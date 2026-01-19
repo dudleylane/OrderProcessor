@@ -13,6 +13,7 @@
 #ifndef _STATE_MACHINE__H
 #define _STATE_MACHINE__H
 
+#include <stdexcept>
 #include <vector>
 
 //#define BOOST_MPL_CFG_NO_PREPROCESSED_HEADERS
@@ -251,7 +252,7 @@ public:
     template <class Event>
     int no_transition(int /*state*/, Event const&)
     {
-		throw std::exception("no transition!");
+		throw std::runtime_error("no transition!");
         /*std::cout << "no transition from state " << state
             << " on event " << typeid(e).name() << std::endl;*/
         //return state;

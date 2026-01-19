@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "SubscriptionLayerImpl.h"
 #include "Logger.h"
 
@@ -45,5 +46,5 @@ SubscriptionManager* SubscriptionLayerImpl::dettach()
 
 void SubscriptionLayerImpl::process(const OrderEntry &, const MatchedSubscribersT &)
 {
-	throw std::exception("SubscriptionLayerImpl::process() Not implemented");
+	throw std::runtime_error("SubscriptionLayerImpl::process() Not implemented");
 }

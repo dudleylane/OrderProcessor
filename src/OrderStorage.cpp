@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "OrderStorage.h"
 #include "DataModelDef.h"
 #include "IdTGenerator.h"
@@ -80,12 +81,12 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 	{
 		mutex::scoped_lock lock(orderLock_);
 		if((order.orderId_.isValid())&&(ordersById_.end() != ordersById_.find(order.orderId_)))
-			throw std::exception("Unable to save order - order with same OrderId already exists.");
+			throw std::runtime_error("Unable to save order - order with same OrderId already exists.");
 		
 		if(0 == order.clOrderId_.get().length_)
-			throw std::exception("Unable to save order - order contains empty ClOrderId.");
+			throw std::runtime_error("Unable to save order - order contains empty ClOrderId.");
 		if(ordersByClId_.end() != ordersByClId_.find(order.clOrderId_.get()))
-			throw std::exception("Unable to save order - order with same ClOrderId already exists.");
+			throw std::runtime_error("Unable to save order - order with same ClOrderId already exists.");
 
 		auto_ptr<OrderEntry> cp(order.clone());
 		if(!cp->orderId_.isValid())
@@ -119,11 +120,11 @@ void OrderDataStorage::restore(OrderEntry *order)
 	{
 		mutex::scoped_lock lock(orderLock_);
 		if((order->orderId_.isValid())&&(ordersById_.end() != ordersById_.find(order->orderId_)))
-			throw std::exception("Unable to restore order - order with same OrderId already exists.");
+			throw std::runtime_error("Unable to restore order - order with same OrderId already exists.");
 		if(0 == order->clOrderId_.get().length_)
-			throw std::exception("Unable to restore order - order contains empty ClOrderId.");
+			throw std::runtime_error("Unable to restore order - order contains empty ClOrderId.");
 		if(ordersByClId_.end() != ordersByClId_.find(order->clOrderId_.get()))
-			throw std::exception("Unable to restore order - order with same ClOrderId already exists.");
+			throw std::runtime_error("Unable to restore order - order with same ClOrderId already exists.");
 
 		int st = 0;
 		try{
@@ -162,7 +163,7 @@ void OrderDataStorage::save(const ExecutionEntry *exec)
 
 	mutex::scoped_lock lock(execLock_);
 	if(executionsById_.end() != executionsById_.find(exec->execId_))
-		throw std::exception("Unable to save execution - execution with same ExecId already exists.");
+		throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
 	executionsById_.insert(ExecByIDT::value_type(exec->execId_, exec->clone()));
 	//assert(NULL != saver_);
 	//saver_->save(*cp.get());
@@ -176,7 +177,7 @@ ExecutionEntry *OrderDataStorage::save(const ExecutionEntry &exec, IdTValueGener
 	assert(NULL != idGenerator);
 	mutex::scoped_lock lock(execLock_);
 	if((exec.execId_.isValid())&&(executionsById_.end() != executionsById_.find(exec.execId_)))
-		throw std::exception("Unable to save execution - execution with same ExecId already exists.");
+		throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
 
 	auto_ptr<ExecutionEntry> cp(exec.clone());
 	if(!cp->execId_.isValid())

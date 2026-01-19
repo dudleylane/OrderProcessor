@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "InstrumentCodec.h"
 #include "StringTCodec.h"
 
@@ -62,11 +63,11 @@ void InstrumentCodec::decode(const IdT& id, u32 /*version*/, const char *buf, si
 	instr->id_ = id;
 	const char *p = StringTCodec::restore(buf, size, &(instr->symbol_));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded Instrument - missed '.' after symbol!");
+		throw std::runtime_error("Invalid format of the encoded Instrument - missed '.' after symbol!");
 	++p;
 	p = StringTCodec::restore(p, size - (p - buf), &(instr->securityId_));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded Instrument - missed '.' after securityId!");
+		throw std::runtime_error("Invalid format of the encoded Instrument - missed '.' after securityId!");
 	++p;
 	p = StringTCodec::restore(p, size - (p - buf), &(instr->securityIdSource_));
 }

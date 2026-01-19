@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "StringTCodec.h"
 
 using namespace COP;
@@ -50,7 +51,7 @@ const char *StringTCodec::restore(const char *buf, size_t size, StringT *val)
 	assert(sizeof(valSize) <= size);
 	memcpy(&valSize, buf, sizeof(valSize));
 	if(valSize > size - sizeof(valSize))
-		throw std::exception("restore(StringT): unable to restore value, buffer size too small!");
+		throw std::runtime_error("restore(StringT): unable to restore value, buffer size too small!");
 	if(0 == valSize)
 		return buf + sizeof(valSize);
 	val->reserve(valSize);

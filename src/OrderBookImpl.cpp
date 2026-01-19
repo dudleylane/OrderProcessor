@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "OrderBookImpl.h"
 #include "FileStorageDef.h"
 #include "Logger.h"
@@ -76,7 +77,7 @@ namespace {
 				break;
 			default:
 				assert(false);
-				throw std::exception("OBLogMessage used with invalid type!");
+				throw std::runtime_error("OBLogMessage used with invalid type!");
 			};	
 		}
 	private:
@@ -128,7 +129,7 @@ void OrderBookImpl::add(const OrderEntry& order)
 	}
 	OrderGroupsByInstrumentT::iterator it = orderGroups_.find(order.instrument_.getId());
 	if(orderGroups_.end() == it)
-		throw std::exception("Unable to add order into book - instrument not registered!");
+		throw std::runtime_error("Unable to add order into book - instrument not registered!");
 	if(BUY_SIDE == order.side_){
 		mutex::scoped_lock lock(it->second->buyLock_);
 		it->second->buyOrder_.insert(OrdersByPriceAscT::value_type(order.price_, order.orderId_));
@@ -136,7 +137,7 @@ void OrderBookImpl::add(const OrderEntry& order)
 		mutex::scoped_lock lock(it->second->sellLock_);
 		it->second->sellOrder_.insert(OrdersByPriceAscT::value_type(order.price_, order.orderId_));		
 	}else
-		throw std::exception("Unable to add order into book - side is not supported!");
+		throw std::runtime_error("Unable to add order into book - side is not supported!");
 
 	if(NULL != storage_){
 		storage_->save(order);
@@ -157,7 +158,7 @@ void OrderBookImpl::restore(const OrderEntry& order)
 	}
 	OrderGroupsByInstrumentT::iterator it = orderGroups_.find(order.instrument_.getId());
 	if(orderGroups_.end() == it)
-		throw std::exception("Unable to restore order into book - instrument not registered!");
+		throw std::runtime_error("Unable to restore order into book - instrument not registered!");
 	if(BUY_SIDE == order.side_){
 		mutex::scoped_lock lock(it->second->buyLock_);
 		it->second->buyOrder_.insert(OrdersByPriceAscT::value_type(order.price_, order.orderId_));
@@ -165,7 +166,7 @@ void OrderBookImpl::restore(const OrderEntry& order)
 		mutex::scoped_lock lock(it->second->sellLock_);
 		it->second->sellOrder_.insert(OrdersByPriceAscT::value_type(order.price_, order.orderId_));		
 	}else
-		throw std::exception("Unable to restore order into book - side is not supported!");
+		throw std::runtime_error("Unable to restore order into book - side is not supported!");
 
 	if(aux::ExchLogger::instance()->isNoteOn()){
 		OBLogMessage msg(RESTOREORDER_FINAL_MSG, order.orderId_);
@@ -183,7 +184,7 @@ void OrderBookImpl::remove(const OrderEntry& order)
 
 	OrderGroupsByInstrumentT::iterator it = orderGroups_.find(order.instrument_.getId());
 	if(orderGroups_.end() == it)
-		throw std::exception("Unable to remove order from book - instrument not registered!");
+		throw std::runtime_error("Unable to remove order from book - instrument not registered!");
 	bool found = false;
 	if(BUY_SIDE == order.side_){
 		mutex::scoped_lock lock(it->second->buyLock_);
@@ -197,7 +198,7 @@ void OrderBookImpl::remove(const OrderEntry& order)
 			++oit;
 		}
 		if(!found)
-			throw std::exception("Unable to remove order from book - order not found!");
+			throw std::runtime_error("Unable to remove order from book - order not found!");
 	}else if(SELL_SIDE == order.side_){
 		mutex::scoped_lock lock(it->second->sellLock_);
 		OrdersByPriceAscT::iterator oit = it->second->sellOrder_.lower_bound(order.price_);
@@ -210,9 +211,9 @@ void OrderBookImpl::remove(const OrderEntry& order)
 			++oit;
 		}
 		if(!found)
-			throw std::exception("Unable to remove order from book - order not found!");
+			throw std::runtime_error("Unable to remove order from book - order not found!");
 	}else
-		throw std::exception("Unable to remove order into book - side is not supported!");
+		throw std::runtime_error("Unable to remove order into book - side is not supported!");
 
 	if(aux::ExchLogger::instance()->isNoteOn()){
 		OBLogMessage msg(REMOVEORDER_FINAL_MSG, order.orderId_);
@@ -247,10 +248,10 @@ IdT OrderBookImpl::find(const OrderFunctor &functor)const
 					break;
 			}
 		}else{
-			throw std::exception("Invalid Side for the order's search");
+			throw std::runtime_error("Invalid Side for the order's search");
 		}
 	}else{
-		throw std::exception("Unknown instrument for the order's search");
+		throw std::runtime_error("Unknown instrument for the order's search");
 	}
 	//aux::ExchLogger::instance()->debug("Order search in OrderBook failed");
 	return IdT();
@@ -283,10 +284,10 @@ void OrderBookImpl::findAll(const OrderFunctor &functor, OrdersT *result)const
 					break;
 			}
 		}else{
-			throw std::exception("Invalid Side for the order's search");
+			throw std::runtime_error("Invalid Side for the order's search");
 		}
 	}else{
-		throw std::exception("Unknown instrument for the order's search");
+		throw std::runtime_error("Unknown instrument for the order's search");
 	}
 }
 
@@ -305,10 +306,10 @@ IdT OrderBookImpl::getTop(const SourceIdT &instrument, const Side &side)const
 			if(0 < it->second->sellOrder_.size())
 				return it->second->sellOrder_.begin()->second;
 		}else{
-			throw std::exception("Invalid Side for the order's top");
+			throw std::runtime_error("Invalid Side for the order's top");
 		}
 	}else{
-		throw std::exception("Unknown instrument for the order's top");
+		throw std::runtime_error("Unknown instrument for the order's top");
 	}
 	//aux::ExchLogger::instance()->debug("Top order locate failed in OrderBook");
 	return IdT();

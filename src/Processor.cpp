@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include <cassert>
 #include "Processor.h"
 #include "TransactionDef.h"
@@ -209,7 +210,7 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 		}
 		break;
 	default:
-		throw std::exception("Processor::onEvent() fails: unknown type of the ProcessEvent.");
+		throw std::runtime_error("Processor::onEvent() fails: unknown type of the ProcessEvent.");
 	};
 
 	// save state into the order

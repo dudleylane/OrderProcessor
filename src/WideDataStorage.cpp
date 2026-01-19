@@ -11,6 +11,7 @@
 */
 
 
+#include <stdexcept>
 #include "WideDataStorage.h"
 #include "DataModelDef.h"
 #include "Logger.h"
@@ -52,7 +53,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, StringT *val)const
 	mutex::scoped_lock lock(lock_);
 	StringsT::const_iterator it = strings_.find(id);
 	if(strings_.end() == it)
-		throw std::exception("WideParamsDataStorage::get(StringT): string not found!");
+		throw std::runtime_error("WideParamsDataStorage::get(StringT): string not found!");
 	*val = *(const_cast<StringT *>(it->second));
 }
 
@@ -61,7 +62,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, RawDataEntry *val)const
 	mutex::scoped_lock lock(lock_);
 	RawDataT::const_iterator it = rawDatas_.find(id);
 	if(rawDatas_.end() == it)
-		throw std::exception("WideParamsDataStorage::get(RawDataEntry): rawData not found!");
+		throw std::runtime_error("WideParamsDataStorage::get(RawDataEntry): rawData not found!");
 	*val = *(const_cast<RawDataEntry *>(it->second));
 }
 
@@ -71,7 +72,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, InstrumentEntry *val)const
 		mutex::scoped_lock lock(lock_);
 		InstrumentsT::const_iterator it = instruments_.find(id);
 		if(instruments_.end() == it)
-			throw std::exception("WideParamsDataStorage::get(InstrumentEntry): instrument not found!");
+			throw std::runtime_error("WideParamsDataStorage::get(InstrumentEntry): instrument not found!");
 		*val = *(const_cast<InstrumentEntry *>(it->second));
 	}
 }
@@ -81,7 +82,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, AccountEntry *val)const
 	mutex::scoped_lock lock(lock_);
 	AccountsT::const_iterator it = accounts_.find(id);
 	if(accounts_.end() == it)
-		throw std::exception("WideParamsDataStorage::get(AccountEntry): account not found!");
+		throw std::runtime_error("WideParamsDataStorage::get(AccountEntry): account not found!");
 	*val = *(const_cast<AccountEntry *>(it->second));
 }
 void WideParamsDataStorage::get(const SourceIdT &id, ClearingEntry *val)const
@@ -89,7 +90,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, ClearingEntry *val)const
 	mutex::scoped_lock lock(lock_);
 	ClearingsT::const_iterator it = clearings_.find(id);
 	if(clearings_.end() == it)
-		throw std::exception("WideParamsDataStorage::get(ClearingEntry): clearing not found!");
+		throw std::runtime_error("WideParamsDataStorage::get(ClearingEntry): clearing not found!");
 	*val = *(const_cast<ClearingEntry *>(it->second));
 }
 
@@ -169,7 +170,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, ExecutionsT **val)const
 	mutex::scoped_lock lock(lock_);
 	ExecutionListsT::const_iterator it = executions_.find(id);
 	if(executions_.end() == it)
-		throw std::exception("WideParamsDataStorage::get(ExecutionsT): execution list not found!");
+		throw std::runtime_error("WideParamsDataStorage::get(ExecutionsT): execution list not found!");
 	*val = (const_cast<ExecutionsT *>(it->second));
 }
 

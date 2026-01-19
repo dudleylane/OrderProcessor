@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "TransactionScope.h"
 #include "TrOperations.h"
 
@@ -39,18 +40,18 @@ void TransactionScope::addOperation(auto_ptr<Operation> &op)
 
 void TransactionScope::removeLastOperation()
 {
-	throw std::exception("Not implemented!");
+	throw std::runtime_error("Not implemented!");
 }
 
 size_t TransactionScope::startNewStage()
 {
-	throw std::exception("Not implemented!");
+	throw std::runtime_error("Not implemented!");
 //	return 0;
 }
 
 void TransactionScope::removeStage(const size_t &)
 {
-	throw std::exception("Not implemented!");
+	throw std::runtime_error("Not implemented!");
 }
 
 void TransactionScope::setTransactionId(const TransactionId &id)
@@ -75,7 +76,7 @@ void TransactionScope::getRelatedObjects(ObjectsInTransactionT *obj)const
 			if(!duplicateId){
 				/// todo: should be redesigned
 				if(DEPENDANT_OBJECT_LIMIT - 1 == obj->size_)
-					throw std::exception("getRelatedObjects() failed to fill ObjectsInTransactionT, transaction use too many objects!");
+					throw std::runtime_error("getRelatedObjects() failed to fill ObjectsInTransactionT, transaction use too many objects!");
 				obj->list_[(obj->size_)++] = ObjectInTransaction(order_ObjectType, id);
 			}
 		}
@@ -90,7 +91,7 @@ void TransactionScope::getRelatedObjects(ObjectsInTransactionT *obj)const
 			if(!duplicateId){
 				/// todo: should be redesigned
 				if(DEPENDANT_OBJECT_LIMIT - 1 == obj->size_)
-					throw std::exception("getRelatedObjects() failed to fill ObjectsInTransactionT, transaction use too many objects!");
+					throw std::runtime_error("getRelatedObjects() failed to fill ObjectsInTransactionT, transaction use too many objects!");
 				obj->list_[(obj->size_)++] = ObjectInTransaction(instrument_ObjectType, rid);
 			}
 		}

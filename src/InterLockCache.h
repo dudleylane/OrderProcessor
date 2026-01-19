@@ -11,6 +11,7 @@
 */
 
 #pragma once
+#include <stdexcept>
 
 #include <memory>
 #include <deque>
@@ -31,7 +32,7 @@ namespace aux{
 		{
 			assert(NULL == instance_);
 			if(NULL != instance_)
-				throw std::exception(string("Cache '") + name + "' initialised twice!");
+				throw std::runtime_error(string("Cache '") + name + "' initialised twice!");
 			instance_ = new T(name, cacheSize);
 		}
 		static void destroy(){
@@ -41,7 +42,7 @@ namespace aux{
 		static T *instance(){
 			assert(NULL != instance_);
 			if(NULL == instance_)
-				throw std::exception("InterLockCache was not initialised!");
+				throw std::runtime_error("InterLockCache was not initialised!");
 			return instance_;
 		}
 

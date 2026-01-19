@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "SubscrManager.h"
 
 #include "OrderFilter.h"
@@ -123,7 +124,7 @@ void SubscrManager::getSubscribers(const OrderEntry &order, MatchedSubscribersT 
 					eit = git->second.end();
 				for(SubscriptionsT::const_iterator it = sit; it != eit; ++it){
 					if(ORDER_SUBSCRIPTION != it->type_)
-						throw std::exception("Subscription with invalid type enqueued at Orders subscriptions!");
+						throw std::runtime_error("Subscription with invalid type enqueued at Orders subscriptions!");
 					if((NULL != it->subscription_.order_)&&(it->subscription_.order_->match(order))){
 						subscribers->push_back(it->handlerId_);
 						found = true;
@@ -137,7 +138,7 @@ void SubscrManager::getSubscribers(const OrderEntry &order, MatchedSubscribersT 
 					eit = hit->second[ORDER_SUBSCRIPTION].generalSubscriptions_.end();
 				for(SubscriptionsT::const_iterator it = bit; it != eit; ++it){
 					if(ORDER_SUBSCRIPTION != it->type_)
-						throw std::exception("Subscription with invalid type enqueued at Orders subscriptions!");
+						throw std::runtime_error("Subscription with invalid type enqueued at Orders subscriptions!");
 					if((NULL != it->subscription_.order_)&&(it->subscription_.order_->match(order))){
 						subscribers->push_back(it->handlerId_);
 						break;

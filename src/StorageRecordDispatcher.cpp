@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "StorageRecordDispatcher.h"
 
 #include "InstrumentCodec.h"
@@ -60,7 +61,7 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT& id, u32 version, const c
 	assert(NULL != buf);
 
 	if(MINIMAL_SIZE > size)
-		throw std::exception("Record size invalid, record could not be restored!");
+		throw std::runtime_error("Record size invalid, record could not be restored!");
 
 	RecordType type;
 	memcpy(&type, buf, sizeof(type));
@@ -118,7 +119,7 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT& id, u32 version, const c
 		}
 		break;
 	default:
-		throw std::exception("Invalid record type, unable to decode record!");
+		throw std::runtime_error("Invalid record type, unable to decode record!");
 	};
 }
 

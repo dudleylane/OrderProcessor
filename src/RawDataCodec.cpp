@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "RawDataCodec.h"
 #include "StringTCodec.h"
 
@@ -73,20 +74,20 @@ void RawDataCodec::decode(const IdT& id, u32 /*version*/, const char *buf, size_
 	val->id_ = id;
 	val->type_ = INVALID_RAWDATATYPE;
 	if(size < sizeof(val->type_))
-		throw std::exception("Invalid format of the encoded RawData - size less than required, unable decode type!");
+		throw std::runtime_error("Invalid format of the encoded RawData - size less than required, unable decode type!");
 	memcpy(&(val->type_), buf, sizeof(val->type_));
 	const char *p = buf + sizeof(val->type_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded RawData - missed '.' after type!");
+		throw std::runtime_error("Invalid format of the encoded RawData - missed '.' after type!");
 	++p;
 
 	val->length_ = 0;
 	if(size < (p - buf) + sizeof(val->length_))
-		throw std::exception("Invalid format of the encoded RawData - size less than required, unable decode length!");
+		throw std::runtime_error("Invalid format of the encoded RawData - size less than required, unable decode length!");
 	memcpy(&(val->length_), p, sizeof(val->length_));
 	p += sizeof(val->length_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded RawData - missed '.' after length!");
+		throw std::runtime_error("Invalid format of the encoded RawData - missed '.' after length!");
 	++p;
 
 	if(0 == val->length_)

@@ -11,6 +11,7 @@
 */
 
 
+#include <stdexcept>
 #include <cassert>
 #include "IncomingQueues.h"
 #include "DataModelDef.h"
@@ -92,7 +93,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 			{
 				OrderQueuesT::const_iterator it = orders_.find(elem.source_);
 				if((orders_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate Order element!");
+					throw std::runtime_error("Invalid structure: Unable to locate Order element!");
 				order = it->second->front();
 				ord.reset(order.order_);
 			}
@@ -101,7 +102,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 			{
 				OrderCancelQueuesT::const_iterator it = orderCancels_.find(elem.source_);
 				if((orderCancels_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate OrderCancel element!");
+					throw std::runtime_error("Invalid structure: Unable to locate OrderCancel element!");
 				cancel = it->second->front();
 			}
 			break;
@@ -109,7 +110,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 			{
 				OrderReplaceQueuesT::const_iterator it = orderReplaces_.find(elem.source_);
 				if((orderReplaces_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate OrderReplace element!");
+					throw std::runtime_error("Invalid structure: Unable to locate OrderReplace element!");
 				replace = it->second->front();
 			}
 			break;
@@ -117,7 +118,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 			{
 				OrderStateQueuesT::const_iterator it = orderStates_.find(elem.source_);
 				if((orderStates_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate OrderState element!");
+					throw std::runtime_error("Invalid structure: Unable to locate OrderState element!");
 				state = it->second->front();
 			}
 			break;
@@ -125,7 +126,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 			{
 				ProcessQueuesT::const_iterator it = processes_.find(elem.source_);
 				if((processes_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate Process element!");
+					throw std::runtime_error("Invalid structure: Unable to locate Process element!");
 				process = it->second->front();
 			}
 			break;
@@ -133,12 +134,12 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 			{
 				TimerQueuesT::const_iterator it = timers_.find(elem.source_);
 				if((timers_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate Timer element!");
+					throw std::runtime_error("Invalid structure: Unable to locate Timer element!");
 				timer = it->second->front();
 			}
 			break;
 		default:
-			throw std::exception("Invalid structure: Unknown type of the element!");
+			throw std::runtime_error("Invalid structure: Unknown type of the element!");
 		};
 	}
 
@@ -181,7 +182,7 @@ bool IncomingQueues::pop()
 			{
 				OrderQueuesT::iterator it = orders_.find(elem.source_);
 				if((orders_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate Order element!");
+					throw std::runtime_error("Invalid structure: Unable to locate Order element!");
 				it->second->pop_front();
 			}
 			break;
@@ -189,7 +190,7 @@ bool IncomingQueues::pop()
 			{
 				OrderCancelQueuesT::iterator it = orderCancels_.find(elem.source_);
 				if((orderCancels_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate OrderCancel element!");
+					throw std::runtime_error("Invalid structure: Unable to locate OrderCancel element!");
 				it->second->pop_front();
 			}
 			break;
@@ -197,7 +198,7 @@ bool IncomingQueues::pop()
 			{
 				OrderReplaceQueuesT::iterator it = orderReplaces_.find(elem.source_);
 				if((orderReplaces_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate OrderReplace element!");
+					throw std::runtime_error("Invalid structure: Unable to locate OrderReplace element!");
 				it->second->pop_front();
 			}
 			break;
@@ -205,7 +206,7 @@ bool IncomingQueues::pop()
 			{
 				OrderStateQueuesT::iterator it = orderStates_.find(elem.source_);
 				if((orderStates_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate OrderState element!");
+					throw std::runtime_error("Invalid structure: Unable to locate OrderState element!");
 				it->second->pop_front();
 			}
 			break;
@@ -213,7 +214,7 @@ bool IncomingQueues::pop()
 			{
 				ProcessQueuesT::iterator it = processes_.find(elem.source_);
 				if((processes_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate Process element!");
+					throw std::runtime_error("Invalid structure: Unable to locate Process element!");
 				it->second->pop_front();
 			}
 			break;
@@ -221,12 +222,12 @@ bool IncomingQueues::pop()
 			{
 				TimerQueuesT::iterator it = timers_.find(elem.source_);
 				if((timers_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate Timer element!");
+					throw std::runtime_error("Invalid structure: Unable to locate Timer element!");
 				it->second->pop_front();
 			}
 			break;
 		default:
-			throw std::exception("Invalid structure: Unknown type of the element!");
+			throw std::runtime_error("Invalid structure: Unknown type of the element!");
 		};
 	}
 	//aux::ExchLogger::instance()->debug("IncomingQueues::pop finish execution");
@@ -258,7 +259,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 			{
 				OrderQueuesT::const_iterator it = orders_.find(elem.source_);
 				if((orders_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate Order element!");
+					throw std::runtime_error("Invalid structure: Unable to locate Order element!");
 				order = it->second->front();
 				ord.reset(order.order_);
 				it->second->pop_front();
@@ -268,7 +269,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 			{
 				OrderCancelQueuesT::const_iterator it = orderCancels_.find(elem.source_);
 				if((orderCancels_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate OrderCancel element!");
+					throw std::runtime_error("Invalid structure: Unable to locate OrderCancel element!");
 				cancel = it->second->front();
 				it->second->pop_front();
 			}
@@ -277,7 +278,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 			{
 				OrderReplaceQueuesT::const_iterator it = orderReplaces_.find(elem.source_);
 				if((orderReplaces_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate OrderReplace element!");
+					throw std::runtime_error("Invalid structure: Unable to locate OrderReplace element!");
 				replace = it->second->front();
 				it->second->pop_front();
 			}
@@ -286,7 +287,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 			{
 				OrderStateQueuesT::const_iterator it = orderStates_.find(elem.source_);
 				if((orderStates_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate OrderState element!");
+					throw std::runtime_error("Invalid structure: Unable to locate OrderState element!");
 				state = it->second->front();
 				it->second->pop_front();
 			}
@@ -295,7 +296,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 			{
 				ProcessQueuesT::const_iterator it = processes_.find(elem.source_);
 				if((processes_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate Process element!");
+					throw std::runtime_error("Invalid structure: Unable to locate Process element!");
 				process = it->second->front();
 				it->second->pop_front();
 			}
@@ -304,13 +305,13 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 			{
 				TimerQueuesT::const_iterator it = timers_.find(elem.source_);
 				if((timers_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
-					throw std::exception("Invalid structure: Unable to locate Timer element!");
+					throw std::runtime_error("Invalid structure: Unable to locate Timer element!");
 				timer = it->second->front();
 				it->second->pop_front();
 			}
 			break;
 		default:
-			throw std::exception("Invalid structure: Unknown type of the element!");
+			throw std::runtime_error("Invalid structure: Unknown type of the element!");
 		};
 	}
 

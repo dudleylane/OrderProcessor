@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "DataModelDef.h"
 #include "ExchUtils.h"
 
@@ -92,11 +93,11 @@ const char *IdT::restore(const char *buf, size_t size)
 {
 	const char *p = buf;
 	if(size < sizeof(date_) + 1 + sizeof(id_))
-		throw std::exception("Unable to restore IdT - buffer size less than expected!");
+		throw std::runtime_error("Unable to restore IdT - buffer size less than expected!");
 	memcpy(&date_, p, sizeof(date_));
 	p += sizeof(date_);
 	if(':' != *p)
-		throw std::exception("Unable to restore IdT - ':' missed after date!");
+		throw std::runtime_error("Unable to restore IdT - ':' missed after date!");
 	++p;
 	memcpy(&id_, p, sizeof(id_));
 	p += sizeof(id_);

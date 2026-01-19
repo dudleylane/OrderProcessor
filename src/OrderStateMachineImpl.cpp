@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "OrderStateMachineImpl.h"
 #include "IdTGenerator.h"
 #include "OrderStorage.h"
@@ -77,11 +78,11 @@ const char *OrderStatePersistence::restore(const char *buf, size_t size)
 {
 	const char *p = buf;
 	if(size < sizeof(stateZone1Id_) + 1 + sizeof(stateZone2Id_))
-		throw std::exception("Unable to restore OrderStatePersistence - buffer size less than expected!");
+		throw std::runtime_error("Unable to restore OrderStatePersistence - buffer size less than expected!");
 	memcpy(&stateZone1Id_, p, sizeof(stateZone1Id_));
 	p += sizeof(stateZone1Id_);
 	if(':' != *p)
-		throw std::exception("Unable to restore OrderStatePersistence - ':' missed after stateZone1Id!");
+		throw std::runtime_error("Unable to restore OrderStatePersistence - ':' missed after stateZone1Id!");
 	++p;
 	memcpy(&stateZone2Id_, p, sizeof(stateZone2Id_));
 	p += sizeof(stateZone2Id_);
@@ -104,7 +105,7 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
 
 	std::string reason;
 	if(!evnt.order_->isValid(&reason))
-		throw std::exception(reason.c_str());
+		throw std::runtime_error(reason.c_str());
 
 	*orderData = evnt.order_;
 	// generate id for the order
@@ -116,7 +117,7 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
 	if(MARKET_ORDERTYPE == (*orderData)->ordType_){
 		assert(NULL != evnt.orderBook_);
 		if(!evnt.orderBook_->find(FindAnyOpositeOrder((*orderData))).isValid())
-			throw std::exception("There is no market for this instrument!");
+			throw std::runtime_error("There is no market for this instrument!");
 	}
 
 	////aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onOrderAccepted) add matchOrder and Add2OrderBook operations");
@@ -143,7 +144,7 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onRplOrderRe
 	// locate original order and fill origOrderId
 	OrderEntry *origOrder = evnt.orderStorage_->locateByClOrderId((*orderData)->origClOrderId_.get());
 	if(NULL == origOrder)
-		throw std::exception("Unable to locate original order for OrderReplace!");
+		throw std::runtime_error("Unable to locate original order for OrderReplace!");
 
 	// generate id for the order
 	assert(NULL != evnt.generator_);
@@ -211,12 +212,12 @@ void OrdStateImpl::processAccept(OrderEntry **orderData, OrdState::onExternalOrd
 	*orderData = evnt.order_;
 	string reason;
 	if(!(*orderData)->isValid(&reason))
-		throw std::exception(reason.c_str());
+		throw std::runtime_error(reason.c_str());
 
 	if(MARKET_ORDERTYPE == (*orderData)->ordType_){
 		assert(NULL != evnt.orderBook_);
 		if(!evnt.orderBook_->find(FindAnyOpositeOrder(*orderData)).isValid())
-			throw std::exception("There is no market for this instrument!");
+			throw std::runtime_error("There is no market for this instrument!");
 	}
 
 	assert(NULL != evnt.generator_);
@@ -260,11 +261,11 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onOrderAccepte
 	////aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onOrderAccepted) started");
 
 	if(!orderData->isValid(&reason))
-		throw std::exception(reason.c_str());
+		throw std::runtime_error(reason.c_str());
 	if(MARKET_ORDERTYPE == orderData->ordType_){
 		assert(NULL != evnt.orderBook_);
 		if(!evnt.orderBook_->find(FindAnyOpositeOrder(orderData)).isValid())
-			throw std::exception("There is no market for this instrument!");
+			throw std::runtime_error("There is no market for this instrument!");
 	}
 
 	////aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onOrderAccepted) add matchOrder and Add2OrderBook operations");
@@ -294,20 +295,20 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onReplace cons
 	//aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onReplace) started");
 
 	if(!orderData->isValid(&reason))
-		throw std::exception(reason.c_str());
+		throw std::runtime_error(reason.c_str());
 	if(MARKET_ORDERTYPE == orderData->ordType_){
 		assert(NULL != evnt.orderBook_);
 		if(!evnt.orderBook_->find(FindAnyOpositeOrder(orderData)).isValid())
-			throw std::exception("There is no market for this instrument!");
+			throw std::runtime_error("There is no market for this instrument!");
 	}
 
 	assert(evnt.origOrderId_.isValid());
 	assert(NULL != evnt.orderStorage_);
 	OrderEntry *origOrder = evnt.orderStorage_->locateByOrderId(orderData->origOrderId_);
 	if(NULL == origOrder)
-		throw std::exception("Unable to locate original order for OrderReplaceAccept!");
+		throw std::runtime_error("Unable to locate original order for OrderReplaceAccept!");
 	if(!origOrder->isReplaceValid(&reason))
-		throw std::exception(reason.c_str());
+		throw std::runtime_error(reason.c_str());
 
 	auto_ptr<Operation> op(new MatchOrderTrOperation(orderData));
 	evnt.transaction_->addOperation(op);
@@ -332,7 +333,7 @@ void OrdStateImpl::processReject(OrderEntry *orderData, OrdState::onRplOrderReje
 
 	OrderEntry *origOrder = evnt.orderStorage_->locateByOrderId(orderData->origOrderId_);
 	if(NULL == origOrder)
-		throw std::exception("Unable to locate original order for OrderReplaceReject!");
+		throw std::runtime_error("Unable to locate original order for OrderReplaceReject!");
 
 	// change original order to NoCnlReplace
 	auto_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder, 
@@ -348,7 +349,7 @@ void OrdStateImpl::processExpire(OrderEntry *orderData, OrdState::onRplOrderExpi
 
 	OrderEntry *origOrder = evnt.orderStorage_->locateByOrderId(orderData->origOrderId_);
 	if(NULL == origOrder)
-		throw std::exception("Unable to locate original order for OrderReplaceExpire!");
+		throw std::runtime_error("Unable to locate original order for OrderReplaceExpire!");
 
 	// change original order to NoCnlReplace
 	auto_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder, 
@@ -378,9 +379,9 @@ bool OrdStateImpl::processComplete(OrderEntry *orderData, OrdState::onTradeExecu
 
 	const ExecTradeParams *trade = evnt.trade();
 	if(NULL == trade)
-		throw std::exception("Invalid onTradeExecution event - trade is NULL!");
+		throw std::runtime_error("Invalid onTradeExecution event - trade is NULL!");
 	if(orderData->leavesQty_ < trade->lastQty_)
-		throw std::exception("Unable to execute trade - order's leaves Qty less than traded Qty!");
+		throw std::runtime_error("Unable to execute trade - order's leaves Qty less than traded Qty!");
 
 	//aux::ExchLogger::instance()->debug("OrdStateImpl::processComplete(onTradeExecution) finished");
 
@@ -429,7 +430,7 @@ bool OrdStateImpl::processNotexecuted(OrderEntry *orderData, OrdState::onTradeCr
 
 	const ExecCorrectExecEntry *crct = evnt.correct();
 	if(NULL == crct)
-		throw std::exception("Invalid onTradeCrctCncl event - correctExecution is NULL!");
+		throw std::runtime_error("Invalid onTradeCrctCncl event - correctExecution is NULL!");
 
 	//aux::ExchLogger::instance()->debug("OrdStateImpl::processNotexecuted(onTradeCrctCncl) finished");
 
@@ -442,7 +443,7 @@ void OrdStateImpl::processCorrected(OrderEntry *orderData, OrdState::onTradeCrct
 
 	const ExecCorrectExecEntry *crct = evnt.correct();
 	if(NULL == crct)
-		throw std::exception("Invalid onTradeCrctCncl event - correctExecution is NULL!");
+		throw std::runtime_error("Invalid onTradeCrctCncl event - correctExecution is NULL!");
 	// if order was filled and gone to partiallyFill after correct - restore it in orderBook
 	if((0 == orderData->leavesQty_)&&(0 < crct->leavesQty_)){
 		auto_ptr<Operation> op(new MatchOrderTrOperation(orderData));
@@ -468,7 +469,7 @@ void OrdStateImpl::processCorrectedWithoutRestore(OrderEntry *orderData, OrdStat
 
 	const ExecCorrectExecEntry *crct = evnt.correct();
 	if(NULL == crct)
-		throw std::exception("Invalid onTradeCrctCncl event - correctExecution is NULL!");
+		throw std::runtime_error("Invalid onTradeCrctCncl event - correctExecution is NULL!");
 
 	//update order according corrected trade
 	orderData->leavesQty_ = crct->leavesQty_;

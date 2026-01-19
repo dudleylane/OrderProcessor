@@ -12,6 +12,7 @@
 
 #define NOMINMAX
 
+#include <stdexcept>
 #include <cassert>
 #include <algorithm>
 #include "OrderMatcher.h"
@@ -129,7 +130,7 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 
 	OrderEntry *contrOrd = ctxt.orderStorage_->locateByOrderId(id);
 	if(NULL == contrOrd)
-		throw std::exception("Unable to retrive order from OrderStorage after search!");
+		throw std::runtime_error("Unable to retrive order from OrderStorage after search!");
 
 	/// add trade event
 	auto_ptr<ExecutionDeferedEvent> defEvnt(new ExecutionDeferedEvent(order));

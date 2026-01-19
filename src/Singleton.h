@@ -11,6 +11,7 @@
 */
 
 #pragma once
+#include <stdexcept>
 
 #include <cassert>
 #include <exception>
@@ -26,7 +27,7 @@ struct Singleton
 	{
 		assert(NULL == instance_);
 		if(NULL != instance_)
-			throw std::exception("Singleton initialised twice!");
+			throw std::runtime_error("Singleton initialised twice!");
 		instance_ = new T;
 	}
 	static void destroy(){
@@ -36,7 +37,7 @@ struct Singleton
 	static T *instance(){
 		assert(NULL != instance_);
 		if(NULL == instance_)
-			throw std::exception("Singleton was not initialised!");
+			throw std::runtime_error("Singleton was not initialised!");
 		return instance_;
 	}
 };

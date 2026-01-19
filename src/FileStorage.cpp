@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include <string>
 #include "TypesDef.h"
 #include "FileStorage.h"
@@ -53,9 +54,9 @@ namespace{
 		char buf[VERSION_SIZE + 1];
 		size_t readBytes = fread(buf, 1, VERSION_SIZE, f);
 		if(VERSION_SIZE != readBytes)
-			throw std::exception("Unable to read version record from file!");
+			throw std::runtime_error("Unable to read version record from file!");
 		if(0 != memcmp(buf, VERSION_RECORD, VERSION_SIZE))
-			throw std::exception("Content of the version record incorrect!");
+			throw std::runtime_error("Content of the version record incorrect!");
 	}
 
 	void readRecord(FILE *f, FileRecord &record, RecordBody *body){
@@ -73,40 +74,40 @@ namespace{
 		}
 		try{
 			if(BODY_PREFIX_SIZE != readBytes)
-				throw std::exception("Invalid record, unable to read record header!");
+				throw std::runtime_error("Invalid record, unable to read record header!");
 			size_t pos = 0;
 			if(('<' != buf[pos++])||('S' != buf[pos++]))
-				throw std::exception("Invalid record, record header does not begins from '<S'!");
+				throw std::runtime_error("Invalid record, record header does not begins from '<S'!");
 
 			memcpy(&(record.size_), &(buf[pos]), sizeof(record.size_));
 			pos += sizeof(record.size_);
 			if(BODY_PREFIX_SIZE > record.size_)
-				throw std::exception("Invalid record, record size is less than header length!");
+				throw std::runtime_error("Invalid record, record size is less than header length!");
 			if('.' != buf[pos++])
-				throw std::exception("Invalid record, delimiter '.' missed after record size in record header!");
+				throw std::runtime_error("Invalid record, delimiter '.' missed after record size in record header!");
 
 			if(('Y' != buf[pos])&&('N' != buf[pos]))
-				throw std::exception("Invalid record, valid flag should be 'Y'/'N' in header!");
+				throw std::runtime_error("Invalid record, valid flag should be 'Y'/'N' in header!");
 			record.enabled_ = 'Y' == buf[pos++];
 			if('.' != buf[pos++])
-				throw std::exception("Invalid record, delimiter '.' missed after valid flag in record header!");
+				throw std::runtime_error("Invalid record, delimiter '.' missed after valid flag in record header!");
 
 			memcpy(&(record.id_), &(buf[pos]), sizeof(record.id_));
 			pos += sizeof(record.id_);
 			if('.' != buf[pos++])
-				throw std::exception("Invalid record, delimiter '.' missed after record id in record header!");
+				throw std::runtime_error("Invalid record, delimiter '.' missed after record id in record header!");
 
 			memcpy(&(record.version_), &(buf[pos]), sizeof(record.version_));
 			pos += sizeof(record.version_);
 			if((':' != buf[pos++])||(':' != buf[pos++]))
-				throw std::exception("Invalid record, '::' is missed after header!");
+				throw std::runtime_error("Invalid record, '::' is missed after header!");
 
 			body->resize(record.size_ - BODY_PREFIX_SIZE);
 			readBytes = fread(&(body->at(0)), 1, record.size_ - BODY_PREFIX_SIZE, f);
 			if(record.size_ - BODY_PREFIX_SIZE != readBytes)
-				throw std::exception("Unable to read body of the record!");
+				throw std::runtime_error("Unable to read body of the record!");
 			if(('E' != body->at(readBytes - 2))||('>' != body->at(readBytes - 1)))
-				throw std::exception("Invalid record's tail, 'E' or '>' is missed!");
+				throw std::runtime_error("Invalid record's tail, 'E' or '>' is missed!");
 			body->resize(readBytes - 2);
 		}catch(...){
 			// returns to the previous position to locate new record (skip one symbol to 
@@ -175,7 +176,7 @@ namespace{
 		
 		int res = fseek(f, static_cast<long>(record.offset_) + HEADER_ACTIVE_POS, SEEK_SET);
 		if(0 != res)
-			throw std::exception("Unable to locate record in file to disable it!");
+			throw std::runtime_error("Unable to locate record in file to disable it!");
 
 		// update record in file
 		fwrite("N", 1, 1, f);
@@ -216,7 +217,7 @@ void FileStorage::load(const std::string &fileName, FileStorageObserver *observe
 		file_ = fopen(fileName.c_str(), "w+");
 	if(NULL == file_){
 		string s = string("FileStorage: Unable to open file '") + fileName + "'.";
-		throw std::exception(s.c_str());
+		throw std::runtime_error(s.c_str());
 	}
 
 	observer->startLoad();
@@ -291,7 +292,7 @@ void FileStorage::save(const IdT &id, const char *buf, size_t size)
 		mutex::scoped_lock lock(lock_);
 		RecordsT::const_iterator it = records_.find(id);
 		if(records_.end() != it)
-			throw std::exception("FileStorage::save: Unable to save record, record with this Id already exists!");
+			throw std::runtime_error("FileStorage::save: Unable to save record, record with this Id already exists!");
 		saveRecord(file_, buf, size, rec);
 		auto_ptr<RecordChainT> chain(new RecordChainT);
 		chain->push_back(rec);
@@ -334,7 +335,7 @@ u32 FileStorage::replace(const IdT& id, u32 version, const char *buf, size_t siz
 		mutex::scoped_lock lock(lock_);
 		RecordsT::const_iterator it = records_.find(id);
 		if(records_.end() == it){
-			throw std::exception("FileStorage::replace: Unable to replace record, record with this Id not exists!");
+			throw std::runtime_error("FileStorage::replace: Unable to replace record, record with this Id not exists!");
 		}
 		assert(NULL != it->second);
 		assert(!it->second->empty());
@@ -351,7 +352,7 @@ u32 FileStorage::replace(const IdT& id, u32 version, const char *buf, size_t siz
 			}
 		}			
 	}
-	throw std::exception("FileStorage::replace: Unable to replace record, record with this version not exists!");
+	throw std::runtime_error("FileStorage::replace: Unable to replace record, record with this version not exists!");
 }
 
 void FileStorage::erase(const IdT& id, u32 version){

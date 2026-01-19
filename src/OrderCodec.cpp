@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "OrderCodec.h"
 #include "StringTCodec.h"
 
@@ -356,48 +357,48 @@ OrderEntry *OrderCodec::decode(const IdT& id, u32 /*version*/, const char *buf, 
 
 	const char *p = instrumentId.restore(buf, size);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after instrumentId!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after instrumentId!");
 	++p;
 
 	p = accountId.restore(p, size - (p - buf));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after accountId!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after accountId!");
 	++p;
 
 	p = clearingId.restore(p, size - (p - buf));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after cleaingId!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after cleaingId!");
 	++p;
 
 	p = destId.restore(p, size - (p - buf));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after destinationId!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after destinationId!");
 	++p;
 
 	/* todo: implement
 	p = val->execInstruct_.id_.restore(p, size - (p - buf));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after execInstructId!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after execInstructId!");
 	++p;*/
 
 	p = clOrderId.restore(p, size - (p - buf));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after clOrderId_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after clOrderId_!");
 	++p;
 
 	p = origClOrderID.restore(p, size - (p - buf));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after origClOrderId_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after origClOrderId_!");
 	++p;
 
 	p = sourceId.restore(p, size - (p - buf));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after source_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after source_!");
 	++p;
 
 	p = executionsId.restore(p, size - (p - buf));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after executions_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after executions_!");
 	++p;
 
 	auto_ptr<OrderEntry> val(new OrderEntry(sourceId, destId, clOrderId, origClOrderID, 
@@ -406,175 +407,175 @@ OrderEntry *OrderCodec::decode(const IdT& id, u32 /*version*/, const char *buf, 
 
 	p = val->origOrderId_.restore(p, size - (p - buf));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after origOrderId_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after origOrderId_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->creationTime_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode creationTime!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode creationTime!");
 	memcpy(&(val->creationTime_), p, sizeof(val->creationTime_));
 	p += sizeof(val->creationTime_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after creationTime!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after creationTime!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->lastUpdateTime_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode lastUpdateTime_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode lastUpdateTime_!");
 	memcpy(&(val->lastUpdateTime_), p, sizeof(val->lastUpdateTime_));
 	p += sizeof(val->lastUpdateTime_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after lastUpdateTime_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after lastUpdateTime_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->expireTime_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode expireTime_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode expireTime_!");
 	memcpy(&(val->expireTime_), p, sizeof(val->expireTime_));
 	p += sizeof(val->expireTime_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after expireTime_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after expireTime_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->settlDate_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode settlDate_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode settlDate_!");
 	memcpy(&(val->settlDate_), p, sizeof(val->settlDate_));
 	p += sizeof(val->settlDate_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after settlDate_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after settlDate_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->price_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode price_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode price_!");
 	memcpy(&(val->price_), p, sizeof(val->price_));
 	p += sizeof(val->price_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after price_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after price_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->stopPx_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode stopPx_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode stopPx_!");
 	memcpy(&(val->stopPx_), p, sizeof(val->stopPx_));
 	p += sizeof(val->stopPx_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after stopPx_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after stopPx_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->avgPx_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode avgPx_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode avgPx_!");
 	memcpy(&(val->avgPx_), p, sizeof(val->avgPx_));
 	p += sizeof(val->avgPx_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after avgPx_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after avgPx_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->dayAvgPx_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode dayAvgPx_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode dayAvgPx_!");
 	memcpy(&(val->dayAvgPx_), p, sizeof(val->dayAvgPx_));
 	p += sizeof(val->dayAvgPx_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after dayAvgPx_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after dayAvgPx_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->status_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode status_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode status_!");
 	memcpy(&(val->status_), p, sizeof(val->status_));
 	p += sizeof(val->status_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after status_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after status_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->side_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode side_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode side_!");
 	memcpy(&(val->side_), p, sizeof(val->side_));
 	p += sizeof(val->side_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after side_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after side_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->ordType_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode ordType_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode ordType_!");
 	memcpy(&(val->ordType_), p, sizeof(val->ordType_));
 	p += sizeof(val->ordType_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after ordType_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after ordType_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->tif_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode tif_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode tif_!");
 	memcpy(&(val->tif_), p, sizeof(val->tif_));
 	p += sizeof(val->tif_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after tif_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after tif_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->settlType_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode settlType_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode settlType_!");
 	memcpy(&(val->settlType_), p, sizeof(val->settlType_));
 	p += sizeof(val->settlType_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after settlType_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after settlType_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->capacity_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode capacity_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode capacity_!");
 	memcpy(&(val->capacity_), p, sizeof(val->capacity_));
 	p += sizeof(val->capacity_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after capacity_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after capacity_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->currency_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode currency_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode currency_!");
 	memcpy(&(val->currency_), p, sizeof(val->currency_));
 	p += sizeof(val->currency_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after currency_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after currency_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->minQty_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode minQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode minQty_!");
 	memcpy(&(val->minQty_), p, sizeof(val->minQty_));
 	p += sizeof(val->minQty_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after minQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after minQty_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->orderQty_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode orderQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode orderQty_!");
 	memcpy(&(val->orderQty_), p, sizeof(val->orderQty_));
 	p += sizeof(val->orderQty_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after orderQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after orderQty_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->leavesQty_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode leavesQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode leavesQty_!");
 	memcpy(&(val->leavesQty_), p, sizeof(val->leavesQty_));
 	p += sizeof(val->leavesQty_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after leavesQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after leavesQty_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->cumQty_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode cumQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode cumQty_!");
 	memcpy(&(val->cumQty_), p, sizeof(val->cumQty_));
 	p += sizeof(val->cumQty_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after cumQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after cumQty_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->dayOrderQty_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode dayOrderQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode dayOrderQty_!");
 	memcpy(&(val->dayOrderQty_), p, sizeof(val->dayOrderQty_));
 	p += sizeof(val->dayOrderQty_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after dayOrderQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after dayOrderQty_!");
 	++p;
 
 	if(size < (p - buf) + sizeof(val->dayCumQty_))
-		throw std::exception("Invalid format of the encoded OrderEntry - size less than required, unable decode dayCumQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode dayCumQty_!");
 	memcpy(&(val->dayCumQty_), p, sizeof(val->dayCumQty_));
 	p += sizeof(val->dayCumQty_);
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded OrderEntry - missed '.' after dayCumQty_!");
+		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after dayCumQty_!");
 	++p;
 
 	p = val->stateMachinePersistance_.restore(p, size - (p - buf));

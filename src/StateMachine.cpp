@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "StateMachine.h"
 #include "DataModelDef.h"
 #include "OrderStateMachineImpl.h"
@@ -28,7 +29,7 @@ namespace{
 const std::string &OrderState::getStateName(int idx)
 {
 	if(STATE_SIZE <= idx)
-		throw std::exception("Invalid index of the state's name!");
+		throw std::runtime_error("Invalid index of the state's name!");
 	return state_names[idx];
 }
 
@@ -141,7 +142,7 @@ void OrderState::accept(onReplace const&evnt){
 		if(!evnt.testStateMachineCheckResult_){
 			onRplOrderRejected newEvnt(evnt, "Test reject");
 			this->process_event(newEvnt);
-			throw std::exception("Test reject");
+			throw std::runtime_error("Test reject");
 		}
 		return;
 	}
@@ -332,7 +333,7 @@ void OrderState::accept(onOrderAccepted const &evnt)
 		if(!evnt.testStateMachineCheckResult_){
 			onOrderRejected newEvnt(evnt, "Test reject");
 			this->process_event(newEvnt);
-			throw std::exception("Test reject");
+			throw std::runtime_error("Test reject");
 		}
 		return;
 	}

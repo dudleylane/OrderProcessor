@@ -11,6 +11,7 @@
 */
 
 
+#include <stdexcept>
 #include "TrOperations.h"
 #include "QueuesDef.h"
 #include "OrderMatcher.h"
@@ -270,7 +271,7 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
 	case REPLACE_EXECTYPE:
 	default:
 		assert(false);
-		throw std::exception("ExecutionType not supported by the CreateExecReportTrOperation!");
+		throw std::runtime_error("ExecutionType not supported by the CreateExecReportTrOperation!");
 	};
 }
 

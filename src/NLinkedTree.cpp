@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include <cassert>
 #include "NLinkedTree.h"
 #include "Logger.h"
@@ -102,7 +103,7 @@ namespace {
 				break;
 			default:
 				assert(false);
-				throw std::exception("NLTLogMessage used with invalid type!");
+				throw std::runtime_error("NLTLogMessage used with invalid type!");
 			};	
 		}
 	private:

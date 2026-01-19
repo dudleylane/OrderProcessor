@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <stdexcept>
 #include "AccountCodec.h"
 #include "StringTCodec.h"
 
@@ -69,15 +70,15 @@ void AccountCodec::decode(const IdT& id, u32 /*version*/, const char *buf, size_
 	val->id_ = id;
 	const char *p = StringTCodec::restore(buf, size, &(val->account_));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded Account - missed '.' after account!");
+		throw std::runtime_error("Invalid format of the encoded Account - missed '.' after account!");
 	++p;
 	p = StringTCodec::restore(p, size - (p - buf), &(val->firm_));
 	if('.' != *p)
-		throw std::exception("Invalid format of the encoded Account - missed '.' after firm!");
+		throw std::runtime_error("Invalid format of the encoded Account - missed '.' after firm!");
 	++p;
 
 	val->type_ = INVALID_ACCOUNTTYPE;
 	if(size < (p - buf) + sizeof(val->type_))
-		throw std::exception("Invalid format of the encoded Account - size less than required, unable decode type!");
+		throw std::runtime_error("Invalid format of the encoded Account - size less than required, unable decode type!");
 	memcpy(&(val->type_), p, sizeof(val->type_));
 }
