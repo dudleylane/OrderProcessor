@@ -15,13 +15,14 @@
 #include <string>
 #include <deque>
 #include <functional>
+#include <cstdint>
 
 namespace COP{
 
-    typedef signed      __int32 i32;
-    typedef signed      __int64 i64;
-	typedef unsigned    __int32 u32;
-    typedef unsigned    __int64 u64;
+    using i32 = std::int32_t;
+    using i64 = std::int64_t;
+    using u32 = std::uint32_t;
+    using u64 = std::uint64_t;
 
 	struct IdT{
 		u64 id_;
@@ -56,15 +57,13 @@ namespace COP{
 	typedef u64 DateTimeT;
 
 	typedef double PriceT;
-	struct PriceTAscend : public std::binary_function <PriceT, PriceT, bool> 
-	{
-		bool operator()(const PriceT& left, const PriceT& right) const{
+	struct PriceTAscend {
+		bool operator()(const PriceT& left, const PriceT& right) const {
 			return left < right;
 		}
 	};
-	struct PriceTDescend : public std::binary_function <PriceT, PriceT, bool> 
-	{
-		bool operator()(const PriceT& left, const PriceT& right) const{
+	struct PriceTDescend {
+		bool operator()(const PriceT& left, const PriceT& right) const {
 			return left > right;
 		}
 	};

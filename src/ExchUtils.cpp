@@ -10,8 +10,10 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
-#include <windows.h>
 #include <cassert>
+#include <cstring>
+#include <thread>
+#include <chrono>
 #include "ExchUtils.h"
 
 namespace{
@@ -271,7 +273,7 @@ COP::DateTimeT currentDateTime()
 
 void WaitInterval(int mseconds)
 {
-	Sleep(mseconds);
+	std::this_thread::sleep_for(std::chrono::milliseconds(mseconds));
 }
 
 }

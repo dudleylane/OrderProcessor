@@ -38,7 +38,7 @@ namespace aux{
 
 	struct NTreeNode;
 
-	struct SortedByKey: public std::binary_function <NTreeNode *, NTreeNode *, bool>{
+	struct SortedByKey {
 		bool operator()(const NTreeNode * lft, const NTreeNode * rgt) const;
 	};
 

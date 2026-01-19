@@ -17,18 +17,8 @@
 
 #pragma once
 
-
-#define WIN32_LEAN_AND_MEAN		// Exclude rarely-used stuff from Windows headers
-#include <stdio.h>
-#include <tchar.h>
+#include <cstdio>
 
 #include "StateMachine.h"
 #include "TestAux.h"
 #include "DataModelDef.h"
-
-// stdafx.cpp : source file that includes just the standard includes
-// test.pch will be the pre-compiled header
-// stdafx.obj will contain the pre-compiled type information
-
-
-// TODO: reference additional headers your program requires here
