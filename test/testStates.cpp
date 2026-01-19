@@ -45,37 +45,37 @@ namespace{
 		return evnt;
 	}
 
-	auto_ptr<OrderEntry> createCorrectOrder(){
+	std::unique_ptr<OrderEntry> createCorrectOrder(){
 		SourceIdT srcId, destId, accountId, clearingId, instrument, clOrdId, origClOrderID, execList;
 
 		{
 			srcId = WideDataStorage::instance()->add(new StringT("CLNT"));
 			destId = WideDataStorage::instance()->add(new StringT("NASDAQ"));
-			auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
+			std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
 			clOrdId = WideDataStorage::instance()->add(clOrd.release());
 
-			auto_ptr<AccountEntry> account(new AccountEntry());
+			std::unique_ptr<AccountEntry> account(new AccountEntry());
 			account->type_ = PRINCIPAL_ACCOUNTTYPE;
 			account->firm_ = "ACTFirm";
 			account->account_ = "ACT";
 			account->id_ = IdT();
 			accountId = WideDataStorage::instance()->add(account.release());
 
-			auto_ptr<ClearingEntry> clearing(new ClearingEntry());
+			std::unique_ptr<ClearingEntry> clearing(new ClearingEntry());
 			clearing->firm_ = "CLRFirm";
 			clearingId = WideDataStorage::instance()->add(clearing.release());
 
-			auto_ptr<InstrumentEntry> instr(new InstrumentEntry());
+			std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
 			instr->symbol_ = "AAASymbl";
 			instr->securityId_ = "AAA";
 			instr->securityIdSource_ = "AAASrc";
 			instrument = WideDataStorage::instance()->add(instr.release());
 
-			auto_ptr<ExecutionsT> execLst(new ExecutionsT());
+			std::unique_ptr<ExecutionsT> execLst(new ExecutionsT());
 			execList = WideDataStorage::instance()->add(execLst.release());
 		}
 
-		auto_ptr<OrderEntry> ptr(
+		std::unique_ptr<OrderEntry> ptr(
 			new OrderEntry(srcId, destId, clOrdId, origClOrderID, instrument, accountId, clearingId, execList));
 		
 		ptr->creationTime_ = 100;
@@ -94,11 +94,11 @@ namespace{
 		ptr->orderQty_ = 77;
 
 		//OrderStorage::instance()->save(*ptr.get());
-		return auto_ptr<OrderEntry>(ptr);
+		return std::unique_ptr<OrderEntry>(ptr);
 	}
 
-	auto_ptr<TradeExecEntry> createTradeExec(const OrderEntry &order, const IdT &execId){
-		auto_ptr<TradeExecEntry> ptr(new TradeExecEntry);
+	std::unique_ptr<TradeExecEntry> createTradeExec(const OrderEntry &order, const IdT &execId){
+		std::unique_ptr<TradeExecEntry> ptr(new TradeExecEntry);
 		
 		ptr->execId_ = execId;
 		ptr->orderId_ = order.orderId_;
@@ -113,11 +113,11 @@ namespace{
 		ptr->tradeDate_ = 1;
 
 		OrderStorage::instance()->save(ptr.get());
-		return auto_ptr<TradeExecEntry>(ptr);
+		return std::unique_ptr<TradeExecEntry>(ptr);
 	}
 
-	auto_ptr<ExecCorrectExecEntry> createCorrectExec(const OrderEntry &order, const IdT &execId){
-		auto_ptr<ExecCorrectExecEntry> ptr(new ExecCorrectExecEntry);
+	std::unique_ptr<ExecCorrectExecEntry> createCorrectExec(const OrderEntry &order, const IdT &execId){
+		std::unique_ptr<ExecCorrectExecEntry> ptr(new ExecCorrectExecEntry);
 
 		ptr->execRefId_ = IdT();
 
@@ -137,42 +137,42 @@ namespace{
 		ptr->tradeDate_ = 1;
 
 		OrderStorage::instance()->save(ptr.get());
-		return auto_ptr<ExecCorrectExecEntry>(ptr);
+		return std::unique_ptr<ExecCorrectExecEntry>(ptr);
 	}
 
-	auto_ptr<OrderEntry> createReplOrder(){
+	std::unique_ptr<OrderEntry> createReplOrder(){
 		SourceIdT srcId, destId, accountId, clearingId, instrument, clOrdId, origClOrderID, execList;
 
 		{
 			srcId = WideDataStorage::instance()->add(new StringT("CLNT1"));
 			destId = WideDataStorage::instance()->add(new StringT("NASDAQ"));
-			auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestReplClOrderId", 17));
+			std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestReplClOrderId", 17));
 			clOrdId = WideDataStorage::instance()->add(clOrd.release());
-			auto_ptr<RawDataEntry> origclOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
+			std::unique_ptr<RawDataEntry> origclOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
 			origClOrderID = WideDataStorage::instance()->add(origclOrd.release());
 
-			auto_ptr<AccountEntry> account(new AccountEntry());
+			std::unique_ptr<AccountEntry> account(new AccountEntry());
 			account->type_ = PRINCIPAL_ACCOUNTTYPE;
 			account->firm_ = "ACTFirm";
 			account->account_ = "ACT";
 			account->id_ = IdT();
 			accountId = WideDataStorage::instance()->add(account.release());
 
-			auto_ptr<ClearingEntry> clearing(new ClearingEntry());
+			std::unique_ptr<ClearingEntry> clearing(new ClearingEntry());
 			clearing->firm_ = "CLRFirm";
 			clearingId = WideDataStorage::instance()->add(clearing.release());
 
-			auto_ptr<InstrumentEntry> instr(new InstrumentEntry());
+			std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
 			instr->symbol_ = "AAASymbl";
 			instr->securityId_ = "AAA";
 			instr->securityIdSource_ = "AAASrc";
 			instrument = WideDataStorage::instance()->add(instr.release());
 
-			auto_ptr<ExecutionsT> execLst(new ExecutionsT());
+			std::unique_ptr<ExecutionsT> execLst(new ExecutionsT());
 			execList = WideDataStorage::instance()->add(execLst.release());
 		}
 
-		auto_ptr<OrderEntry> ptr(
+		std::unique_ptr<OrderEntry> ptr(
 			new OrderEntry(srcId, destId, clOrdId, origClOrderID, instrument, accountId, clearingId, execList));
 		
 		ptr->creationTime_ = 130;
@@ -190,16 +190,16 @@ namespace{
 		ptr->currency_ = USD_CURRENCY;
 		ptr->orderQty_ = 300;
 
-		return auto_ptr<OrderEntry>(ptr);
+		return std::unique_ptr<OrderEntry>(ptr);
 	}
 
 	void assignClOrderId(OrderEntry *order, const string &val){
-		auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
+		std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
 		order->clOrderId_ = WideDataStorage::instance()->add(clOrd.release());
 	}
 
 	void assignOrigClOrderId(OrderEntry *order, const string &val){
-		auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
+		std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
 		order->origClOrderId_ = WideDataStorage::instance()->add(clOrd.release());
 	}
 
@@ -336,7 +336,7 @@ bool testRcvdNew2New_onOrderReceived()
 	{// check how new order processed
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 
 		p.start();
 		p.checkStates("Rcvd_New", "NoCnlReplace");
@@ -370,7 +370,7 @@ bool testRcvdNew2New_onOrderReceived()
 	{// check how new order with existing ClOrdId processed
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		p.start();
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(0 == order->orderId_.id_);
@@ -402,7 +402,7 @@ bool testRcvdNew2New_onOrderReceived()
 	{// check how new incorrect order (invalid side) processed
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
 		check(nullptr == ord);
@@ -436,7 +436,7 @@ bool testRcvdNew2New_onOrderReceived()
 	{// check how new incorrect order (empty ClOrderId) processed
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get(), "");
 
 		p.start();
@@ -477,7 +477,7 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 	{// check how new order processed
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get());
 
 		p.start();
@@ -510,7 +510,7 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 	{// check how new order (with empty ClOrderId) processed
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get(), "");
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
 		check(nullptr == ord);
@@ -543,7 +543,7 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 	{// check how new order (with duplicate ClOrderId) processed
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get(), "TestClOrderId_1");
 
 		p.start();
@@ -576,7 +576,7 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 	{// check how new order (with invalid values) processed
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get());
 
 		p.start();
@@ -615,7 +615,7 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		/*correct order should be processed*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createReplOrder());
+		std::unique_ptr<OrderEntry> order(createReplOrder());
 		//assignClOrderId(order.get());
 
 		p.start();
@@ -647,7 +647,7 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		/*incorrect order should be processed*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createReplOrder());
+		std::unique_ptr<OrderEntry> order(createReplOrder());
 		assignClOrderId(order.get());
 
 		p.start();
@@ -680,7 +680,7 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		/* order with duplicate ClOrderId should be processed*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createReplOrder());
+		std::unique_ptr<OrderEntry> order(createReplOrder());
 
 		p.start();
 		p.checkStates("Rcvd_New", "NoCnlReplace");
@@ -711,7 +711,7 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		/* order with empty OrigClOrderId - should be rejected*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createReplOrder());
+		std::unique_ptr<OrderEntry> order(createReplOrder());
 		assignClOrderId(order.get());
 
 		p.start();
@@ -745,7 +745,7 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		/* order with unknown OrigClOrderId - should be rejected*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createReplOrder());
+		std::unique_ptr<OrderEntry> order(createReplOrder());
 		assignClOrderId(order.get());
 		assignOrigClOrderId(order.get(), "Unknown");
 
@@ -783,7 +783,7 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		/* correct order should be processed*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createReplOrder());
+		std::unique_ptr<OrderEntry> order(createReplOrder());
 		assignClOrderId(order.get());
 
 		p.start();
@@ -815,7 +815,7 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		/* incorrect order should be processed*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createReplOrder());
+		std::unique_ptr<OrderEntry> order(createReplOrder());
 		assignClOrderId(order.get());
 
 		p.start();
@@ -849,7 +849,7 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		/* order with empty ClOrderId should be rejected*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createReplOrder());
+		std::unique_ptr<OrderEntry> order(createReplOrder());
 		assignClOrderId(order.get(), "");
 
 		p.start();
@@ -879,7 +879,7 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		/* order with duplicate ClOrderId should be rejected*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createReplOrder());
+		std::unique_ptr<OrderEntry> order(createReplOrder());
 
 		p.start();
 		p.checkStates("Rcvd_New", "NoCnlReplace");
@@ -915,7 +915,7 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		/* correct order should be processed*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get());
 
 		p.start();
@@ -948,7 +948,7 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		/* incorrect order should be processed*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get());
 
 		p.start();
@@ -982,7 +982,7 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		/* order with empty ClORderId should be processed*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get(), "");
 
 		p.start();
@@ -1015,7 +1015,7 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		/* order with duplicate ClORderId should be processed*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 
 		p.start();
 		p.checkStates("Rcvd_New", "NoCnlReplace");
@@ -1051,7 +1051,7 @@ bool testRcvdNew2New_onExternalOrder()
 		/* correct order should be processed*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get());
 
 		p.start();
@@ -1084,7 +1084,7 @@ bool testRcvdNew2New_onExternalOrder()
 		/* incorrect order should be rejected*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get());
 
 		p.start();
@@ -1116,7 +1116,7 @@ bool testRcvdNew2New_onExternalOrder()
 		/* order with empty ClOrderID should be rejected*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get(), "");
 
 		p.start();
@@ -1145,7 +1145,7 @@ bool testRcvdNew2New_onExternalOrder()
 		/* order with duplicate ClOrderID should be rejected*/
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
-		auto_ptr<OrderEntry> order(createCorrectOrder());
+		std::unique_ptr<OrderEntry> order(createCorrectOrder());
 
 		p.start();
 		p.checkStates("Rcvd_New", "NoCnlReplace");

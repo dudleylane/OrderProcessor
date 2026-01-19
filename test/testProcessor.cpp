@@ -69,7 +69,7 @@ namespace {
 	};
 
 	SourceIdT addInstrument(const std::string &name){
-		auto_ptr<InstrumentEntry> instr(new InstrumentEntry());
+		std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
 		instr->symbol_ = name;
 		instr->securityId_ = "AAA";
 		instr->securityIdSource_ = "AAASrc";
@@ -91,31 +91,31 @@ namespace {
 		bool res_;
 	};
 
-	auto_ptr<OrderEntry> createCorrectOrder(SourceIdT instr){
+	std::unique_ptr<OrderEntry> createCorrectOrder(SourceIdT instr){
 		SourceIdT srcId, destId, accountId, clearingId, clOrdId, origClOrderID, execList;
 
 		{
 			srcId = WideDataStorage::instance()->add(new StringT("CLNT"));
 			destId = WideDataStorage::instance()->add(new StringT("NASDAQ"));
-			auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
+			std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
 			clOrdId = WideDataStorage::instance()->add(clOrd.release());
 
-			auto_ptr<AccountEntry> account(new AccountEntry());
+			std::unique_ptr<AccountEntry> account(new AccountEntry());
 			account->type_ = PRINCIPAL_ACCOUNTTYPE;
 			account->firm_ = "ACTFirm";
 			account->account_ = "ACT";
 			account->id_ = IdT();
 			accountId = WideDataStorage::instance()->add(account.release());
 
-			auto_ptr<ClearingEntry> clearing(new ClearingEntry());
+			std::unique_ptr<ClearingEntry> clearing(new ClearingEntry());
 			clearing->firm_ = "CLRFirm";
 			clearingId = WideDataStorage::instance()->add(clearing.release());
 
-			auto_ptr<ExecutionsT> execLst(new ExecutionsT());
+			std::unique_ptr<ExecutionsT> execLst(new ExecutionsT());
 			execList = WideDataStorage::instance()->add(execLst.release());
 		}
 
-		auto_ptr<OrderEntry> ptr(
+		std::unique_ptr<OrderEntry> ptr(
 			new OrderEntry(srcId, destId, clOrdId, origClOrderID, instr, accountId, clearingId, execList));
 		
 		ptr->creationTime_ = 100;
@@ -133,7 +133,7 @@ namespace {
 		ptr->currency_ = USD_CURRENCY;
 		ptr->orderQty_ = 77;
 
-		return auto_ptr<OrderEntry>(ptr);
+		return std::unique_ptr<OrderEntry>(ptr);
 	}
 	void assignClOrderId(OrderEntry *order){
 		static int id = 0;
@@ -141,7 +141,7 @@ namespace {
 		string val("TestClOrderId_");
 		char buf[64];
 		val += _itoa(++id, buf, 10);
-		auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
+		std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
 		order->clOrderId_ = WideDataStorage::instance()->add(clOrd.release());
 	}
 
@@ -153,7 +153,7 @@ namespace {
 		{
 			return nullptr;
 		}
-		virtual void addTransaction(std::auto_ptr<ACID::Transaction> &tr)
+		virtual void addTransaction(std::unique_ptr<ACID::Transaction> &tr)
 		{
 			tr->setTransactionId(ACID::TransactionId(1, 1));
 			proc_->process(tr->transactionId(), tr.get());
@@ -204,10 +204,10 @@ bool testProcessor()
 		proc.init(params);
 		transMgr.proc_ = &proc;
 		{
-			auto_ptr<OrderEntry> ord(createCorrectOrder(instrId1));
+			std::unique_ptr<OrderEntry> ord(createCorrectOrder(instrId1));
 			RawDataEntry ordClOrdId = ord->clOrderId_.get();
 			inQueues.push("test", OrderEvent(ord.release()));
-			auto_ptr<OrderEntry> ord2(createCorrectOrder(instrId1));
+			std::unique_ptr<OrderEntry> ord2(createCorrectOrder(instrId1));
 			assignClOrderId(ord2.get());
 			RawDataEntry ord2ClOrdId = ord2->clOrderId_.get();
 			inQueues.push("test", OrderEvent(ord2.release()));
@@ -246,7 +246,7 @@ bool testProcessor()
 		}
 
 		{
-			auto_ptr<OrderEntry> ord(createCorrectOrder(instrId1));
+			std::unique_ptr<OrderEntry> ord(createCorrectOrder(instrId1));
 			assignClOrderId(ord.get());
 			ord->side_ = SELL_SIDE;
 			ord->leavesQty_ = 100;
@@ -265,7 +265,7 @@ bool testProcessor()
 			check(nullptr != order);
 			check(NEW_ORDSTATUS == order->status_);
 
-			auto_ptr<OrderEntry> ord2(createCorrectOrder(instrId1));
+			std::unique_ptr<OrderEntry> ord2(createCorrectOrder(instrId1));
 			assignClOrderId(ord2.get());
 			ord2->side_ = BUY_SIDE;
 			ord2->leavesQty_ = 50;

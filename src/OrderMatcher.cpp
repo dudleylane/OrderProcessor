@@ -117,7 +117,7 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 		if(MARKET_ORDERTYPE == order->ordType_){
 			/// if market not available - market order should be canceled
 			aux::ExchLogger::instance()->error("Unable to find oposite order for Market order during order matching.");
-			auto_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
+			std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
 			defEvnt->cancelReason_ = "Unable to find oposite order for Market order during order matching.";
 			defEvnt->order_ = order;
 			defered_->addDeferedEvent(defEvnt.release());
@@ -133,7 +133,7 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 		throw std::runtime_error("Unable to retrive order from OrderStorage after search!");
 
 	/// add trade event
-	auto_ptr<ExecutionDeferedEvent> defEvnt(new ExecutionDeferedEvent(order));
+	std::unique_ptr<ExecutionDeferedEvent> defEvnt(new ExecutionDeferedEvent(order));
 	TradeParams trade;
 	trade.order_ = contrOrd;
 	trade.lastQty_ = std::min(order->leavesQty_, contrOrd->leavesQty_);
@@ -143,7 +143,7 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 
 	/// add another match event to continue matching
 	if(order->leavesQty_ - trade.lastQty_ > 0){
-		auto_ptr<MatchOrderDeferedEvent> defEvnt(new MatchOrderDeferedEvent(order));
+		std::unique_ptr<MatchOrderDeferedEvent> defEvnt(new MatchOrderDeferedEvent(order));
 		defEvnt->order_ = order;
 		defered_->addDeferedEvent(defEvnt.release());	
 	}

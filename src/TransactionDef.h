@@ -134,7 +134,7 @@ namespace COP{
 			~Scope(){}
 
 			/// add operation into the transaction
-			virtual void addOperation(std::auto_ptr<Operation> &op) = 0;
+			virtual void addOperation(std::unique_ptr<Operation> &op) = 0;
 
 			/// removes last operation from transaction scope
 			virtual void removeLastOperation() = 0;
@@ -196,7 +196,7 @@ namespace COP{
 			virtual TransactionObserver *detach() = 0;
 
 			/// add new transaction for execution
-			virtual void addTransaction(std::auto_ptr<Transaction> &tr) = 0;
+			virtual void addTransaction(std::unique_ptr<Transaction> &tr) = 0;
 
 			/// remove transaction, do not execute it
 			virtual bool removeTransaction(const TransactionId &id, Transaction *t) = 0;

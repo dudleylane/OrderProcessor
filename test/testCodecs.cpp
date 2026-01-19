@@ -34,7 +34,7 @@ using namespace test;
 
 namespace{
 	SourceIdT addInstrument(const std::string &name){
-		auto_ptr<InstrumentEntry> instr(new InstrumentEntry());
+		std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
 		instr->symbol_ = name;
 		instr->securityId_ = "AAA";
 		instr->securityIdSource_ = "AAASrc";
@@ -271,7 +271,7 @@ namespace{
 			check(!buf.empty());
 			check(id == val.orderId_);
 
-			auto_ptr<OrderEntry> decVal(OrderCodec::decode(id, version, buf.c_str(), buf.size()));
+			std::unique_ptr<OrderEntry> decVal(OrderCodec::decode(id, version, buf.c_str(), buf.size()));
 			check(nullptr != decVal.get());
 			check(decVal->instrument_.getId() == val.instrument_.getId());
 			check(decVal->account_.getId() == val.account_.getId());
@@ -349,7 +349,7 @@ namespace{
 			check(!buf.empty());
 			check(id == val.orderId_);
 
-			auto_ptr<OrderEntry> decVal(OrderCodec::decode(id, version, buf.c_str(), buf.size()));
+			std::unique_ptr<OrderEntry> decVal(OrderCodec::decode(id, version, buf.c_str(), buf.size()));
 			check(nullptr != decVal.get());
 			check(decVal->instrument_.getId() == val.instrument_.getId());
 			check(decVal->account_.getId() == val.account_.getId());

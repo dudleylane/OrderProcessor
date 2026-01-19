@@ -112,7 +112,7 @@ void OrderBookImpl::init(const InstrumentsT &instr, OrderSaver *storage)
 	storage_ = storage;
 
 	for(InstrumentsT::const_iterator it = instr.begin(); it != instr.end(); ++it){
-		auto_ptr<OrdersGroup> grp(new OrdersGroup);
+		std::unique_ptr<OrdersGroup> grp(new OrdersGroup);
 		orderGroups_.insert(OrderGroupsByInstrumentT::value_type(*it, grp.get()));	
 		grp.release();
 	}

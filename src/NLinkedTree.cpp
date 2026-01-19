@@ -149,14 +149,14 @@ void NLinkTree::clear()
 	}
 	{
 		for(OParamsT::iterator it = tmpDepends.begin(); it != tmpDepends.end(); ++it){
-			AllocAutoPtr<OParam> el(it->second, &objParamAllocator_);//auto_ptr<OParam> el(it->second);
+			AllocAutoPtr<OParam> el(it->second, &objParamAllocator_);//std::unique_ptr<OParam> el(it->second);
 		}
 	}
 	{
 		for(KParamsT::iterator it = tmpKeys.begin(); it != tmpKeys.end(); ++it){
-			AllocAutoPtr<KParam> el(it->second, &keyParamAllocator_);//auto_ptr<KParam> el(it->second);
+			AllocAutoPtr<KParam> el(it->second, &keyParamAllocator_);//std::unique_ptr<KParam> el(it->second);
 			if(nullptr != it->second->node_)
-				AllocAutoPtr<NTreeNode> nd(it->second->node_, &treeNodeAllocator_);//auto_ptr<NTreeNode> nd(it->second->node_);
+				AllocAutoPtr<NTreeNode> nd(it->second->node_, &treeNodeAllocator_);//std::unique_ptr<NTreeNode> nd(it->second->node_);
 		}
 	}
 }
@@ -182,7 +182,7 @@ bool NLinkTree::add(const K &key, const V &value, const DependObjs &depend, int 
 		OParamsT::iterator depIt = depends_.find(obj);
 		if(depends_.end() == depIt){
 			// if this object not used in transactions now - need to add it
-			AllocAutoPtr<OParam> el(objParamAllocator_.create(OParam()), &objParamAllocator_);//auto_ptr<OParam> el(new OParam());
+			AllocAutoPtr<OParam> el(objParamAllocator_.create(OParam()), &objParamAllocator_);//std::unique_ptr<OParam> el(new OParam());
 			el->usedIn_.insert(key);
 			depends_.insert(OParamsT::value_type(obj, el.get()));
 			el.release();
@@ -220,7 +220,7 @@ bool NLinkTree::add(const K &key, const V &value, const DependObjs &depend, int 
 	}
 
 	// add into the list of the keys
-	AllocAutoPtr<KParam> keyParams(keyParamAllocator_.create(KParam()), &keyParamAllocator_);//auto_ptr<KParam> keyParams(new KParam());
+	AllocAutoPtr<KParam> keyParams(keyParamAllocator_.create(KParam()), &keyParamAllocator_);//std::unique_ptr<KParam> keyParams(new KParam());
 	keyParams->node_ = node.get();
 	keyParams->dependsOn_ = depend;
 	keys_.insert(KParamsT::value_type(key, keyParams.get()));
@@ -329,7 +329,7 @@ bool NLinkTree::remove(const K &key, int *readyToExecuteAdded)
 				if((K() != child)||(K() != prnt))
 					childn.insert(ChildElement(child, prnt));
 				if(depIt->second->usedIn_.empty()){
-					AllocAutoPtr<OParam> el(depIt->second, &objParamAllocator_);//auto_ptr<OParam> el(depIt->second);
+					AllocAutoPtr<OParam> el(depIt->second, &objParamAllocator_);//std::unique_ptr<OParam> el(depIt->second);
 					depends_.erase(depIt);
 				}
 			}else{

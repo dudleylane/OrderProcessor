@@ -33,7 +33,7 @@ const TransactionId &TransactionScope::transactionId()const
 	return id_;
 }
 
-void TransactionScope::addOperation(auto_ptr<Operation> &op)
+void TransactionScope::addOperation(std::unique_ptr<Operation> &op)
 {
 	operations_.push_back(op.release());
 }

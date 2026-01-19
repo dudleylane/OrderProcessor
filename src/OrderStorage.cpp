@@ -88,7 +88,7 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 		if(ordersByClId_.end() != ordersByClId_.find(order.clOrderId_.get()))
 			throw std::runtime_error("Unable to save order - order with same ClOrderId already exists.");
 
-		auto_ptr<OrderEntry> cp(order.clone());
+		std::unique_ptr<OrderEntry> cp(order.clone());
 		if(!cp->orderId_.isValid())
 			cp->orderId_ = idGenerator->getId();
 		int st = 0;
@@ -179,7 +179,7 @@ ExecutionEntry *OrderDataStorage::save(const ExecutionEntry &exec, IdTValueGener
 	if((exec.execId_.isValid())&&(executionsById_.end() != executionsById_.find(exec.execId_)))
 		throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
 
-	auto_ptr<ExecutionEntry> cp(exec.clone());
+	std::unique_ptr<ExecutionEntry> cp(exec.clone());
 	if(!cp->execId_.isValid())
 		cp->execId_ = idGenerator->getId();
 	executionsById_.insert(ExecByIDT::value_type(cp->execId_, cp.get()));

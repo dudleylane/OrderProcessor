@@ -121,12 +121,12 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
 	}
 
 	////aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onOrderAccepted) add matchOrder and Add2OrderBook operations");
-	auto_ptr<Operation> op(new MatchOrderTrOperation((*orderData)));
+	std::unique_ptr<Operation> op(new MatchOrderTrOperation((*orderData)));
 	evnt.transaction_->addOperation(op);
 
 	/// market order should be matched once - no need to put it into OrderBook
 	if(MARKET_ORDERTYPE != (*orderData)->ordType_){
-		auto_ptr<Operation> op2(new AddToOrderBookTrOperation(*(*orderData), (*orderData)->instrument_.getId()));
+		std::unique_ptr<Operation> op2(new AddToOrderBookTrOperation(*(*orderData), (*orderData)->instrument_.getId()));
 		evnt.transaction_->addOperation(op2);
 	}
 
@@ -155,7 +155,7 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onRplOrderRe
 	(*orderData)->status_ = PENDINGREPLACE_ORDSTATUS;
 
 	// change original order to onReplaceReceived
-	auto_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceReceived>(*origOrder, 
+	std::unique_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceReceived>(*origOrder, 
 												onReplaceReceived((*orderData)->orderId_),
 												(*orderData)->instrument_.getId()));
 	evnt.transaction_->addOperation(op);
@@ -224,12 +224,12 @@ void OrdStateImpl::processAccept(OrderEntry **orderData, OrdState::onExternalOrd
 	assert(nullptr != evnt.orderStorage_);
 	*orderData = evnt.orderStorage_->save(**orderData, evnt.generator_);
 
-	auto_ptr<Operation> op(new MatchOrderTrOperation(evnt.order_));
+	std::unique_ptr<Operation> op(new MatchOrderTrOperation(evnt.order_));
 	evnt.transaction_->addOperation(op);
 
 	/// market order should be matched once - no need to put it into OrderBook
 	if(MARKET_ORDERTYPE != (*orderData)->ordType_){
-		auto_ptr<Operation> op2(new AddToOrderBookTrOperation(*evnt.order_, (*orderData)->instrument_.getId()));
+		std::unique_ptr<Operation> op2(new AddToOrderBookTrOperation(*evnt.order_, (*orderData)->instrument_.getId()));
 		evnt.transaction_->addOperation(op2);
 	}
 	////aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onExternalOrder) finished");
@@ -269,12 +269,12 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onOrderAccepte
 	}
 
 	////aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onOrderAccepted) add matchOrder and Add2OrderBook operations");
-	auto_ptr<Operation> op(new MatchOrderTrOperation(orderData));
+	std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
 	evnt.transaction_->addOperation(op);
 
 	/// market order should be matched once - no need to put it into OrderBook
 	if(MARKET_ORDERTYPE != orderData->ordType_){
-		auto_ptr<Operation> op2(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+		std::unique_ptr<Operation> op2(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op2);
 	}
 
@@ -310,16 +310,16 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onReplace cons
 	if(!origOrder->isReplaceValid(&reason))
 		throw std::runtime_error(reason.c_str());
 
-	auto_ptr<Operation> op(new MatchOrderTrOperation(orderData));
+	std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
 	evnt.transaction_->addOperation(op);
 
 	/// market order should be matched once - no need to put it into OrderBook
 	if(MARKET_ORDERTYPE != orderData->ordType_){
-		auto_ptr<Operation> addOp(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+		std::unique_ptr<Operation> addOp(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(addOp);
 	}
 	// change original order to CnclReplaced
-	auto_ptr<Operation> execOp(new EnqueueOrderEventTrOperation<onExecReplace>(*origOrder, 
+	std::unique_ptr<Operation> execOp(new EnqueueOrderEventTrOperation<onExecReplace>(*origOrder, 
 												onExecReplace(orderData->orderId_)));
 	evnt.transaction_->addOperation(execOp);
 
@@ -336,7 +336,7 @@ void OrdStateImpl::processReject(OrderEntry *orderData, OrdState::onRplOrderReje
 		throw std::runtime_error("Unable to locate original order for OrderReplaceReject!");
 
 	// change original order to NoCnlReplace
-	auto_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder, 
+	std::unique_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder, 
 												onReplaceRejected(orderData->orderId_)));
 	evnt.transaction_->addOperation(op);
 
@@ -352,7 +352,7 @@ void OrdStateImpl::processExpire(OrderEntry *orderData, OrdState::onRplOrderExpi
 		throw std::runtime_error("Unable to locate original order for OrderReplaceExpire!");
 
 	// change original order to NoCnlReplace
-	auto_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder, 
+	std::unique_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder, 
 												onReplaceRejected(orderData->orderId_)));
 	evnt.transaction_->addOperation(op);
 
@@ -446,12 +446,12 @@ void OrdStateImpl::processCorrected(OrderEntry *orderData, OrdState::onTradeCrct
 		throw std::runtime_error("Invalid onTradeCrctCncl event - correctExecution is nullptr!");
 	// if order was filled and gone to partiallyFill after correct - restore it in orderBook
 	if((0 == orderData->leavesQty_)&&(0 < crct->leavesQty_)){
-		auto_ptr<Operation> op(new MatchOrderTrOperation(orderData));
+		std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
 		evnt.transaction_->addOperation(op);
 
 		/// market order should be matched once - no need to put it into OrderBook
 		if(MARKET_ORDERTYPE != orderData->ordType_){
-			auto_ptr<Operation> op1(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+			std::unique_ptr<Operation> op1(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 			evnt.transaction_->addOperation(op1);			
 		}
 	}
@@ -486,7 +486,7 @@ void OrdStateImpl::processRejectNew(OrderEntry *orderData, OrdState::onOrderReje
 	//aux::ExchLogger::instance()->debug("OrdStateImpl::processRejectNew(onOrderRejected) started");
 
 	if(MARKET_ORDERTYPE != orderData->ordType_){
-		auto_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
 	//aux::ExchLogger::instance()->debug("OrdStateImpl::processRejectNew(onOrderRejected) finished");
@@ -507,7 +507,7 @@ void OrdStateImpl::processExpire(OrderEntry *orderData, OrdState::onExpired cons
 
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 		((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
-		auto_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
 
@@ -520,7 +520,7 @@ void OrdStateImpl::processFinished(OrderEntry *orderData, OrdState::onFinished c
 	//aux::ExchLogger::instance()->debug("OrdStateImpl::processFinished(onFinished) started");
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 	   ((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
-		auto_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
 	//aux::ExchLogger::instance()->debug("OrdStateImpl::processFinished(onFinished) finished");
@@ -543,11 +543,11 @@ void OrdStateImpl::processRestored(OrderEntry *orderData, OrdState::onNewDay con
 	assert(nullptr != orderData);
 	//aux::ExchLogger::instance()->debug("OrdStateImpl::processRestored(onNewDay) started");
 	if(0 < orderData->leavesQty_){
-		auto_ptr<Operation> op(new MatchOrderTrOperation(orderData));
+		std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
 		evnt.transaction_->addOperation(op);
 
 		assert(MARKET_ORDERTYPE != orderData->ordType_);		
-		auto_ptr<Operation> op1(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+		std::unique_ptr<Operation> op1(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);			
 	}
 	//aux::ExchLogger::instance()->debug("OrdStateImpl::processRestored(onNewDay) finished");
@@ -560,7 +560,7 @@ void OrdStateImpl::processSuspended(OrderEntry *orderData, OrdState::onSuspended
 
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 	   ((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
-		auto_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
 
@@ -574,12 +574,12 @@ void OrdStateImpl::processContinued(OrderEntry *orderData, OrdState::onContinue 
 	//aux::ExchLogger::instance()->debug("OrdStateImpl::processContinued(onContinue) started");
 
 	if(0 < orderData->leavesQty_){
-		auto_ptr<Operation> op(new MatchOrderTrOperation(orderData));
+		std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
 		evnt.transaction_->addOperation(op);
 
 		/// market order should be matched once - no need to put it into OrderBook
 		if(MARKET_ORDERTYPE != orderData->ordType_){
-			auto_ptr<Operation> op1(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+			std::unique_ptr<Operation> op1(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 			evnt.transaction_->addOperation(op1);			
 		}
 	}
@@ -599,7 +599,7 @@ void OrdStateImpl::processCanceled(OrderEntry *orderData, OrdState::onExecCancel
 
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 	   ((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
-		auto_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
 
@@ -614,7 +614,7 @@ void OrdStateImpl::processCanceled(OrderEntry *orderData, OrdState::onInternalCa
 
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 	   ((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
-		auto_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
 
@@ -628,7 +628,7 @@ void OrdStateImpl::processReplaced(OrderEntry *orderData, OrdState::onExecReplac
 	//aux::ExchLogger::instance()->debug("OrdStateImpl::processReplaced(onExecReplace) started");
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 	   ((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
-		auto_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
+		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
 

@@ -45,7 +45,7 @@ public:
 	/// reimplemented from TransactionManager
 	void attach(TransactionObserver *obs);
 	TransactionObserver *detach();
-	virtual void addTransaction(std::auto_ptr<Transaction> &tr);
+	virtual void addTransaction(std::unique_ptr<Transaction> &tr);
 	virtual bool removeTransaction(const TransactionId &id, Transaction *t);
 	virtual bool getParentTransactions(const TransactionId &id, TransactionIdsT *parent)const;
 	virtual bool getRelatedTransactions(const TransactionId &id, TransactionIdsT *related)const;

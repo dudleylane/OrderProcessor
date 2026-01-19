@@ -166,7 +166,7 @@ namespace{
 	};
 
 	SourceIdT addInstrument(const std::string &name){
-		auto_ptr<InstrumentEntry> instr(new InstrumentEntry());
+		std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
 		instr->symbol_ = name;
 		instr->securityId_ = "AAA";
 		instr->securityIdSource_ = "AAASrc";
@@ -174,9 +174,9 @@ namespace{
 	}
 
 	SourceIdT addRawData(const std::string &name){
-		auto_ptr<RawDataEntry> raw(new RawDataEntry());
+		std::unique_ptr<RawDataEntry> raw(new RawDataEntry());
 		raw->type_ = STRING_RAWDATATYPE;
-		auto_ptr<char> val(new char[name.size()]);
+		std::unique_ptr<char> val(new char[name.size()]);
 		memcpy(val.get(), name.c_str(), name.size());
 		raw->data_ = val.release();
 		raw->length_ = name.size();
@@ -187,7 +187,7 @@ namespace{
 		SourceIdT v;
 		SourceIdT instrId = addInstrument("instrument");
 		SourceIdT clOrderId = addRawData("clOrderId_");
-		auto_ptr<OrderEntry> val(new OrderEntry(SourceIdT(1, 1), SourceIdT(2, 2), clOrderId, 
+		std::unique_ptr<OrderEntry> val(new OrderEntry(SourceIdT(1, 1), SourceIdT(2, 2), clOrderId, 
 					SourceIdT(4, 4), instrId, SourceIdT(6, 6), SourceIdT(7, 7), SourceIdT(8, 8)));
 		val->creationTime_ = 1111;
 		val->lastUpdateTime_ = 1112;
@@ -373,7 +373,7 @@ bool testStorageRecordDispatcher()
 			check(0 == memcmp(restore.rawData_.at(0)->data_, val.data_, val.length_));
 		}
 		{// load ORDER_RECORDTYPE
-			auto_ptr<OrderEntry> val(createOrder());
+			std::unique_ptr<OrderEntry> val(createOrder());
 			val->orderId_ = IdT(1111, 6789);
 			std::string buf;
 			{
@@ -528,7 +528,7 @@ bool testStorageRecordDispatcher()
 			check(0 == it->second.record_.compare(buf));
 		}
 		{// load ORDER_RECORDTYPE
-			auto_ptr<OrderEntry> val(createOrder());
+			std::unique_ptr<OrderEntry> val(createOrder());
 			val->orderId_ = IdT(1115, 6789);
 			std::string buf;
 			{

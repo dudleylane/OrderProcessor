@@ -53,37 +53,37 @@ namespace{
 		return evnt;
 	}
 
-	auto_ptr<OrderEntry> createCorrectOrder(){
+	std::unique_ptr<OrderEntry> createCorrectOrder(){
 		SourceIdT srcId, destId, accountId, clearingId, instrument, clOrdId, origClOrderID, execList;
 
 		{
 			srcId = WideDataStorage::instance()->add(new StringT("CLNT"));
 			destId = WideDataStorage::instance()->add(new StringT("NASDAQ"));
-			auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
+			std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
 			clOrdId = WideDataStorage::instance()->add(clOrd.release());
 
-			auto_ptr<AccountEntry> account(new AccountEntry());
+			std::unique_ptr<AccountEntry> account(new AccountEntry());
 			account->type_ = PRINCIPAL_ACCOUNTTYPE;
 			account->firm_ = "ACTFirm";
 			account->account_ = "ACT";
 			account->id_ = IdT();
 			accountId = WideDataStorage::instance()->add(account.release());
 
-			auto_ptr<ClearingEntry> clearing(new ClearingEntry());
+			std::unique_ptr<ClearingEntry> clearing(new ClearingEntry());
 			clearing->firm_ = "CLRFirm";
 			clearingId = WideDataStorage::instance()->add(clearing.release());
 
-			auto_ptr<InstrumentEntry> instr(new InstrumentEntry());
+			std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
 			instr->symbol_ = "AAASymbl";
 			instr->securityId_ = "AAA";
 			instr->securityIdSource_ = "AAASrc";
 			instrument = WideDataStorage::instance()->add(instr.release());
 
-			auto_ptr<ExecutionsT> execLst(new ExecutionsT());
+			std::unique_ptr<ExecutionsT> execLst(new ExecutionsT());
 			execList = WideDataStorage::instance()->add(execLst.release());
 		}
 
-		auto_ptr<OrderEntry> ptr(
+		std::unique_ptr<OrderEntry> ptr(
 			new OrderEntry(srcId, destId, clOrdId, origClOrderID, instrument, accountId, clearingId, execList));
 		
 		ptr->creationTime_ = 100;
@@ -102,11 +102,11 @@ namespace{
 		ptr->orderQty_ = 77;
 
 		//OrderStorage::instance()->save(*ptr.get());
-		return auto_ptr<OrderEntry>(ptr);
+		return std::unique_ptr<OrderEntry>(ptr);
 	}
 
-	auto_ptr<TradeExecEntry> createTradeExec(const OrderEntry &order, const IdT &execId){
-		auto_ptr<TradeExecEntry> ptr(new TradeExecEntry);
+	std::unique_ptr<TradeExecEntry> createTradeExec(const OrderEntry &order, const IdT &execId){
+		std::unique_ptr<TradeExecEntry> ptr(new TradeExecEntry);
 		
 		ptr->execId_ = execId;
 		ptr->orderId_ = order.orderId_;
@@ -121,11 +121,11 @@ namespace{
 		ptr->tradeDate_ = 1;
 
 		OrderStorage::instance()->save(ptr.get());
-		return auto_ptr<TradeExecEntry>(ptr);
+		return std::unique_ptr<TradeExecEntry>(ptr);
 	}
 
-	auto_ptr<ExecCorrectExecEntry> createCorrectExec(const OrderEntry &order, const IdT &execId){
-		auto_ptr<ExecCorrectExecEntry> ptr(new ExecCorrectExecEntry);
+	std::unique_ptr<ExecCorrectExecEntry> createCorrectExec(const OrderEntry &order, const IdT &execId){
+		std::unique_ptr<ExecCorrectExecEntry> ptr(new ExecCorrectExecEntry);
 
 		ptr->execRefId_ = IdT();
 
@@ -145,42 +145,42 @@ namespace{
 		ptr->tradeDate_ = 1;
 
 		OrderStorage::instance()->save(ptr.get());
-		return auto_ptr<ExecCorrectExecEntry>(ptr);
+		return std::unique_ptr<ExecCorrectExecEntry>(ptr);
 	}
 
-	auto_ptr<OrderEntry> createReplOrder(){
+	std::unique_ptr<OrderEntry> createReplOrder(){
 		SourceIdT srcId, destId, accountId, clearingId, instrument, clOrdId, origClOrderID, execList;
 
 		{
 			srcId = WideDataStorage::instance()->add(new StringT("CLNT1"));
 			destId = WideDataStorage::instance()->add(new StringT("NASDAQ"));
-			auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestReplClOrderId", 17));
+			std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestReplClOrderId", 17));
 			clOrdId = WideDataStorage::instance()->add(clOrd.release());
-			auto_ptr<RawDataEntry> origclOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
+			std::unique_ptr<RawDataEntry> origclOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
 			origClOrderID = WideDataStorage::instance()->add(origclOrd.release());
 
-			auto_ptr<AccountEntry> account(new AccountEntry());
+			std::unique_ptr<AccountEntry> account(new AccountEntry());
 			account->type_ = PRINCIPAL_ACCOUNTTYPE;
 			account->firm_ = "ACTFirm";
 			account->account_ = "ACT";
 			account->id_ = IdT();
 			accountId = WideDataStorage::instance()->add(account.release());
 
-			auto_ptr<ClearingEntry> clearing(new ClearingEntry());
+			std::unique_ptr<ClearingEntry> clearing(new ClearingEntry());
 			clearing->firm_ = "CLRFirm";
 			clearingId = WideDataStorage::instance()->add(clearing.release());
 
-			auto_ptr<InstrumentEntry> instr(new InstrumentEntry());
+			std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
 			instr->symbol_ = "AAASymbl";
 			instr->securityId_ = "AAA";
 			instr->securityIdSource_ = "AAASrc";
 			instrument = WideDataStorage::instance()->add(instr.release());
 
-			auto_ptr<ExecutionsT> execLst(new ExecutionsT());
+			std::unique_ptr<ExecutionsT> execLst(new ExecutionsT());
 			execList = WideDataStorage::instance()->add(execLst.release());
 		}
 
-		auto_ptr<OrderEntry> ptr(
+		std::unique_ptr<OrderEntry> ptr(
 			new OrderEntry(srcId, destId, clOrdId, origClOrderID, instrument, accountId, clearingId, execList));
 		
 		ptr->creationTime_ = 130;
@@ -199,7 +199,7 @@ namespace{
 		ptr->orderQty_ = 300;
 
 		//OrderStorage::instance()->save(*ptr.get());
-		return auto_ptr<OrderEntry>(ptr);
+		return std::unique_ptr<OrderEntry>(ptr);
 	}
 
 	void assignClOrderId(OrderEntry *order){
@@ -208,7 +208,7 @@ namespace{
 		string val("TestClOrderId_");
 		char buf[64];
 		val += _itoa(++id, buf, 10);
-		auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
+		std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
 		order->clOrderId_ = WideDataStorage::instance()->add(clOrd.release());
 	}
 
@@ -237,7 +237,7 @@ bool testStateMachine()
 	SubscriptionMgr::create();
 	IdTGenerator::create();
 	OrderStorage::create();
-	auto_ptr<OrderEntry> order(createCorrectOrder());
+	std::unique_ptr<OrderEntry> order(createCorrectOrder());
 	TestOrderBook books;
 
 	{//Rcvd_New->Pend_New->Rejected
@@ -289,7 +289,7 @@ bool testStateMachine()
 		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(101, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(101, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -341,7 +341,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_TRADE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(100, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(100, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
@@ -525,7 +525,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(106, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(106, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -543,7 +543,7 @@ bool testStateMachine()
 		check(ord->orderQty_ == ord->cumQty_);
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(107, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(107, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
@@ -886,7 +886,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(111, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(111, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -947,7 +947,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(121, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(121, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1007,7 +1007,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(131, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(131, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1039,7 +1039,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(137, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(137, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
@@ -1102,7 +1102,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(133, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(133, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1133,7 +1133,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(138, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(138, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
@@ -1195,7 +1195,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(233, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(233, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1255,7 +1255,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(136, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(136, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1286,7 +1286,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(151, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(151, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
@@ -1350,7 +1350,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(333, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(333, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1381,7 +1381,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(251, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(251, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
@@ -1446,7 +1446,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(433, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(433, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1477,7 +1477,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(351, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(351, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
@@ -1623,7 +1623,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(161, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(161, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1640,7 +1640,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_TRADE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(167, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(167, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
@@ -1703,7 +1703,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(171, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(171, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1761,7 +1761,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(181, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(181, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1778,7 +1778,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_TRADE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams2(createTradeExec(*order.get(), IdT(182, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams2(createTradeExec(*order.get(), IdT(182, 5)));
 		onTradeExecution tradeevnt1(tradeParams2.get());
 		{
 			tradeevnt1.orderId_ = order->orderId_;
@@ -1834,7 +1834,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(281, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(281, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1851,7 +1851,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_TRADE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams2(createTradeExec(*order.get(), IdT(282, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams2(createTradeExec(*order.get(), IdT(282, 5)));
 		onTradeExecution tradeevnt1(tradeParams2.get());
 		{
 			tradeevnt1.orderId_ = order->orderId_;
@@ -1880,7 +1880,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(283, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(283, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
@@ -1926,7 +1926,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(381, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(381, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -1943,7 +1943,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_TRADE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(383, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(383, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
@@ -2003,7 +2003,7 @@ bool testStateMachine()
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(192, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(192, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -2288,7 +2288,7 @@ bool testStateMachine()
 		trCntxt.clear();
 	}
 	{//Rcvd_New->Pend_Replace->Rejected
-		auto_ptr<OrderEntry> orderRepl(createReplOrder());
+		std::unique_ptr<OrderEntry> orderRepl(createReplOrder());
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
 
@@ -2329,7 +2329,7 @@ bool testStateMachine()
 		trCntxt.clear();
 	}
 	{//Rcvd_New->Pend_Replace->New
-		auto_ptr<OrderEntry> orderRepl(createReplOrder());
+		std::unique_ptr<OrderEntry> orderRepl(createReplOrder());
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
 
@@ -2375,7 +2375,7 @@ bool testStateMachine()
 		trCntxt.clear();
 	}
 	{//Rcvd_New->Pend_Replace->Rejected(replReject)
-		auto_ptr<OrderEntry> orderRepl(createReplOrder());
+		std::unique_ptr<OrderEntry> orderRepl(createReplOrder());
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
 
@@ -2419,7 +2419,7 @@ bool testStateMachine()
 		trCntxt.clear();
 	}
 	{//Rcvd_New->Pend_Replace->Expired
-		auto_ptr<OrderEntry> orderRepl(createReplOrder());
+		std::unique_ptr<OrderEntry> orderRepl(createReplOrder());
 		TestTransactionContext trCntxt;
 		OrderStateWrapper p;
 
@@ -2555,7 +2555,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(581, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(581, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -2586,7 +2586,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(REMOVE_ORDERBOOK_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(583, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(583, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
@@ -2697,7 +2697,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(681, 5)));
+		std::unique_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(681, 5)));
 		onTradeExecution tradeevnt(tradeParams1.get());
 		{
 			tradeevnt.orderId_ = order->orderId_;
@@ -2728,7 +2728,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(REMOVE_ORDERBOOK_TROPERATION));
 		trCntxt.clear();
 
-		auto_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(683, 5)));
+		std::unique_ptr<ExecCorrectExecEntry> correctParams1(createCorrectExec(*order.get(), IdT(683, 5)));
 		onTradeCrctCncl tradeCrctevnt(correctParams1.get());
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;

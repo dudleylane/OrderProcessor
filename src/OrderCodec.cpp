@@ -401,7 +401,7 @@ OrderEntry *OrderCodec::decode(const IdT& id, u32 /*version*/, const char *buf, 
 		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after executions_!");
 	++p;
 
-	auto_ptr<OrderEntry> val(new OrderEntry(sourceId, destId, clOrderId, origClOrderID, 
+	std::unique_ptr<OrderEntry> val(new OrderEntry(sourceId, destId, clOrderId, origClOrderID, 
 					instrumentId, accountId, clearingId, executionsId));
 	val->orderId_ = id;
 

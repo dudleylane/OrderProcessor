@@ -25,7 +25,7 @@ using namespace test;
 namespace {
 
 	SourceIdT addInstrument(const std::string &name){
-		auto_ptr<InstrumentEntry> instr(new InstrumentEntry());
+		std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
 		instr->symbol_ = name;
 		instr->securityId_ = "AAA";
 		instr->securityIdSource_ = "AAASrc";
@@ -48,31 +48,31 @@ namespace {
 		bool res_;
 	};
 
-	auto_ptr<OrderEntry> createCorrectOrder(SourceIdT instr){
+	std::unique_ptr<OrderEntry> createCorrectOrder(SourceIdT instr){
 		SourceIdT srcId, destId, accountId, clearingId, clOrdId, origClOrderID, execList;
 
 		{
 			srcId = WideDataStorage::instance()->add(new StringT("CLNT"));
 			destId = WideDataStorage::instance()->add(new StringT("NASDAQ"));
-			auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
+			std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
 			clOrdId = WideDataStorage::instance()->add(clOrd.release());
 
-			auto_ptr<AccountEntry> account(new AccountEntry());
+			std::unique_ptr<AccountEntry> account(new AccountEntry());
 			account->type_ = PRINCIPAL_ACCOUNTTYPE;
 			account->firm_ = "ACTFirm";
 			account->account_ = "ACT";
 			account->id_ = IdT();
 			accountId = WideDataStorage::instance()->add(account.release());
 
-			auto_ptr<ClearingEntry> clearing(new ClearingEntry());
+			std::unique_ptr<ClearingEntry> clearing(new ClearingEntry());
 			clearing->firm_ = "CLRFirm";
 			clearingId = WideDataStorage::instance()->add(clearing.release());
 
-			auto_ptr<ExecutionsT> execLst(new ExecutionsT());
+			std::unique_ptr<ExecutionsT> execLst(new ExecutionsT());
 			execList = WideDataStorage::instance()->add(execLst.release());
 		}
 
-		auto_ptr<OrderEntry> ptr(
+		std::unique_ptr<OrderEntry> ptr(
 			new OrderEntry(srcId, destId, clOrdId, origClOrderID, instr, accountId, clearingId, execList));
 		
 		ptr->creationTime_ = 100;
@@ -90,7 +90,7 @@ namespace {
 		ptr->currency_ = USD_CURRENCY;
 		ptr->orderQty_ = 77;
 
-		return auto_ptr<OrderEntry>(ptr);
+		return std::unique_ptr<OrderEntry>(ptr);
 	}
 
 }
@@ -174,13 +174,13 @@ bool testOrderBook()
 
 		{
 			SourceIdT instrId3 = addInstrument("ccc");
-			auto_ptr<OrderEntry> ord(createCorrectOrder(instrId3));
+			std::unique_ptr<OrderEntry> ord(createCorrectOrder(instrId3));
 			ord->orderId_ = IdT(2, 1);
 			try{
 				books.add(*(ord.get()));
 			}catch(const std::exception &){}
 		}
-		auto_ptr<OrderEntry> ord(createCorrectOrder(instrId1));
+		std::unique_ptr<OrderEntry> ord(createCorrectOrder(instrId1));
 		ord->orderId_ = IdT(1, 1);
 		ord->price_ = 5.0;
 		ord->side_ = BUY_SIDE;

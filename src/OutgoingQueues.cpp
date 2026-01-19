@@ -37,7 +37,7 @@ void OutgoingQueues::clear()
 		swap(tmp, outQueues_);
 	}
 	for(OutQueuesByTargetT::iterator it = tmp.begin(); it != tmp.end(); ++it){
-		auto_ptr<OutQueues> t(it->second);
+		std::unique_ptr<OutQueues> t(it->second);
 	}
 	aux::ExchLogger::instance()->note("OutgoingQueues cleared.");
 }
@@ -51,7 +51,7 @@ void OutgoingQueues::push(const ExecReportEvent &evnt, const std::string &target
 		mutex::scoped_lock lock(lock_);
 		OutQueuesByTargetT::iterator it = outQueues_.find(target);
 		if(outQueues_.end() == it){
-			auto_ptr<OutQueues> q(new OutQueues);
+			std::unique_ptr<OutQueues> q(new OutQueues);
 			it = outQueues_.insert(OutQueuesByTargetT::value_type(target, q.get())).first;
 			q.release();
 		}
@@ -71,7 +71,7 @@ void OutgoingQueues::push(const CancelRejectEvent &evnt, const std::string &targ
 		mutex::scoped_lock lock(lock_);
 		OutQueuesByTargetT::iterator it = outQueues_.find(target);
 		if(outQueues_.end() == it){
-			auto_ptr<OutQueues> q(new OutQueues);
+			std::unique_ptr<OutQueues> q(new OutQueues);
 			it = outQueues_.insert(OutQueuesByTargetT::value_type(target, q.get())).first;
 			q.release();
 		}
@@ -91,7 +91,7 @@ void OutgoingQueues::push(const BusinessRejectEvent &evnt, const std::string &ta
 		mutex::scoped_lock lock(lock_);
 		OutQueuesByTargetT::iterator it = outQueues_.find(target);
 		if(outQueues_.end() == it){
-			auto_ptr<OutQueues> q(new OutQueues);
+			std::unique_ptr<OutQueues> q(new OutQueues);
 			it = outQueues_.insert(OutQueuesByTargetT::value_type(target, q.get())).first;
 			q.release();
 		}

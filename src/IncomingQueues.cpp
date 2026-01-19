@@ -82,7 +82,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 	OrderChangeStateEvent state;
 	ProcessEvent process;
 	TimerEvent timer;
-	auto_ptr<OrderEntry> ord;
+	std::unique_ptr<OrderEntry> ord;
 	{
 		mutex::scoped_lock lock(lock_);
 		if(0 == processingQueue_.size())
@@ -247,7 +247,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 	OrderChangeStateEvent state;
 	ProcessEvent process;
 	TimerEvent timer;
-	auto_ptr<OrderEntry> ord;
+	std::unique_ptr<OrderEntry> ord;
 	{
 		mutex::scoped_lock lock(lock_);
 		if(0 == processingQueue_.size())
@@ -342,7 +342,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 void IncomingQueues::push(const std::string &source, const OrderEvent &evnt)
 {
 	//aux::ExchLogger::instance()->debug("IncomingQueues start push OrderEvent");
-	auto_ptr<OrderEntry> ord(evnt.order_);
+	std::unique_ptr<OrderEntry> ord(evnt.order_);
 	{
 		mutex::scoped_lock lock(lock_);
 		OrderQueuesT::iterator it = orders_.find(source);
@@ -505,34 +505,34 @@ void IncomingQueues::clear()
 
 	{
 		for(OrderQueuesT::iterator it = ordersTmp.begin(); it != ordersTmp.end(); ++it){
-			auto_ptr<OrderQueueT> ap(it->second);
+			std::unique_ptr<OrderQueueT> ap(it->second);
 			for(OrderQueueT::iterator oIt = ap->begin(); oIt != ap->begin(); ++oIt)
-				auto_ptr<OrderEntry> ord(oIt->order_);
+				std::unique_ptr<OrderEntry> ord(oIt->order_);
 		}
 	}
 	{
 		for(OrderCancelQueuesT::iterator it = orderCancelsTmp.begin(); it != orderCancelsTmp.end(); ++it){
-			auto_ptr<OrderCancelQueueT> ap(it->second);
+			std::unique_ptr<OrderCancelQueueT> ap(it->second);
 		}
 	}
 	{
 		for(OrderReplaceQueuesT::iterator it = orderReplacesTmp.begin(); it != orderReplacesTmp.end(); ++it){
-			auto_ptr<OrderReplaceQueueT> ap(it->second);
+			std::unique_ptr<OrderReplaceQueueT> ap(it->second);
 		}
 	}
 	{
 		for(OrderStateQueuesT::iterator it = orderStatesTmp.begin(); it != orderStatesTmp.end(); ++it){
-			auto_ptr<OrderStateQueueT> ap(it->second);
+			std::unique_ptr<OrderStateQueueT> ap(it->second);
 		}
 	}
 	{
 		for(ProcessQueuesT::iterator it = processesTmp.begin(); it != processesTmp.end(); ++it){
-			auto_ptr<ProcessQueueT> ap(it->second);
+			std::unique_ptr<ProcessQueueT> ap(it->second);
 		}
 	}
 	{
 		for(TimerQueuesT::iterator it = timersTmp.begin(); it != timersTmp.end(); ++it){
-			auto_ptr<TimerQueueT> ap(it->second);
+			std::unique_ptr<TimerQueueT> ap(it->second);
 		}
 	}
 	aux::ExchLogger::instance()->debug("IncomingQueues finish clear");

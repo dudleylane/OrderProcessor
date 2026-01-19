@@ -43,7 +43,7 @@ using namespace test;
 namespace{
 
 	SourceIdT addInstrument(const std::string &name){
-		auto_ptr<InstrumentEntry> instr(new InstrumentEntry());
+		std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
 		instr->symbol_ = name;
 		instr->securityId_ = "AAA";
 		instr->securityIdSource_ = "AAASrc";
@@ -51,31 +51,31 @@ namespace{
 	}
 
 
-	auto_ptr<OrderEntry> createCorrectOrder(SourceIdT instr){
+	std::unique_ptr<OrderEntry> createCorrectOrder(SourceIdT instr){
 		SourceIdT srcId, destId, accountId, clearingId, clOrdId, origClOrderID, execList;
 
 		{
 			srcId = WideDataStorage::instance()->add(new StringT("CLNT"));
 			destId = WideDataStorage::instance()->add(new StringT("NASDAQ"));
-			auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
+			std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, "TestClOrderId", 13));
 			clOrdId = WideDataStorage::instance()->add(clOrd.release());
 
-			auto_ptr<AccountEntry> account(new AccountEntry());
+			std::unique_ptr<AccountEntry> account(new AccountEntry());
 			account->type_ = PRINCIPAL_ACCOUNTTYPE;
 			account->firm_ = "ACTFirm";
 			account->account_ = "ACT";
 			account->id_ = IdT();
 			accountId = WideDataStorage::instance()->add(account.release());
 
-			auto_ptr<ClearingEntry> clearing(new ClearingEntry());
+			std::unique_ptr<ClearingEntry> clearing(new ClearingEntry());
 			clearing->firm_ = "CLRFirm";
 			clearingId = WideDataStorage::instance()->add(clearing.release());
 
-			auto_ptr<ExecutionsT> execLst(new ExecutionsT());
+			std::unique_ptr<ExecutionsT> execLst(new ExecutionsT());
 			execList = WideDataStorage::instance()->add(execLst.release());
 		}
 
-		auto_ptr<OrderEntry> ptr(
+		std::unique_ptr<OrderEntry> ptr(
 			new OrderEntry(srcId, destId, clOrdId, origClOrderID, instr, accountId, clearingId, execList));
 		
 		ptr->creationTime_ = 100;
@@ -94,7 +94,7 @@ namespace{
 		ptr->orderQty_ = 100;
 		ptr->leavesQty_ = 100;
 
-		return auto_ptr<OrderEntry>(ptr);
+		return std::unique_ptr<OrderEntry>(ptr);
 	}
 
 	std::string getOrderId(int id){
@@ -106,7 +106,7 @@ namespace{
 	void assignClOrderId(OrderEntry *order){
 		static int id = 1;
 		string val = getOrderId(++id);
-		auto_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
+		std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
 		order->clOrderId_ = WideDataStorage::instance()->add(clOrd.release());
 	}
 
@@ -172,25 +172,25 @@ bool testTaskManager()
 	{
 		TaskManagerParams params;
 		{
-			auto_ptr<Processor> proc(new Processor());
+			std::unique_ptr<Processor> proc(new Processor());
 			proc->init(procParams);
 			params.evntProcessors_.push_back(proc.release());
-			auto_ptr<Processor> proc1(new Processor());
+			std::unique_ptr<Processor> proc1(new Processor());
 			proc1->init(procParams);
 			params.evntProcessors_.push_back(proc1.release());
-			auto_ptr<Processor> proc2(new Processor());
+			std::unique_ptr<Processor> proc2(new Processor());
 			proc2->init(procParams);
 			params.evntProcessors_.push_back(proc2.release());
 		}
 		params.transactMgr_ = &transMgr;
 		{
-			auto_ptr<Processor> proc(new Processor());
+			std::unique_ptr<Processor> proc(new Processor());
 			proc->init(procParams);
 			params.transactProcessors_.push_back(proc.release());
-			auto_ptr<Processor> proc1(new Processor());
+			std::unique_ptr<Processor> proc1(new Processor());
 			proc1->init(procParams);
 			params.transactProcessors_.push_back(proc1.release());
-			auto_ptr<Processor> proc2(new Processor());
+			std::unique_ptr<Processor> proc2(new Processor());
 			proc2->init(procParams);
 			params.transactProcessors_.push_back(proc2.release());
 		}
@@ -200,10 +200,10 @@ bool testTaskManager()
 		{
 			bs = tick_count::now();
 			for(int i = 0; i < AMOUNT; ++i){
-				auto_ptr<OrderEntry> ord(createCorrectOrder(instrId1));
+				std::unique_ptr<OrderEntry> ord(createCorrectOrder(instrId1));
 				assignClOrderId(ord.get());
 				orderIds.push_back(ord->clOrderId_.get());
-				auto_ptr<OrderEntry> ord2(createCorrectOrder(instrId1));
+				std::unique_ptr<OrderEntry> ord2(createCorrectOrder(instrId1));
 				assignClOrderId(ord2.get());
 				ord2->side_ = SELL_SIDE;
 				orderIds.push_back(ord2->clOrderId_.get());

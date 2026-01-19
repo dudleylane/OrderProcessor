@@ -92,7 +92,7 @@ void RawDataCodec::decode(const IdT& id, u32 /*version*/, const char *buf, size_
 
 	if(0 == val->length_)
 		return;
-	auto_ptr<char> arr(new char[val->length_]);
+	std::unique_ptr<char> arr(new char[val->length_]);
 	memcpy(arr.get(), p, val->length_);
 	val->data_ = arr.release();
 }

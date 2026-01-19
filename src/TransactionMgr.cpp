@@ -73,7 +73,7 @@ void TransactionMgr::stop()
 	//aux::ExchLogger::instance()->note("TransactionMgr stopped.");
 }
 
-void TransactionMgr::addTransaction(std::auto_ptr<Transaction> &tr)
+void TransactionMgr::addTransaction(std::unique_ptr<Transaction> &tr)
 {
 	assert(started_);
 	assert(nullptr != tr.get());
@@ -105,7 +105,7 @@ bool TransactionMgr::removeTransaction(const TransactionId &id, Transaction *t)
 	assert(started_);
 	assert(nullptr != t);
 	assert(id.isValid());
-	std::auto_ptr<Transaction> trans(t);
+	std::unique_ptr<Transaction> trans(t);
 	//aux::ExchLogger::instance()->debug("TransactionMgr removing transaction.");
 
 	int ready2Exec = 0;

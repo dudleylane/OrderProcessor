@@ -125,7 +125,7 @@ namespace{
 		record.offset_ = static_cast<size_t>(ftell(f));
 
 		u32 recSize = static_cast<u32>(size) + TAIL_SIZE + HEADER_SIZE;
-		auto_ptr<char> recBuffer(new char[recSize]);
+		std::unique_ptr<char> recBuffer(new char[recSize]);
 
 		// prepare template
 		memcpy(recBuffer.get(), HEADER_TEMPLATE, HEADER_SIZE);
@@ -244,7 +244,7 @@ void FileStorage::pocessRecord(FILE *file, FileStorageObserver *observer)
 			return;
 		RecordsT::iterator it = records_.find(rec.id_);
 		if(records_.end() == it){
-			auto_ptr<RecordChainT> cont(new RecordChainT());
+			std::unique_ptr<RecordChainT> cont(new RecordChainT());
 			cont->push_back(rec);
 			records_.insert(RecordsT::value_type(rec.id_, cont.get()));
 			cont.release();
@@ -270,7 +270,7 @@ void FileStorage::clear()
 			file_ = nullptr;		}
 	}
 	for(RecordsT::iterator it = tmp.begin(); it != tmp.end(); ++it){
-		auto_ptr<RecordChainT> chain(it->second);
+		std::unique_ptr<RecordChainT> chain(it->second);
 	}
 }
 
@@ -294,7 +294,7 @@ void FileStorage::save(const IdT &id, const char *buf, size_t size)
 		if(records_.end() != it)
 			throw std::runtime_error("FileStorage::save: Unable to save record, record with this Id already exists!");
 		saveRecord(file_, buf, size, rec);
-		auto_ptr<RecordChainT> chain(new RecordChainT);
+		std::unique_ptr<RecordChainT> chain(new RecordChainT);
 		chain->push_back(rec);
 		records_.insert(RecordsT::value_type(id, chain.get()));
 		chain.release();
@@ -311,7 +311,7 @@ u32 FileStorage::update(const IdT& id, const char *buf, size_t size){
 		mutex::scoped_lock lock(lock_);
 		RecordsT::const_iterator it = records_.find(id);
 		if(records_.end() == it){
-			auto_ptr<RecordChainT> chain(new RecordChainT);
+			std::unique_ptr<RecordChainT> chain(new RecordChainT);
 			records_.insert(RecordsT::value_type(id, chain.get()));
 			chain.release();
 		}else{
@@ -376,7 +376,7 @@ void FileStorage::erase(const IdT& id){
 	RecordsT::iterator it = records_.find(id);
 	if(records_.end() == it)
 		return;
-	auto_ptr<RecordChainT> chain(it->second);
+	std::unique_ptr<RecordChainT> chain(it->second);
 	for(RecordChainT::iterator rit = it->second->begin(); rit != it->second->end(); ++rit){
 		disableRecord(file_, *rit);
 	}

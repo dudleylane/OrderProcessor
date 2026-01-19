@@ -50,14 +50,14 @@ namespace aux{
 			cache_ = new Node(new T);
 			Node *prev = cache_;
 			for(size_t i = 0; i < cacheSize; ++i){
-				std::auto_ptr<T> val(new T);
-				std::auto_ptr<Node> n(new Node(val.get()));
+				std::unique_ptr<T> val(new T);
+				std::unique_ptr<Node> n(new Node(val.get()));
 				prev->next_ = n.get();
 				prev = n.release();
 				val.release();
 			}
 			/// add nullptr node and create circle
-			std::auto_ptr<Node> n(new Node());
+			std::unique_ptr<Node> n(new Node());
 			n->next_ = cache_;
 			prev->next_ = n.get();
 
@@ -69,7 +69,7 @@ namespace aux{
 			Node *next = cache_;
 			std::deque<Node *> nodes;
 			do{
-				std::auto_ptr<T> v(next->val_);
+				std::unique_ptr<T> v(next->val_);
 				nodes.push_back(next);
 				next = next->next_;
 			}while(cache_ != next->next_);

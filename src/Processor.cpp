@@ -90,7 +90,7 @@ void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 
 	// prepare context
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
-	auto_ptr<TransactionScope> scope(new TransactionScope());
+	std::unique_ptr<TransactionScope> scope(new TransactionScope());
 
 	// restore event to process
 	onOrderReceived evnt2Proc(evnt.order_);
@@ -111,7 +111,7 @@ void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 
 	// enqueue transaction, prepared by state machine
 	assert(nullptr != transactMgr_);
-	auto_ptr<Transaction> tr(scope.release());
+	std::unique_ptr<Transaction> tr(scope.release());
 	transactMgr_->addTransaction(tr);//scope.executeTransaction(cntxt);
 
 	// process defered events
@@ -141,7 +141,7 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 	///prepare context
 	assert(events_.empty());
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
-	auto_ptr<TransactionScope> scope(new TransactionScope());
+	std::unique_ptr<TransactionScope> scope(new TransactionScope());
 
 	switch(evnt.type_){
 	case ProcessEvent::ON_REPLACE_RECEVIED:
@@ -219,7 +219,7 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 	smState.orderData_->setStateMachinePersistance(smState);
 
 	assert(nullptr != transactMgr_);
-	auto_ptr<Transaction> tr(scope.release());
+	std::unique_ptr<Transaction> tr(scope.release());
 	transactMgr_->addTransaction(tr);//scope.executeTransaction(cntxt);
 
 	processDeferedEvent();
@@ -244,12 +244,12 @@ void Processor::onEvent(DeferedEventBase *evnt)
 	//aux::ExchLogger::instance()->debug("Processor: start onEvent(DeferedEventBase)");
 
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
-	auto_ptr<TransactionScope> scope(new TransactionScope());
+	std::unique_ptr<TransactionScope> scope(new TransactionScope());
 
 	evnt->execute(this, cntxt, scope.get());
 
 	assert(nullptr != transactMgr_);
-	auto_ptr<Transaction> tr(scope.release());
+	std::unique_ptr<Transaction> tr(scope.release());
 	transactMgr_->addTransaction(tr);//scope.executeTransaction(cntxt);
 
 	//aux::ExchLogger::instance()->debug("Processor: finished onEvent(DeferedEventBase)");
@@ -264,7 +264,7 @@ void Processor::processDeferedEvent()
 		swap(tmp, events_);
 		try{
 			for(DeferedEventsT::iterator it = tmp.begin(); it != tmp.end(); ++it){
-				auto_ptr<DeferedEventBase> evnt(*it);
+				std::unique_ptr<DeferedEventBase> evnt(*it);
 				*it = nullptr;
 
 				onEvent(evnt.get());

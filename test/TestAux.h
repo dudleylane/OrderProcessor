@@ -27,7 +27,7 @@ namespace test{
 	class TestTransactionContext: public COP::ACID::Scope{
 	public:
 		~TestTransactionContext();
-		virtual void addOperation(std::auto_ptr<COP::ACID::Operation> &op);
+		virtual void addOperation(std::unique_ptr<COP::ACID::Operation> &op);
 		virtual const std::string &invalidReason()const;
 		virtual void setInvalidReason(const std::string &reason);
 		virtual bool executeTransaction(const COP::ACID::Context &cnxt);

@@ -68,7 +68,7 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT& id, u32 version, const c
 	switch(type){
 	case INSTRUMENT_RECORDTYPE:
 		{
-			auto_ptr<InstrumentEntry> instr(new InstrumentEntry());
+			std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
 			Codec::InstrumentCodec::decode(id, version, buf + sizeof(type), size - sizeof(type), instr.get());
 			storage_->restore(instr.get());
 			instr.release();
@@ -76,7 +76,7 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT& id, u32 version, const c
 		break;
 	case STRING_RECORDTYPE:
 		{
-			auto_ptr<StringT> str(new StringT());
+			std::unique_ptr<StringT> str(new StringT());
 			Codec::StringTCodec::decode(buf + sizeof(type), size - sizeof(type), str.get());
 			storage_->restore(id, str.get());
 			str.release();
@@ -84,7 +84,7 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT& id, u32 version, const c
 		break;
 	case ACCOUNT_RECORDTYPE:
 		{
-			auto_ptr<AccountEntry> acct(new AccountEntry());
+			std::unique_ptr<AccountEntry> acct(new AccountEntry());
 			Codec::AccountCodec::decode(id, version, buf + sizeof(type), size - sizeof(type), acct.get());
 			storage_->restore(acct.get());
 			acct.release();
@@ -92,7 +92,7 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT& id, u32 version, const c
 		break;
 	case CLEARING_RECORDTYPE:
 		{
-			auto_ptr<ClearingEntry> clr(new ClearingEntry());
+			std::unique_ptr<ClearingEntry> clr(new ClearingEntry());
 			Codec::ClearingCodec::decode(id, version, buf + sizeof(type), size - sizeof(type), clr.get());
 			storage_->restore(clr.get());
 			clr.release();
@@ -100,7 +100,7 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT& id, u32 version, const c
 		break;
 	case RAWDATA_RECORDTYPE:
 		{
-			auto_ptr<RawDataEntry> raw(new RawDataEntry());
+			std::unique_ptr<RawDataEntry> raw(new RawDataEntry());
 			Codec::RawDataCodec::decode(id, version, buf + sizeof(type), size - sizeof(type), raw.get());
 			storage_->restore(raw.get());
 			raw.release();
@@ -112,7 +112,7 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT& id, u32 version, const c
 		break;
 	case ORDER_RECORDTYPE:
 		{
-			auto_ptr<OrderEntry> order(Codec::OrderCodec::decode(id, version, buf + sizeof(type), size - sizeof(type)));
+			std::unique_ptr<OrderEntry> order(Codec::OrderCodec::decode(id, version, buf + sizeof(type), size - sizeof(type)));
 			orderBook_->restore(*order.get());
 			orderStorage_->restore(order.get());
 			order.release();

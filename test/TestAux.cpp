@@ -44,7 +44,7 @@ bool TestTransactionContext::isOperationEnqueued(COP::ACID::OperationType type)c
 	return false;
 }
 
-void TestTransactionContext::addOperation(std::auto_ptr<Operation> &op)
+void TestTransactionContext::addOperation(std::unique_ptr<Operation> &op)
 {
 	op_.push_back(op.release());
 }

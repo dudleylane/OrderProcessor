@@ -167,11 +167,11 @@ TaskManager::~TaskManager(void)
 	}
 	assert(lastAvailableTransactProcessor_ == totalAvailableTransactProcessor_);
 	for(size_t i = 0; i < transactProcessors_.size(); ++i){
-		auto_ptr<TransactionProcessor> ap(transactProcessors_[i]);
+		std::unique_ptr<TransactionProcessor> ap(transactProcessors_[i]);
 	}
 	assert(lastAvailableEvntProcessor_ == totalAvailableEvntProcessor_);
 	for(size_t i = 0; i < evntProcessors_.size(); ++i){
-		auto_ptr<InQueueProcessor> ap(evntProcessors_[i]);
+		std::unique_ptr<InQueueProcessor> ap(evntProcessors_[i]);
 	}
 
 	//EXCH_LOG_("Tasks created: " + itoa(created_.fetch_and_increment()));

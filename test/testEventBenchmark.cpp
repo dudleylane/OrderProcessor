@@ -38,10 +38,10 @@ namespace {
 		tick_count bs = tick_count::now();
 		{
 			for(size_t i = 0; i < symbols.size(); ++i){
-				auto_ptr<OrderFilter> filter(new OrderFilter());
+				std::unique_ptr<OrderFilter> filter(new OrderFilter());
 				InstrumentFilter instrFlt;
-				auto_ptr<StringEqualFilter> eqSymblFlt(new StringEqualFilter(symbols[i]));
-				auto_ptr<InstrumentElementFilter> symblFlt(new InstrumentSymbolFilter(eqSymblFlt.get()));
+				std::unique_ptr<StringEqualFilter> eqSymblFlt(new StringEqualFilter(symbols[i]));
+				std::unique_ptr<InstrumentElementFilter> symblFlt(new InstrumentSymbolFilter(eqSymblFlt.get()));
 				eqSymblFlt.release();
 				instrFlt.addFilter(symblFlt.release());
 				filter->addInstrumentFilter(&instrFlt);
@@ -163,10 +163,10 @@ namespace {
 			for(size_t i = 0; i < symbols.size(); ++i){
 				string part(symbols[i].c_str(), 2);
 				if(pattern != part){
-					auto_ptr<OrderFilter> filter(new OrderFilter());
+					std::unique_ptr<OrderFilter> filter(new OrderFilter());
 					InstrumentFilter instrFlt;
-					auto_ptr<StringFilter> eqSymblFlt(new StringMatchFilter(part + ".?"));//
-					auto_ptr<InstrumentElementFilter> symblFlt(new InstrumentSymbolFilter(eqSymblFlt.get()));
+					std::unique_ptr<StringFilter> eqSymblFlt(new StringMatchFilter(part + ".?"));//
+					std::unique_ptr<InstrumentElementFilter> symblFlt(new InstrumentSymbolFilter(eqSymblFlt.get()));
 					eqSymblFlt.release();
 					instrFlt.addFilter(symblFlt.release());
 					filter->addInstrumentFilter(&instrFlt);
@@ -239,7 +239,7 @@ namespace {
 			for(size_t i = 0; i < symbols.size(); ++i){
 				string part(symbols[i].c_str(), 2);
 				if(pattern != part){
-					auto_ptr<OrderFilter> filter(new OrderFilter());
+					std::unique_ptr<OrderFilter> filter(new OrderFilter());
 					filter->addFilter(new OrderStatusEqualFilter(RECEIVEDNEW_ORDSTATUS));
 					filter->addFilter(new SideEqualFilter(BUY_SIDE));
 					filter->addFilter(new OrderTypeEqualFilter(LIMIT_ORDERTYPE));
@@ -273,8 +273,8 @@ namespace {
 					
 					{
 						InstrumentFilter instrFlt;
-						auto_ptr<StringFilter> eqSymblFlt(new StringMatchFilter(part + ".?"));//
-						auto_ptr<InstrumentElementFilter> symblFlt(new InstrumentSymbolFilter(eqSymblFlt.get()));
+						std::unique_ptr<StringFilter> eqSymblFlt(new StringMatchFilter(part + ".?"));//
+						std::unique_ptr<InstrumentElementFilter> symblFlt(new InstrumentSymbolFilter(eqSymblFlt.get()));
 						eqSymblFlt.release();
 						instrFlt.addFilter(symblFlt.release());
 
@@ -443,7 +443,7 @@ namespace {
 		tick_count bs = tick_count::now();
 		{
 			for(size_t i = 0; i < symbols.size(); ++i){
-					auto_ptr<OrderFilter> filter(new OrderFilter());
+					std::unique_ptr<OrderFilter> filter(new OrderFilter());
 					filter->addFilter(new OrderStatusEqualFilter(RECEIVEDNEW_ORDSTATUS));
 					filter->addFilter(new SideEqualFilter(BUY_SIDE));
 					filter->addFilter(new OrderTypeEqualFilter(LIMIT_ORDERTYPE));
@@ -477,8 +477,8 @@ namespace {
 					
 					{
 						InstrumentFilter instrFlt;
-						auto_ptr<StringFilter> eqSymblFlt(new StringEqualFilter(symbols[i]));//
-						auto_ptr<InstrumentElementFilter> symblFlt(new InstrumentSymbolFilter(eqSymblFlt.get()));
+						std::unique_ptr<StringFilter> eqSymblFlt(new StringEqualFilter(symbols[i]));//
+						std::unique_ptr<InstrumentElementFilter> symblFlt(new InstrumentSymbolFilter(eqSymblFlt.get()));
 						eqSymblFlt.release();
 						instrFlt.addFilter(symblFlt.release());
 
@@ -651,18 +651,18 @@ bool testEventBenchmark()
 		g_srcId = WideDataStorage::instance()->add(new StringT("CLNT"));
 		g_destId = WideDataStorage::instance()->add(new StringT("NASDAQ"));
 
-		auto_ptr<AccountEntry> account(new AccountEntry());
+		std::unique_ptr<AccountEntry> account(new AccountEntry());
 		account->type_ = PRINCIPAL_ACCOUNTTYPE;
 		account->firm_ = "ACTFirm";
 		account->account_ = "ACT";
 		account->id_ = IdT();
 		g_accountId = WideDataStorage::instance()->add(account.release());
 
-		auto_ptr<ClearingEntry> clearing(new ClearingEntry());
+		std::unique_ptr<ClearingEntry> clearing(new ClearingEntry());
 		clearing->firm_ = "CLRFirm";
 		g_clearingId = WideDataStorage::instance()->add(clearing.release());
 
-		auto_ptr<ExecutionsT> execLst(new ExecutionsT());
+		std::unique_ptr<ExecutionsT> execLst(new ExecutionsT());
 		g_execList = WideDataStorage::instance()->add(execLst.release());
 	}
 
@@ -673,7 +673,7 @@ bool testEventBenchmark()
 		for(char a = 'A'; a < 'Z'; ++a){
 			for(char b = 'A'; b < 'Z'; ++b){
 				for(char c = 'A'; c < 'Z'; ++c){
-					auto_ptr<InstrumentEntry> instr(new InstrumentEntry());
+					std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
 					symb.clear();
 					symb += a;
 					symb += b;
