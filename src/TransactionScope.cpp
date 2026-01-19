@@ -116,9 +116,11 @@ bool TransactionScope::executeTransaction(const Context &cnxt)
 
 	// commit failed - execute rollback
 	try{
-		for(;pos >= 0; --pos){
+		// pos points to failed operation, rollback from there to beginning
+		// Use do-while to handle unsigned wraparound safely
+		do {
 			operations_[pos]->rollback(cnxt);
-		}
+		} while (pos-- > 0);
 	}catch(const std::exception &){
 	}catch(...){
 	}

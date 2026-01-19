@@ -188,6 +188,8 @@ void OrderBookImpl::remove(const OrderEntry& order)
 	bool found = false;
 	if(BUY_SIDE == order.side_){
 		tbb::mutex::scoped_lock lock(it->second->buyLock_);
+		// buyOrder_ uses descending order (highest price first for buy side)
+		// lower_bound finds first element with key <= price in descending order
 		OrdersByPriceDescT::iterator oit = it->second->buyOrder_.lower_bound(order.price_);
 		while((it->second->buyOrder_.end() != oit)&&(order.price_ == oit->first)){
 			found = oit->second == order.orderId_;

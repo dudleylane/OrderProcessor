@@ -134,6 +134,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 	assert(nullptr != obs);
 
 	QueuedEvent event;
+	bool hasPendingEvent = false;
 
 	// Check if we have a pending event from top()
 	{
@@ -141,11 +142,12 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 		if (pendingEvent_.has_value()) {
 			event = std::move(pendingEvent_.value());
 			pendingEvent_.reset();
+			hasPendingEvent = true;
 		}
 	}
 
 	// If no pending event, try to get from queue
-	if (event.source_.empty()) {
+	if (!hasPendingEvent) {
 		if (!eventQueue_.try_pop(event)) {
 			return false;
 		}

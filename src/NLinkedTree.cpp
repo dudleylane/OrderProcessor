@@ -176,7 +176,7 @@ bool NLinkTree::add(const K &key, const V &value, const DependObjs &depend, int 
 	*readyToExecuteAdded = 0;
 	KSetT parents;
 	// update list of the based objects and get list of the parent keys
-	for(unsigned char o = 0; o < depend.size_; ++o){
+	for(size_t o = 0; o < static_cast<size_t>(depend.size_); ++o){
 		const O &obj = depend.list_[o];
 		assert(obj.id_.isValid());
 		OParamsT::iterator depIt = depends_.find(obj);
@@ -298,7 +298,7 @@ bool NLinkTree::remove(const K &key, int *readyToExecuteAdded)
 	{// for all objects - remove this transaction and bind next element in usedIn_ (that child of this transaction) 
 	 // with previous usedIn_ element (that parent of this transaction).
 	 // remove this transaction from all objects that used in it
-		for(unsigned char o = 0; o < keyParams->dependsOn_.size_; ++o){
+		for(size_t o = 0; o < static_cast<size_t>(keyParams->dependsOn_.size_); ++o){
 			const O&obj = keyParams->dependsOn_.list_[o];
 			OParamsT::iterator depIt = depends_.find(obj);
 			if(depends_.end() != depIt){
@@ -394,8 +394,8 @@ bool NLinkTree::getParents(const K &key, KSetT *parents)const
 			return false;
 		assert(nullptr != kIt->second);
 		assert(nullptr != kIt->second->node_);
-		for(TreeNodesT::const_iterator it = kIt->second->node_->parents_.begin(); 
-			it != kIt->second->node_->parents_.begin(); ++it){
+		for(TreeNodesT::const_iterator it = kIt->second->node_->parents_.begin();
+			it != kIt->second->node_->parents_.end(); ++it){
 			parents->insert((*it)->key_);
 		}
 	}
@@ -411,8 +411,8 @@ bool NLinkTree::getChildren(const K &key, KSetT *children)const
 			return false;
 		assert(nullptr != kIt->second);
 		assert(nullptr != kIt->second->node_);
-		for(TreeNodesT::const_iterator it = kIt->second->node_->children_.begin(); 
-			it != kIt->second->node_->children_.begin(); ++it){
+		for(TreeNodesT::const_iterator it = kIt->second->node_->children_.begin();
+			it != kIt->second->node_->children_.end(); ++it){
 			children->insert((*it)->key_);
 		}
 	}

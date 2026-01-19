@@ -42,9 +42,13 @@ namespace{
 		assert(nullptr != f);
 
 		/// save record
-		fseek(f, 0, SEEK_SET);
-		fwrite(VERSION_RECORD, 1, VERSION_SIZE, f);
-		fflush(f);
+		if(0 != fseek(f, 0, SEEK_SET))
+			throw std::runtime_error("addVersionRecord: fseek failed!");
+		size_t written = fwrite(VERSION_RECORD, 1, VERSION_SIZE, f);
+		if(VERSION_SIZE != written)
+			throw std::runtime_error("addVersionRecord: fwrite failed!");
+		if(0 != fflush(f))
+			throw std::runtime_error("addVersionRecord: fflush failed!");
 	}
 
 	void checkVersionRecord(FILE *f){

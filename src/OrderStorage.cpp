@@ -83,6 +83,8 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 		aux::ExchLogger::instance()->note("OrderDataStorage saving order");
 
 	assert(nullptr != idGenerator);
+
+	OrderEntry *result = nullptr;
 	{
 		// Exclusive write lock - atomic dual-map insert
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, true);
@@ -103,9 +105,7 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 			st = 1;
 			ordersByClId_.insert(OrdersByClientIDT::value_type(cp->clOrderId_.get(), cp.get()));
 			st = 2;
-			if(nullptr != saver_)
-				saver_->save(*cp.get());
-			return cp.release();
+			result = cp.release();
 		}catch(...){
 			switch(st){
 			case 2:
@@ -117,6 +117,10 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 			throw;
 		}
 	}
+	// Call saver outside of lock to avoid potential deadlock
+	if(nullptr != saver_ && nullptr != result)
+		saver_->save(*result);
+	return result;
 }
 
 void OrderDataStorage::restore(OrderEntry *order)
@@ -124,6 +128,7 @@ void OrderDataStorage::restore(OrderEntry *order)
 	if(aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OrderDataStorage restoring order");
 
+	bool shouldSave = false;
 	{
 		// Exclusive write lock - atomic dual-map insert
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, true);
@@ -140,9 +145,7 @@ void OrderDataStorage::restore(OrderEntry *order)
 			st = 1;
 			ordersByClId_.insert(OrdersByClientIDT::value_type(order->clOrderId_.get(), order));
 			st = 2;
-			if(nullptr != saver_)
-				saver_->save(*order);
-			return;
+			shouldSave = true;
 		}catch(...){
 			switch(st){
 			case 2:
@@ -154,6 +157,9 @@ void OrderDataStorage::restore(OrderEntry *order)
 			throw;
 		}
 	}
+	// Call saver outside of lock to avoid potential deadlock
+	if(nullptr != saver_ && shouldSave)
+		saver_->save(*order);
 }
 
 // ============================================================================

@@ -204,8 +204,11 @@ SourceIdT WideParamsDataStorage::add(ExecutionsT *val)
 
 void WideParamsDataStorage::restore(InstrumentEntry *val)
 {
-	if(subscrCounter_ < val->id_.id_)
-		subscrCounter_.store(val->id_.id_ + 1);
+	// Atomically update subscrCounter_ if needed using compare-exchange
+	u64 current = subscrCounter_.load(std::memory_order_acquire);
+	u64 newVal = val->id_.id_ + 1;
+	while(current < newVal && !subscrCounter_.compare_exchange_weak(current, newVal, std::memory_order_release, std::memory_order_acquire))
+		; // Empty body - CAS loop
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -215,8 +218,11 @@ void WideParamsDataStorage::restore(InstrumentEntry *val)
 
 void WideParamsDataStorage::restore(const IdT& id, StringT *val)
 {
-	if(subscrCounter_ < id.id_)
-		subscrCounter_.store(id.id_ + 1);
+	// Atomically update subscrCounter_ if needed using compare-exchange
+	u64 current = subscrCounter_.load(std::memory_order_acquire);
+	u64 newVal = id.id_ + 1;
+	while(current < newVal && !subscrCounter_.compare_exchange_weak(current, newVal, std::memory_order_release, std::memory_order_acquire))
+		; // Empty body - CAS loop
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -226,8 +232,11 @@ void WideParamsDataStorage::restore(const IdT& id, StringT *val)
 
 void WideParamsDataStorage::restore(RawDataEntry *val)
 {
-	if(subscrCounter_ < val->id_.id_)
-		subscrCounter_.store(val->id_.id_ + 1);
+	// Atomically update subscrCounter_ if needed using compare-exchange
+	u64 current = subscrCounter_.load(std::memory_order_acquire);
+	u64 newVal = val->id_.id_ + 1;
+	while(current < newVal && !subscrCounter_.compare_exchange_weak(current, newVal, std::memory_order_release, std::memory_order_acquire))
+		; // Empty body - CAS loop
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -237,8 +246,11 @@ void WideParamsDataStorage::restore(RawDataEntry *val)
 
 void WideParamsDataStorage::restore(AccountEntry *val)
 {
-	if(subscrCounter_ < val->id_.id_)
-		subscrCounter_.store(val->id_.id_ + 1);
+	// Atomically update subscrCounter_ if needed using compare-exchange
+	u64 current = subscrCounter_.load(std::memory_order_acquire);
+	u64 newVal = val->id_.id_ + 1;
+	while(current < newVal && !subscrCounter_.compare_exchange_weak(current, newVal, std::memory_order_release, std::memory_order_acquire))
+		; // Empty body - CAS loop
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -248,8 +260,11 @@ void WideParamsDataStorage::restore(AccountEntry *val)
 
 void WideParamsDataStorage::restore(ClearingEntry *val)
 {
-	if(subscrCounter_ < val->id_.id_)
-		subscrCounter_.store(val->id_.id_ + 1);
+	// Atomically update subscrCounter_ if needed using compare-exchange
+	u64 current = subscrCounter_.load(std::memory_order_acquire);
+	u64 newVal = val->id_.id_ + 1;
+	while(current < newVal && !subscrCounter_.compare_exchange_weak(current, newVal, std::memory_order_release, std::memory_order_acquire))
+		; // Empty body - CAS loop
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);

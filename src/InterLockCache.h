@@ -88,31 +88,37 @@ namespace aux{
 
 		T *popFront(){
 			do{
-				Node *cur = nextFree_.load();
-				if (cur != nextNull_.load()){
-					T *v = cur->val_.exchange(nullptr);
+				Node *cur = nextFree_.load(std::memory_order_acquire);
+				Node *null = nextNull_.load(std::memory_order_acquire);
+				if (cur != null){
+					T *v = cur->val_.exchange(nullptr, std::memory_order_acq_rel);
 					Node *expected = cur;
-					nextFree_.compare_exchange_strong(expected, cur->next_);
+					nextFree_.compare_exchange_strong(expected, cur->next_, std::memory_order_release, std::memory_order_relaxed);
 					if(nullptr != v)
 						return v;
 				}else{
-					cacheMiss_.fetch_add(1);
+					cacheMiss_.fetch_add(1, std::memory_order_relaxed);
 					return new T;
 				}
 			}while(true);
 		}
 
 		void pushBack(T *val){
-			Node *cur = nextNull_.load();
-			while(cur->next_ != nextFree_.load()){
+			Node *cur = nextNull_.load(std::memory_order_acquire);
+			Node *free = nextFree_.load(std::memory_order_acquire);
+			while(cur->next_ != free){
 				T *expected = nullptr;
-				bool v = nextNull_.load()->val_.compare_exchange_strong(expected, val);
-				Node *expectedNode = cur;
-				nextNull_.compare_exchange_strong(expectedNode, nextNull_.load()->next_);
-				if(v)
+				// Try to store val in current null node
+				if(cur->val_.compare_exchange_strong(expected, val, std::memory_order_release, std::memory_order_relaxed)){
+					// Successfully stored, now advance nextNull_
+					nextNull_.compare_exchange_strong(cur, cur->next_, std::memory_order_release, std::memory_order_relaxed);
 					return;
-				cur = nextNull_.load();
+				}
+				// Failed to store, reload and retry
+				cur = nextNull_.load(std::memory_order_acquire);
+				free = nextFree_.load(std::memory_order_acquire);
 			}
+			// Cache is full, delete the value
 			delete val;
 		}
 

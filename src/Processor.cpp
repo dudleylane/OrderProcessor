@@ -83,9 +83,11 @@ bool Processor::process()
 
 void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 {
-	assert(nullptr != evnt.order_);
-	assert(events_.empty());
-	
+	if(nullptr == evnt.order_)
+		throw std::runtime_error("Processor::onEvent(OrderEvent): order pointer is null!");
+	if(!events_.empty())
+		throw std::runtime_error("Processor::onEvent(OrderEvent): events queue is not empty!");
+
 	//aux::ExchLogger::instance()->debug("Processor start onEvent(OrderEvent).");
 
 	// prepare context
