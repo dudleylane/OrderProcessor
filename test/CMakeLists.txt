@@ -1,7 +1,11 @@
+# Google Test based test files
 target_sources(orderProcessorTest
     PRIVATE
+        # Test utilities
         TestAux.cpp
         StateMachineHelper.cpp
+
+        # Google Test converted tests
         CodecsTest.cpp
         FileStorageTest.cpp
         IncomingQueuesTest.cpp
@@ -19,4 +23,5 @@ target_sources(orderProcessorTest
 target_include_directories(orderProcessorTest
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/src
 )
