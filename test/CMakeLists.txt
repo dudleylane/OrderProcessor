@@ -1,0 +1,22 @@
+target_sources(orderProcessorTest
+    PRIVATE
+        TestAux.cpp
+        StateMachineHelper.cpp
+        CodecsTest.cpp
+        FileStorageTest.cpp
+        IncomingQueuesTest.cpp
+        InterlockCacheTest.cpp
+        NLinkTreeTest.cpp
+        OrderBookTest.cpp
+        ProcessorTest.cpp
+        StateMachineTest.cpp
+        StatesTest.cpp
+        StorageRecordDispatcherTest.cpp
+        TaskManagerTest.cpp
+        IntegrationTest.cpp
+)
+
+target_include_directories(orderProcessorTest
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
