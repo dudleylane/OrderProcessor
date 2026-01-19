@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <cstring>
 #include <stdexcept>
 #include "RawDataCodec.h"
 #include "StringTCodec.h"

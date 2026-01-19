@@ -36,14 +36,14 @@ void TransactionMgr::attach(TransactionObserver *obs)
 {
 	assert(nullptr != obs);
 	assert(nullptr == obs_);
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	obs_ = obs;
 	//aux::ExchLogger::instance()->note("TransactionMgr TransactionObserver attached.");
 }
 
 TransactionObserver *TransactionMgr::detach()
 {
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	TransactionObserver *obs = obs_;
 	obs_ = nullptr;
 	//aux::ExchLogger::instance()->note("TransactionMgr TransactionObserver detached.");
@@ -67,7 +67,7 @@ void TransactionMgr::stop()
 	//aux::ExchLogger::instance()->note("TransactionMgr stopping.");
 
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		started_ = false;
 	}
 	//aux::ExchLogger::instance()->note("TransactionMgr stopped.");
@@ -88,7 +88,7 @@ void TransactionMgr::addTransaction(std::unique_ptr<Transaction> &tr)
 	trPtr->getRelatedObjects(&objects);
 	int ready2Exec = 0;
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		IdT id = idGenerator_->getId(); // should be just before add() call, because tree requires sequential order adding of transactions
 		tr->setTransactionId(id);
 		transactionTree_.add(id, trPtr, objects, &ready2Exec);
@@ -111,7 +111,7 @@ bool TransactionMgr::removeTransaction(const TransactionId &id, Transaction *t)
 	int ready2Exec = 0;
 	bool rez = false;
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		rez = transactionTree_.remove(id, &ready2Exec);
 	}
 	if((0 < ready2Exec)&&(nullptr != obs_)){
@@ -126,7 +126,7 @@ bool TransactionMgr::getParentTransactions(const TransactionId &id, TransactionI
 {
 	assert(started_);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		return transactionTree_.getParents(id, parent);
 	}
 }
@@ -135,7 +135,7 @@ bool TransactionMgr::getRelatedTransactions(const TransactionId &id, Transaction
 {
 	assert(started_);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		return transactionTree_.getChildren(id, related);
 	}
 }
@@ -147,18 +147,18 @@ TransactionIterator *TransactionMgr::iterator()
 
 bool TransactionMgr::next(TransactionId *id, Transaction **tr)
 {
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	return transactionTree_.next(id, tr);
 }
 
 bool TransactionMgr::get(TransactionId *id, Transaction **tr)const
 {
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	return transactionTree_.current(id, tr);
 }
 
 bool TransactionMgr::isValid()const
 {
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	return transactionTree_.isCurrentValid();
 }

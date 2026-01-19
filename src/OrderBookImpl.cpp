@@ -131,10 +131,10 @@ void OrderBookImpl::add(const OrderEntry& order)
 	if(orderGroups_.end() == it)
 		throw std::runtime_error("Unable to add order into book - instrument not registered!");
 	if(BUY_SIDE == order.side_){
-		mutex::scoped_lock lock(it->second->buyLock_);
+		tbb::mutex::scoped_lock lock(it->second->buyLock_);
 		it->second->buyOrder_.insert(OrdersByPriceAscT::value_type(order.price_, order.orderId_));
 	}else if(SELL_SIDE == order.side_){
-		mutex::scoped_lock lock(it->second->sellLock_);
+		tbb::mutex::scoped_lock lock(it->second->sellLock_);
 		it->second->sellOrder_.insert(OrdersByPriceAscT::value_type(order.price_, order.orderId_));		
 	}else
 		throw std::runtime_error("Unable to add order into book - side is not supported!");
@@ -160,10 +160,10 @@ void OrderBookImpl::restore(const OrderEntry& order)
 	if(orderGroups_.end() == it)
 		throw std::runtime_error("Unable to restore order into book - instrument not registered!");
 	if(BUY_SIDE == order.side_){
-		mutex::scoped_lock lock(it->second->buyLock_);
+		tbb::mutex::scoped_lock lock(it->second->buyLock_);
 		it->second->buyOrder_.insert(OrdersByPriceAscT::value_type(order.price_, order.orderId_));
 	}else if(SELL_SIDE == order.side_){
-		mutex::scoped_lock lock(it->second->sellLock_);
+		tbb::mutex::scoped_lock lock(it->second->sellLock_);
 		it->second->sellOrder_.insert(OrdersByPriceAscT::value_type(order.price_, order.orderId_));		
 	}else
 		throw std::runtime_error("Unable to restore order into book - side is not supported!");
@@ -187,7 +187,7 @@ void OrderBookImpl::remove(const OrderEntry& order)
 		throw std::runtime_error("Unable to remove order from book - instrument not registered!");
 	bool found = false;
 	if(BUY_SIDE == order.side_){
-		mutex::scoped_lock lock(it->second->buyLock_);
+		tbb::mutex::scoped_lock lock(it->second->buyLock_);
 		OrdersByPriceDescT::iterator oit = it->second->buyOrder_.lower_bound(order.price_);
 		while((it->second->buyOrder_.end() != oit)&&(order.price_ == oit->first)){
 			found = oit->second == order.orderId_;
@@ -200,7 +200,7 @@ void OrderBookImpl::remove(const OrderEntry& order)
 		if(!found)
 			throw std::runtime_error("Unable to remove order from book - order not found!");
 	}else if(SELL_SIDE == order.side_){
-		mutex::scoped_lock lock(it->second->sellLock_);
+		tbb::mutex::scoped_lock lock(it->second->sellLock_);
 		OrdersByPriceAscT::iterator oit = it->second->sellOrder_.lower_bound(order.price_);
 		while((it->second->sellOrder_.end() != oit)&&(order.price_ == oit->first)){
 			found = oit->second == order.orderId_;
@@ -229,7 +229,7 @@ IdT OrderBookImpl::find(const OrderFunctor &functor)const
 	if(orderGroups_.end() != it){
 		if(BUY_SIDE == functor.side()){
 			bool stop = false;
-			mutex::scoped_lock lock(it->second->buyLock_);
+			tbb::mutex::scoped_lock lock(it->second->buyLock_);
 			for(OrdersByPriceDescT::const_iterator oit = it->second->buyOrder_.begin(); 
 					oit != it->second->buyOrder_.end(); ++oit){
 				if(functor.match(oit->second, &stop))
@@ -239,7 +239,7 @@ IdT OrderBookImpl::find(const OrderFunctor &functor)const
 			}
 		}else if(SELL_SIDE == functor.side()){
 			bool stop = false;
-			mutex::scoped_lock lock(it->second->sellLock_);
+			tbb::mutex::scoped_lock lock(it->second->sellLock_);
 			for(OrdersByPriceAscT::const_iterator oit = it->second->sellOrder_.begin(); 
 					oit != it->second->sellOrder_.end(); ++oit){
 				if(functor.match(oit->second, &stop))
@@ -265,7 +265,7 @@ void OrderBookImpl::findAll(const OrderFunctor &functor, OrdersT *result)const
 	if(orderGroups_.end() != it){
 		if(BUY_SIDE == functor.side()){
 			bool stop = false;
-			mutex::scoped_lock lock(it->second->buyLock_);
+			tbb::mutex::scoped_lock lock(it->second->buyLock_);
 			for(OrdersByPriceDescT::const_iterator oit = it->second->buyOrder_.begin(); 
 					oit != it->second->buyOrder_.end(); ++oit){
 				if(functor.match(oit->second, &stop))
@@ -275,7 +275,7 @@ void OrderBookImpl::findAll(const OrderFunctor &functor, OrdersT *result)const
 			}
 		}else if(SELL_SIDE == functor.side()){
 			bool stop = false;
-			mutex::scoped_lock lock(it->second->sellLock_);
+			tbb::mutex::scoped_lock lock(it->second->sellLock_);
 			for(OrdersByPriceAscT::const_iterator oit = it->second->sellOrder_.begin(); 
 					oit != it->second->sellOrder_.end(); ++oit){
 				if(functor.match(oit->second, &stop))
@@ -298,11 +298,11 @@ IdT OrderBookImpl::getTop(const SourceIdT &instrument, const Side &side)const
 	OrderGroupsByInstrumentT::const_iterator it = orderGroups_.find(instrument);
 	if(orderGroups_.end() != it){
 		if(BUY_SIDE == side){
-			mutex::scoped_lock lock(it->second->buyLock_);
+			tbb::mutex::scoped_lock lock(it->second->buyLock_);
 			if(0 < it->second->buyOrder_.size())
 				return it->second->buyOrder_.begin()->second;
 		}else if(SELL_SIDE == side){
-			mutex::scoped_lock lock(it->second->sellLock_);
+			tbb::mutex::scoped_lock lock(it->second->sellLock_);
 			if(0 < it->second->sellOrder_.size())
 				return it->second->sellOrder_.begin()->second;
 		}else{

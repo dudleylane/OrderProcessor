@@ -33,7 +33,7 @@ void OutgoingQueues::clear()
 {
 	OutQueuesByTargetT tmp;
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		swap(tmp, outQueues_);
 	}
 	for(OutQueuesByTargetT::iterator it = tmp.begin(); it != tmp.end(); ++it){
@@ -48,7 +48,7 @@ void OutgoingQueues::push(const ExecReportEvent &evnt, const std::string &target
 	if(aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OutgoingQueues push new ExecReportEvent.");
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		OutQueuesByTargetT::iterator it = outQueues_.find(target);
 		if(outQueues_.end() == it){
 			std::unique_ptr<OutQueues> q(new OutQueues);
@@ -68,7 +68,7 @@ void OutgoingQueues::push(const CancelRejectEvent &evnt, const std::string &targ
 	if(aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OutgoingQueues push new CancelRejectEvent.");
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		OutQueuesByTargetT::iterator it = outQueues_.find(target);
 		if(outQueues_.end() == it){
 			std::unique_ptr<OutQueues> q(new OutQueues);
@@ -88,7 +88,7 @@ void OutgoingQueues::push(const BusinessRejectEvent &evnt, const std::string &ta
 	if(aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OutgoingQueues push new BusinessRejectEvent.");
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		OutQueuesByTargetT::iterator it = outQueues_.find(target);
 		if(outQueues_.end() == it){
 			std::unique_ptr<OutQueues> q(new OutQueues);

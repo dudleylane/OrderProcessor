@@ -38,34 +38,35 @@ IncomingQueues::~IncomingQueues(void)
 
 InQueueProcessor *IncomingQueues::attach(InQueueProcessor *obs)
 {
-	aux::ExchLogger::instance()->note("IncomingQueues attaching InQueueProcessor.");	
-	return processor_.store(obs);}
+	aux::ExchLogger::instance()->note("IncomingQueues attaching InQueueProcessor.");
+	return processor_.exchange(obs);
+}
 
 InQueueProcessor *IncomingQueues::detachProcessor()
 {
-	aux::ExchLogger::instance()->note("IncomingQueues detaching InQueueProcessor.");	
-	return processor_.store(nullptr);
+	aux::ExchLogger::instance()->note("IncomingQueues detaching InQueueProcessor.");
+	return processor_.exchange(nullptr);
 }
 
 InQueuesObserver *IncomingQueues::attach(InQueuesObserver *obs)
 {
 	aux::ExchLogger::instance()->note("IncomingQueues attaching InQueuesObserver.");
-	InQueuesObserver *obsOld = observer_.store(obs);
-	if((nullptr != observer_)&&(!processingQueue_.empty()))
-		observer_->onNewEvent();
+	InQueuesObserver *obsOld = observer_.exchange(obs);
+	InQueuesObserver *current = observer_.load();
+	if((nullptr != current)&&(!processingQueue_.empty()))
+		current->onNewEvent();
 	return obsOld;
-
 }
 
 InQueuesObserver *IncomingQueues::detach()
 {
 	aux::ExchLogger::instance()->note("IncomingQueues detaching InQueuesObserver.");
-	return observer_.store(nullptr);
+	return observer_.exchange(nullptr);
 }
 
 u32 IncomingQueues::size()const
 {
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	return static_cast<u32>(processingQueue_.size());
 }
 
@@ -84,7 +85,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 	TimerEvent timer;
 	std::unique_ptr<OrderEntry> ord;
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		if(0 == processingQueue_.size())
 			return false;
 		elem = processingQueue_.front();
@@ -172,7 +173,7 @@ bool IncomingQueues::pop()
 {
 	//aux::ExchLogger::instance()->debug("IncomingQueues::pop start execution");
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		if(0 == processingQueue_.size())
 			return false;
 		Element elem = processingQueue_.front();
@@ -249,7 +250,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 	TimerEvent timer;
 	std::unique_ptr<OrderEntry> ord;
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		if(0 == processingQueue_.size())
 			return false;
 		elem = processingQueue_.front();
@@ -344,7 +345,7 @@ void IncomingQueues::push(const std::string &source, const OrderEvent &evnt)
 	//aux::ExchLogger::instance()->debug("IncomingQueues start push OrderEvent");
 	std::unique_ptr<OrderEntry> ord(evnt.order_);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		OrderQueuesT::iterator it = orders_.find(source);
 		if(orders_.end() == it){
 			it = orders_.insert(OrderQueuesT::value_type(source, new OrderQueueT())).first;
@@ -356,8 +357,9 @@ void IncomingQueues::push(const std::string &source, const OrderEvent &evnt)
 		processingQueue_.push_back(Element(source, ORDER_QUEUE_TYPE));
 	}	
 	{
-		if(nullptr != observer_)
-			observer_->onNewEvent();
+		InQueuesObserver *obs = observer_.load();
+		if(nullptr != obs)
+			obs->onNewEvent();
 	}
 	//aux::ExchLogger::instance()->debug("IncomingQueues finish push OrderEvent");
 }
@@ -367,7 +369,7 @@ void IncomingQueues::push(const std::string &source, const OrderCancelEvent &evn
 	//aux::ExchLogger::instance()->debug("IncomingQueues start push OrderCancelEvent");
 
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		OrderCancelQueuesT::iterator it = orderCancels_.find(source);
 		if(orderCancels_.end() == it){
 			it = orderCancels_.insert(OrderCancelQueuesT::value_type(source, new OrderCancelQueueT())).first;
@@ -379,8 +381,9 @@ void IncomingQueues::push(const std::string &source, const OrderCancelEvent &evn
 		processingQueue_.push_back(Element(source, ORDER_CANCEL_QUEUE_TYPE));
 	}
 	{
-		if(nullptr != observer_)
-			observer_->onNewEvent();
+		InQueuesObserver *obs = observer_.load();
+		if(nullptr != obs)
+			obs->onNewEvent();
 	}
 
 	//aux::ExchLogger::instance()->debug("IncomingQueues finish push OrderCancelEvent");
@@ -391,7 +394,7 @@ void IncomingQueues::push(const std::string &source, const OrderReplaceEvent &ev
 	//aux::ExchLogger::instance()->debug("IncomingQueues start push OrderReplaceEvent");
 
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		OrderReplaceQueuesT::iterator it = orderReplaces_.find(source);
 		if(orderReplaces_.end() == it){
 			it = orderReplaces_.insert(OrderReplaceQueuesT::value_type(source, new OrderReplaceQueueT())).first;
@@ -403,8 +406,9 @@ void IncomingQueues::push(const std::string &source, const OrderReplaceEvent &ev
 		processingQueue_.push_back(Element(source, ORDER_REPLACE_QUEUE_TYPE));
 	}
 	{
-		if(nullptr != observer_)
-			observer_->onNewEvent();
+		InQueuesObserver *obs = observer_.load();
+		if(nullptr != obs)
+			obs->onNewEvent();
 	}
 
 	//aux::ExchLogger::instance()->debug("IncomingQueues finish push OrderReplaceEvent");
@@ -415,7 +419,7 @@ void IncomingQueues::push(const std::string &source, const OrderChangeStateEvent
 	//aux::ExchLogger::instance()->debug("IncomingQueues start push OrderStateEvent");
 
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		OrderStateQueuesT::iterator it = orderStates_.find(source);
 		if(orderStates_.end() == it){
 			it = orderStates_.insert(OrderStateQueuesT::value_type(source, new OrderStateQueueT())).first;
@@ -427,8 +431,9 @@ void IncomingQueues::push(const std::string &source, const OrderChangeStateEvent
 		processingQueue_.push_back(Element(source, ORDER_STATE_QUEUE_TYPE));
 	}
 	{
-		if(nullptr != observer_)
-			observer_->onNewEvent();
+		InQueuesObserver *obs = observer_.load();
+		if(nullptr != obs)
+			obs->onNewEvent();
 	}
 
 	//aux::ExchLogger::instance()->debug("IncomingQueues finish push OrderStateEvent");
@@ -438,7 +443,7 @@ void IncomingQueues::push(const std::string &source, const ProcessEvent &evnt)
 {
 	//aux::ExchLogger::instance()->debug("IncomingQueues start push ProcessEvent");
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		ProcessQueuesT::iterator it = processes_.find(source);
 		if(processes_.end() == it){
 			it = processes_.insert(ProcessQueuesT::value_type(source, new ProcessQueueT())).first;
@@ -450,8 +455,9 @@ void IncomingQueues::push(const std::string &source, const ProcessEvent &evnt)
 		processingQueue_.push_back(Element(source, PROCESS_QUEUE_TYPE));
 	}
 	{
-		if(nullptr != observer_)
-			observer_->onNewEvent();
+		InQueuesObserver *obs = observer_.load();
+		if(nullptr != obs)
+			obs->onNewEvent();
 	}
 
 	//aux::ExchLogger::instance()->debug("IncomingQueues finish push ProcessEvent");
@@ -462,7 +468,7 @@ void IncomingQueues::push(const std::string &source, const TimerEvent &evnt)
 	//aux::ExchLogger::instance()->debug("IncomingQueues start push TimerEvent");
 
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		TimerQueuesT::iterator it = timers_.find(source);
 		if(timers_.end() == it){
 			it = timers_.insert(TimerQueuesT::value_type(source, new TimerQueueT())).first;
@@ -474,8 +480,9 @@ void IncomingQueues::push(const std::string &source, const TimerEvent &evnt)
 		processingQueue_.push_back(Element(source, TIMER_QUEUE_TYPE));
 	}
 	{
-		if(nullptr != observer_)
-			observer_->onNewEvent();
+		InQueuesObserver *obs = observer_.load();
+		if(nullptr != obs)
+			obs->onNewEvent();
 	}
 
 	//aux::ExchLogger::instance()->debug("IncomingQueues finish push TimerEvent");
@@ -493,7 +500,7 @@ void IncomingQueues::clear()
 	TimerQueuesT timersTmp;
 	{
 		ProcessingQueueT tmp;
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		swap(tmp, processingQueue_);
 		swap(ordersTmp, orders_);
 		swap(orderCancelsTmp, orderCancels_);

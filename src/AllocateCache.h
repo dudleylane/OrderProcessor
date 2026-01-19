@@ -14,18 +14,21 @@
 
 #include <memory>
 #include <vector>
-#include <tbb/scalable_allocator.h> 
+#include <oneapi/tbb/scalable_allocator.h>
 
-namespace aux{ 
+namespace aux{
 
 	template<typename T>
 	class AllocateCache{
 	public:
+		using AllocatorType = tbb::scalable_allocator<T>;
+		using AllocTraits = std::allocator_traits<AllocatorType>;
+
 		explicit AllocateCache(const size_t cacheSize = 100): cacheSize_(cacheSize){
 			cache_.reserve(cacheSize_);
 			for(size_t i = 0; i < cacheSize_; ++i){
-				T *ptr = allocator_.allocate(1);
-				allocator_.construct(ptr, T());
+				T *ptr = AllocTraits::allocate(allocator_, 1);
+				AllocTraits::construct(allocator_, ptr, T());
 				cache_.push_back(ptr);
 			}
 			lastAvailable_ = static_cast<int>(cacheSize_) - 1;
@@ -36,21 +39,21 @@ namespace aux{
 
 		T *create(){
 			T *ptr = allocate();
-			allocator_.construct(ptr, T());
+			AllocTraits::construct(allocator_, ptr, T());
 			return ptr;
 		}
 		T *create(const T &val){
 			T *ptr = allocate();
-			allocator_.construct(ptr, val);
+			AllocTraits::construct(allocator_, ptr, val);
 			return ptr;
 		}
 		void destroy(T *val){
-			allocator_.destroy(val);
+			AllocTraits::destroy(allocator_, val);
 			if(lastAvailable_ + 1 < static_cast<int>(cacheSize_)){
 				++lastAvailable_;
 				cache_[lastAvailable_] = val;
 			}else{
-				allocator_.deallocate(val, 1);
+				AllocTraits::deallocate(allocator_, val, 1);
 			}
 		}
 
@@ -61,7 +64,7 @@ namespace aux{
 				lastAvailable_ = -1;
 			}
 			for(size_t i = 0; i < tmp.size(); ++i){
-				allocator_.deallocate(tmp[i], 1);
+				AllocTraits::deallocate(allocator_, tmp[i], 1);
 			}
 		}
 	private:
@@ -72,13 +75,13 @@ namespace aux{
 				cache_[lastAvailable_] = nullptr;
 				--lastAvailable_;
 			}else{
-				ptr = allocator_.allocate(1);
+				ptr = AllocTraits::allocate(allocator_, 1);
 			}
 			return ptr;
 		}
 
 	private:
-		tbb::scalable_allocator<T> allocator_;
+		AllocatorType allocator_;
 		typedef std::vector<T *> CacheT;
 		int lastAvailable_;
 		CacheT cache_;
@@ -115,7 +118,7 @@ namespace aux{
 			return *val_;
 		}
 
-		V *operator->() const{		
+		V *operator->() const{
 			return (&**this);
 		}
 

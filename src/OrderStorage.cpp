@@ -36,7 +36,7 @@ OrderDataStorage::~OrderDataStorage(void)
 	aux::ExchLogger::instance()->note("OrderDataStorage destroying");
 	OrdersByIDT tmp;
 	{
-		mutex::scoped_lock lock(orderLock_);
+		tbb::mutex::scoped_lock lock(orderLock_);
 		std::swap(tmp, ordersById_);
 		ordersByClId_.clear();
 	}
@@ -45,7 +45,7 @@ OrderDataStorage::~OrderDataStorage(void)
 
 	ExecByIDT execTmp;
 	{
-		mutex::scoped_lock lock(execLock_);
+		tbb::mutex::scoped_lock lock(execLock_);
 		std::swap(execTmp, executionsById_);
 	}
 	for(ExecByIDT::iterator it = execTmp.begin(); it != execTmp.end(); ++it)
@@ -55,7 +55,7 @@ OrderDataStorage::~OrderDataStorage(void)
 
 OrderEntry *OrderDataStorage::locateByClOrderId(const RawDataEntry &clOrderId)const
 {
-	mutex::scoped_lock lock(orderLock_);
+	tbb::mutex::scoped_lock lock(orderLock_);
 	OrdersByClientIDT::const_iterator it = ordersByClId_.find(clOrderId);
 	if(ordersByClId_.end() == it)
 		return nullptr;
@@ -65,7 +65,7 @@ OrderEntry *OrderDataStorage::locateByClOrderId(const RawDataEntry &clOrderId)co
 OrderEntry *OrderDataStorage::locateByOrderId(const IdT &orderId)const
 {
 	/// changed for concurrent_hash_map
-	mutex::scoped_lock lock(orderLock_);
+	tbb::mutex::scoped_lock lock(orderLock_);
 	OrdersByIDT::const_iterator it = ordersById_.find(orderId);
 	if(ordersById_.end() == it)
 		return nullptr;
@@ -79,7 +79,7 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 
 	assert(nullptr != idGenerator);
 	{
-		mutex::scoped_lock lock(orderLock_);
+		tbb::mutex::scoped_lock lock(orderLock_);
 		if((order.orderId_.isValid())&&(ordersById_.end() != ordersById_.find(order.orderId_)))
 			throw std::runtime_error("Unable to save order - order with same OrderId already exists.");
 		
@@ -118,7 +118,7 @@ void OrderDataStorage::restore(OrderEntry *order)
 		aux::ExchLogger::instance()->note("OrderDataStorage restoring order");
 
 	{
-		mutex::scoped_lock lock(orderLock_);
+		tbb::mutex::scoped_lock lock(orderLock_);
 		if((order->orderId_.isValid())&&(ordersById_.end() != ordersById_.find(order->orderId_)))
 			throw std::runtime_error("Unable to restore order - order with same OrderId already exists.");
 		if(0 == order->clOrderId_.get().length_)
@@ -149,7 +149,7 @@ void OrderDataStorage::restore(OrderEntry *order)
 
 ExecutionEntry *OrderDataStorage::locateByExecId(const IdT &execId)const
 {
-	mutex::scoped_lock lock(execLock_);
+	tbb::mutex::scoped_lock lock(execLock_);
 	ExecByIDT::const_iterator it = executionsById_.find(execId);
 	if(executionsById_.end() == it)
 		return nullptr;
@@ -161,7 +161,7 @@ void OrderDataStorage::save(const ExecutionEntry *exec)
 	if(aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OrderDataStorage saving execution");
 
-	mutex::scoped_lock lock(execLock_);
+	tbb::mutex::scoped_lock lock(execLock_);
 	if(executionsById_.end() != executionsById_.find(exec->execId_))
 		throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
 	executionsById_.insert(ExecByIDT::value_type(exec->execId_, exec->clone()));
@@ -175,7 +175,7 @@ ExecutionEntry *OrderDataStorage::save(const ExecutionEntry &exec, IdTValueGener
 		aux::ExchLogger::instance()->note("OrderDataStorage saving execution 2");
 
 	assert(nullptr != idGenerator);
-	mutex::scoped_lock lock(execLock_);
+	tbb::mutex::scoped_lock lock(execLock_);
 	if((exec.execId_.isValid())&&(executionsById_.end() != executionsById_.find(exec.execId_)))
 		throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
 

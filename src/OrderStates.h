@@ -13,311 +13,286 @@
 #pragma once
 
 #include "OrderStateEvents.h"
-#include <boost/msm/state_machine.hpp>
+#include <boost/msm/front/states.hpp>
+#include <boost/msm/front/functor_row.hpp>
 
 #include <iostream>
 
 namespace COP{
 namespace OrdState{
 
-struct Rcvd_New : public boost::msm::state<> 
+struct Rcvd_New : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    /*template <class Event>
-    void on_entry(Event const& evnt) {
-		//std::cout << "entering: Rcvd_New" << std::endl;
-	}*/
-    /*template <class Event>
-    void on_exit(Event const& evnt) {//std::cout << "leaving: Rcvd_New" << std::endl;}*/
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {}
 
-	void on_exit(onOrderReceived const& ){}
-	void on_exit(onRecvOrderRejected const& ){}
-	void on_exit(onRplOrderReceived const& ){}
-	void on_exit(onRecvRplOrderRejected const& ){}
-	void on_exit(onExternalOrder const& ){}
-	void on_exit(onExternalOrderRejected const& ){}
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {}
+
+	template <class FSM> void on_exit(onOrderReceived const&, FSM& ){}
+	template <class FSM> void on_exit(onRecvOrderRejected const&, FSM& ){}
+	template <class FSM> void on_exit(onRplOrderReceived const&, FSM& ){}
+	template <class FSM> void on_exit(onRecvRplOrderRejected const&, FSM& ){}
+	template <class FSM> void on_exit(onExternalOrder const&, FSM& ){}
+	template <class FSM> void on_exit(onExternalOrderRejected const&, FSM& ){}
 };
 
-struct NoCnlReplace : public boost::msm::state<> 
+struct NoCnlReplace : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: NoCnlReplace" << std::endl;
-#endif	
+#endif
 	}
-    template <class Event>
-    void on_exit(Event const& ) {
-#ifdef _DEBUG		
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
+#ifdef _DEBUG
 		//std::cout << "leaving: NoCnlReplace" << std::endl;
-#endif	
+#endif
 	}
 
-	void on_entry(onCancelRejected const& );
-	void on_entry(onReplaceRejected const& );
+	template <class FSM> void on_entry(onCancelRejected const&, FSM& );
+	template <class FSM> void on_entry(onReplaceRejected const&, FSM& );
 };
 
-struct Pend_New : public boost::msm::state<> 
+struct Pend_New : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& /*evnt*/) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: Pend_New" << std::endl;
 #endif
 	}
-    template <class Event>
-    void on_exit(Event const& /*evnt*/) {
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: Pend_New" << std::endl;
-#endif	
+#endif
 	}
 
-	void on_entry(onOrderAccepted const& );
+	template <class FSM> void on_entry(onOrderAccepted const&, FSM& );
 };
 
-struct Pend_Replace : public boost::msm::state<> 
+struct Pend_Replace : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: Pend_Replace" << std::endl;
 #endif
 	}
-    template <class Event>
-    void on_exit(Event const& ) {
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: Pend_Replace" << std::endl;
 #endif
 	}
 };
 
-struct Rejected : public boost::msm::state<> 
+struct Rejected : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: Rejected" << std::endl;
 #endif
 	}
-    template <class Event>
-    void on_exit(Event const& ) {
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: Rejected" << std::endl;
 #endif
 	}
 
+	template <class FSM> void on_entry(onOrderAccepted const&, FSM& );
+	template <class FSM> void on_entry(onOrderRejected const&, FSM& );
+	template <class FSM> void on_entry(onRplOrderRejected const&, FSM& );
+	template <class FSM> void on_entry(onExternalOrder const&, FSM& );
+	template <class FSM> void on_entry(onReplace const&, FSM& );
 
-	void on_entry(onOrderAccepted const& );
-	void on_entry(onOrderRejected const& );
-	void on_entry(onRplOrderRejected const& );
-	void on_entry(onExternalOrder const& );
-	void on_entry(onReplace const& );
-	
-	void on_entry(onRecvOrderRejected const& );
-	void on_entry(onRecvRplOrderRejected const& );
-	void on_entry(onExternalOrderRejected const& );	
+	template <class FSM> void on_entry(onRecvOrderRejected const&, FSM& );
+	template <class FSM> void on_entry(onRecvRplOrderRejected const&, FSM& );
+	template <class FSM> void on_entry(onExternalOrderRejected const&, FSM& );
 };
 
-struct New : public boost::msm::state<> 
+struct New : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: New" << std::endl;
 #endif
 	}
-    template <class Event>
-    void on_exit(Event const& ) {
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: New" << std::endl;
-#endif	
+#endif
 	}
 
-	void on_entry(onExternalOrder const& );
-	void on_entry(onOrderReceived const& );
-	void on_entry(onOrderAccepted const& );
-	void on_entry(onReplace const& );
-	void on_entry(onTradeCrctCncl const& );
-	void on_entry(onNewDay const& );
-	void on_entry(onContinue const& );
+	template <class FSM> void on_entry(onExternalOrder const&, FSM& );
+	template <class FSM> void on_entry(onOrderReceived const&, FSM& );
+	template <class FSM> void on_entry(onOrderAccepted const&, FSM& );
+	template <class FSM> void on_entry(onReplace const&, FSM& );
+	template <class FSM> void on_entry(onTradeCrctCncl const&, FSM& );
+	template <class FSM> void on_entry(onNewDay const&, FSM& );
+	template <class FSM> void on_entry(onContinue const&, FSM& );
 };
 
-struct PartFill : public boost::msm::state<> 
+struct PartFill : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: PartFill" << std::endl;
-#endif	
+#endif
 	}
-    template <class Event>
-    void on_exit(Event const& ) {
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: PartFill" << std::endl;
-#endif	
+#endif
 	}
 
-
-	void on_entry(onTradeExecution const& );
-	void on_entry(onTradeCrctCncl const& );
-	void on_entry(onNewDay const& );
-	void on_entry(onContinue const& );
-
+	template <class FSM> void on_entry(onTradeExecution const&, FSM& );
+	template <class FSM> void on_entry(onTradeCrctCncl const&, FSM& );
+	template <class FSM> void on_entry(onNewDay const&, FSM& );
+	template <class FSM> void on_entry(onContinue const&, FSM& );
 };
 
-struct Filled : public boost::msm::state<> 
+struct Filled : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: Filled" << std::endl;
 #endif
 	}
-    template <class Event>
-    void on_exit(Event const& ) {
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: Filled" << std::endl;
 #endif
 	}
 
-	
-	void on_entry(onTradeExecution const& );
+	template <class FSM> void on_entry(onTradeExecution const&, FSM& );
 };
 
-struct Expired : public boost::msm::state<> 
+struct Expired : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: Expired" << std::endl;
-#endif	
+#endif
 	}
-    template <class Event>
-	void on_exit(Event const& ) {
+    template <class Event, class FSM>
+	void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: Expired" << std::endl;
-#endif	
+#endif
 	}
 
-
-	void on_entry(onExpired const& );
-	void on_entry(onRplOrderExpired const& );
-	void on_entry(onTradeCrctCncl const& );
+	template <class FSM> void on_entry(onExpired const&, FSM& );
+	template <class FSM> void on_entry(onRplOrderExpired const&, FSM& );
+	template <class FSM> void on_entry(onTradeCrctCncl const&, FSM& );
 };
 
-struct CnclReplaced : public boost::msm::state<> 
+struct CnclReplaced : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: CnclReplaced" << std::endl;
-#endif	
+#endif
 	}
-    template <class Event>
-    void on_exit(Event const& ) {
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: CnclReplaced" << std::endl;
-#endif	
+#endif
 	}
 
-	void on_entry(onExecCancel const& );
-	void on_entry(onInternalCancel const& );
-	void on_entry(onExecReplace const& );
-	void on_entry(onTradeCrctCncl const& );
+	template <class FSM> void on_entry(onExecCancel const&, FSM& );
+	template <class FSM> void on_entry(onInternalCancel const&, FSM& );
+	template <class FSM> void on_entry(onExecReplace const&, FSM& );
+	template <class FSM> void on_entry(onTradeCrctCncl const&, FSM& );
 };
 
-struct Suspended : public boost::msm::state<> 
+struct Suspended : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: Suspended" << std::endl;
-#endif	
+#endif
 	}
-    template <class Event>
-    void on_exit(Event const& ) {
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: Suspended" << std::endl;
-#endif	
+#endif
 	}
 
-
-	void on_entry(onSuspended const& );
-	void on_entry(onTradeCrctCncl const& );
+	template <class FSM> void on_entry(onSuspended const&, FSM& );
+	template <class FSM> void on_entry(onTradeCrctCncl const&, FSM& );
 };
 
-struct DoneForDay : public boost::msm::state<> 
+struct DoneForDay : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: DoneForDay" << std::endl;
-#endif	
+#endif
 	}
-    template <class Event>
-    void on_exit(Event const& ) {
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: DoneForDay" << std::endl;
-#endif	
+#endif
 	}
 
-
-	void on_entry(onFinished const& );
-	void on_entry(onTradeCrctCncl const& );
+	template <class FSM> void on_entry(onFinished const&, FSM& );
+	template <class FSM> void on_entry(onTradeCrctCncl const&, FSM& );
 };
 
-struct GoingCancel : public boost::msm::state<> 
+struct GoingCancel : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: GoingCancel" << std::endl;
-#endif	
+#endif
 	}
-    template <class Event>
-    void on_exit(Event const& ) {
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: GoingCancel" << std::endl;
-#endif	
+#endif
 	}
 
-
-	void on_entry(onCancelReceived const& );
+	template <class FSM> void on_entry(onCancelReceived const&, FSM& );
 };
 
-struct GoingReplace : public boost::msm::state<> 
+struct GoingReplace : public boost::msm::front::state<>
 {
-    // every (optional) entry/exit methods get the event passed.
-    template <class Event>
-    void on_entry(Event const& ) {
+    template <class Event, class FSM>
+    void on_entry(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "entering: GoingReplace" << std::endl;
-#endif	
+#endif
 	}
-    template <class Event>
-    void on_exit(Event const& ) {
+    template <class Event, class FSM>
+    void on_exit(Event const& , FSM& ) {
 #ifdef _DEBUG
 		//std::cout << "leaving: GoingReplace" << std::endl;
-#endif	
+#endif
 	}
 
-
-	void on_entry(onReplaceReceived const& );
+	template <class FSM> void on_entry(onReplaceReceived const&, FSM& );
 };
-
-
 
 }
 }

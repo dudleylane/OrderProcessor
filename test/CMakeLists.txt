@@ -1,6 +1,9 @@
 # Google Test based test files
 target_sources(orderProcessorTest
     PRIVATE
+        # Custom main with global Logger initialization
+        TestMain.cpp
+
         # Test utilities
         TestAux.cpp
         StateMachineHelper.cpp

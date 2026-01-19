@@ -32,14 +32,14 @@ namespace aux{
 		{
 			assert(nullptr == instance_);
 			if(nullptr != instance_)
-				throw std::runtime_error(string("Cache '") + name + "' initialised twice!");
-			instance_ = new T(name, cacheSize);
+				throw std::runtime_error(std::string("Cache '") + name + "' initialised twice!");
+			instance_ = new InterLockCache<T>(name, cacheSize);
 		}
 		static void destroy(){
 			delete instance_;
 			instance_ = nullptr;
 		}
-		static T *instance(){
+		static InterLockCache<T> *instance(){
 			assert(nullptr != instance_);
 			if(nullptr == instance_)
 				throw std::runtime_error("InterLockCache was not initialised!");
@@ -142,7 +142,7 @@ namespace aux{
 	};
 
 	template<typename T>
-	T *InterLockCache<T>::instance_ = nullptr;
+	InterLockCache<T> *InterLockCache<T>::instance_ = nullptr;
 
 	template<typename V>
 	class CacheAutoPtr{

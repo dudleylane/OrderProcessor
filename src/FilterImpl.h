@@ -61,8 +61,8 @@ public:
 	EnumSetInSetFilter(const ValuesT &val): val_(val){}
 
 	bool filter(const ValuesT &val)const{
-		for(ValuesT::const_iterator it = val.begin(); it != val.end(); ++it)
-			if(val_.end() == val_.find(*it))
+		for(const auto& item : val)
+			if(val_.end() == val_.find(item))
 				return false;
 		return true;
 	}

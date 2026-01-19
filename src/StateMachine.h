@@ -20,10 +20,13 @@
 //#define BOOST_MPL_LIMIT_VECTOR_SIZE 50
 
 #include "boost/mpl/vector/vector50.hpp"
-#include <boost/msm/state_machine.hpp>
+#include <boost/msm/back/state_machine.hpp>
+#include <boost/msm/front/state_machine_def.hpp>
 #include "OrderStateEvents.h"
 #include "OrderStates.h"
 #include "StateMachineDef.h"
+
+namespace mpl = boost::mpl;
 
 namespace COP{
 
@@ -31,12 +34,13 @@ namespace COP{
 
 namespace OrdState{
 
-class OrderState : public boost::msm::state_machine<OrderState>{
+// Front-end state machine definition
+struct OrderState_ : public boost::msm::front::state_machine_def<OrderState_>{
 public:
-	OrderState();
-	explicit OrderState(OrderEntry *orderData);
-	~OrderState();
-	
+	OrderState_();
+	explicit OrderState_(OrderEntry *orderData);
+	~OrderState_();
+
 	static const std::string &getStateName(int idx);
 
 	OrderStatePersistence getPersistence()const;
@@ -90,7 +94,7 @@ public:
 
 
 	typedef mpl::vector<Rcvd_New, NoCnlReplace> initial_state;
-	typedef OrderState os;
+	typedef OrderState_ os;
 
 public:
 	// Transition table for Order
@@ -249,8 +253,8 @@ public:
 	> {};
 
     // Replaces the default no-transition response.
-    template <class Event>
-    int no_transition(int /*state*/, Event const&)
+    template <class FSM, class Event>
+    void no_transition(Event const&, FSM&, int)
     {
 		throw std::runtime_error("no transition!");
         /*std::cout << "no transition from state " << state
@@ -258,7 +262,8 @@ public:
         //return state;
     }
 
-    void exception_caught (std::exception&)
+    template <class FSM, class Event>
+    void exception_caught (Event const&, FSM&, std::exception&)
     {
 		//throw ex;
         //BOOST_ASSERT(false);
@@ -268,9 +273,11 @@ private:
 	OrderEntry *orderData_;
 };
 
+// Back-end state machine (wraps the front-end definition)
+typedef boost::msm::back::state_machine<OrderState_> OrderState;
+
 }
 
 }
 
 #endif //_STATE_MACHINE__H
-

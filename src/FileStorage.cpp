@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include "TypesDef.h"
@@ -262,7 +263,7 @@ void FileStorage::clear()
 {
 	RecordsT tmp;
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		std::swap(records_, tmp);
 		if(nullptr != file_){
 			fflush(file_);
@@ -289,7 +290,7 @@ void FileStorage::save(const IdT &id, const char *buf, size_t size)
 
 	FileRecord rec(id, static_cast<u32>(size));
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		RecordsT::const_iterator it = records_.find(id);
 		if(records_.end() != it)
 			throw std::runtime_error("FileStorage::save: Unable to save record, record with this Id already exists!");
@@ -308,7 +309,7 @@ u32 FileStorage::update(const IdT& id, const char *buf, size_t size){
 
 	FileRecord rec(id, static_cast<u32>(size));
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		RecordsT::const_iterator it = records_.find(id);
 		if(records_.end() == it){
 			std::unique_ptr<RecordChainT> chain(new RecordChainT);
@@ -332,7 +333,7 @@ u32 FileStorage::replace(const IdT& id, u32 version, const char *buf, size_t siz
 
 	FileRecord rec(id, static_cast<u32>(size));
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		RecordsT::const_iterator it = records_.find(id);
 		if(records_.end() == it){
 			throw std::runtime_error("FileStorage::replace: Unable to replace record, record with this Id not exists!");
@@ -357,7 +358,7 @@ u32 FileStorage::replace(const IdT& id, u32 version, const char *buf, size_t siz
 
 void FileStorage::erase(const IdT& id, u32 version){
 	assert(nullptr != file_);
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	RecordsT::iterator it = records_.find(id);
 	if(records_.end() == it)
 		return;
@@ -372,7 +373,7 @@ void FileStorage::erase(const IdT& id, u32 version){
 }
 
 void FileStorage::erase(const IdT& id){
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	RecordsT::iterator it = records_.find(id);
 	if(records_.end() == it)
 		return;

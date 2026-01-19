@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
+
+# Handle removed FindBoost module in CMake 3.31+
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+
 project(OrderProcessor VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -19,7 +25,9 @@ add_compile_definitions(
 # Core dependencies
 find_package(TBB REQUIRED)
 find_package(spdlog REQUIRED)
-find_package(Boost REQUIRED COMPONENTS headers)
+find_package(Boost 1.70 REQUIRED CONFIG)
+message(STATUS "Boost_INCLUDE_DIRS = ${Boost_INCLUDE_DIRS}")
+message(STATUS "Boost_LIBRARY_DIRS = ${Boost_LIBRARY_DIRS}")
 
 # Main library
 add_library(orderEngine STATIC)
@@ -27,8 +35,8 @@ add_subdirectory(src)
 
 target_link_libraries(orderEngine
     PUBLIC
-        Boost::headers
         TBB::tbb
+        TBB::tbbmalloc
         spdlog::spdlog
 )
 
@@ -36,6 +44,7 @@ target_include_directories(orderEngine
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
         $<INSTALL_INTERFACE:include>
+        ${Boost_INCLUDE_DIRS}
 )
 
 # Testing dependencies (Google Test, Google Mock, Google Benchmark)
@@ -59,7 +68,7 @@ if(BUILD_TESTS)
     target_link_libraries(orderProcessorTest
         PRIVATE
             orderEngine
-            GTest::gtest_main
+            GTest::gtest
             GTest::gmock
     )
 

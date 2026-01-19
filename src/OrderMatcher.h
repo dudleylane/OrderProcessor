@@ -13,14 +13,11 @@
 #pragma once
 
 #include "TransactionDef.h"
+#include "StateMachine.h"
 
 namespace COP{
 
 	struct OrderEntry;
-	
-	namespace OrdState{
-		class OrderState;
-	}
 
 namespace Proc{
 

@@ -28,10 +28,6 @@ namespace COP{
 		class OrderDataStorage;
 	}
 
-	namespace OrdState{
-		class OrderState;
-	}
-
 	namespace ACID{
 		class TransactionManager;
 	}

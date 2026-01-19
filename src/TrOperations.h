@@ -130,11 +130,11 @@ namespace COP{
 		template<typename T>
 		class EnqueueOrderEventTrOperation: public Operation{
 		public:
-			EnqueueOrderEventTrOperation(const OrderEntry &order, typename T const& evnt):
+			EnqueueOrderEventTrOperation(const OrderEntry &order, const T& evnt):
 				Operation(ENQUEUE_EVENT_TROPERATION, order.orderId_), event_(evnt){}
-			EnqueueOrderEventTrOperation(const OrderEntry &order, typename T const& evnt, const IdT &instrId):
+			EnqueueOrderEventTrOperation(const OrderEntry &order, const T& evnt, const IdT &instrId):
 				Operation(ENQUEUE_EVENT_TROPERATION, order.orderId_, instrId), event_(evnt){}
-				
+
 			~EnqueueOrderEventTrOperation(){}
 
 			virtual void execute(const Context &cnxt){
@@ -144,7 +144,7 @@ namespace COP{
 				rollbackEnqueueOrderEvent(event_, cnxt);
 			}
 		private:
-			typename T event_;
+			T event_;
 		};
 
 		class CancelRejectTrOperation: public Operation{

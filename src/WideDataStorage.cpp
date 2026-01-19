@@ -31,7 +31,7 @@ WideParamsDataStorage::~WideParamsDataStorage(void)
 {
 	InstrumentsT tmp;
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		std::swap(tmp, instruments_);
 	}
 	for(InstrumentsT::iterator it = tmp.begin(); it != tmp.end(); ++it)
@@ -50,7 +50,7 @@ void WideParamsDataStorage::bindStorage(DataSaver *storage)
 
 void WideParamsDataStorage::get(const SourceIdT &id, StringT *val)const
 {
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	StringsT::const_iterator it = strings_.find(id);
 	if(strings_.end() == it)
 		throw std::runtime_error("WideParamsDataStorage::get(StringT): string not found!");
@@ -59,7 +59,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, StringT *val)const
 
 void WideParamsDataStorage::get(const SourceIdT &id, RawDataEntry *val)const
 {
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	RawDataT::const_iterator it = rawDatas_.find(id);
 	if(rawDatas_.end() == it)
 		throw std::runtime_error("WideParamsDataStorage::get(RawDataEntry): rawData not found!");
@@ -69,7 +69,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, RawDataEntry *val)const
 void WideParamsDataStorage::get(const SourceIdT &id, InstrumentEntry *val)const
 {
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		InstrumentsT::const_iterator it = instruments_.find(id);
 		if(instruments_.end() == it)
 			throw std::runtime_error("WideParamsDataStorage::get(InstrumentEntry): instrument not found!");
@@ -79,7 +79,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, InstrumentEntry *val)const
 
 void WideParamsDataStorage::get(const SourceIdT &id, AccountEntry *val)const
 {
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	AccountsT::const_iterator it = accounts_.find(id);
 	if(accounts_.end() == it)
 		throw std::runtime_error("WideParamsDataStorage::get(AccountEntry): account not found!");
@@ -87,7 +87,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, AccountEntry *val)const
 }
 void WideParamsDataStorage::get(const SourceIdT &id, ClearingEntry *val)const
 {
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	ClearingsT::const_iterator it = clearings_.find(id);
 	if(clearings_.end() == it)
 		throw std::runtime_error("WideParamsDataStorage::get(ClearingEntry): clearing not found!");
@@ -98,7 +98,7 @@ SourceIdT WideParamsDataStorage::add(InstrumentEntry *val)
 {
 	SourceIdT id(subscrCounter_.fetch_add(1), 1);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		instruments_.insert(InstrumentsT::value_type(id, val));
 		val->id_ = id;
 	}
@@ -114,7 +114,7 @@ SourceIdT WideParamsDataStorage::add(StringT *val)
 
 	SourceIdT id(subscrCounter_.fetch_add(1), 0);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		strings_.insert(StringsT::value_type(id, val));
 	}
 	if(nullptr != storage_)
@@ -127,7 +127,7 @@ SourceIdT WideParamsDataStorage::add(RawDataEntry *val)
 {
 	SourceIdT id(subscrCounter_.fetch_add(1), 1);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		rawDatas_.insert(RawDataT::value_type(id, val));
 		val->id_ = id;
 	}
@@ -141,7 +141,7 @@ SourceIdT WideParamsDataStorage::add(AccountEntry *val)
 {
 	SourceIdT id(subscrCounter_.fetch_add(1), 1);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		accounts_.insert(AccountsT::value_type(id, val));
 		val->id_ = id;
 	}
@@ -155,7 +155,7 @@ SourceIdT WideParamsDataStorage::add(ClearingEntry *val)
 {
 	SourceIdT id(subscrCounter_.fetch_add(1), 1);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		clearings_.insert(ClearingsT::value_type(id, val));
 		val->id_ = id;
 	}
@@ -167,7 +167,7 @@ SourceIdT WideParamsDataStorage::add(ClearingEntry *val)
 
 void WideParamsDataStorage::get(const SourceIdT &id, ExecutionsT **val)const
 {
-	mutex::scoped_lock lock(lock_);
+	tbb::mutex::scoped_lock lock(lock_);
 	ExecutionListsT::const_iterator it = executions_.find(id);
 	if(executions_.end() == it)
 		throw std::runtime_error("WideParamsDataStorage::get(ExecutionsT): execution list not found!");
@@ -178,7 +178,7 @@ SourceIdT WideParamsDataStorage::add(ExecutionsT *val)
 {
 	SourceIdT id(subscrCounter_.fetch_add(1), 1);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		executions_.insert(ExecutionListsT::value_type(id, val));
 		//val->id_ = id;
 	}
@@ -193,7 +193,7 @@ void WideParamsDataStorage::restore(InstrumentEntry *val)
 	if(subscrCounter_ < val->id_.id_)
 		subscrCounter_.store(val->id_.id_ + 1);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		instruments_.insert(InstrumentsT::value_type(val->id_, val));
 	}
 }
@@ -203,7 +203,7 @@ void WideParamsDataStorage::restore(const IdT& id, StringT *val)
 	if(subscrCounter_ < id.id_)
 		subscrCounter_.store(id.id_ + 1);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		strings_.insert(StringsT::value_type(id, val));
 	}
 }
@@ -213,7 +213,7 @@ void WideParamsDataStorage::restore(RawDataEntry *val)
 	if(subscrCounter_ < val->id_.id_)
 		subscrCounter_.store(val->id_.id_ + 1);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		rawDatas_.insert(RawDataT::value_type(val->id_, val));
 	}
 }
@@ -223,7 +223,7 @@ void WideParamsDataStorage::restore(AccountEntry *val)
 	if(subscrCounter_ < val->id_.id_)
 		subscrCounter_.store(val->id_.id_ + 1);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		accounts_.insert(AccountsT::value_type(val->id_, val));
 	}
 }
@@ -233,7 +233,7 @@ void WideParamsDataStorage::restore(ClearingEntry *val)
 	if(subscrCounter_ < val->id_.id_)
 		subscrCounter_.store(val->id_.id_ + 1);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		clearings_.insert(ClearingsT::value_type(val->id_, val));
 	}
 }

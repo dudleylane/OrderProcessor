@@ -10,9 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
-#define _USE_32BIT_TIME_T
-#include <time.h>
-#include <sys/timeb.h>
+#include <ctime>
 #include "IdTGenerator.h"
 
 using namespace COP;
@@ -27,7 +25,6 @@ IdTValueGenerator::~IdTValueGenerator(void)
 }
 
 IdT IdTValueGenerator::getId(){
-	__time32_t ltime;
-	_time32( &ltime );
+	std::time_t ltime = std::time(nullptr);
 	return IdT(counter_.fetch_add(1), static_cast<u32>(ltime));
 }

@@ -53,7 +53,7 @@ void SubscrManager::addSubscription(const std::string &name, OrderFilter *filter
 	InstrumentEntry instr;
 	bool isGeneral = !filter->getInstrument(&instr);
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		availableSubscriptions_.insert(val);
 		SubscriptionsBySubscriberT::iterator sit = subscriptionsBySubscriber_.find(handlerId);
 		if(subscriptionsBySubscriber_.end() == sit){
@@ -79,7 +79,7 @@ void SubscrManager::addSubscription(const std::string &name, OrderFilter *filter
 void SubscrManager::removeSubscriptions(const SubscriberIdT &handlerId){
 	SubscriptionsListT lst;
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		SubscriptionsByHandlerT::iterator it = subscriptionsByHandler_.find(handlerId);
 		if(subscriptionsByHandler_.end() == it)
 			return;
@@ -111,7 +111,7 @@ void SubscrManager::removeSubscriptions(const SubscriberIdT &handlerId){
 void SubscrManager::getSubscribers(const OrderEntry &order, MatchedSubscribersT *subscribers)const
 {
 	{
-		mutex::scoped_lock lock(lock_);
+		tbb::mutex::scoped_lock lock(lock_);
 		for(SubscriptionsBySubscriberT::const_iterator hit = subscriptionsBySubscriber_.begin(); 
 			hit != subscriptionsBySubscriber_.end(); ++hit){
 			assert(TOTAL_SUBSCRIPTION == hit->second.size());

@@ -35,8 +35,9 @@ TEST_F(NLinkTreeTest, AddSingleNode) {
     int readyToExecute = 0;
     DependObjs deps;
     Transaction* tr = nullptr;
+    COP::IdT key(1, 20260119);  // id=1, date=20260119
 
-    bool result = tree_->add(1, tr, deps, &readyToExecute);
+    bool result = tree_->add(key, tr, deps, &readyToExecute);
     EXPECT_TRUE(result);
 }
 

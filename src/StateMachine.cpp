@@ -26,7 +26,7 @@ namespace{
 			"CnclReplaced", "Rejected"};
 }
 
-const std::string &OrderState::getStateName(int idx)
+const std::string &OrderState_::getStateName(int idx)
 {
 	if(STATE_SIZE <= idx)
 		throw std::runtime_error("Invalid index of the state's name!");
@@ -35,32 +35,39 @@ const std::string &OrderState::getStateName(int idx)
 
 
 
-OrderState::OrderState():orderData_(nullptr)
+OrderState_::OrderState_():orderData_(nullptr)
 {}
 
-OrderState::OrderState(OrderEntry *orderData): orderData_(orderData)
+OrderState_::OrderState_(OrderEntry *orderData): orderData_(orderData)
 {}
 
-OrderState::~OrderState()
+OrderState_::~OrderState_()
 {}
 
-OrderStatePersistence OrderState::getPersistence()const
+OrderStatePersistence OrderState_::getPersistence()const
 {
+	// Cast to back-end to access state machine internals
+	// This is safe because getPersistence is only called on the back-end object
+	const auto* backend = static_cast<const OrderState*>(this);
 	OrderStatePersistence st;
 	st.orderData_ = orderData_;
-	st.stateZone1Id_ = current_state()[0];
-	st.stateZone2Id_ = current_state()[1];
+	st.stateZone1Id_ = backend->current_state()[0];
+	st.stateZone2Id_ = backend->current_state()[1];
 	return st;
 }
 
-void OrderState::setPersistance(const OrderStatePersistence &st)
+void OrderState_::setPersistance(const OrderStatePersistence &st)
 {
+	// Cast to back-end to access state machine internals
+	auto* backend = static_cast<OrderState*>(this);
 	orderData_ = st.orderData_;
-	m_states[0] = st.stateZone1Id_;
-	m_states[1] = st.stateZone2Id_;
+	// Direct write to state array (const_cast is needed as current_state() returns const)
+	auto* states = const_cast<int*>(backend->current_state());
+	states[0] = st.stateZone1Id_;
+	states[1] = st.stateZone2Id_;
 }
 
-void OrderState::receive(onOrderReceived const &evnt)
+void OrderState_::receive(onOrderReceived const &evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
@@ -72,12 +79,12 @@ void OrderState::receive(onOrderReceived const &evnt)
 	}catch(const std::exception &ex){
 		onRecvOrderRejected newEvnt(evnt, evnt.order_, ex.what());
 		newEvnt.order4StateMachine_ = orderData_;
-		this->process_event(newEvnt);
+		static_cast<OrderState*>(this)->process_event(newEvnt);
 		throw;
 	}
 }
 
-void OrderState::receive(onRplOrderReceived const &evnt)
+void OrderState_::receive(onRplOrderReceived const &evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
@@ -89,13 +96,13 @@ void OrderState::receive(onRplOrderReceived const &evnt)
 	}catch(const std::exception &ex){
 		onRecvRplOrderRejected newEvnt(evnt, evnt.order_, ex.what());
 		newEvnt.order4StateMachine_ = orderData_;
-		this->process_event(newEvnt);
+		static_cast<OrderState*>(this)->process_event(newEvnt);
 		throw;
 	}
 }
 
 
-void OrderState::accept(onExternalOrder const&evnt)
+void OrderState_::accept(onExternalOrder const&evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
@@ -106,13 +113,13 @@ void OrderState::accept(onExternalOrder const&evnt)
 	}catch(const std::exception &ex){
 		onExternalOrderRejected newEvnt(evnt, evnt.order_, ex.what());
 		newEvnt.order4StateMachine_ = orderData_;
-		this->process_event(newEvnt);
+		static_cast<OrderState*>(this)->process_event(newEvnt);
 		throw;
 	}
 
 }
 
-void OrderState::reject(onExternalOrderRejected const&evnt)
+void OrderState_::reject(onExternalOrderRejected const&evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
@@ -121,7 +128,7 @@ void OrderState::reject(onExternalOrderRejected const&evnt)
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::reject(onReplaceRejected const &evnt){
+void OrderState_::reject(onReplaceRejected const &evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -129,7 +136,7 @@ void OrderState::reject(onReplaceRejected const &evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::reject(onCancelRejected const &evnt){
+void OrderState_::reject(onCancelRejected const &evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -137,11 +144,11 @@ void OrderState::reject(onCancelRejected const &evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::accept(onReplace const&evnt){
+void OrderState_::accept(onReplace const&evnt){
 	if(evnt.testStateMachine_){
 		if(!evnt.testStateMachineCheckResult_){
 			onRplOrderRejected newEvnt(evnt, "Test reject");
-			this->process_event(newEvnt);
+			static_cast<OrderState*>(this)->process_event(newEvnt);
 			throw std::runtime_error("Test reject");
 		}
 		return;
@@ -153,13 +160,13 @@ void OrderState::accept(onReplace const&evnt){
 	}catch(const std::exception &ex){
 		onRplOrderRejected newEvnt(evnt, ex.what());
 		newEvnt.order4StateMachine_ = orderData_;
-		this->process_event(newEvnt);
+		static_cast<OrderState*>(this)->process_event(newEvnt);
 		throw;
 	}
 
 }
 
-bool OrderState::notexecuted(onTradeExecution const &evnt){
+bool OrderState_::notexecuted(onTradeExecution const &evnt){
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
 
@@ -168,7 +175,7 @@ bool OrderState::notexecuted(onTradeExecution const &evnt){
 	return res;
 }
 
-bool OrderState::notexecuted(onTradeCrctCncl const &evnt){
+bool OrderState_::notexecuted(onTradeCrctCncl const &evnt){
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
 
@@ -177,7 +184,7 @@ bool OrderState::notexecuted(onTradeCrctCncl const &evnt){
 	return res;
 }
 
-bool OrderState::notexecuted(onNewDay const &evnt){
+bool OrderState_::notexecuted(onNewDay const &evnt){
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
 
@@ -186,7 +193,7 @@ bool OrderState::notexecuted(onNewDay const &evnt){
 	return res;
 }
 
-bool OrderState::notexecuted(onContinue const &evnt){
+bool OrderState_::notexecuted(onContinue const &evnt){
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
 
@@ -195,7 +202,7 @@ bool OrderState::notexecuted(onContinue const &evnt){
 	return res;
 }
 
-bool OrderState::complete(onTradeExecution const &evnt){
+bool OrderState_::complete(onTradeExecution const &evnt){
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
 
@@ -204,7 +211,7 @@ bool OrderState::complete(onTradeExecution const &evnt){
 	return res;
 }
 
-void OrderState::corrected(onTradeCrctCncl const &evnt){
+void OrderState_::corrected(onTradeCrctCncl const &evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -213,7 +220,7 @@ void OrderState::corrected(onTradeCrctCncl const &evnt){
 }
 
 
-void OrderState::correctedWithoutRestore(onTradeCrctCncl const &evnt){
+void OrderState_::correctedWithoutRestore(onTradeCrctCncl const &evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -221,7 +228,7 @@ void OrderState::correctedWithoutRestore(onTradeCrctCncl const &evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::expire(onExpired const&evnt){
+void OrderState_::expire(onExpired const&evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -229,7 +236,7 @@ void OrderState::expire(onExpired const&evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::cancel(onCanceled const&evnt){
+void OrderState_::cancel(onCanceled const&evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -237,7 +244,7 @@ void OrderState::cancel(onCanceled const&evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::restored(onNewDay const &evnt){
+void OrderState_::restored(onNewDay const &evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -245,7 +252,7 @@ void OrderState::restored(onNewDay const &evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::continued(onContinue const &evnt){
+void OrderState_::continued(onContinue const &evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -253,7 +260,7 @@ void OrderState::continued(onContinue const &evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::finished(onFinished const&evnt){
+void OrderState_::finished(onFinished const&evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -261,7 +268,7 @@ void OrderState::finished(onFinished const&evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::suspended(onSuspended const&evnt){
+void OrderState_::suspended(onSuspended const&evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -269,7 +276,7 @@ void OrderState::suspended(onSuspended const&evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::canceled(onExecCancel const&evnt){
+void OrderState_::canceled(onExecCancel const&evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -277,7 +284,7 @@ void OrderState::canceled(onExecCancel const&evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::canceled(onInternalCancel const&evnt){
+void OrderState_::canceled(onInternalCancel const&evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -285,7 +292,7 @@ void OrderState::canceled(onInternalCancel const&evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::replaced(onExecReplace const&evnt){
+void OrderState_::replaced(onExecReplace const&evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -293,7 +300,7 @@ void OrderState::replaced(onExecReplace const&evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::receive(onReplaceReceived const&evnt){
+void OrderState_::receive(onReplaceReceived const&evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -301,7 +308,7 @@ void OrderState::receive(onReplaceReceived const&evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-bool OrderState::acceptable(onReplaceReceived const&evnt){
+bool OrderState_::acceptable(onReplaceReceived const&evnt){
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
 
@@ -310,7 +317,7 @@ bool OrderState::acceptable(onReplaceReceived const&evnt){
 	return res;
 }
 
-void OrderState::receive(onCancelReceived const&evnt){
+void OrderState_::receive(onCancelReceived const&evnt){
 	if(evnt.testStateMachine_)
 		return;
 
@@ -318,7 +325,7 @@ void OrderState::receive(onCancelReceived const&evnt){
 	evnt.order4StateMachine_ = orderData_;
 }
 
-bool OrderState::acceptable(onCancelReceived const&evnt){
+bool OrderState_::acceptable(onCancelReceived const&evnt){
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
 
@@ -327,12 +334,12 @@ bool OrderState::acceptable(onCancelReceived const&evnt){
 	return res;
 }
 
-void OrderState::accept(onOrderAccepted const &evnt)
+void OrderState_::accept(onOrderAccepted const &evnt)
 {
 	if(evnt.testStateMachine_){
 		if(!evnt.testStateMachineCheckResult_){
 			onOrderRejected newEvnt(evnt, "Test reject");
-			this->process_event(newEvnt);
+			static_cast<OrderState*>(this)->process_event(newEvnt);
 			throw std::runtime_error("Test reject");
 		}
 		return;
@@ -344,12 +351,12 @@ void OrderState::accept(onOrderAccepted const &evnt)
 	}catch(const std::exception &ex){
 		onOrderRejected newEvnt(evnt, ex.what());
 		newEvnt.order4StateMachine_ = orderData_;
-		this->process_event(newEvnt);
+		static_cast<OrderState*>(this)->process_event(newEvnt);
 		throw;
 	}
 }
 
-/*bool OrderState::acceptable(onOrderAccepted const &evnt)
+/*bool OrderState_::acceptable(onOrderAccepted const &evnt)
 {
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
@@ -359,7 +366,7 @@ void OrderState::accept(onOrderAccepted const &evnt)
 	return res;
 }*/
 
-void OrderState::reject(onRplOrderRejected const&evnt)
+void OrderState_::reject(onRplOrderRejected const&evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
@@ -369,7 +376,7 @@ void OrderState::reject(onRplOrderRejected const&evnt)
 }
 
 
-void OrderState::reject(onOrderRejected const&evnt)
+void OrderState_::reject(onOrderRejected const&evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
@@ -378,7 +385,7 @@ void OrderState::reject(onOrderRejected const&evnt)
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::rejectNew(onOrderRejected const&evnt)
+void OrderState_::rejectNew(onOrderRejected const&evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
@@ -387,7 +394,7 @@ void OrderState::rejectNew(onOrderRejected const&evnt)
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::reject(onRecvOrderRejected const&evnt)
+void OrderState_::reject(onRecvOrderRejected const&evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
@@ -396,7 +403,7 @@ void OrderState::reject(onRecvOrderRejected const&evnt)
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::fill(onTradeExecution const&evnt)
+void OrderState_::fill(onTradeExecution const&evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
@@ -405,7 +412,7 @@ void OrderState::fill(onTradeExecution const&evnt)
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::reject(onRecvRplOrderRejected const&evnt)
+void OrderState_::reject(onRecvRplOrderRejected const&evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
@@ -414,7 +421,7 @@ void OrderState::reject(onRecvRplOrderRejected const&evnt)
 	evnt.order4StateMachine_ = orderData_;
 }
 
-void OrderState::expire(onRplOrderExpired const&evnt)
+void OrderState_::expire(onRplOrderExpired const&evnt)
 {
 	if(evnt.testStateMachine_)
 		return;

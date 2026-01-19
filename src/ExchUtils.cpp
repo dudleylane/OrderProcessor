@@ -12,6 +12,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <climits>
 #include <thread>
 #include <chrono>
 #include "ExchUtils.h"
@@ -179,6 +180,43 @@ char *toStr(char *buf, int val, size_t pos){
 	return toStr(buf, val);
 }
 
+char *toStr(char *buf, COP::u32 val){
+	assert(nullptr != buf);
+	return toStr(buf, static_cast<size_t>(val));
+}
+
+char *toStr(char *buf, COP::u32 val, size_t pos){
+	buf[0] = 0;
+	size_t usePos = 0;
+	if(val < 10)
+		usePos = 1;
+	else if(val < 100)
+		usePos = 2;
+	else if(val < 1000)
+		usePos = 3;
+	else if(val < 10000)
+		usePos = 4;
+	else if(val < 100000)
+		usePos = 5;
+	else if(val < 1000000)
+		usePos = 6;
+	else if(val < 10000000)
+		usePos = 7;
+	else if(val < 100000000)
+		usePos = 8;
+	else if(val < 1000000000)
+		usePos = 9;
+	else
+		usePos = 10;
+	if(usePos < pos){
+		for(size_t i = usePos; i < pos; ++i)
+			buf = append(buf, 0);
+	}
+	return toStr(buf, static_cast<size_t>(val));
+}
+
+// u64 and i64 overloads only if different from size_t (Windows or 32-bit systems)
+#if defined(_WIN32) || ULONG_MAX == 0xFFFFFFFF
 char *toStr(char *buf, COP::u64 val){
 	assert(nullptr != buf);
 	buf[0] = 0;
@@ -265,6 +303,7 @@ char *toStr(char *buf, COP::i64 val){
 	}
 	return toStr(buf, static_cast<COP::u64>(val));
 }
+#endif // _WIN32 || 32-bit
 
 COP::DateTimeT currentDateTime()
 {

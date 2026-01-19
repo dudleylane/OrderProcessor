@@ -15,9 +15,9 @@
 #include <stdexcept>
 #include <cassert>
 #include <algorithm>
+#include "StateMachine.h"
 #include "OrderMatcher.h"
 #include "TransactionDef.h"
-#include "StateMachine.h"
 #include "TransactionScope.h"
 #include "DataModelDef.h"
 #include "OrderStorage.h"
