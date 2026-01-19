@@ -1,0 +1,188 @@
+/**
+ Concurrent Order Processor library
+
+ Author: Sergey Mikhailik
+
+ Copyright (C) 2009 Sergey Mikhailik
+
+ Distributed under the GNU General Public License (GPL).
+
+ See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
+*/
+
+#include "OrderStorage.h"
+#include "DataModelDef.h"
+#include "IdTGenerator.h"
+#include "Logger.h"
+
+using namespace COP;
+using namespace tbb;
+using namespace std;
+using namespace COP::Store;
+
+OrderDataStorage::OrderDataStorage(): saver_(NULL)
+{
+	aux::ExchLogger::instance()->note("OrderDataStorage created");
+}
+
+void OrderDataStorage::attach(OrderSaver *saver){
+	assert(NULL == saver_);
+	saver_ = saver;
+}
+
+OrderDataStorage::~OrderDataStorage(void)
+{
+	aux::ExchLogger::instance()->note("OrderDataStorage destroying");
+	OrdersByIDT tmp;
+	{
+		mutex::scoped_lock lock(orderLock_);
+		std::swap(tmp, ordersById_);
+		ordersByClId_.clear();
+	}
+	for(OrdersByIDT::iterator it = tmp.begin(); it != tmp.end(); ++it)
+		delete it->second;
+
+	ExecByIDT execTmp;
+	{
+		mutex::scoped_lock lock(execLock_);
+		std::swap(execTmp, executionsById_);
+	}
+	for(ExecByIDT::iterator it = execTmp.begin(); it != execTmp.end(); ++it)
+		delete it->second;
+	aux::ExchLogger::instance()->note("OrderDataStorage destroyed");
+}
+
+OrderEntry *OrderDataStorage::locateByClOrderId(const RawDataEntry &clOrderId)const
+{
+	mutex::scoped_lock lock(orderLock_);
+	OrdersByClientIDT::const_iterator it = ordersByClId_.find(clOrderId);
+	if(ordersByClId_.end() == it)
+		return NULL;
+	return it->second;
+}
+
+OrderEntry *OrderDataStorage::locateByOrderId(const IdT &orderId)const
+{
+	/// changed for concurrent_hash_map
+	mutex::scoped_lock lock(orderLock_);
+	OrdersByIDT::const_iterator it = ordersById_.find(orderId);
+	if(ordersById_.end() == it)
+		return NULL;
+	return it->second;
+}
+
+OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *idGenerator)
+{
+	if(aux::ExchLogger::instance()->isNoteOn())
+		aux::ExchLogger::instance()->note("OrderDataStorage saving order");
+
+	assert(NULL != idGenerator);
+	{
+		mutex::scoped_lock lock(orderLock_);
+		if((order.orderId_.isValid())&&(ordersById_.end() != ordersById_.find(order.orderId_)))
+			throw std::exception("Unable to save order - order with same OrderId already exists.");
+		
+		if(0 == order.clOrderId_.get().length_)
+			throw std::exception("Unable to save order - order contains empty ClOrderId.");
+		if(ordersByClId_.end() != ordersByClId_.find(order.clOrderId_.get()))
+			throw std::exception("Unable to save order - order with same ClOrderId already exists.");
+
+		auto_ptr<OrderEntry> cp(order.clone());
+		if(!cp->orderId_.isValid())
+			cp->orderId_ = idGenerator->getId();
+		int st = 0;
+		try{
+			ordersById_.insert(OrdersByIDT::value_type(cp->orderId_, cp.get()));
+			st = 1;
+			ordersByClId_.insert(OrdersByClientIDT::value_type(cp->clOrderId_.get(), cp.get()));
+			st = 2;
+			if(NULL != saver_)
+				saver_->save(*cp.get());
+			return cp.release();
+		}catch(...){
+			switch(st){
+			case 2:
+				ordersByClId_.erase(order.clOrderId_.get());
+			case 1:
+				ordersById_.erase(order.orderId_);
+			}
+			throw;
+		}
+	}
+}
+
+void OrderDataStorage::restore(OrderEntry *order)
+{
+	if(aux::ExchLogger::instance()->isNoteOn())
+		aux::ExchLogger::instance()->note("OrderDataStorage restoring order");
+
+	{
+		mutex::scoped_lock lock(orderLock_);
+		if((order->orderId_.isValid())&&(ordersById_.end() != ordersById_.find(order->orderId_)))
+			throw std::exception("Unable to restore order - order with same OrderId already exists.");
+		if(0 == order->clOrderId_.get().length_)
+			throw std::exception("Unable to restore order - order contains empty ClOrderId.");
+		if(ordersByClId_.end() != ordersByClId_.find(order->clOrderId_.get()))
+			throw std::exception("Unable to restore order - order with same ClOrderId already exists.");
+
+		int st = 0;
+		try{
+			ordersById_.insert(OrdersByIDT::value_type(order->orderId_, order));
+			st = 1;
+			ordersByClId_.insert(OrdersByClientIDT::value_type(order->clOrderId_.get(), order));
+			st = 2;
+			if(NULL != saver_)
+				saver_->save(*order);
+			return;
+		}catch(...){
+			switch(st){
+			case 2:
+				ordersByClId_.erase(order->clOrderId_.get());
+			case 1:
+				ordersById_.erase(order->orderId_);
+			}
+			throw;
+		}
+	}
+}
+
+ExecutionEntry *OrderDataStorage::locateByExecId(const IdT &execId)const
+{
+	mutex::scoped_lock lock(execLock_);
+	ExecByIDT::const_iterator it = executionsById_.find(execId);
+	if(executionsById_.end() == it)
+		return NULL;
+	return it->second;
+}
+
+void OrderDataStorage::save(const ExecutionEntry *exec)
+{
+	if(aux::ExchLogger::instance()->isNoteOn())
+		aux::ExchLogger::instance()->note("OrderDataStorage saving execution");
+
+	mutex::scoped_lock lock(execLock_);
+	if(executionsById_.end() != executionsById_.find(exec->execId_))
+		throw std::exception("Unable to save execution - execution with same ExecId already exists.");
+	executionsById_.insert(ExecByIDT::value_type(exec->execId_, exec->clone()));
+	//assert(NULL != saver_);
+	//saver_->save(*cp.get());
+}
+
+ExecutionEntry *OrderDataStorage::save(const ExecutionEntry &exec, IdTValueGenerator *idGenerator)
+{
+	if(aux::ExchLogger::instance()->isNoteOn())
+		aux::ExchLogger::instance()->note("OrderDataStorage saving execution 2");
+
+	assert(NULL != idGenerator);
+	mutex::scoped_lock lock(execLock_);
+	if((exec.execId_.isValid())&&(executionsById_.end() != executionsById_.find(exec.execId_)))
+		throw std::exception("Unable to save execution - execution with same ExecId already exists.");
+
+	auto_ptr<ExecutionEntry> cp(exec.clone());
+	if(!cp->execId_.isValid())
+		cp->execId_ = idGenerator->getId();
+	executionsById_.insert(ExecByIDT::value_type(cp->execId_, cp.get()));
+	//assert(NULL != saver_);
+	//saver_->save(*cp.get());
+	return cp.release();
+}

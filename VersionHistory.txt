@@ -1,0 +1,104 @@
+/**
+ Concurrent Order Processor library
+
+ Author: Sergey Mikhailik
+
+ Copyright (C) 2009 Sergey Mikhailik
+
+ Distributed under the GNU General Public License (GPL).
+
+ See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
+*/
+
+
+History of changes
+
+2010.Oct.01 v.0.0.0.20
+-----------------------------------------------------------------------------------------
+[*] Restored StateMachines tests.
+
+2010.Sep.15 v.0.0.0.19
+-----------------------------------------------------------------------------------------
+[*] Removed Pend_New order state, state is merged with New order state.
+
+2010.Sep.14 v.0.0.0.18
+-----------------------------------------------------------------------------------------
+[+] Logger extended with methods isDebugOn, isNoteOn, isWarnOn, isErrorOn and isFatalOn. 
+      Implementation was updated to use these methods.
+
+2010.Sep.08 v.0.0.0.17
+-----------------------------------------------------------------------------------------
+[-] Fixed memory leak with FileStorage::records_ - FileStorage::clear() updated
+[-] Fixed memory leak with ExecutionDeferedEvent - virtual destructor was missed
+
+2010.Sep.06 v.0.0.0.16
+-----------------------------------------------------------------------------------------
+[-] Fixed memory leak with TransactionScope - it not erased, when trasaction finished
+
+2010.Sep.04 v.0.0.0.15
+-----------------------------------------------------------------------------------------
+[+] Implemented wait-free InterlockCache
+
+2010.Aug.23 v.0.0.0.14
+-----------------------------------------------------------------------------------------
+[*] Tested with tbb::hash_map in OrderStorage
+
+2010.Aug.17 v.0.0.0.13
+-----------------------------------------------------------------------------------------
+[+] Added method TaskManager::waitUntilTransactionsFinished() to wait until processing finished
+
+2010.Aug.08 v.0.0.0.12
+-----------------------------------------------------------------------------------------
+[+] Added onInternalCancel event to switch state from NoCnlReplace to CnclReplaced, it 
+    required to cancel partially filled Market orders when market not available.
+
+2010.Aug.05 v.0.0.0.11
+-----------------------------------------------------------------------------------------
+[+] AddToOrderBookTrOperation operation does not created for the Market orders.
+[*] Code updated to remove some warnings during compile.
+
+2010.Jul.30 v.0.0.0.10
+-----------------------------------------------------------------------------------------
+[+] Added separate TrOperation for the Trade, Reject, Correct, Replace execReport processing. 
+    Add ExecReport events into the order's execution_ list. Tests corrected.
+
+2010.Jul.11 v.0.0.0.9
+-----------------------------------------------------------------------------------------
+[*] Added tests for persistance and codecs
+
+2010.Jun.23 v.0.0.0.8
+-----------------------------------------------------------------------------------------
+[+] Added Codecs for different entities
+[+] Added FileStorage to save data into persistent file
+[+] Added StorageRecordDispatcher to restore entities from file
+
+2010.Mar.10 v.0.0.0.7
+-----------------------------------------------------------------------------------------
+[-] Fixed TaskManager - NLinkedTree requires sequentional adding of the transactions 
+    (transactId should be continiosly increased)
+[*] added NLinkedTree::dumpTree
+
+2010.Mar.04 v.0.0.0.6
+-----------------------------------------------------------------------------------------
+[+] Added logging
+[-] Fixed NLinkedTree - root element contains list of children instead of set
+
+2009.Dec.29 v.0.0.0.5
+-----------------------------------------------------------------------------------------
+[+] Added NLinkedTree
+
+2009.Dec.19 v.0.0.0.4
+-----------------------------------------------------------------------------------------
+[+] Added verification of the market existance when MARKET order go to the Accepted state.
+
+2009.Dec.15 v.0.0.0.3
+-----------------------------------------------------------------------------------------
+[!] Member state_machine::m_states becomes protected to allow restore state of the state_machine.
+
+2009.Aug.21 v.0.0.0.2
+-----------------------------------------------------------------------------------------
+[+] Redesigned StateMachine implementation - logic moved to the OrdStateImpl
+
+2009.Aug.08 v.0.0.0.1
+-----------------------------------------------------------------------------------------
+[!] Initial version

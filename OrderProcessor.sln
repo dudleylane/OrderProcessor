@@ -1,0 +1,26 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 9.00
+# Visual Studio 2005
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OrderProcessor", "src\OrderProcessor.vcproj", "{5580AAE5-AE2A-4163-B4D9-CEECFD53580A}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OrderProcessorTest", "test\orderprocessortest.vcproj", "{A5A81EE3-07B0-4033-81CC-B427F2824D77}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5580AAE5-AE2A-4163-B4D9-CEECFD53580A}.Debug|Win32.ActiveCfg = Debug|Win32
+		{5580AAE5-AE2A-4163-B4D9-CEECFD53580A}.Debug|Win32.Build.0 = Debug|Win32
+		{5580AAE5-AE2A-4163-B4D9-CEECFD53580A}.Release|Win32.ActiveCfg = Release|Win32
+		{5580AAE5-AE2A-4163-B4D9-CEECFD53580A}.Release|Win32.Build.0 = Release|Win32
+		{A5A81EE3-07B0-4033-81CC-B427F2824D77}.Debug|Win32.ActiveCfg = Debug|Win32
+		{A5A81EE3-07B0-4033-81CC-B427F2824D77}.Debug|Win32.Build.0 = Debug|Win32
+		{A5A81EE3-07B0-4033-81CC-B427F2824D77}.Release|Win32.ActiveCfg = Release|Win32
+		{A5A81EE3-07B0-4033-81CC-B427F2824D77}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

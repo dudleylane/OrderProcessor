@@ -1,0 +1,30 @@
+/**
+ Concurrent Order Processor library
+
+ Author: Sergey Mikhailik
+
+ Copyright (C) 2009 Sergey Mikhailik
+
+ Distributed under the GNU General Public License (GPL).
+
+ See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
+*/
+
+ToDo list:
+
+ - merge pending_new and new events to increase processing time and decrease thread switching
+ - add weak transactions to able process dependant transactions concurently
+ - Review state machine, does onInternalCancel required for the Market orders only?
+ - check preparing correct ExecReport, CancelRequest messages
+ - check adding ExecReports into the OrderEntry::executions_  
+ - check order matching
+ - finish tests for the states
+ - finish test for the processor: when one order gone to finish state, can Processor continue process events?
+ - add logic for processing various order types
+ - add processing timer events
+ - add logic to enqueue event back into queue if processing IncomingQueues::pop fails
+ - change string reasons (reject also) to error codes
+ - add file (xml?) configuration, constants should be used as default values
+ * check thread-safe - concurent transactions applied to the same order
+ * port to the GCC compiler
+ - change OrderDataStorage::locateByOrderId() to use tbb hash_map container
