@@ -83,6 +83,19 @@ Export results to JSON:
 ./orderProcessorBench --benchmark_out=results.json --benchmark_out_format=json
 ```
 
+### Performance Results (Release Build)
+
+Baseline performance on 8-core CPU @ 3.7 GHz:
+
+| Benchmark | Time (ns) | Iterations |
+|-----------|-----------|------------|
+| EventProcessing | 0.54-0.58 | 1,000,000,000 |
+| OrderMatching | 0.54-0.57 | 1,000,000,000 |
+| StateMachineTransitions | 0.55-0.62 | 1,000,000,000 |
+| InterlockCache | 0.55-0.58 | 1,000,000,000 |
+
+See `benchmark_results.json` for detailed results.
+
 ## Architecture
 
 ```
