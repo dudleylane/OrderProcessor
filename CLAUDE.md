@@ -86,6 +86,20 @@ IncomingQueues → Processor → OrderStateMachine → OrderMatcher/OrderStorage
 | **TaskManager** | `src/TaskManager.cpp` | oneTBB-based parallel task scheduling |
 | **Logger** | `src/Logger.cpp` | spdlog-based logging |
 
+### Supporting Modules
+
+| Module | Location | Purpose |
+|--------|----------|---------|
+| **Codecs** | `src/*Codec.cpp` | Serialization: `AccountCodec`, `ClearingCodec`, `InstrumentCodec`, `OrderCodec`, `RawDataCodec`, `StringTCodec` |
+| **Filters** | `src/*Filter.cpp` | Order filtering: `EntryFilter`, `OrderFilter`, `FilterImpl` |
+| **Data Storage** | `src/OrderStorage.cpp`, `src/WideDataStorage.cpp` | Runtime order and reference data storage |
+| **Deferred Events** | `src/*DeferedEvent.cpp` | Async event handling: `CancelOrderDeferedEvent`, `ExecutionDeferedEvent`, `MatchOrderDeferedEvent` |
+| **Subscriptions** | `src/SubscriptionLayerImpl.cpp`, `src/SubscrManager.cpp` | Event subscription management |
+| **Utilities** | `src/IdTGenerator.cpp`, `src/ExchUtils.cpp`, `src/AllocateCache.cpp` | ID generation, exchange utilities, memory caching |
+| **State Definitions** | `src/OrderStates.cpp`, `src/TrOperations.cpp` | Order states and transaction operations |
+| **Queue Management** | `src/QueuesManager.cpp`, `src/EventManager.cpp` | Queue coordination and event dispatch |
+| **Type Definitions** | `src/DataModelDef.cpp` | Data model definitions |
+
 ### Key Entry Point
 
 The `Processor` class (`src/Processor.cpp`) is the central coordinator:
@@ -145,12 +159,19 @@ Tests are in `test/` using Google Test framework:
 - `StateMachineTest.cpp` - State machine transitions
 - `OrderBookTest.cpp` - Order book operations
 - `FileStorageTest.cpp` - Persistence tests
+- `StatesTest.cpp` - Order state tests
+- `StorageRecordDispatcherTest.cpp` - Storage dispatcher tests
+- `TaskManagerTest.cpp` - Task manager tests
 - `IntegrationTest.cpp` - Full integration tests
+
+Helper utilities: `TestAux.cpp/h`, `StateMachineHelper.cpp/h`
+
+### Legacy Test Files
+
+The `test/` directory contains legacy test files (`test*.cpp`) with original test implementations being migrated to Google Test format. These files are retained for reference during migration.
 
 Benchmarks in `bench/`:
 - `EventProcessingBench.cpp` - Event queue throughput
 - `OrderMatchingBench.cpp` - Order matching performance
 - `StateMachineBench.cpp` - State transition performance
 - `InterlockCacheBench.cpp` - Lock-free cache performance
-
-Helper utilities: `TestAux.cpp/h`, `StateMachineHelper.cpp/h`
