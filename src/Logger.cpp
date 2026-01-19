@@ -12,81 +12,46 @@
 
 #include "Logger.h"
 #include "ExchUtils.h"
-#include <tbb/mutex.h>
-#include <tbb/atomic.h>
-#include <sys/types.h>
-#include <sys/timeb.h>
-
-#define BOOST_LOG_COMPILE_FAST_OFF
-#include <boost/logging/logging.hpp>
-#include <boost/logging/format.hpp>
+#include <oneapi/tbb/mutex.h>
+#include <atomic>
+#include <chrono>
+#include <thread>
+#include <cstring>
+#include <sstream>
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 using namespace aux;
-using namespace boost::logging;
 
 namespace{
-	struct no_gather {
-		typedef const char* msg_type;
-
-		const char * m_msg;
-		no_gather() : m_msg(0) {}
-		const char * msg() const { return m_msg; }
-		void *out(const char* msg) { m_msg = msg; return this; }
-		void *out(const std::string& msg) { m_msg = msg.c_str(); return this; }
-	};
-
-	typedef logger< no_gather, destination::cout > out_log_type;
-	typedef logger< no_gather, destination::file > file_log_type;
-
-	BOOST_DEFINE_LOG_FILTER(g_log_filter, filter::no_ts ) 
-
-	BOOST_DEFINE_LOG(out_log, out_log_type)
-	BOOST_DEFINE_LOG_WITH_ARGS( exch_log, file_log_type, ("exchange.log") )
-
-	#define OUT_LOG_ BOOST_LOG_USE_SIMPLE_LOG_IF_FILTER(out_log(), g_log_filter()->is_enabled() ) 
-	#define EXCH_LOG_ BOOST_LOG_USE_SIMPLE_LOG_IF_FILTER(exch_log(), g_log_filter()->is_enabled() ) 
-
-	char *addTimeStamp(char *ptr){
-		__int64 ltime = 0;
-		_time64( &ltime );
-		struct tm *newtime = _gmtime64( &ltime );
-		struct _timeb tstruct;
-		_ftime( &tstruct ); 
-
-		/// format is YYYYMMDD-HH:MM:SS.sss
-		ptr = toStr(ptr, 1900 + newtime->tm_year);
-		ptr = toStr(ptr, newtime->tm_mon + 1, 2);
-		ptr = toStr(ptr, newtime->tm_mday, 2);
-		*ptr = '-'; ++ptr;
-		ptr = toStr(ptr, newtime->tm_hour, 2);
-		*ptr = ':'; ++ptr;
-		ptr = toStr(ptr, newtime->tm_min, 2);
-		*ptr = ':'; ++ptr;
-		ptr = toStr(ptr, newtime->tm_sec, 2);
-		*ptr = '.'; ++ptr;
-		ptr = toStr(ptr, tstruct.millitm, 3);
-		
-		return ptr;
-	}
-
 	const std::string DEBUG_PREFIX(": [Debug][");
 	const std::string NOTE_PREFIX(": [Note][");
 	const std::string WARN_PREFIX(": [Warn][");
 	const std::string ERROR_PREFIX(": [Error][");
 	const std::string FATAL_PREFIX(": [Fatal][");
 
-	char *prepareRecord(char *buf, const char *prefix, size_t prefixSize){
-		buf[0] = 0;
-		
-		///prepare record prefix: TimeStamp: [<Severity>][<ThreadId>] <message>
-		char *ptr = addTimeStamp(buf);
-		memcpy(ptr, prefix, prefixSize + 1); 
-		ptr += prefixSize;
+	std::string getTimestamp(){
+		auto now = std::chrono::system_clock::now();
+		auto time = std::chrono::system_clock::to_time_t(now);
+		auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			now.time_since_epoch()) % 1000;
 
-		ptr = toStr(ptr, static_cast<size_t>(GetCurrentThreadId()));
-		memcpy(ptr, "] \0", 3); ptr += 2;
-		
-		return ptr;
+		std::tm tm_time;
+		gmtime_r(&time, &tm_time);
+
+		char buf[32];
+		std::snprintf(buf, sizeof(buf), "%04d%02d%02d-%02d:%02d:%02d.%03d",
+			tm_time.tm_year + 1900, tm_time.tm_mon + 1, tm_time.tm_mday,
+			tm_time.tm_hour, tm_time.tm_min, tm_time.tm_sec,
+			static_cast<int>(ms.count()));
+		return std::string(buf);
+	}
+
+	std::string getThreadId(){
+		std::ostringstream ss;
+		ss << std::this_thread::get_id();
+		return ss.str();
 	}
 }
 
@@ -94,7 +59,8 @@ namespace aux{
 	const size_t BUFFER_SIZE = 256;
 	struct LoggerImpl{
 		char buf_[BUFFER_SIZE + 1];
-		mutable tbb::mutex lock_;
+		mutable oneapi::tbb::mutex lock_;
+		std::shared_ptr<spdlog::logger> logger_;
 
 		enum LoggingMask{
 			ALL_DISABLED_FLAG = 0,
@@ -105,33 +71,46 @@ namespace aux{
 			FATAL_ON_FLAG = 16,
 			ALL_ENABLED_FLAG = 31
 		};
-		tbb::atomic<char> loggingMask_;
+		std::atomic<char> loggingMask_;
 
 		LoggerImpl(){
-			loggingMask_.fetch_and_store(ALL_ENABLED_FLAG);
+			loggingMask_.store(ALL_ENABLED_FLAG);
+			try {
+				logger_ = spdlog::basic_logger_mt("exchange", "exchange.log");
+				logger_->set_pattern("%v");
+				logger_->flush_on(spdlog::level::info);
+			} catch (const spdlog::spdlog_ex& ex) {
+				// Fallback to stdout if file logging fails
+				logger_ = spdlog::stdout_color_mt("exchange");
+				logger_->set_pattern("%v");
+			}
+		}
+
+		~LoggerImpl(){
+			spdlog::drop("exchange");
 		}
 
 		void setFlag(bool enabled, char flag){
-			char before = LoggerImpl::ALL_DISABLED_FLAG, 
-				 current = LoggerImpl::ALL_DISABLED_FLAG;
+			char before = ALL_DISABLED_FLAG;
 			do{
-				before = loggingMask_;
+				before = loggingMask_.load();
 				char newVal = before;
 				if(enabled){
-					if(0 != (before&flag)) // flag already assigned
+					if(0 != (before&flag))
 						return;
 					newVal |= flag;
 				}else{
-					if(0 == (before&~flag)) //flag already removed
+					if(0 == (before&~flag))
 						return;
 					newVal &= ~flag;
 				}
-				current = loggingMask_.compare_and_swap(newVal, before);
-			}while(current != before);
+				if(loggingMask_.compare_exchange_strong(before, newVal))
+					return;
+			}while(true);
 		}
 
 		bool isFlag(char flag){
-			char mask = loggingMask_;
+			char mask = loggingMask_.load();
 			return 0 != (mask&flag);
 		}
 
@@ -139,50 +118,27 @@ namespace aux{
 			if(!isFlag(flag))
 				return;
 
-			//size_t msgLen = msg.size();
-			tbb::mutex::scoped_lock lock(lock_);
-
-			prepareRecord(buf_, prefix.c_str(), prefix.length());
-
-			/// write message to the log
-			EXCH_LOG_(buf_);
-			EXCH_LOG_(msg.c_str());
-			EXCH_LOG_("\n");
+			oneapi::tbb::mutex::scoped_lock lock(lock_);
+			std::string record = getTimestamp() + prefix + getThreadId() + "] " + msg;
+			logger_->info(record);
 		}
 
 		void logMessage(const char *msg, char flag, const std::string &prefix){
 			if(!isFlag(flag))
 				return;
 
-			size_t msgLen = strlen(msg);
-			tbb::mutex::scoped_lock lock(lock_);
-
-			char *ptr = prepareRecord(buf_, prefix.c_str(), prefix.length());
-
-			if(BUFFER_SIZE - (ptr - buf_) - 2 > msgLen){
-				strncat(ptr, msg, msgLen);
-				ptr[msgLen] = '\n';
-				ptr[msgLen + 1] = 0;
-				EXCH_LOG_(buf_);
-			}else{
-				EXCH_LOG_(buf_);
-				EXCH_LOG_(msg);
-				EXCH_LOG_("\n");
-			}
+			oneapi::tbb::mutex::scoped_lock lock(lock_);
+			std::string record = getTimestamp() + prefix + getThreadId() + "] " + msg;
+			logger_->info(record);
 		}
 
 		void logMessage(int val, char flag, const std::string &prefix){
 			if(!isFlag(flag))
 				return;
 
-			tbb::mutex::scoped_lock lock(lock_);
-
-			char *ptr = prepareRecord(buf_, prefix.c_str(), prefix.length());
-
-			ptr = toStr(ptr, val);
-			ptr[0] = '\n';
-			ptr[1] = 0;
-			EXCH_LOG_(buf_);
+			oneapi::tbb::mutex::scoped_lock lock(lock_);
+			std::string record = getTimestamp() + prefix + getThreadId() + "] " + std::to_string(val);
+			logger_->info(record);
 		}
 
 		void logMessage(LogMessage &msg, char flag, const std::string &prefix){
@@ -191,24 +147,9 @@ namespace aux{
 
 			msg.prepareMessage();
 
-			tbb::mutex::scoped_lock lock(lock_);
-
-			char *ptr = prepareRecord(buf_, prefix.c_str(), prefix.length());
-
-			/// write message to the log
-			size_t msgLen = 0;
-			const char *msgBuf = nullptr;
-			if((!msg.isBinary()) && (nullptr != (msgBuf = msg.getMessage(&msgLen))) && 
-				(BUFFER_SIZE - (ptr - buf_) - 2 > msgLen)){
-				strncat(ptr, msgBuf, msgLen);
-				ptr[msgLen] = '\n';
-				ptr[msgLen + 1] = 0;
-				EXCH_LOG_(buf_);
-			}else{
-				EXCH_LOG_(buf_);
-				EXCH_LOG_(msg.getMessage());
-				EXCH_LOG_("\n");
-			}
+			oneapi::tbb::mutex::scoped_lock lock(lock_);
+			std::string record = getTimestamp() + prefix + getThreadId() + "] " + msg.getMessage();
+			logger_->info(record);
 		}
 
 	};
@@ -216,9 +157,6 @@ namespace aux{
 
 Logger::Logger(void): impl_(nullptr)
 {
-    out_log()->mark_as_initialized();
-    exch_log()->mark_as_initialized();
-
 	impl_ = new LoggerImpl();
 
 	note("----------------------------------------------------------------------");

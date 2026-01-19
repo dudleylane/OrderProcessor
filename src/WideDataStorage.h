@@ -12,8 +12,8 @@
 
 #pragma once
 
-#include <tbb/mutex.h>
-#include <tbb/atomic.h>
+#include <oneapi/tbb/mutex.h>
+#include <atomic>
 #include <map>
 #include "Singleton.h"
 #include "FileStorageDef.h"
@@ -59,9 +59,9 @@ public:
 	virtual void restore(ExecutionsT *val);
 
 private:
-	mutable tbb::mutex lock_;
+	mutable oneapi::tbb::mutex lock_;
 
-	tbb::atomic<u64> subscrCounter_;
+	std::atomic<u64> subscrCounter_;
 
 	typedef std::map<SourceIdT, InstrumentEntry *> InstrumentsT;
 	InstrumentsT instruments_;

@@ -13,7 +13,7 @@
 #pragma once
 
 #include <map>
-#include <tbb/mutex.h>
+#include <oneapi/tbb/mutex.h>
 
 #include "DataModelDef.h"
 
@@ -42,10 +42,10 @@ namespace COP{
 		typedef std::multimap<PriceT, IdT, PriceTAscend> OrdersByPriceAscT;
 		typedef std::multimap<PriceT, IdT, PriceTDescend> OrdersByPriceDescT;
 		struct OrdersGroup{
-			mutable tbb::mutex buyLock_;
+			mutable oneapi::tbb::mutex buyLock_;
 			OrdersByPriceDescT buyOrder_;
 
-			mutable tbb::mutex sellLock_;
+			mutable oneapi::tbb::mutex sellLock_;
 			OrdersByPriceAscT sellOrder_;
 		};
 

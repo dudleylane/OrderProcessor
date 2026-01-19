@@ -24,8 +24,8 @@ using namespace COP::Queues;
 
 IncomingQueues::IncomingQueues(void)
 {
-	processor_.fetch_and_store(nullptr);
-	observer_.fetch_and_store(nullptr);
+	processor_.store(nullptr);
+	observer_.store(nullptr);
 
 	aux::ExchLogger::instance()->note("IncomingQueues created.");	
 }
@@ -39,18 +39,18 @@ IncomingQueues::~IncomingQueues(void)
 InQueueProcessor *IncomingQueues::attach(InQueueProcessor *obs)
 {
 	aux::ExchLogger::instance()->note("IncomingQueues attaching InQueueProcessor.");	
-	return processor_.fetch_and_store(obs);}
+	return processor_.store(obs);}
 
 InQueueProcessor *IncomingQueues::detachProcessor()
 {
 	aux::ExchLogger::instance()->note("IncomingQueues detaching InQueueProcessor.");	
-	return processor_.fetch_and_store(nullptr);
+	return processor_.store(nullptr);
 }
 
 InQueuesObserver *IncomingQueues::attach(InQueuesObserver *obs)
 {
 	aux::ExchLogger::instance()->note("IncomingQueues attaching InQueuesObserver.");
-	InQueuesObserver *obsOld = observer_.fetch_and_store(obs);
+	InQueuesObserver *obsOld = observer_.store(obs);
 	if((nullptr != observer_)&&(!processingQueue_.empty()))
 		observer_->onNewEvent();
 	return obsOld;
@@ -60,7 +60,7 @@ InQueuesObserver *IncomingQueues::attach(InQueuesObserver *obs)
 InQueuesObserver *IncomingQueues::detach()
 {
 	aux::ExchLogger::instance()->note("IncomingQueues detaching InQueuesObserver.");
-	return observer_.fetch_and_store(nullptr);
+	return observer_.store(nullptr);
 }
 
 u32 IncomingQueues::size()const

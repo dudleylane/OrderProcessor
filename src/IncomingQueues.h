@@ -12,8 +12,8 @@
 
 #pragma once
 
-#include <tbb/atomic.h>
-#include <tbb/mutex.h>
+#include <atomic>
+#include <oneapi/tbb/mutex.h>
 #include <map>
 #include <deque>
 
@@ -51,11 +51,11 @@ namespace Queues{
 		virtual bool pop(InQueueProcessor *obs);
 
 	private:
-		tbb::atomic<InQueueProcessor *> processor_;
-		tbb::atomic<InQueuesObserver *> observer_;
+		std::atomic<InQueueProcessor *> processor_;
+		std::atomic<InQueuesObserver *> observer_;
 		
 
-		mutable tbb::mutex lock_;
+		mutable oneapi::tbb::mutex lock_;
 
 		typedef std::deque<OrderEvent> OrderQueueT;
 		typedef std::deque<OrderCancelEvent> OrderCancelQueueT;

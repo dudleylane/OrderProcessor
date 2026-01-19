@@ -15,7 +15,7 @@
 #include <map>
 #include <deque>
 #include <vector>
-#include <tbb/mutex.h>
+#include <oneapi/tbb/mutex.h>
 #include "IdTGenerator.h"
 
 #include "FileStorageDef.h"
@@ -86,7 +86,7 @@ namespace COP{
 		FileStorage(const FileStorage &);
 		FileStorage &operator =(const FileStorage &);
 	private:
-		mutable tbb::mutex lock_;
+		mutable oneapi::tbb::mutex lock_;
 
 		FILE *file_;
 

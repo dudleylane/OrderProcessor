@@ -13,9 +13,11 @@
 #pragma once
 
 #include <vector>
-#include <tbb/mutex.h>
-#include <tbb/atomic.h>
-#include <tbb/task_scheduler_init.h>
+#include <atomic>
+#include <memory>
+#include <oneapi/tbb/mutex.h>
+#include <oneapi/tbb/global_control.h>
+#include <oneapi/tbb/task_group.h>
 
 #include "TasksDef.h"
 #include "QueuesDef.h"
@@ -70,11 +72,12 @@ public:
 	void taskFinishedTr();
 
 private:
-	mutable tbb::mutex lock_;
-	mutable tbb::mutex transactLock_;
-	mutable tbb::mutex eventLock_;
+	mutable oneapi::tbb::mutex lock_;
+	mutable oneapi::tbb::mutex transactLock_;
+	mutable oneapi::tbb::mutex eventLock_;
 
-	static tbb::task_scheduler_init scheduler_;
+	static std::unique_ptr<oneapi::tbb::global_control> scheduler_;
+	static oneapi::tbb::task_group taskGroup_;
 
 	ACID::TransactionManager *transactMgr_;
 	ACID::TransactionIterator *transactIt_;
@@ -82,20 +85,20 @@ private:
 	Queues::InQueuesContainer *inQueues_;
 
 	ACID::ProcessorPoolT transactProcessors_;
-	tbb::atomic<int> lastAvailableTransactProcessor_;
-	tbb::atomic<int> totalAvailableTransactProcessor_;
+	std::atomic<int> lastAvailableTransactProcessor_;
+	std::atomic<int> totalAvailableTransactProcessor_;
 
 	Queues::InQueueProcessorsPoolT evntProcessors_;
-	tbb::atomic<int> lastAvailableEvntProcessor_;
-	tbb::atomic<int> totalAvailableEvntProcessor_;
+	std::atomic<int> lastAvailableEvntProcessor_;
+	std::atomic<int> totalAvailableEvntProcessor_;
 
-	tbb::atomic<int> created_;
-	tbb::atomic<int> processed_;
-	tbb::atomic<int> finished_;
+	std::atomic<int> created_;
+	std::atomic<int> processed_;
+	std::atomic<int> finished_;
 
-	tbb::atomic<int> createdTr_;
-	tbb::atomic<int> processedTr_;
-	tbb::atomic<int> finishedTr_;
+	std::atomic<int> createdTr_;
+	std::atomic<int> processedTr_;
+	std::atomic<int> finishedTr_;
 
 };
 

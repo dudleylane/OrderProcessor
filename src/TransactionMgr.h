@@ -15,7 +15,7 @@
 #include <string>
 #include <memory>
 #include <deque>
-#include <tbb/mutex.h>
+#include <oneapi/tbb/mutex.h>
 
 #include "NLinkedTree.h"
 #include "TransactionDef.h"
@@ -58,7 +58,7 @@ public:
 	virtual bool isValid()const;
 
 private:
-	mutable tbb::mutex lock_;
+	mutable oneapi::tbb::mutex lock_;
 
 	IdTValueGenerator *idGenerator_;
 	bool started_;

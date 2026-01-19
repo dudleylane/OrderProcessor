@@ -14,8 +14,8 @@
 #include <iostream>
 #include <vector>
 #include <tbb/tick_count.h>
-#include <tbb/atomic.h>
-#include <tbb/mutex.h>
+#include <atomic>
+#include <oneapi/tbb/mutex.h>
 
 #include "TasksDef.h"
 #include "TransactionDef.h"
@@ -115,30 +115,30 @@ namespace{
 
 	class TestOutQueues: public Queues::OutQueues{
 	public:
-		TestOutQueues(): events_(), es_(){events_.fetch_and_store(0);}
+		TestOutQueues(): events_(), es_(){events_.store(0);}
 
 		virtual void push(const ExecReportEvent &, const std::string &){
-			if(EVENT_AMOUNT == events_.fetch_and_increment())
+			if(EVENT_AMOUNT == events_.fetch_add(1))
 				es_ = tick_count::now();
 			//mutex::scoped_lock lock(lock_);
 			//cout<< "ExecReport "<< evnt.type_<< endl;
 		}
 
 		virtual void push(const CancelRejectEvent &, const std::string &){
-			if(EVENT_AMOUNT == events_.fetch_and_increment())
+			if(EVENT_AMOUNT == events_.fetch_add(1))
 				es_ = tick_count::now();
 			//mutex::scoped_lock lock(lock_);
 			//cout<< "CancelReject "<< endl;
 		}
 		virtual void push(const BusinessRejectEvent &, const std::string &){
-			if(EVENT_AMOUNT == events_.fetch_and_increment())
+			if(EVENT_AMOUNT == events_.fetch_add(1))
 				es_ = tick_count::now();
 			//mutex::scoped_lock lock(lock_);
 			//cout<< "BusinessReject "<< endl;
 		}
-		tbb::atomic<int> events_;
+		std::atomic<int> events_;
 		tick_count es_;
-		tbb::mutex lock_;
+		oneapi::tbb::mutex lock_;
 	};
 }
 

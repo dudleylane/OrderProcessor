@@ -14,7 +14,7 @@
 
 #include "Singleton.h"
 #include "TypesDef.h"
-#include <tbb/mutex.h>
+#include <oneapi/tbb/mutex.h>
 #include <map>
 #include "DataModelDef.h"
 
@@ -43,7 +43,7 @@ public:
 	ExecutionEntry *save(const ExecutionEntry &exec, IdTValueGenerator *idGenerator);
 
 private:
-	mutable tbb::mutex orderLock_;
+	mutable oneapi::tbb::mutex orderLock_;
 
 	typedef std::map<IdT, OrderEntry *> OrdersByIDT;
 	OrdersByIDT ordersById_;
@@ -51,7 +51,7 @@ private:
 	typedef std::map<RawDataEntry, OrderEntry *> OrdersByClientIDT;
 	OrdersByClientIDT ordersByClId_;
 
-	mutable tbb::mutex execLock_;
+	mutable oneapi::tbb::mutex execLock_;
 	typedef std::map<SourceIdT, ExecutionEntry *> ExecByIDT;
 	ExecByIDT executionsById_;
 

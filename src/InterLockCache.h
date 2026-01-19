@@ -15,7 +15,7 @@
 
 #include <memory>
 #include <deque>
-#include <tbb/atomic.h>
+#include <atomic>
 
 #include "Logger.h"
 #include "ExchUtils.h"
@@ -88,50 +88,53 @@ namespace aux{
 
 		T *popFront(){
 			do{
-				Node *cur = nextFree_;
-				if (cur != nextNull_){
-					T *v = nextFree_->val_.fetch_and_store(nullptr);
-					nextFree_.compare_and_swap(cur->next_, cur);
+				Node *cur = nextFree_.load();
+				if (cur != nextNull_.load()){
+					T *v = cur->val_.exchange(nullptr);
+					Node *expected = cur;
+					nextFree_.compare_exchange_strong(expected, cur->next_);
 					if(nullptr != v)
 						return v;
 				}else{
-					cacheMiss_.fetch_and_increment();
+					cacheMiss_.fetch_add(1);
 					return new T;
 				}
 			}while(true);
 		}
 
 		void pushBack(T *val){
-			Node *cur = nextNull_;
-			while(cur->next_ != nextFree_){
-				bool v = (nullptr != nextNull_->val_.compare_and_swap(val, nullptr));
-				nextNull_.compare_and_swap(nextNull_->next_, cur);
-				if(!v)
+			Node *cur = nextNull_.load();
+			while(cur->next_ != nextFree_.load()){
+				T *expected = nullptr;
+				bool v = nextNull_.load()->val_.compare_exchange_strong(expected, val);
+				Node *expectedNode = cur;
+				nextNull_.compare_exchange_strong(expectedNode, nextNull_.load()->next_);
+				if(v)
 					return;
-				cur = nextNull_;
+				cur = nextNull_.load();
 			}
 			delete val;
 		}
 
 	private:
 		struct Node{
-			Node(): next_(nullptr){val_.fetch_and_store(nullptr);}
-			Node(T *val): next_(nullptr){val_.fetch_and_store(val);}
-			Node(Node *next): next_(next){val_.fetch_and_store(nullptr);}
-			Node(Node *next, T *val): next_(next){val_.fetch_and_store(val);}
+			Node(): next_(nullptr){val_.store(nullptr);}
+			Node(T *val): next_(nullptr){val_.store(val);}
+			Node(Node *next): next_(next){val_.store(nullptr);}
+			Node(Node *next, T *val): next_(next){val_.store(val);}
 
-			tbb::atomic<T *> val_;
+			std::atomic<T *> val_;
 			Node *next_;
 		};
 
 		std::string name_;
 		Node *cache_;
 		char align1_[256];
-		tbb::atomic<Node *> nextFree_;
+		std::atomic<Node *> nextFree_;
 		char align2_[256];
-		tbb::atomic<Node *> nextNull_;
+		std::atomic<Node *> nextNull_;
 		char align3_[256];
-		tbb::atomic<int> cacheMiss_;
+		std::atomic<int> cacheMiss_;
 		
 	protected:
 		InterLockCache(const InterLockCache &);

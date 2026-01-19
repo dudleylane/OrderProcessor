@@ -19,7 +19,7 @@ using namespace COP;
 
 IdTValueGenerator::IdTValueGenerator(void)
 {
-	counter_.fetch_and_store(1);
+	counter_.store(1);
 }
 
 IdTValueGenerator::~IdTValueGenerator(void)
@@ -29,5 +29,5 @@ IdTValueGenerator::~IdTValueGenerator(void)
 IdT IdTValueGenerator::getId(){
 	__time32_t ltime;
 	_time32( &ltime );
-	return IdT(counter_.fetch_and_increment(), static_cast<u32>(ltime));
+	return IdT(counter_.fetch_add(1), static_cast<u32>(ltime));
 }

@@ -14,8 +14,8 @@
 
 #include "TypesDef.h"
 
-#include <tbb/mutex.h>
-#include <tbb/atomic.h>
+#include <oneapi/tbb/mutex.h>
+#include <atomic>
 #include <set>
 #include <vector>
 #include <map>
@@ -78,7 +78,7 @@ public:
 	virtual void removeSubscriptions(const SubscriberIdT &handlerId);
 
 private:
-	tbb::atomic<u64> subscrCounter_;
+	std::atomic<u64> subscrCounter_;
 
 	typedef std::set<SubscriptionInfo, SubscrInfoByID> SubscriptionsT;
 	SubscriptionsT availableSubscriptions_;
@@ -101,7 +101,7 @@ private:
 	typedef std::map<SubscriberIdT, SubscriptionsByTypeT> SubscriptionsBySubscriberT;
 	SubscriptionsBySubscriberT subscriptionsBySubscriber_;
 
-	mutable tbb::mutex lock_;
+	mutable oneapi::tbb::mutex lock_;
 };
 
 typedef aux::Singleton<SubscrManager> SubscriptionMgr;

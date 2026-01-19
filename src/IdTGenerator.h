@@ -14,7 +14,7 @@
 
 #include "TypesDef.h"
 #include "Singleton.h"
-#include <tbb/atomic.h>
+#include <atomic>
 
 namespace COP{
 
@@ -26,7 +26,7 @@ public:
 
 	IdT getId();
 private:
-	tbb::atomic<u64> counter_;
+	std::atomic<u64> counter_;
 };
 
 typedef aux::Singleton<IdTValueGenerator> IdTGenerator;

@@ -15,7 +15,7 @@
 #include <string>
 #include <map>
 #include <deque>
-#include <tbb/mutex.h>
+#include <oneapi/tbb/mutex.h>
 
 #include "QueuesDef.h"
 
@@ -33,7 +33,7 @@ namespace Queues{
 		virtual void push(const CancelRejectEvent &evnt, const std::string &target);
 		virtual void push(const BusinessRejectEvent &evnt, const std::string &target);
 	private:
-		mutable tbb::mutex lock_;
+		mutable oneapi::tbb::mutex lock_;
 
 		typedef std::deque<ExecReportEvent> ExecRepQueueT;
 		typedef std::deque<CancelRejectEvent> CancelRejectQueueT;

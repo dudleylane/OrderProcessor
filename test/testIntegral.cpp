@@ -252,24 +252,24 @@ namespace{
 
 	class TestOutQueues: public Queues::OutQueues{
 	public:
-		TestOutQueues(): events_(), es_(){events_.fetch_and_store(0);}
+		TestOutQueues(): events_(), es_(){events_.store(0);}
 
 		virtual void push(const ExecReportEvent &, const std::string &){
-			if(EVENT_AMOUNT == events_.fetch_and_increment())
+			if(EVENT_AMOUNT == events_.fetch_add(1))
 				es_ = tick_count::now();
 		}
 
 		virtual void push(const CancelRejectEvent &, const std::string &){
-			if(EVENT_AMOUNT == events_.fetch_and_increment())
+			if(EVENT_AMOUNT == events_.fetch_add(1))
 				es_ = tick_count::now();
 		}
 		virtual void push(const BusinessRejectEvent &, const std::string &){
-			if(EVENT_AMOUNT == events_.fetch_and_increment())
+			if(EVENT_AMOUNT == events_.fetch_add(1))
 				es_ = tick_count::now();
 		}
-		tbb::atomic<int> events_;
+		std::atomic<int> events_;
 		tick_count es_;
-		tbb::mutex lock_;
+		oneapi::tbb::mutex lock_;
 	};
 
 }

@@ -32,7 +32,7 @@ bool SubscrInfoByName::operator()(const SubscriptionInfo& lft, const Subscriptio
 
 SubscrManager::SubscrManager(void)
 {
-	subscrCounter_.fetch_and_store(1);
+	subscrCounter_.store(1);
 }
 
 SubscrManager::~SubscrManager(void)
@@ -44,7 +44,7 @@ void SubscrManager::addSubscription(const std::string &name, OrderFilter *filter
 {
 	SubscriptionInfo val;
 	val.id_.date_ = 0;
-	val.id_.id_ = subscrCounter_.fetch_and_increment();
+	val.id_.id_ = subscrCounter_.fetch_add(1);
 	val.name_ = name;
 	val.subscription_.order_ = filter;
 	val.type_ = ORDER_SUBSCRIPTION;

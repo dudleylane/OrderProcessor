@@ -22,7 +22,7 @@ using namespace COP::Store;
 
 WideParamsDataStorage::WideParamsDataStorage(void): storage_(nullptr)
 {
-	subscrCounter_.fetch_and_store(1);
+	subscrCounter_.store(1);
 
 	aux::ExchLogger::instance()->note("WideParamsDataStorage created");
 }
@@ -96,7 +96,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, ClearingEntry *val)const
 
 SourceIdT WideParamsDataStorage::add(InstrumentEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_and_increment(), 1);
+	SourceIdT id(subscrCounter_.fetch_add(1), 1);
 	{
 		mutex::scoped_lock lock(lock_);
 		instruments_.insert(InstrumentsT::value_type(id, val));
@@ -112,7 +112,7 @@ SourceIdT WideParamsDataStorage::add(StringT *val)
 {
 //	assert(false);
 
-	SourceIdT id(subscrCounter_.fetch_and_increment(), 0);
+	SourceIdT id(subscrCounter_.fetch_add(1), 0);
 	{
 		mutex::scoped_lock lock(lock_);
 		strings_.insert(StringsT::value_type(id, val));
@@ -125,7 +125,7 @@ SourceIdT WideParamsDataStorage::add(StringT *val)
 
 SourceIdT WideParamsDataStorage::add(RawDataEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_and_increment(), 1);
+	SourceIdT id(subscrCounter_.fetch_add(1), 1);
 	{
 		mutex::scoped_lock lock(lock_);
 		rawDatas_.insert(RawDataT::value_type(id, val));
@@ -139,7 +139,7 @@ SourceIdT WideParamsDataStorage::add(RawDataEntry *val)
 
 SourceIdT WideParamsDataStorage::add(AccountEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_and_increment(), 1);
+	SourceIdT id(subscrCounter_.fetch_add(1), 1);
 	{
 		mutex::scoped_lock lock(lock_);
 		accounts_.insert(AccountsT::value_type(id, val));
@@ -153,7 +153,7 @@ SourceIdT WideParamsDataStorage::add(AccountEntry *val)
 
 SourceIdT WideParamsDataStorage::add(ClearingEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_and_increment(), 1);
+	SourceIdT id(subscrCounter_.fetch_add(1), 1);
 	{
 		mutex::scoped_lock lock(lock_);
 		clearings_.insert(ClearingsT::value_type(id, val));
@@ -176,7 +176,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, ExecutionsT **val)const
 
 SourceIdT WideParamsDataStorage::add(ExecutionsT *val)
 {
-	SourceIdT id(subscrCounter_.fetch_and_increment(), 1);
+	SourceIdT id(subscrCounter_.fetch_add(1), 1);
 	{
 		mutex::scoped_lock lock(lock_);
 		executions_.insert(ExecutionListsT::value_type(id, val));
@@ -191,7 +191,7 @@ SourceIdT WideParamsDataStorage::add(ExecutionsT *val)
 void WideParamsDataStorage::restore(InstrumentEntry *val)
 {
 	if(subscrCounter_ < val->id_.id_)
-		subscrCounter_.fetch_and_store(val->id_.id_ + 1);
+		subscrCounter_.store(val->id_.id_ + 1);
 	{
 		mutex::scoped_lock lock(lock_);
 		instruments_.insert(InstrumentsT::value_type(val->id_, val));
@@ -201,7 +201,7 @@ void WideParamsDataStorage::restore(InstrumentEntry *val)
 void WideParamsDataStorage::restore(const IdT& id, StringT *val)
 {
 	if(subscrCounter_ < id.id_)
-		subscrCounter_.fetch_and_store(id.id_ + 1);
+		subscrCounter_.store(id.id_ + 1);
 	{
 		mutex::scoped_lock lock(lock_);
 		strings_.insert(StringsT::value_type(id, val));
@@ -211,7 +211,7 @@ void WideParamsDataStorage::restore(const IdT& id, StringT *val)
 void WideParamsDataStorage::restore(RawDataEntry *val)
 {
 	if(subscrCounter_ < val->id_.id_)
-		subscrCounter_.fetch_and_store(val->id_.id_ + 1);
+		subscrCounter_.store(val->id_.id_ + 1);
 	{
 		mutex::scoped_lock lock(lock_);
 		rawDatas_.insert(RawDataT::value_type(val->id_, val));
@@ -221,7 +221,7 @@ void WideParamsDataStorage::restore(RawDataEntry *val)
 void WideParamsDataStorage::restore(AccountEntry *val)
 {
 	if(subscrCounter_ < val->id_.id_)
-		subscrCounter_.fetch_and_store(val->id_.id_ + 1);
+		subscrCounter_.store(val->id_.id_ + 1);
 	{
 		mutex::scoped_lock lock(lock_);
 		accounts_.insert(AccountsT::value_type(val->id_, val));
@@ -231,7 +231,7 @@ void WideParamsDataStorage::restore(AccountEntry *val)
 void WideParamsDataStorage::restore(ClearingEntry *val)
 {
 	if(subscrCounter_ < val->id_.id_)
-		subscrCounter_.fetch_and_store(val->id_.id_ + 1);
+		subscrCounter_.store(val->id_.id_ + 1);
 	{
 		mutex::scoped_lock lock(lock_);
 		clearings_.insert(ClearingsT::value_type(val->id_, val));
