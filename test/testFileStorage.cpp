@@ -36,7 +36,7 @@ namespace{
 		}
 		virtual void onRecordLoaded(const IdT& /*id*/, u32 /*version*/, const char *ptr, size_t s)
 		{
-			assert(NULL != ptr);
+			assert(nullptr != ptr);
 			assert(0 < s);
 			records_.push_back(string(ptr, s));
 		}

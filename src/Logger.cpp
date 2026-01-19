@@ -197,8 +197,8 @@ namespace aux{
 
 			/// write message to the log
 			size_t msgLen = 0;
-			const char *msgBuf = NULL;
-			if((!msg.isBinary()) && (NULL != (msgBuf = msg.getMessage(&msgLen))) && 
+			const char *msgBuf = nullptr;
+			if((!msg.isBinary()) && (nullptr != (msgBuf = msg.getMessage(&msgLen))) && 
 				(BUFFER_SIZE - (ptr - buf_) - 2 > msgLen)){
 				strncat(ptr, msgBuf, msgLen);
 				ptr[msgLen] = '\n';
@@ -214,7 +214,7 @@ namespace aux{
 	};
 }
 
-Logger::Logger(void): impl_(NULL)
+Logger::Logger(void): impl_(nullptr)
 {
     out_log()->mark_as_initialized();
     exch_log()->mark_as_initialized();
@@ -234,7 +234,7 @@ Logger::~Logger(void)
 
 void Logger::setDebugOn(bool val)
 {
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->setFlag(val, LoggerImpl::DEBUG_ON_FLAG);
 	if(val)
 		warn("Debug logging turned on.");
@@ -244,7 +244,7 @@ void Logger::setDebugOn(bool val)
 
 void Logger::setNoteOn(bool val)
 {
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->setFlag(val, LoggerImpl::NOTE_ON_FLAG);
 	if(val)
 		warn("Notification logging turned on.");
@@ -254,7 +254,7 @@ void Logger::setNoteOn(bool val)
 
 void Logger::setWarnOn(bool val)
 {
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->setFlag(val, LoggerImpl::WARN_ON_FLAG);
 	if(val)
 		warn("Warning logging turned on.");
@@ -264,7 +264,7 @@ void Logger::setWarnOn(bool val)
 
 void Logger::setErrorOn(bool val)
 {
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->setFlag(val, LoggerImpl::ERROR_ON_FLAG);
 	if(val)
 		warn("Error logging turned on.");
@@ -274,7 +274,7 @@ void Logger::setErrorOn(bool val)
 
 void Logger::setFatalOn(bool val)
 {
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->setFlag(val, LoggerImpl::FATAL_ON_FLAG);
 	if(val)
 		warn("Fatal logging turned on.");
@@ -284,131 +284,131 @@ void Logger::setFatalOn(bool val)
 
 bool Logger::isDebugOn()const
 {
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	return impl_->isFlag(LoggerImpl::DEBUG_ON_FLAG);
 }
 
 bool Logger::isNoteOn()const
 {
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	return impl_->isFlag(LoggerImpl::NOTE_ON_FLAG);
 }
 
 bool Logger::isWarnOn()const
 {
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	return impl_->isFlag(LoggerImpl::WARN_ON_FLAG);
 }
 
 bool Logger::isErrorOn()const
 {
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	return impl_->isFlag(LoggerImpl::ERROR_ON_FLAG);
 }
 
 bool Logger::isFatalOn()const
 {
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	return impl_->isFlag(LoggerImpl::FATAL_ON_FLAG);
 }
 
 
 void Logger::debug(const std::string &msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
 }
 
 void Logger::debug(const char *msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
 }
 
 void Logger::debug(int val){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(val, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
 }
 
 void Logger::debug(LogMessage &msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
 }
 
 void Logger::note(const std::string &msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::NOTE_ON_FLAG, NOTE_PREFIX);
 }
 
 void Logger::note(const char *msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::NOTE_ON_FLAG, NOTE_PREFIX);
 }
 
 void Logger::note(int val){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(val, LoggerImpl::NOTE_ON_FLAG, NOTE_PREFIX);
 }
 
 void Logger::note(LogMessage &msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
 }
 
 void Logger::warn(const std::string &msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::WARN_ON_FLAG, WARN_PREFIX);
 }
 
 void Logger::warn(const char *msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::WARN_ON_FLAG, WARN_PREFIX);
 }
 
 void Logger::warn(int val){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(val, LoggerImpl::WARN_ON_FLAG, WARN_PREFIX);
 }
 
 void Logger::warn(LogMessage &msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
 }
 
 void Logger::error(const std::string &msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::ERROR_ON_FLAG, ERROR_PREFIX);
 }
 
 void Logger::error(const char *msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::ERROR_ON_FLAG, ERROR_PREFIX);
 }
 
 void Logger::error(int val){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(val, LoggerImpl::ERROR_ON_FLAG, ERROR_PREFIX);
 }
 
 void Logger::error(LogMessage &msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
 }
 
 void Logger::fatal(const std::string &msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::FATAL_ON_FLAG, FATAL_PREFIX);
 }
 
 void Logger::fatal(const char *msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::FATAL_ON_FLAG, FATAL_PREFIX);
 }
 
 void Logger::fatal(int val){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(val, LoggerImpl::FATAL_ON_FLAG, FATAL_PREFIX);
 }
 
 void Logger::fatal(LogMessage &msg){
-	assert(NULL != impl_);
+	assert(nullptr != impl_);
 	impl_->logMessage(msg, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
 }

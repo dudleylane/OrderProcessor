@@ -25,20 +25,20 @@ using namespace COP::ACID;
 using namespace COP::OrdState;
 using namespace COP::Store;
 
-CancelOrderDeferedEvent::CancelOrderDeferedEvent(): order_(NULL)
+CancelOrderDeferedEvent::CancelOrderDeferedEvent(): order_(nullptr)
 {}
 
 CancelOrderDeferedEvent::CancelOrderDeferedEvent(OrderEntry *ord): order_(ord)
 {
-	assert(NULL != order_);
+	assert(nullptr != order_);
 }
 
 void CancelOrderDeferedEvent::execute(DeferedEventFunctor *func, const Context &cnxt, ACID::Scope *scope)
 {
 	//aux::ExchLogger::instance()->debug("CancelOrderDeferedEvent: Start execution of trades.");
 
-	assert(NULL != func);
-	assert(NULL != order_);
+	assert(nullptr != func);
+	assert(nullptr != order_);
 
 	onInternalCancel evnt4Proc;
 	evnt4Proc.transaction_ = scope;

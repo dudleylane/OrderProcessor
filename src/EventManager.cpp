@@ -20,7 +20,7 @@ using namespace COP::EventMgr;
 using namespace COP::SubscrMgr;
 using namespace COP::SL;
 
-EventManager::EventManager(void): subscrMgr_(NULL), sl_(NULL)
+EventManager::EventManager(void): subscrMgr_(nullptr), sl_(nullptr)
 {
 	subscrMgr_ = SubscriptionMgr::instance();
 	aux::ExchLogger::instance()->note("EventManager created.");
@@ -38,8 +38,8 @@ SubscriptionManager *EventManager::getSubscriptionManager()const
 
 void EventManager::attach(SubscriptionLayer *sl)
 {
-	assert(NULL == sl_);
-	assert(NULL != sl);
+	assert(nullptr == sl_);
+	assert(nullptr != sl);
 	sl_ = sl;
 	aux::ExchLogger::instance()->note("EventManager attached with SubscriptionLayer.");
 }
@@ -47,7 +47,7 @@ void EventManager::attach(SubscriptionLayer *sl)
 SubscriptionLayer *EventManager::dettach()
 {
 	SubscriptionLayer *sl = sl_;
-	sl_ = NULL;
+	sl_ = nullptr;
 	aux::ExchLogger::instance()->note("EventManager dettached from SubscriptionLayer.");
 	return sl;
 }
@@ -58,7 +58,7 @@ void EventManager::dispatch(const NewOrderEvent &evnt)const
 
 	MatchedSubscribersT subscribers;
 	subscrMgr_->getSubscribers(*evnt.order_, &subscribers);
-	assert(NULL != sl_);
+	assert(nullptr != sl_);
 	sl_->process(*evnt.order_, subscribers);
 	//aux::ExchLogger::instance()->debug("EventManager dispatched NewOrderEvent.");
 }

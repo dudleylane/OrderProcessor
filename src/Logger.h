@@ -27,7 +27,7 @@ namespace aux{
 		virtual void prepareMessage() = 0;
 		
 		const char *getMessage(size_t *size){
-			assert(NULL != size);
+			assert(nullptr != size);
 			*size = msg.length();
 			return msg.c_str();
 		}

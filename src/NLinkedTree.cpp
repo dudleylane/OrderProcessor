@@ -127,7 +127,7 @@ NTreeNode::NTreeNode(const K &key, const V &value):key_(key), value_(value)
 {}
 
 NLinkTree::NLinkTree(): root_(), keys_(), depends_(), 
-	treeNodeAllocator_(2000), keyParamAllocator_(2000), objParamAllocator_(), current_(NULL)
+	treeNodeAllocator_(2000), keyParamAllocator_(2000), objParamAllocator_(), current_(nullptr)
 {
 
 }
@@ -155,7 +155,7 @@ void NLinkTree::clear()
 	{
 		for(KParamsT::iterator it = tmpKeys.begin(); it != tmpKeys.end(); ++it){
 			AllocAutoPtr<KParam> el(it->second, &keyParamAllocator_);//auto_ptr<KParam> el(it->second);
-			if(NULL != it->second->node_)
+			if(nullptr != it->second->node_)
 				AllocAutoPtr<NTreeNode> nd(it->second->node_, &treeNodeAllocator_);//auto_ptr<NTreeNode> nd(it->second->node_);
 		}
 	}
@@ -164,7 +164,7 @@ void NLinkTree::clear()
 bool NLinkTree::add(const K &key, const V &value, const DependObjs &depend, int *readyToExecuteAdded)
 {
 	assert((keys_.empty())||(keys_.rbegin()->first < key));
-	assert(NULL != readyToExecuteAdded);
+	assert(nullptr != readyToExecuteAdded);
 	if(aux::ExchLogger::instance()->isDebugOn())
 		aux::ExchLogger::instance()->debug("NLinkTree::add() start add");
 
@@ -187,7 +187,7 @@ bool NLinkTree::add(const K &key, const V &value, const DependObjs &depend, int 
 			depends_.insert(OParamsT::value_type(obj, el.get()));
 			el.release();
 		}else{
-			assert(NULL != depIt->second);
+			assert(nullptr != depIt->second);
 			// if this object used in some transaction - last transaction will be parent of this one
 			assert(!depIt->second->usedIn_.empty());
 			assert(*(depIt->second->usedIn_.rbegin()) < key);
@@ -205,8 +205,8 @@ bool NLinkTree::add(const K &key, const V &value, const DependObjs &depend, int 
 			if(keys_.end() == kIt){
 				///Todo: error about broken structure!
 			}else{
-				assert(NULL != kIt->second);
-				assert(NULL != kIt->second->node_);
+				assert(nullptr != kIt->second);
+				assert(nullptr != kIt->second->node_);
 				// remember parent
 				node->parents_.insert(kIt->second->node_);
 				// add this element into the parent's childrens
@@ -237,7 +237,7 @@ bool NLinkTree::add(const K &key, const V &value, const DependObjs &depend, int 
 
 bool NLinkTree::remove(const K &key, int *readyToExecuteAdded)
 {
-	assert(NULL != readyToExecuteAdded);
+	assert(nullptr != readyToExecuteAdded);
 	if(aux::ExchLogger::instance()->isDebugOn()){
 		NLTLogMessage l(REMOVENODE_START_MSG, key, root_.children_.size(), 0);
 		aux::ExchLogger::instance()->debug(l);
@@ -252,8 +252,8 @@ bool NLinkTree::remove(const K &key, int *readyToExecuteAdded)
 			aux::ExchLogger::instance()->debug("NLinkTree::remove() - remove failed, unable to locate object");
 			return false;
 		}
-		assert(NULL != kIt->second);
-		assert(NULL != kIt->second->node_);
+		assert(nullptr != kIt->second);
+		assert(nullptr != kIt->second->node_);
 		keyParams.reset(kIt->second, &keyParamAllocator_);
 		nd.reset(keyParams->node_, &treeNodeAllocator_);
 		keys_.erase(kIt);
@@ -269,7 +269,7 @@ bool NLinkTree::remove(const K &key, int *readyToExecuteAdded)
 			if(keyParams->node_ == current_){
 				TreeNodesListT::iterator erIt = root_.children_.begin();
 				if(*erIt == current_){
-					current_ = NULL;
+					current_ = nullptr;
 				}else{
 					for(; erIt != root_.children_.end(); ++erIt){
 						if(*erIt == current_){
@@ -302,7 +302,7 @@ bool NLinkTree::remove(const K &key, int *readyToExecuteAdded)
 			const O&obj = keyParams->dependsOn_.list_[o];
 			OParamsT::iterator depIt = depends_.find(obj);
 			if(depends_.end() != depIt){
-				assert(NULL != depIt->second);
+				assert(nullptr != depIt->second);
 				if(depIt->second->usedIn_.empty())
 					continue;///ToDo: notify about error
 				K child = K(), prnt = K();
@@ -344,8 +344,8 @@ bool NLinkTree::remove(const K &key, int *readyToExecuteAdded)
 			if(K() != cIt->parentId_){
 				prntIt = keys_.find(cIt->parentId_);
 				if(keys_.end() != prntIt){
-					assert(NULL != prntIt->second);
-					assert(NULL != prntIt->second->node_);
+					assert(nullptr != prntIt->second);
+					assert(nullptr != prntIt->second->node_);
 					prntIt->second->node_->children_.erase(keyParams->node_);
 				}else
 					true; /// todo: note about broken structure
@@ -357,8 +357,8 @@ bool NLinkTree::remove(const K &key, int *readyToExecuteAdded)
 					/// todo: note about broken structure
 					continue;
 				}
-				assert(NULL != chldIt->second);
-				assert(NULL != chldIt->second->node_);
+				assert(nullptr != chldIt->second);
+				assert(nullptr != chldIt->second->node_);
 				chldIt->second->node_->parents_.erase(keyParams->node_);
 
 				if(keys_.end() != prntIt){
@@ -387,13 +387,13 @@ bool NLinkTree::remove(const K &key, int *readyToExecuteAdded)
 
 bool NLinkTree::getParents(const K &key, KSetT *parents)const
 {
-	assert(NULL != parents);
+	assert(nullptr != parents);
 	{
 		KParamsT::const_iterator kIt = keys_.find(key);
 		if(keys_.end() == kIt)
 			return false;
-		assert(NULL != kIt->second);
-		assert(NULL != kIt->second->node_);
+		assert(nullptr != kIt->second);
+		assert(nullptr != kIt->second->node_);
 		for(TreeNodesT::const_iterator it = kIt->second->node_->parents_.begin(); 
 			it != kIt->second->node_->parents_.begin(); ++it){
 			parents->insert((*it)->key_);
@@ -404,13 +404,13 @@ bool NLinkTree::getParents(const K &key, KSetT *parents)const
 
 bool NLinkTree::getChildren(const K &key, KSetT *children)const
 {
-	assert(NULL != children);
+	assert(nullptr != children);
 	{
 		KParamsT::const_iterator kIt = keys_.find(key);
 		if(keys_.end() == kIt)
 			return false;
-		assert(NULL != kIt->second);
-		assert(NULL != kIt->second->node_);
+		assert(nullptr != kIt->second);
+		assert(nullptr != kIt->second->node_);
 		for(TreeNodesT::const_iterator it = kIt->second->node_->children_.begin(); 
 			it != kIt->second->node_->children_.begin(); ++it){
 			children->insert((*it)->key_);
@@ -426,7 +426,7 @@ bool NLinkTree::next(const K &after, K *key, V *value)
 		cout<< (*it)->key_<< ", "<< (*it)->value_<< endl;
 	}*/
 	{
-		NTreeNode *node = NULL;
+		NTreeNode *node = nullptr;
 		if(K() == after){
 			if(root_.children_.empty())
 				return false;
@@ -435,7 +435,7 @@ bool NLinkTree::next(const K &after, K *key, V *value)
 			bool found = false;
 			for(TreeNodesListT::const_iterator it = root_.children_.begin(); 
 				it != root_.children_.end(); ++it){
-				assert(NULL != *it);
+				assert(nullptr != *it);
 				found = (after == (*it)->key_);
 				if(found){
 					++it;
@@ -448,7 +448,7 @@ bool NLinkTree::next(const K &after, K *key, V *value)
 			if(!found)
 				return false;
 		}
-		assert(NULL != node);
+		assert(nullptr != node);
 		*key = node->key_;
 		*value = node->value_;
 	}
@@ -458,8 +458,8 @@ bool NLinkTree::next(const K &after, K *key, V *value)
 bool NLinkTree::next(K *key, V *value)
 {
 	{
-		NTreeNode *node = NULL;
-		if(NULL == current_){
+		NTreeNode *node = nullptr;
+		if(nullptr == current_){
 			if(root_.children_.empty()){
 				aux::ExchLogger::instance()->debug("NLinkTree::next() - root has no childrent.");
 				return false;
@@ -469,7 +469,7 @@ bool NLinkTree::next(K *key, V *value)
 			bool found = false;
 			for(TreeNodesListT::const_iterator it = root_.children_.begin(); 
 				it != root_.children_.end(); ++it){
-				assert(NULL != *it);
+				assert(nullptr != *it);
 				found = (*it == current_);
 				if(found){
 					++it;
@@ -486,7 +486,7 @@ bool NLinkTree::next(K *key, V *value)
 				return false;
 			}
 		}
-		assert(NULL != node);
+		assert(nullptr != node);
 		*key = node->key_;
 		*value = node->value_;
 		current_ = node;
@@ -501,14 +501,14 @@ bool NLinkTree::next(K *key, V *value)
 bool NLinkTree::current(K *key, V *value)const
 {
 	{
-		NTreeNode *node = NULL;
-		if(NULL == current_){
+		NTreeNode *node = nullptr;
+		if(nullptr == current_){
 			return false;
 		}else{
 			bool found = false;
 			for(TreeNodesListT::const_iterator it = root_.children_.begin(); 
 				it != root_.children_.end(); ++it){
-				assert(NULL != *it);
+				assert(nullptr != *it);
 				found = (*it == current_);
 				if(found){
 					node = *(it);
@@ -518,7 +518,7 @@ bool NLinkTree::current(K *key, V *value)const
 			if(!found)
 				return false;
 		}
-		assert(NULL != node);
+		assert(nullptr != node);
 		*key = node->key_;
 		*value = node->value_;
 	}
@@ -527,11 +527,11 @@ bool NLinkTree::current(K *key, V *value)const
 
 bool NLinkTree::isCurrentValid()const
 {
-	if(NULL == current_)
+	if(nullptr == current_)
 		return false;
 	for(TreeNodesListT::const_iterator it = root_.children_.begin(); 
 		it != root_.children_.end(); ++it){
-		assert(NULL != *it);
+		assert(nullptr != *it);
 		if(*it == current_)
 			return true;
 	}
@@ -546,7 +546,7 @@ void NLinkTree::dumpTree()
 	aux::ExchLogger::instance()->fatal(string("Start duming tree: tree contains elements ") + buf);
 	string keyVal;
 	for(KParamsT::const_iterator it = keys_.begin(); it != keys_.end(); ++it){
-		if(NULL == it->second)
+		if(nullptr == it->second)
 			break;
 		keyVal.clear();
 		it->first.toString(keyVal);
@@ -561,7 +561,7 @@ void NLinkTree::dumpTree()
 			text += "]";
 		}
 
-		assert(NULL != it->second->node_);
+		assert(nullptr != it->second->node_);
 		text += ". Parents: ";
 		for(TreeNodesT::const_iterator iit = it->second->node_->parents_.begin(); 
 			iit != it->second->node_->parents_.end(); ++iit){

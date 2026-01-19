@@ -286,7 +286,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 
 		auto_ptr<TradeExecEntry> tradeParams1(createTradeExec(*order.get(), IdT(101, 5)));
@@ -294,7 +294,7 @@ bool testStateMachine()
 		{
 			tradeevnt.orderId_ = order->orderId_;
 			OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-			check(NULL != ord);
+			check(nullptr != ord);
 			ord->leavesQty_ = 100;
 			ord->orderQty_ = 100;
 			tradeevnt.generator_ = IdTGenerator::instance();
@@ -311,7 +311,7 @@ bool testStateMachine()
 		{
 			tradeevnt.orderId_ = order->orderId_;
 			OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-			check(NULL != ord);
+			check(nullptr != ord);
 			ord->leavesQty_ = 50;
 			tradeevnt.generator_ = IdTGenerator::instance();
 			tradeevnt.transaction_ = &trCntxt;
@@ -327,7 +327,7 @@ bool testStateMachine()
 		{
 			tradeevnt.orderId_ = order->orderId_;
 			OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-			check(NULL != ord);
+			check(nullptr != ord);
 			ord->leavesQty_ = 30;
 			tradeevnt.generator_ = IdTGenerator::instance();
 			tradeevnt.transaction_ = &trCntxt;
@@ -346,7 +346,7 @@ bool testStateMachine()
 		{
 			tradeCrctevnt.orderId_ = order->orderId_;
 			OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-			check(NULL != ord);
+			check(nullptr != ord);
 			ord->leavesQty_ = 0;
 			tradeCrctevnt.generator_ = IdTGenerator::instance();
 			tradeCrctevnt.transaction_ = &trCntxt;
@@ -372,7 +372,7 @@ bool testStateMachine()
 			correctParams1->lastQty_ = 30;
 			correctParams1->leavesQty_ = 40;
 			OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-			check(NULL != ord);
+			check(nullptr != ord);
 		}
 		p.processEvent(tradeCrctevnt); 
 		p.checkStates("PartFill", "NoCnlReplace");
@@ -386,7 +386,7 @@ bool testStateMachine()
 			tradeCrctevnt.generator_ = IdTGenerator::instance();
 			tradeCrctevnt.transaction_ = &trCntxt;
 			tradeCrctevnt.orderStorage_ = OrderStorage::instance();
-			check(NULL != ord);
+			check(nullptr != ord);
 			correctParams1->lastQty_ = 30;
 			correctParams1->cumQty_ = 0;
 			correctParams1->leavesQty_ = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get())->orderQty_;
@@ -411,7 +411,7 @@ bool testStateMachine()
 		p.checkStates("Filled", "NoCnlReplace");
 		check(1 == trCntxt.op_.size());
 		check(trCntxt.isOperationEnqueued(CREATE_TRADE_EXECREPORT_TROPERATION));
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(0 == ord->leavesQty_);
 		check(ord->orderQty_ == ord->cumQty_);
 		trCntxt.clear();
@@ -475,7 +475,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -521,7 +521,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -663,7 +663,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -721,7 +721,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -805,7 +805,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -882,7 +882,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -943,7 +943,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1003,7 +1003,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1098,7 +1098,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1191,7 +1191,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1251,7 +1251,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1346,7 +1346,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1442,7 +1442,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1534,7 +1534,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1577,7 +1577,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1619,7 +1619,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1699,7 +1699,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1757,7 +1757,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1830,7 +1830,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1922,7 +1922,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -1999,7 +1999,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -2042,7 +2042,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -2083,7 +2083,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -2124,7 +2124,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -2165,7 +2165,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -2250,7 +2250,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		trCntxt.clear();
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 
 		onExpired expire;
 		{
@@ -2294,7 +2294,7 @@ bool testStateMachine()
 
 		assignClOrderId(orderRepl.get());
 		OrderEntry *origOrd = OrderStorage::instance()->locateByClOrderId(orderRepl->origClOrderId_.get());
-		check(NULL != origOrd);
+		check(nullptr != origOrd);
 		orderRepl->origOrderId_ = origOrd->orderId_;
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
@@ -2312,7 +2312,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(ENQUEUE_EVENT_TROPERATION));
 		trCntxt.clear();
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(orderRepl->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 
 		onRplOrderRejected reject;
 		{
@@ -2335,7 +2335,7 @@ bool testStateMachine()
 
 		assignClOrderId(orderRepl.get());
 		OrderEntry *origOrd = OrderStorage::instance()->locateByClOrderId(orderRepl->origClOrderId_.get());
-		check(NULL != origOrd);
+		check(nullptr != origOrd);
 		orderRepl->origOrderId_ = origOrd->orderId_;
 
 		p.start(); 
@@ -2354,7 +2354,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(ENQUEUE_EVENT_TROPERATION));
 		trCntxt.clear();
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(orderRepl->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 
 		onReplace acceptEvnt;
 		{
@@ -2381,7 +2381,7 @@ bool testStateMachine()
 
 		assignClOrderId(orderRepl.get());
 		OrderEntry *origOrd = OrderStorage::instance()->locateByClOrderId(orderRepl->origClOrderId_.get());
-		check(NULL != origOrd);
+		check(nullptr != origOrd);
 		orderRepl->origOrderId_ = origOrd->orderId_;
 
 		p.start(); 
@@ -2400,7 +2400,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(ENQUEUE_EVENT_TROPERATION));
 		trCntxt.clear();
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(orderRepl->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 
 		onReplace rejctEvnt;
 		{
@@ -2425,7 +2425,7 @@ bool testStateMachine()
 
 		assignClOrderId(orderRepl.get());
 		OrderEntry *origOrd = OrderStorage::instance()->locateByClOrderId(orderRepl->origClOrderId_.get());
-		check(NULL != origOrd);
+		check(nullptr != origOrd);
 		orderRepl->origOrderId_ = origOrd->orderId_;
 
 		p.start(); 
@@ -2444,7 +2444,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(ENQUEUE_EVENT_TROPERATION));
 		trCntxt.clear();
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(orderRepl->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 
 		onRplOrderExpired exprEvnt;
 		{
@@ -2484,7 +2484,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -2538,7 +2538,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		trCntxt.clear();
 
@@ -2628,7 +2628,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 
 		onReplaceReceived cncl(IdT(1, 5));
@@ -2681,7 +2681,7 @@ bool testStateMachine()
 		check(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 
 		onReplaceReceived cncl(IdT(3, 5));
@@ -2766,25 +2766,25 @@ bool testStateMachineOnly()
 
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onOrderRejected>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onOrderRejected>(nullptr)); 
 		p.checkStates("Rejected", "NoCnlReplace");
 	}
 	{//Rcvd_New->Pend_New->New->PartFill->PartFill->Filled->PartFill(Crct)->PartFill(Crct)->New(Crct)->Filled->New(Crct)->Expired
@@ -2792,25 +2792,25 @@ bool testStateMachineOnly()
 
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 	}
 	{//Rcvd_New->Pend_New->New->PartFill->PartFill->Filled->PartFill(Crct)->PartFill(Crct)->
@@ -2819,33 +2819,33 @@ bool testStateMachineOnly()
 
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onFinished>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onFinished>(nullptr)); 
 		p.checkStates("DoneForDay", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onNewDay>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onNewDay>(nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onSuspended>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onSuspended>(nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onContinue>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onContinue>(nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 	}
 	{//Rcvd_New->Pend_New->New->PartFill->PartFill->Filled->PartFill(Crct)->PartFill(Crct)->New(Crct)->
@@ -2854,31 +2854,31 @@ bool testStateMachineOnly()
 
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onFinished>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onFinished>(nullptr)); 
 		p.checkStates("DoneForDay", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onNewDay>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onNewDay>(nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onSuspended>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onSuspended>(nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 	}
 // is Suspended->DoneForDay->Suspended->DoneForDay correct?
@@ -2888,35 +2888,35 @@ bool testStateMachineOnly()
 
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onFinished>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onFinished>(nullptr)); 
 		p.checkStates("DoneForDay", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onNewDay>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onNewDay>(nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onSuspended>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onSuspended>(nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onFinished>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onFinished>(nullptr)); 
 		p.checkStates("DoneForDay", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onSuspended>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onSuspended>(nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 	}
 	{//Rcvd_New->Pend_New->New->PartFill->PartFill->Filled->PartFill(Crct)->PartFill(Crct)->New(Crct)->
@@ -2925,29 +2925,29 @@ bool testStateMachineOnly()
 
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onFinished>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onFinished>(nullptr)); 
 		p.checkStates("DoneForDay", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onNewDay>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onNewDay>(nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onOrderRejected>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderRejected>(nullptr));
 		p.checkStates("Rejected", "NoCnlReplace");
 	}
 	{//Rcvd_New->Pend_New->New->PartFill->PartFill->Filled->PartFill(Crct)->PartFill(Crct)->New(Crct)->
@@ -2956,23 +2956,23 @@ bool testStateMachineOnly()
 
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 	}
 	{//Rcvd_New->Pend_New->New->PartFill->PartFill->Filled->PartFill(Crct)->PartFill(Crct)->New(Crct)->
@@ -2982,31 +2982,31 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onFinished>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onFinished>(nullptr)); 
 		p.checkStates("DoneForDay", "NoCnlReplace");
 
 	}
@@ -3018,37 +3018,37 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onFinished>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onFinished>(nullptr)); 
 		p.checkStates("DoneForDay", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("DoneForDay", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onNewDay>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onNewDay>(nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
 	}
@@ -3059,37 +3059,37 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onFinished>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onFinished>(nullptr)); 
 		p.checkStates("DoneForDay", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("DoneForDay", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onNewDay>(NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onNewDay>(nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
 	}
@@ -3102,31 +3102,31 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onSuspended>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onSuspended>(nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
 
 	}
@@ -3137,37 +3137,37 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onSuspended>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onSuspended>(nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onContinue>(NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onContinue>(nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
 
@@ -3179,37 +3179,37 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onSuspended>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onSuspended>(nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onContinue>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onContinue>(nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
 	}
@@ -3220,37 +3220,37 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onSuspended>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onSuspended>(nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
 	}
@@ -3261,28 +3261,28 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderRejected>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onOrderRejected>(nullptr)); 
 		p.checkStates("Rejected", "NoCnlReplace");
 
 	}
@@ -3292,28 +3292,28 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
 	}
@@ -3323,25 +3323,25 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
 	}
@@ -3352,37 +3352,37 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onFinished>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onFinished>(nullptr)); 
 		p.checkStates("DoneForDay", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onNewDay>(NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onNewDay>(nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onSuspended>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onSuspended>(nullptr)); 
 		p.checkStates("Suspended", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onContinue>(NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onContinue>(nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
 	}
@@ -3392,25 +3392,25 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
 	}
@@ -3420,28 +3420,28 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
 	}
@@ -3451,16 +3451,16 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
 	}
@@ -3470,10 +3470,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr)); 
 		p.checkStates("Filled", "NoCnlReplace");
 
 	}
@@ -3483,10 +3483,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderRejected>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onOrderRejected>(nullptr)); 
 		p.checkStates("Rejected", "NoCnlReplace");
 
 	}
@@ -3496,10 +3496,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
 	}
@@ -3509,10 +3509,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderRejected>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onOrderRejected>(nullptr)); 
 		p.checkStates("Rejected", "NoCnlReplace");
 
 	}
@@ -3522,10 +3522,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
 	}
@@ -3535,7 +3535,7 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onRecvOrderRejected>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onRecvOrderRejected>(nullptr)); 
 		p.checkStates("Rejected", "NoCnlReplace");
 
 	}
@@ -3545,7 +3545,7 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExternalOrderRejected>(NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onExternalOrderRejected>(nullptr, false)); 
 		p.checkStates("Rejected", "NoCnlReplace");
 
 	}
@@ -3556,10 +3556,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExternalOrder>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExternalOrder>(nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
 	}
@@ -3569,7 +3569,7 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onRecvRplOrderRejected>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onRecvRplOrderRejected>(nullptr)); 
 		p.checkStates("Rejected", "NoCnlReplace");
 
 	}
@@ -3579,10 +3579,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onRplOrderReceived>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onRplOrderReceived>(nullptr)); 
 		p.checkStates("Pend_Replace", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onRplOrderRejected>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onRplOrderRejected>(nullptr)); 
 		p.checkStates("Rejected", "NoCnlReplace");
 
 	}
@@ -3592,10 +3592,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onRplOrderReceived>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onRplOrderReceived>(nullptr)); 
 		p.checkStates("Pend_Replace", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onReplace>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onReplace>(nullptr)); 
 		p.checkStates("New", "NoCnlReplace");
 
 	}
@@ -3605,10 +3605,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onRplOrderReceived>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onRplOrderReceived>(nullptr)); 
 		p.checkStates("Pend_Replace", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onRplOrderRejected>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onRplOrderRejected>(nullptr)); 
 		p.checkStates("Rejected", "NoCnlReplace");
 
 	}
@@ -3618,10 +3618,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onRplOrderReceived>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onRplOrderReceived>(nullptr)); 
 		p.checkStates("Pend_Replace", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onRplOrderExpired>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onRplOrderExpired>(nullptr)); 
 		p.checkStates("Expired", "NoCnlReplace");
 
 	}
@@ -3632,10 +3632,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onCancelReceived>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onCancelReceived>(nullptr)); 
 		p.checkStates("Rcvd_New", "GoingCancel");
 
-		p.processEvent(eventForTestStateMachineOnly<onCancelRejected>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onCancelRejected>(nullptr)); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
 	}
@@ -3645,13 +3645,13 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onCancelReceived>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onCancelReceived>(nullptr)); 
 		p.checkStates("Rcvd_New", "GoingCancel");
 
-		p.processEvent(eventForTestStateMachineOnly<onExecCancel>(NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onExecCancel>(nullptr)); 
 		p.checkStates("Rcvd_New", "CnclReplaced");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("Rcvd_New", "CnclReplaced");
 	}
 	{//NoCnlReplace->GoingReplace->NoCnlReplace
@@ -3660,10 +3660,10 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onReplaceReceived>(NULL, IdT())); 
+		p.processEvent(eventForTestStateMachineOnly<onReplaceReceived>(nullptr, IdT())); 
 		p.checkStates("Rcvd_New", "GoingReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onReplaceRejected>(NULL, IdT())); 
+		p.processEvent(eventForTestStateMachineOnly<onReplaceRejected>(nullptr, IdT())); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
 	}
@@ -3674,16 +3674,16 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onReplaceReceived>(NULL, IdT())); 
+		p.processEvent(eventForTestStateMachineOnly<onReplaceReceived>(nullptr, IdT())); 
 		p.checkStates("Rcvd_New", "GoingReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(NULL));
+		p.processEvent(eventForTestStateMachineOnly<onOrderReceived>(nullptr));
 		p.checkStates("New", "GoingReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(NULL, (TradeExecEntry *)NULL, false)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeExecution>(nullptr, (TradeExecEntry *)nullptr, false)); 
 		p.checkStates("PartFill", "GoingReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onReplaceRejected>(NULL, IdT())); 
+		p.processEvent(eventForTestStateMachineOnly<onReplaceRejected>(nullptr, IdT())); 
 		p.checkStates("PartFill", "NoCnlReplace");
 
 	}
@@ -3694,13 +3694,13 @@ bool testStateMachineOnly()
 		p.start(); 
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onReplaceReceived>(NULL, IdT())); 
+		p.processEvent(eventForTestStateMachineOnly<onReplaceReceived>(nullptr, IdT())); 
 		p.checkStates("Rcvd_New", "GoingReplace");
 
-		p.processEvent(eventForTestStateMachineOnly<onExecReplace>(NULL, IdT())); 
+		p.processEvent(eventForTestStateMachineOnly<onExecReplace>(nullptr, IdT())); 
 		p.checkStates("Rcvd_New", "CnclReplaced");
 
-		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(NULL, (ExecCorrectExecEntry *)NULL)); 
+		p.processEvent(eventForTestStateMachineOnly<onTradeCrctCncl>(nullptr, (ExecCorrectExecEntry *)nullptr)); 
 		p.checkStates("Rcvd_New", "CnclReplaced");
 	}
 

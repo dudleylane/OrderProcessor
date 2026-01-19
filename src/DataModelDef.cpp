@@ -33,12 +33,12 @@ namespace COP{
 
 }
 
-RawDataEntry::RawDataEntry():type_(INVALID_RAWDATATYPE), data_(NULL), length_(0)
+RawDataEntry::RawDataEntry():type_(INVALID_RAWDATATYPE), data_(nullptr), length_(0)
 {
 }
 
 RawDataEntry::RawDataEntry(RawDataType type, const char *data, u32 len):
-	type_(type), data_(NULL), length_(len)
+	type_(type), data_(nullptr), length_(len)
 {
 	data_ = new char[length_];
 	memcpy(data_, data, len);
@@ -164,7 +164,7 @@ OrderParams::~OrderParams()
 
 void OrderParams::applyTrade(const TradeExecEntry *trade)
 {
-	assert(NULL != trade);
+	assert(nullptr != trade);
 	leavesQty_ -= trade->lastQty_;
 	cumQty_ += trade->lastQty_;
 
@@ -237,7 +237,7 @@ OrderStatePersistence OrderEntry::stateMachinePersistance()const
 void OrderEntry::setStateMachinePersistance(const OrderStatePersistence &persist)
 {
 	stateMachinePersistance_ = persist;
-	stateMachinePersistance_.orderData_ = NULL;
+	stateMachinePersistance_.orderData_ = nullptr;
 }
 
 OrderEntry *OrderEntry::clone()const
@@ -247,7 +247,7 @@ OrderEntry *OrderEntry::clone()const
 
 bool OrderEntry::isValid(std::string *invalid)const
 {
-	assert(NULL != invalid);
+	assert(nullptr != invalid);
 	try{
 		if(0 == clOrderId_.get().length_){
 			*invalid = "Invalid value of the client order Id!";
@@ -311,14 +311,14 @@ bool OrderEntry::isValid(std::string *invalid)const
 
 bool OrderEntry::isReplaceValid(std::string *invalid)const
 {
-	assert(NULL != invalid);
+	assert(nullptr != invalid);
 	bool rez = true;
 	return rez;
 }
 
 bool InstrumentEntry::isValid(std::string *invalid)const
 {
-	assert(NULL != invalid);
+	assert(nullptr != invalid);
 	try{
 		if(symbol_.empty()){
 			*invalid = "Invalid value of the instrument's symbol!";
@@ -347,7 +347,7 @@ bool InstrumentEntry::isValid(std::string *invalid)const
 
 bool AccountEntry::isValid(std::string *invalid)const
 {
-	assert(NULL != invalid);
+	assert(nullptr != invalid);
 	try{
 		if(account_.empty()){
 			*invalid = "Invalid value of the account's account!";
@@ -376,7 +376,7 @@ bool AccountEntry::isValid(std::string *invalid)const
 
 bool ClearingEntry::isValid(std::string *invalid)const
 {
-	assert(NULL != invalid);
+	assert(nullptr != invalid);
 	try{
 		if(firm_.empty()){
 			*invalid = "Invalid value of the clearing firm!";

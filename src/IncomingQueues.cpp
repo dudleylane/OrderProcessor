@@ -24,8 +24,8 @@ using namespace COP::Queues;
 
 IncomingQueues::IncomingQueues(void)
 {
-	processor_.fetch_and_store(NULL);
-	observer_.fetch_and_store(NULL);
+	processor_.fetch_and_store(nullptr);
+	observer_.fetch_and_store(nullptr);
 
 	aux::ExchLogger::instance()->note("IncomingQueues created.");	
 }
@@ -44,14 +44,14 @@ InQueueProcessor *IncomingQueues::attach(InQueueProcessor *obs)
 InQueueProcessor *IncomingQueues::detachProcessor()
 {
 	aux::ExchLogger::instance()->note("IncomingQueues detaching InQueueProcessor.");	
-	return processor_.fetch_and_store(NULL);
+	return processor_.fetch_and_store(nullptr);
 }
 
 InQueuesObserver *IncomingQueues::attach(InQueuesObserver *obs)
 {
 	aux::ExchLogger::instance()->note("IncomingQueues attaching InQueuesObserver.");
 	InQueuesObserver *obsOld = observer_.fetch_and_store(obs);
-	if((NULL != observer_)&&(!processingQueue_.empty()))
+	if((nullptr != observer_)&&(!processingQueue_.empty()))
 		observer_->onNewEvent();
 	return obsOld;
 
@@ -60,7 +60,7 @@ InQueuesObserver *IncomingQueues::attach(InQueuesObserver *obs)
 InQueuesObserver *IncomingQueues::detach()
 {
 	aux::ExchLogger::instance()->note("IncomingQueues detaching InQueuesObserver.");
-	return observer_.fetch_and_store(NULL);
+	return observer_.fetch_and_store(nullptr);
 }
 
 u32 IncomingQueues::size()const
@@ -71,7 +71,7 @@ u32 IncomingQueues::size()const
 
 bool IncomingQueues::top(InQueueProcessor *obs)
 {
-	assert(NULL != obs);
+	assert(nullptr != obs);
 
 	//aux::ExchLogger::instance()->debug("IncomingQueues::top(InQueueProcessor ) start execution");
 
@@ -92,7 +92,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 		case ORDER_QUEUE_TYPE:
 			{
 				OrderQueuesT::const_iterator it = orders_.find(elem.source_);
-				if((orders_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orders_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate Order element!");
 				order = it->second->front();
 				ord.reset(order.order_);
@@ -101,7 +101,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 		case ORDER_CANCEL_QUEUE_TYPE:
 			{
 				OrderCancelQueuesT::const_iterator it = orderCancels_.find(elem.source_);
-				if((orderCancels_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orderCancels_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate OrderCancel element!");
 				cancel = it->second->front();
 			}
@@ -109,7 +109,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 		case ORDER_REPLACE_QUEUE_TYPE:
 			{
 				OrderReplaceQueuesT::const_iterator it = orderReplaces_.find(elem.source_);
-				if((orderReplaces_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orderReplaces_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate OrderReplace element!");
 				replace = it->second->front();
 			}
@@ -117,7 +117,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 		case ORDER_STATE_QUEUE_TYPE:
 			{
 				OrderStateQueuesT::const_iterator it = orderStates_.find(elem.source_);
-				if((orderStates_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orderStates_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate OrderState element!");
 				state = it->second->front();
 			}
@@ -125,7 +125,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 		case PROCESS_QUEUE_TYPE:
 			{
 				ProcessQueuesT::const_iterator it = processes_.find(elem.source_);
-				if((processes_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((processes_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate Process element!");
 				process = it->second->front();
 			}
@@ -133,7 +133,7 @@ bool IncomingQueues::top(InQueueProcessor *obs)
 		case TIMER_QUEUE_TYPE:
 			{
 				TimerQueuesT::const_iterator it = timers_.find(elem.source_);
-				if((timers_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((timers_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate Timer element!");
 				timer = it->second->front();
 			}
@@ -181,7 +181,7 @@ bool IncomingQueues::pop()
 		case ORDER_QUEUE_TYPE:
 			{
 				OrderQueuesT::iterator it = orders_.find(elem.source_);
-				if((orders_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orders_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate Order element!");
 				it->second->pop_front();
 			}
@@ -189,7 +189,7 @@ bool IncomingQueues::pop()
 		case ORDER_CANCEL_QUEUE_TYPE:
 			{
 				OrderCancelQueuesT::iterator it = orderCancels_.find(elem.source_);
-				if((orderCancels_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orderCancels_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate OrderCancel element!");
 				it->second->pop_front();
 			}
@@ -197,7 +197,7 @@ bool IncomingQueues::pop()
 		case ORDER_REPLACE_QUEUE_TYPE:
 			{
 				OrderReplaceQueuesT::iterator it = orderReplaces_.find(elem.source_);
-				if((orderReplaces_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orderReplaces_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate OrderReplace element!");
 				it->second->pop_front();
 			}
@@ -205,7 +205,7 @@ bool IncomingQueues::pop()
 		case ORDER_STATE_QUEUE_TYPE:
 			{
 				OrderStateQueuesT::iterator it = orderStates_.find(elem.source_);
-				if((orderStates_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orderStates_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate OrderState element!");
 				it->second->pop_front();
 			}
@@ -213,7 +213,7 @@ bool IncomingQueues::pop()
 		case PROCESS_QUEUE_TYPE:
 			{
 				ProcessQueuesT::iterator it = processes_.find(elem.source_);
-				if((processes_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((processes_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate Process element!");
 				it->second->pop_front();
 			}
@@ -221,7 +221,7 @@ bool IncomingQueues::pop()
 		case TIMER_QUEUE_TYPE:
 			{
 				TimerQueuesT::iterator it = timers_.find(elem.source_);
-				if((timers_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((timers_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate Timer element!");
 				it->second->pop_front();
 			}
@@ -236,7 +236,7 @@ bool IncomingQueues::pop()
 
 bool IncomingQueues::pop(InQueueProcessor *obs)
 {
-	assert(NULL != obs);
+	assert(nullptr != obs);
 	
 	//aux::ExchLogger::instance()->debug("IncomingQueues::pop(InQueueProcessor) start execution");
 
@@ -258,7 +258,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 		case ORDER_QUEUE_TYPE:
 			{
 				OrderQueuesT::const_iterator it = orders_.find(elem.source_);
-				if((orders_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orders_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate Order element!");
 				order = it->second->front();
 				ord.reset(order.order_);
@@ -268,7 +268,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 		case ORDER_CANCEL_QUEUE_TYPE:
 			{
 				OrderCancelQueuesT::const_iterator it = orderCancels_.find(elem.source_);
-				if((orderCancels_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orderCancels_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate OrderCancel element!");
 				cancel = it->second->front();
 				it->second->pop_front();
@@ -277,7 +277,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 		case ORDER_REPLACE_QUEUE_TYPE:
 			{
 				OrderReplaceQueuesT::const_iterator it = orderReplaces_.find(elem.source_);
-				if((orderReplaces_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orderReplaces_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate OrderReplace element!");
 				replace = it->second->front();
 				it->second->pop_front();
@@ -286,7 +286,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 		case ORDER_STATE_QUEUE_TYPE:
 			{
 				OrderStateQueuesT::const_iterator it = orderStates_.find(elem.source_);
-				if((orderStates_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((orderStates_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate OrderState element!");
 				state = it->second->front();
 				it->second->pop_front();
@@ -295,7 +295,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 		case PROCESS_QUEUE_TYPE:
 			{
 				ProcessQueuesT::const_iterator it = processes_.find(elem.source_);
-				if((processes_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((processes_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate Process element!");
 				process = it->second->front();
 				it->second->pop_front();
@@ -304,7 +304,7 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
 		case TIMER_QUEUE_TYPE:
 			{
 				TimerQueuesT::const_iterator it = timers_.find(elem.source_);
-				if((timers_.end() == it)||(NULL == it->second)||(0 == it->second->size()))
+				if((timers_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
 					throw std::runtime_error("Invalid structure: Unable to locate Timer element!");
 				timer = it->second->front();
 				it->second->pop_front();
@@ -350,13 +350,13 @@ void IncomingQueues::push(const std::string &source, const OrderEvent &evnt)
 			it = orders_.insert(OrderQueuesT::value_type(source, new OrderQueueT())).first;
 		}
 		assert(orders_.end() != it);
-		assert(NULL != it->second);
+		assert(nullptr != it->second);
 		it->second->push_back(evnt);
 		ord.release();
 		processingQueue_.push_back(Element(source, ORDER_QUEUE_TYPE));
 	}	
 	{
-		if(NULL != observer_)
+		if(nullptr != observer_)
 			observer_->onNewEvent();
 	}
 	//aux::ExchLogger::instance()->debug("IncomingQueues finish push OrderEvent");
@@ -373,13 +373,13 @@ void IncomingQueues::push(const std::string &source, const OrderCancelEvent &evn
 			it = orderCancels_.insert(OrderCancelQueuesT::value_type(source, new OrderCancelQueueT())).first;
 		}
 		assert(orderCancels_.end() != it);
-		assert(NULL != it->second);
+		assert(nullptr != it->second);
 		it->second->push_back(evnt);
 
 		processingQueue_.push_back(Element(source, ORDER_CANCEL_QUEUE_TYPE));
 	}
 	{
-		if(NULL != observer_)
+		if(nullptr != observer_)
 			observer_->onNewEvent();
 	}
 
@@ -397,13 +397,13 @@ void IncomingQueues::push(const std::string &source, const OrderReplaceEvent &ev
 			it = orderReplaces_.insert(OrderReplaceQueuesT::value_type(source, new OrderReplaceQueueT())).first;
 		}
 		assert(orderReplaces_.end() != it);
-		assert(NULL != it->second);
+		assert(nullptr != it->second);
 		it->second->push_back(evnt);
 
 		processingQueue_.push_back(Element(source, ORDER_REPLACE_QUEUE_TYPE));
 	}
 	{
-		if(NULL != observer_)
+		if(nullptr != observer_)
 			observer_->onNewEvent();
 	}
 
@@ -421,13 +421,13 @@ void IncomingQueues::push(const std::string &source, const OrderChangeStateEvent
 			it = orderStates_.insert(OrderStateQueuesT::value_type(source, new OrderStateQueueT())).first;
 		}
 		assert(orderStates_.end() != it);
-		assert(NULL != it->second);
+		assert(nullptr != it->second);
 		it->second->push_back(evnt);
 
 		processingQueue_.push_back(Element(source, ORDER_STATE_QUEUE_TYPE));
 	}
 	{
-		if(NULL != observer_)
+		if(nullptr != observer_)
 			observer_->onNewEvent();
 	}
 
@@ -444,13 +444,13 @@ void IncomingQueues::push(const std::string &source, const ProcessEvent &evnt)
 			it = processes_.insert(ProcessQueuesT::value_type(source, new ProcessQueueT())).first;
 		}
 		assert(processes_.end() != it);
-		assert(NULL != it->second);
+		assert(nullptr != it->second);
 		it->second->push_back(evnt);
 
 		processingQueue_.push_back(Element(source, PROCESS_QUEUE_TYPE));
 	}
 	{
-		if(NULL != observer_)
+		if(nullptr != observer_)
 			observer_->onNewEvent();
 	}
 
@@ -468,13 +468,13 @@ void IncomingQueues::push(const std::string &source, const TimerEvent &evnt)
 			it = timers_.insert(TimerQueuesT::value_type(source, new TimerQueueT())).first;
 		}
 		assert(timers_.end() != it);
-		assert(NULL != it->second);
+		assert(nullptr != it->second);
 		it->second->push_back(evnt);
 
 		processingQueue_.push_back(Element(source, TIMER_QUEUE_TYPE));
 	}
 	{
-		if(NULL != observer_)
+		if(nullptr != observer_)
 			observer_->onNewEvent();
 	}
 

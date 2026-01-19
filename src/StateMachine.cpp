@@ -35,7 +35,7 @@ const std::string &OrderState::getStateName(int idx)
 
 
 
-OrderState::OrderState():orderData_(NULL)
+OrderState::OrderState():orderData_(nullptr)
 {}
 
 OrderState::OrderState(OrderEntry *orderData): orderData_(orderData)
@@ -64,8 +64,8 @@ void OrderState::receive(onOrderReceived const &evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL == orderData_);
-	assert(NULL != evnt.order_);
+	assert(nullptr == orderData_);
+	assert(nullptr != evnt.order_);
 	try{
 		OrdStateImpl::processReceive(&orderData_, evnt);
 		evnt.order4StateMachine_ = orderData_;
@@ -81,8 +81,8 @@ void OrderState::receive(onRplOrderReceived const &evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL == orderData_);
-	assert(NULL != evnt.order_);
+	assert(nullptr == orderData_);
+	assert(nullptr != evnt.order_);
 	try{
 		OrdStateImpl::processReceive(&orderData_, evnt);
 		evnt.order4StateMachine_ = orderData_;

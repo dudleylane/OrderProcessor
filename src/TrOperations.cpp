@@ -32,24 +32,24 @@ namespace COP{ namespace ACID{
 	{
 		/// locate order and push event into the executions_
 		/// find source of the order and push ExecReport to the source
-		assert(NULL != cnxt.orderStorage_);
+		assert(nullptr != cnxt.orderStorage_);
 		OrderEntry *ord = cnxt.orderStorage_->locateByOrderId(orderId);
-		assert(NULL != ord);
+		assert(nullptr != ord);
 		
 		StringT src = ord->source_.get();
 
 		ExecutionEntry *execReport = cnxt.orderStorage_->save(exec, cnxt.idGenerator_);
-		assert(NULL != execReport);
+		assert(nullptr != execReport);
 
 		ord->addExecution(execReport->execId_);
 
-		assert(NULL != cnxt.outQueues_);
+		assert(nullptr != cnxt.outQueues_);
 		cnxt.outQueues_->push(ExecReportEvent(execReport), src);
 	}
 
 	void executeEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt)
 	{
-		assert(NULL != cnxt.inQueues_);
+		assert(nullptr != cnxt.inQueues_);
 		cnxt.inQueues_->push("_", ProcessEvent(ProcessEvent::ON_REPLACE_RECEVIED, event_.replId_));
 
 		ReplaceExecEntry execReport;
@@ -69,7 +69,7 @@ namespace COP{ namespace ACID{
 
 	void executeEnqueueOrderEvent(const OrdState::onOrderAccepted &event_, const Context &cnxt)
 	{
-		assert(NULL != cnxt.inQueues_);
+		assert(nullptr != cnxt.inQueues_);
 		cnxt.inQueues_->push("_", ProcessEvent(ProcessEvent::ON_ORDER_ACCEPTED, event_.orderId_));
 
 		ExecutionEntry execReport;
@@ -89,7 +89,7 @@ namespace COP{ namespace ACID{
 
 	void executeEnqueueOrderEvent(const OrdState::onExecReplace &event_, const Context &cnxt)
 	{
-		assert(NULL != cnxt.inQueues_);
+		assert(nullptr != cnxt.inQueues_);
 		cnxt.inQueues_->push("_", ProcessEvent(ProcessEvent::ON_EXEC_REPLACE, event_.replId_));	
 
 		ReplaceExecEntry execReport;
@@ -110,7 +110,7 @@ namespace COP{ namespace ACID{
 
 	void executeEnqueueOrderEvent(const OrdState::onReplaceRejected &event_, const Context &cnxt)
 	{
-		assert(NULL != cnxt.inQueues_);
+		assert(nullptr != cnxt.inQueues_);
 		cnxt.inQueues_->push("_", ProcessEvent(ProcessEvent::ON_REPLACE_REJECTED));	
 
 		RejectExecEntry execReport;
@@ -142,7 +142,7 @@ CreateExecReportTrOperation::~CreateExecReportTrOperation()
 
 void CreateExecReportTrOperation::execute(const Context &cnxt)
 {
-	assert(NULL != cnxt.outQueues_);
+	assert(nullptr != cnxt.outQueues_);
 	/// locate source of the order, 
 	/// prepare ExecReport and send to the source of the order
 	switch(execType_){
@@ -282,7 +282,7 @@ CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(const TradeEx
 													OrderStatus status, const OrderEntry &order):
 Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), status_(status)
 {
-	assert(NULL != trade);
+	assert(nullptr != trade);
 	lastQty_ = trade->lastQty_;
 	lastPx_ = trade->lastPx_;
 	tradeDate_ = trade->tradeDate_;
@@ -294,7 +294,7 @@ CreateTradeExecReportTrOperation::~CreateTradeExecReportTrOperation()
 
 void CreateTradeExecReportTrOperation::execute(const Context &cnxt)
 {
-	assert(NULL != cnxt.outQueues_);
+	assert(nullptr != cnxt.outQueues_);
 	/// locate source of the order, 
 	/// prepare ExecReport and send to the source of the order
 	TradeExecEntry execReport;
@@ -320,7 +320,7 @@ CreateCorrectExecReportTrOperation::CreateCorrectExecReportTrOperation(const Exe
 													OrderStatus status, const OrderEntry &order):
 Operation(CREATE_CORRECT_EXECREPORT_TROPERATION, order.orderId_), status_(status)
 {
-	assert(NULL != correct);
+	assert(nullptr != correct);
 	cumQty_ = correct->cumQty_;
 	leavesQty_ = correct->leavesQty_;
 	lastQty_ = correct->lastQty_;
@@ -336,7 +336,7 @@ CreateCorrectExecReportTrOperation::~CreateCorrectExecReportTrOperation()
 
 void CreateCorrectExecReportTrOperation::execute(const Context &cnxt)
 {
-	assert(NULL != cnxt.outQueues_);
+	assert(nullptr != cnxt.outQueues_);
 	/// locate source of the order, 
 	/// prepare ExecReport and send to the source of the order
 	ExecCorrectExecEntry execReport;
@@ -372,7 +372,7 @@ CreateRejectExecReportTrOperation::~CreateRejectExecReportTrOperation()
 
 void CreateRejectExecReportTrOperation::execute(const Context &cnxt)
 {
-	assert(NULL != cnxt.outQueues_);
+	assert(nullptr != cnxt.outQueues_);
 	/// locate source of the order, 
 	/// prepare ExecReport and send to the source of the order
 	RejectExecEntry execReport;
@@ -401,7 +401,7 @@ CreateReplaceExecReportTrOperation::~CreateReplaceExecReportTrOperation()
 
 void CreateReplaceExecReportTrOperation::execute(const Context &cnxt)
 {
-	assert(NULL != cnxt.outQueues_);
+	assert(nullptr != cnxt.outQueues_);
 	/// locate source of the order, 
 	/// prepare ExecReport and send to the source of the order
 	ReplaceExecEntry execReport;
@@ -429,13 +429,13 @@ AddToOrderBookTrOperation::~AddToOrderBookTrOperation()
 
 void AddToOrderBookTrOperation::execute(const Context &cnxt)
 {
-	assert(NULL != cnxt.orderBook_);
+	assert(nullptr != cnxt.orderBook_);
 	cnxt.orderBook_->add(order_);
 }
 
 void AddToOrderBookTrOperation::rollback(const Context &cnxt)
 {
-	assert(NULL != cnxt.orderBook_);
+	assert(nullptr != cnxt.orderBook_);
 	cnxt.orderBook_->remove(order_);
 }
 
@@ -447,13 +447,13 @@ RemoveFromOrderBookTrOperation::~RemoveFromOrderBookTrOperation()
 
 void RemoveFromOrderBookTrOperation::execute(const Context &cnxt)
 {
-	assert(NULL != cnxt.orderBook_);
+	assert(nullptr != cnxt.orderBook_);
 	cnxt.orderBook_->remove(order_);
 }
 
 void RemoveFromOrderBookTrOperation::rollback(const Context &cnxt)
 {
-	assert(NULL != cnxt.orderBook_);
+	assert(nullptr != cnxt.orderBook_);
 	cnxt.orderBook_->add(order_);
 }
 
@@ -467,7 +467,7 @@ CancelRejectTrOperation::~CancelRejectTrOperation()
 
 void CancelRejectTrOperation::execute(const Context &cnxt)
 {
-	assert(NULL != cnxt.outQueues_);
+	assert(nullptr != cnxt.outQueues_);
 	cnxt.outQueues_->push(CancelRejectEvent(), "tgt");
 }
 
@@ -485,7 +485,7 @@ MatchOrderTrOperation::~MatchOrderTrOperation()
 
 void MatchOrderTrOperation::execute(const Context &cnxt)
 {
-	assert(NULL != order_);
+	assert(nullptr != order_);
 	cnxt.orderMatch_->match(order_, cnxt);
 }
 

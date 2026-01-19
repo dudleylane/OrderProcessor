@@ -61,7 +61,7 @@ void TransactionScope::setTransactionId(const TransactionId &id)
 
 void TransactionScope::getRelatedObjects(ObjectsInTransactionT *obj)const
 {
-	assert(NULL != obj);
+	assert(nullptr != obj);
 	obj->size_ = 0;
 	for(OperationsT::const_iterator it = operations_.begin(); it != operations_.end(); ++it){
 		const IdT &id = (*it)->getObjectId();

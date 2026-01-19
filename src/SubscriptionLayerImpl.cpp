@@ -18,7 +18,7 @@ using namespace COP;
 using namespace COP::SL;
 using namespace COP::SubscrMgr;
 
-SubscriptionLayerImpl::SubscriptionLayerImpl(void): subscrMgr_(NULL)
+SubscriptionLayerImpl::SubscriptionLayerImpl(void): subscrMgr_(nullptr)
 {
 	aux::ExchLogger::instance()->note("SubscriptionLayer created.");
 }
@@ -30,8 +30,8 @@ SubscriptionLayerImpl::~SubscriptionLayerImpl(void)
 
 void SubscriptionLayerImpl::attach(SubscriptionManager *subscMgr)
 {
-	assert(NULL == subscrMgr_);
-	assert(NULL != subscMgr);
+	assert(nullptr == subscrMgr_);
+	assert(nullptr != subscMgr);
 	subscrMgr_ = subscMgr;
 	aux::ExchLogger::instance()->note("SubscriptionLayer SubscriptionManager attached.");
 }
@@ -39,7 +39,7 @@ void SubscriptionLayerImpl::attach(SubscriptionManager *subscMgr)
 SubscriptionManager* SubscriptionLayerImpl::dettach()
 {
 	SubscriptionManager* tmp = subscrMgr_;
-	subscrMgr_ = NULL;
+	subscrMgr_ = nullptr;
 	aux::ExchLogger::instance()->note("SubscriptionLayer SubscriptionManager detached.");
 	return tmp;
 }

@@ -20,7 +20,7 @@ using namespace tbb;
 using namespace COP;
 using namespace COP::Store;
 
-WideParamsDataStorage::WideParamsDataStorage(void): storage_(NULL)
+WideParamsDataStorage::WideParamsDataStorage(void): storage_(nullptr)
 {
 	subscrCounter_.fetch_and_store(1);
 
@@ -42,8 +42,8 @@ WideParamsDataStorage::~WideParamsDataStorage(void)
 
 void WideParamsDataStorage::bindStorage(DataSaver *storage)
 {
-	assert(NULL == storage_);
-	assert(NULL != storage);
+	assert(nullptr == storage_);
+	assert(nullptr != storage);
 
 	storage_ = storage;
 }
@@ -102,7 +102,7 @@ SourceIdT WideParamsDataStorage::add(InstrumentEntry *val)
 		instruments_.insert(InstrumentsT::value_type(id, val));
 		val->id_ = id;
 	}
-	if(NULL != storage_)
+	if(nullptr != storage_)
 		storage_->save(*val);
 	//aux::ExchLogger::instance()->debug("WideParamsDataStorage InstrumentEntry added");
 	return id;
@@ -117,7 +117,7 @@ SourceIdT WideParamsDataStorage::add(StringT *val)
 		mutex::scoped_lock lock(lock_);
 		strings_.insert(StringsT::value_type(id, val));
 	}
-	if(NULL != storage_)
+	if(nullptr != storage_)
 		storage_->save(id, *val);
 	//aux::ExchLogger::instance()->debug("WideParamsDataStorage String added");
 	return id;
@@ -131,7 +131,7 @@ SourceIdT WideParamsDataStorage::add(RawDataEntry *val)
 		rawDatas_.insert(RawDataT::value_type(id, val));
 		val->id_ = id;
 	}
-	if(NULL != storage_)
+	if(nullptr != storage_)
 		storage_->save(*val);
 	//aux::ExchLogger::instance()->debug("WideParamsDataStorage RawDataEntry added");
 	return id;
@@ -145,7 +145,7 @@ SourceIdT WideParamsDataStorage::add(AccountEntry *val)
 		accounts_.insert(AccountsT::value_type(id, val));
 		val->id_ = id;
 	}
-	if(NULL != storage_)
+	if(nullptr != storage_)
 		storage_->save(*val);
 	//aux::ExchLogger::instance()->debug("WideParamsDataStorage AccountEntry added");
 	return id;
@@ -159,7 +159,7 @@ SourceIdT WideParamsDataStorage::add(ClearingEntry *val)
 		clearings_.insert(ClearingsT::value_type(id, val));
 		val->id_ = id;
 	}
-	if(NULL != storage_)
+	if(nullptr != storage_)
 		storage_->save(*val);
 	//aux::ExchLogger::instance()->debug("WideParamsDataStorage ClearingEntry added");
 	return id;
@@ -182,7 +182,7 @@ SourceIdT WideParamsDataStorage::add(ExecutionsT *val)
 		executions_.insert(ExecutionListsT::value_type(id, val));
 		//val->id_ = id;
 	}
-	if(NULL != storage_)
+	if(nullptr != storage_)
 		storage_->save(*val);
 	//aux::ExchLogger::instance()->debug("WideParamsDataStorage ExecutionsT added");
 	return id;

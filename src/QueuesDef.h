@@ -32,7 +32,7 @@ namespace Queues{
 	struct OrderEvent: public EventBase{
 		OrderEntry *order_;
 
-		OrderEvent(): order_(NULL){}
+		OrderEvent(): order_(nullptr){}
 		explicit OrderEvent(OrderEntry *ord): order_(ord){}
 	};
 

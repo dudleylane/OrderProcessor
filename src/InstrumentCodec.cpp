@@ -40,9 +40,9 @@ InstrumentCodec::~InstrumentCodec(void)
 
 void InstrumentCodec::encode(const InstrumentEntry &instr, std::string *buf, IdT *id, u32 *version)
 {
-	assert(NULL != buf);
-	assert(NULL != id);
-	assert(NULL != version);
+	assert(nullptr != buf);
+	assert(nullptr != id);
+	assert(nullptr != version);
 
 	*id = instr.id_;
 	*version = 0;
@@ -56,8 +56,8 @@ void InstrumentCodec::encode(const InstrumentEntry &instr, std::string *buf, IdT
 
 void InstrumentCodec::decode(const IdT& id, u32 /*version*/, const char *buf, size_t size, InstrumentEntry *instr)
 {
-	assert(NULL != buf);
-	assert(NULL != instr);
+	assert(nullptr != buf);
+	assert(nullptr != instr);
 	assert(0 < size);
 
 	instr->id_ = id;

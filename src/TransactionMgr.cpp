@@ -20,7 +20,7 @@ using namespace tbb;
 using namespace COP;
 using namespace COP::ACID;
 
-TransactionMgr::TransactionMgr(void): idGenerator_(NULL), started_(false), obs_(NULL)
+TransactionMgr::TransactionMgr(void): idGenerator_(nullptr), started_(false), obs_(nullptr)
 {
 	//aux::ExchLogger::instance()->note("TransactionMgr created.");
 }
@@ -34,8 +34,8 @@ TransactionMgr::~TransactionMgr(void)
 
 void TransactionMgr::attach(TransactionObserver *obs)
 {
-	assert(NULL != obs);
-	assert(NULL == obs_);
+	assert(nullptr != obs);
+	assert(nullptr == obs_);
 	mutex::scoped_lock lock(lock_);
 	obs_ = obs;
 	//aux::ExchLogger::instance()->note("TransactionMgr TransactionObserver attached.");
@@ -45,7 +45,7 @@ TransactionObserver *TransactionMgr::detach()
 {
 	mutex::scoped_lock lock(lock_);
 	TransactionObserver *obs = obs_;
-	obs_ = NULL;
+	obs_ = nullptr;
 	//aux::ExchLogger::instance()->note("TransactionMgr TransactionObserver detached.");
 	return obs;
 }
@@ -53,8 +53,8 @@ TransactionObserver *TransactionMgr::detach()
 void TransactionMgr::init(const TransactionMgrParams &params)
 {
 	assert(!started_);
-	assert(NULL == idGenerator_);
-	assert(NULL != params.idGenerator_);
+	assert(nullptr == idGenerator_);
+	assert(nullptr != params.idGenerator_);
 	idGenerator_ = params.idGenerator_;
 	started_ = true;
 	//aux::ExchLogger::instance()->note("TransactionMgr initialized.");
@@ -76,9 +76,9 @@ void TransactionMgr::stop()
 void TransactionMgr::addTransaction(std::auto_ptr<Transaction> &tr)
 {
 	assert(started_);
-	assert(NULL != tr.get());
+	assert(nullptr != tr.get());
 	assert(!tr->transactionId().isValid());
-	assert(NULL != idGenerator_);
+	assert(nullptr != idGenerator_);
 
 	//aux::ExchLogger::instance()->debug("TransactionMgr adding transaction.");
 
@@ -94,7 +94,7 @@ void TransactionMgr::addTransaction(std::auto_ptr<Transaction> &tr)
 		transactionTree_.add(id, trPtr, objects, &ready2Exec);
 	}
 	tr.release();
-	if((0 < ready2Exec)&&(NULL != obs_)){
+	if((0 < ready2Exec)&&(nullptr != obs_)){
 		obs_->onReadyToExecute();
 	}
 	//aux::ExchLogger::instance()->debug("TransactionMgr added transaction.");
@@ -103,7 +103,7 @@ void TransactionMgr::addTransaction(std::auto_ptr<Transaction> &tr)
 bool TransactionMgr::removeTransaction(const TransactionId &id, Transaction *t)
 {
 	assert(started_);
-	assert(NULL != t);
+	assert(nullptr != t);
 	assert(id.isValid());
 	std::auto_ptr<Transaction> trans(t);
 	//aux::ExchLogger::instance()->debug("TransactionMgr removing transaction.");
@@ -114,7 +114,7 @@ bool TransactionMgr::removeTransaction(const TransactionId &id, Transaction *t)
 		mutex::scoped_lock lock(lock_);
 		rez = transactionTree_.remove(id, &ready2Exec);
 	}
-	if((0 < ready2Exec)&&(NULL != obs_)){
+	if((0 < ready2Exec)&&(nullptr != obs_)){
 		//aux::ExchLogger::instance()->debug("TransactionMgr starts new transaction after remove previous.");
 		obs_->onReadyToExecute();
 	}

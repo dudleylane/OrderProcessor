@@ -22,7 +22,7 @@ namespace OrdState{
 		int stateZone1Id_;	
 		int stateZone2Id_;
 
-		OrderStatePersistence(): orderData_(NULL), stateZone1Id_(-1), stateZone2Id_(-1){}
+		OrderStatePersistence(): orderData_(nullptr), stateZone1Id_(-1), stateZone2Id_(-1){}
 
 		void serialize(std::string &msg)const;
 		char *serialize(char *msg)const;

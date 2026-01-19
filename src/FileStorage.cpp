@@ -38,7 +38,7 @@ namespace{
 	typedef std::vector<char> RecordBody;
 
 	void addVersionRecord(FILE *f){
-		assert(NULL != f);
+		assert(nullptr != f);
 
 		/// save record
 		fseek(f, 0, SEEK_SET);
@@ -47,7 +47,7 @@ namespace{
 	}
 
 	void checkVersionRecord(FILE *f){
-		assert(NULL != f);
+		assert(nullptr != f);
 
 		fseek(f, 0, SEEK_SET);
 		
@@ -60,8 +60,8 @@ namespace{
 	}
 
 	void readRecord(FILE *f, FileRecord &record, RecordBody *body){
-		assert(NULL != f);
-		assert(NULL != body);
+		assert(nullptr != f);
+		assert(nullptr != body);
 
 		record.offset_ = static_cast<size_t>(ftell(f));
 
@@ -118,8 +118,8 @@ namespace{
 	}
 
 	void saveRecord(FILE *f, const char *recBody, size_t size, FileRecord &record){
-		assert(NULL != f);
-		assert(NULL != recBody);
+		assert(nullptr != f);
+		assert(nullptr != recBody);
 
 		fseek(f, 0, SEEK_END);
 		record.offset_ = static_cast<size_t>(ftell(f));
@@ -152,7 +152,7 @@ namespace{
 
 	// locates next record in file and skip fault block
 	void findNextRecord(FILE *f){
-		assert(NULL != f);
+		assert(nullptr != f);
 
 		const int bufSize = 64*1024;
 		char buf[bufSize + 1];
@@ -163,7 +163,7 @@ namespace{
 				return;
 			}
 			char *ptr = static_cast<char *>(memchr(buf, '<', bufSize));
-			if(NULL != ptr){
+			if(nullptr != ptr){
 				fseek(f, surrPos + (ptr - buf), SEEK_SET);
 				return;
 			}
@@ -172,7 +172,7 @@ namespace{
 	}
 
 	void disableRecord(FILE *f, FileRecord &record){
-		assert(NULL != f);
+		assert(nullptr != f);
 		
 		int res = fseek(f, static_cast<long>(record.offset_) + HEADER_ACTIVE_POS, SEEK_SET);
 		if(0 != res)
@@ -191,12 +191,12 @@ void FileStorage::init()
 }
 
 FileStorage::FileStorage(): 
-	file_(NULL), generator_(), records_()
+	file_(nullptr), generator_(), records_()
 {
 }
 
 FileStorage::FileStorage(const std::string &fileName, FileStorageObserver *observer): 
-	file_(NULL), generator_(), records_()
+	file_(nullptr), generator_(), records_()
 {
 	load(fileName, observer);
 }
@@ -208,14 +208,14 @@ FileStorage::~FileStorage(void)
 
 void FileStorage::load(const std::string &fileName, FileStorageObserver *observer)
 {
-	assert(NULL == file_);
-	assert(NULL != observer);
+	assert(nullptr == file_);
+	assert(nullptr != observer);
 
 	file_ = fopen(fileName.c_str(), "r+");
-	bool newFile = NULL == file_;
+	bool newFile = nullptr == file_;
 	if(newFile)
 		file_ = fopen(fileName.c_str(), "w+");
-	if(NULL == file_){
+	if(nullptr == file_){
 		string s = string("FileStorage: Unable to open file '") + fileName + "'.";
 		throw std::runtime_error(s.c_str());
 	}
@@ -235,7 +235,7 @@ void FileStorage::load(const std::string &fileName, FileStorageObserver *observe
 
 void FileStorage::pocessRecord(FILE *file, FileStorageObserver *observer)
 {
-	assert(NULL != observer);
+	assert(nullptr != observer);
 	try{
 		FileRecord rec;
 		RecordBody body;
@@ -249,7 +249,7 @@ void FileStorage::pocessRecord(FILE *file, FileStorageObserver *observer)
 			records_.insert(RecordsT::value_type(rec.id_, cont.get()));
 			cont.release();
 		}else{
-			assert(NULL != it->second);
+			assert(nullptr != it->second);
 			it->second->push_back(rec);
 		}
 		observer->onRecordLoaded(rec.id_, rec.version_, &(body[0]), body.size());
@@ -264,10 +264,10 @@ void FileStorage::clear()
 	{
 		mutex::scoped_lock lock(lock_);
 		std::swap(records_, tmp);
-		if(NULL != file_){
+		if(nullptr != file_){
 			fflush(file_);
 			fclose(file_);
-			file_ = NULL;		}
+			file_ = nullptr;		}
 	}
 	for(RecordsT::iterator it = tmp.begin(); it != tmp.end(); ++it){
 		auto_ptr<RecordChainT> chain(it->second);
@@ -283,8 +283,8 @@ IdT FileStorage::save(const char *buf, size_t size)
 
 void FileStorage::save(const IdT &id, const char *buf, size_t size)
 {
-	assert(NULL != file_);
-	assert(NULL != buf);
+	assert(nullptr != file_);
+	assert(nullptr != buf);
 	assert(0 < size);
 
 	FileRecord rec(id, static_cast<u32>(size));
@@ -302,8 +302,8 @@ void FileStorage::save(const IdT &id, const char *buf, size_t size)
 }
 
 u32 FileStorage::update(const IdT& id, const char *buf, size_t size){
-	assert(NULL != file_);
-	assert(NULL != buf);
+	assert(nullptr != file_);
+	assert(nullptr != buf);
 	assert(0 < size);
 
 	FileRecord rec(id, static_cast<u32>(size));
@@ -315,7 +315,7 @@ u32 FileStorage::update(const IdT& id, const char *buf, size_t size){
 			records_.insert(RecordsT::value_type(id, chain.get()));
 			chain.release();
 		}else{
-			assert(NULL != it->second);
+			assert(nullptr != it->second);
 			assert(!it->second->empty());
 			rec.version_ = it->second->back().version_ + 1;
 		}
@@ -326,8 +326,8 @@ u32 FileStorage::update(const IdT& id, const char *buf, size_t size){
 }
 
 u32 FileStorage::replace(const IdT& id, u32 version, const char *buf, size_t size){
-	assert(NULL != file_);
-	assert(NULL != buf);
+	assert(nullptr != file_);
+	assert(nullptr != buf);
 	assert(0 < size);
 
 	FileRecord rec(id, static_cast<u32>(size));
@@ -337,7 +337,7 @@ u32 FileStorage::replace(const IdT& id, u32 version, const char *buf, size_t siz
 		if(records_.end() == it){
 			throw std::runtime_error("FileStorage::replace: Unable to replace record, record with this Id not exists!");
 		}
-		assert(NULL != it->second);
+		assert(nullptr != it->second);
 		assert(!it->second->empty());
 		for(RecordChainT::iterator rit = it->second->begin(); rit != it->second->end(); ++rit){
 			if(rit->version_ == version){
@@ -356,12 +356,12 @@ u32 FileStorage::replace(const IdT& id, u32 version, const char *buf, size_t siz
 }
 
 void FileStorage::erase(const IdT& id, u32 version){
-	assert(NULL != file_);
+	assert(nullptr != file_);
 	mutex::scoped_lock lock(lock_);
 	RecordsT::iterator it = records_.find(id);
 	if(records_.end() == it)
 		return;
-	assert(NULL != it->second);
+	assert(nullptr != it->second);
 	for(RecordChainT::iterator rit = it->second->begin(); rit != it->second->end(); ++rit){
 		if(rit->version_ == version){
 			disableRecord(file_, *rit);

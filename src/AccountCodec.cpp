@@ -42,9 +42,9 @@ AccountCodec::~AccountCodec(void)
 
 void AccountCodec::encode(const AccountEntry &val, std::string *buf, IdT *id, u32 *version)
 {
-	assert(NULL != buf);
-	assert(NULL != id);
-	assert(NULL != version);
+	assert(nullptr != buf);
+	assert(nullptr != id);
+	assert(nullptr != version);
 
 	*id = val.id_;
 	*version = 0;
@@ -63,8 +63,8 @@ void AccountCodec::encode(const AccountEntry &val, std::string *buf, IdT *id, u3
 
 void AccountCodec::decode(const IdT& id, u32 /*version*/, const char *buf, size_t size, AccountEntry *val)
 {
-	assert(NULL != buf);
-	assert(NULL != val);
+	assert(nullptr != buf);
+	assert(nullptr != val);
 	assert(0 < size);
 
 	val->id_ = id;

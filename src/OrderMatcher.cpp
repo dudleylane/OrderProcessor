@@ -38,8 +38,8 @@ namespace{
 		FindOpositeOrder(OrderEntry *order, OrderDataStorage *orderStorage): 
 					order_(order), orderStorage_(orderStorage)
 		{
-			assert(NULL != order_);
-			assert(NULL != orderStorage_);
+			assert(nullptr != order_);
+			assert(nullptr != orderStorage_);
 			if(BUY_SIDE == order_->side_)
 				side_ = SELL_SIDE;
 			else 
@@ -58,7 +58,7 @@ namespace{
 
 	bool FindOpositeOrder::match(const IdT &order, bool *stop)const{
 		OrderEntry *contrOrd = orderStorage_->locateByOrderId(order);
-		if(NULL == contrOrd)
+		if(nullptr == contrOrd)
 			return false;
 		if(0 == contrOrd->leavesQty_)
 			return false;
@@ -77,12 +77,12 @@ namespace{
 			else
 				*stop = true;
 		}
-		assert(NULL != stop);
+		assert(nullptr != stop);
 		return false;
 	}
 }
 
-OrderMatcher::OrderMatcher(void): stateMachine_(NULL), defered_(NULL)
+OrderMatcher::OrderMatcher(void): stateMachine_(nullptr), defered_(nullptr)
 {
 	aux::ExchLogger::instance()->note("OrderMatcher created.");
 }
@@ -90,13 +90,13 @@ OrderMatcher::OrderMatcher(void): stateMachine_(NULL), defered_(NULL)
 OrderMatcher::~OrderMatcher(void)
 {
 	delete stateMachine_;
-	stateMachine_ = NULL;
+	stateMachine_ = nullptr;
 	aux::ExchLogger::instance()->note("OrderMatcher destroyed.");
 }
 
 void OrderMatcher::init(DeferedEventContainer *cont)
 {
-	assert(NULL != cont);
+	assert(nullptr != cont);
 	defered_ = cont;
 
 	stateMachine_ = new OrderState();
@@ -106,9 +106,9 @@ void OrderMatcher::init(DeferedEventContainer *cont)
 
 void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 {
-	assert(NULL != order);
-	assert(NULL != ctxt.orderBook_);
-	assert(NULL != ctxt.orderStorage_);
+	assert(nullptr != order);
+	assert(nullptr != ctxt.orderBook_);
+	assert(nullptr != ctxt.orderStorage_);
 
 	//aux::ExchLogger::instance()->debug("OrderMatcher start matching.");
 
@@ -129,7 +129,7 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 	}
 
 	OrderEntry *contrOrd = ctxt.orderStorage_->locateByOrderId(id);
-	if(NULL == contrOrd)
+	if(nullptr == contrOrd)
 		throw std::runtime_error("Unable to retrive order from OrderStorage after search!");
 
 	/// add trade event

@@ -343,7 +343,7 @@ bool testRcvdNew2New_onOrderReceived()
 		check(0 == order->orderId_.id_);
 		check(0 == order->orderId_.date_);
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onOrderReceived recvevnt;
 		{
@@ -355,9 +355,9 @@ bool testRcvdNew2New_onOrderReceived()
 		p.processEvent(recvevnt);
 		p.checkStates("New", "NoCnlReplace");
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		check(3 == trCntxt.op_.size());
 		check(trCntxt.isOperationEnqueued(ADD_ORDERBOOK_TROPERATION));
@@ -376,7 +376,7 @@ bool testRcvdNew2New_onOrderReceived()
 		check(0 == order->orderId_.id_);
 		check(0 == order->orderId_.date_);
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 
 		onOrderReceived recvevnt;
 		{
@@ -392,9 +392,9 @@ bool testRcvdNew2New_onOrderReceived()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByOrderId(order->orderId_);
-		check(NULL == ord);
+		check(nullptr == ord);
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(NEW_ORDSTATUS == ord->status_);
 		check(REJECTED_ORDSTATUS == order->status_);
 	}
@@ -405,7 +405,7 @@ bool testRcvdNew2New_onOrderReceived()
 		auto_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		p.start();
 		p.checkStates("Rcvd_New", "NoCnlReplace");
@@ -427,9 +427,9 @@ bool testRcvdNew2New_onOrderReceived()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS == ord->status_);
 	}
 
@@ -444,7 +444,7 @@ bool testRcvdNew2New_onOrderReceived()
 		check(0 == order->orderId_.id_);
 		check(0 == order->orderId_.date_);
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onOrderReceived recvevnt;
 		{
@@ -461,9 +461,9 @@ bool testRcvdNew2New_onOrderReceived()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 		ord = OrderStorage::instance()->locateByOrderId(order->orderId_);
-		check(NULL == ord);
+		check(nullptr == ord);
 		check(REJECTED_ORDSTATUS == order->status_);
 	}
 
@@ -485,7 +485,7 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 		check(0 == order->orderId_.id_);
 		check(0 == order->orderId_.date_);
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onRecvOrderRejected evnt;
 		{
@@ -501,9 +501,9 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS == ord->status_);
 	}
 
@@ -513,7 +513,7 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 		auto_ptr<OrderEntry> order(createCorrectOrder());
 		assignClOrderId(order.get(), "");
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		p.start();
 		p.checkStates("Rcvd_New", "NoCnlReplace");
@@ -534,9 +534,9 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 		ord = OrderStorage::instance()->locateByOrderId(order->orderId_);
-		check(NULL == ord);
+		check(nullptr == ord);
 		check(REJECTED_ORDSTATUS == evnt.order_->status_);
 	}
 
@@ -551,7 +551,7 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 		check(0 == order->orderId_.id_);
 		check(0 == order->orderId_.date_);
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 
 		onRecvOrderRejected evnt;
 		{
@@ -567,9 +567,9 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS == evnt.order_->status_);
 		check(REJECTED_ORDSTATUS == ord->status_);
 	}
@@ -584,7 +584,7 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 		check(0 == order->orderId_.id_);
 		check(0 == order->orderId_.date_);
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onRecvOrderRejected evnt;
 		{
@@ -601,9 +601,9 @@ bool testRcvdNew2Rejected_onRecvOrderRejected()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS == ord->status_);
 	}
 
@@ -622,7 +622,7 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onRplOrderReceived evnt;
 		{
@@ -638,9 +638,9 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		check(trCntxt.isOperationEnqueued(ENQUEUE_EVENT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(PENDINGREPLACE_ORDSTATUS == ord->status_);
 	}
 	{
@@ -654,7 +654,7 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onRplOrderReceived evnt;
 		{
@@ -671,9 +671,9 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		check(trCntxt.isOperationEnqueued(ENQUEUE_EVENT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(PENDINGREPLACE_ORDSTATUS == ord->status_);
 	}
 	{
@@ -686,7 +686,7 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 
 		onRplOrderReceived evnt;
 		{
@@ -701,9 +701,9 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS != ord->status_);
 		check(REJECTED_ORDSTATUS == evnt.order_->status_);
 	}
@@ -718,7 +718,7 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onRplOrderReceived evnt;
 		{
@@ -734,9 +734,9 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		check(REJECTED_ORDSTATUS == ord->status_);
 	}
@@ -753,7 +753,7 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onRplOrderReceived evnt;
 		{
@@ -768,9 +768,9 @@ bool testRcvdNew2PendReplace_onRplOrderReceived()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(ord->orderId_.isValid());
 		check(REJECTED_ORDSTATUS == ord->status_);
 	}
@@ -790,7 +790,7 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onRecvRplOrderRejected evnt;
 		{
@@ -806,9 +806,9 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS == ord->status_);
 	}
 	{
@@ -822,7 +822,7 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onRecvRplOrderRejected evnt;
 		{
@@ -839,9 +839,9 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS == ord->status_);
 	}
 
@@ -855,7 +855,7 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		p.start();
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
-		OrderEntry *ord = NULL;
+		OrderEntry *ord = nullptr;
 
 		onRecvRplOrderRejected evnt;
 		{
@@ -870,9 +870,9 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByOrderId(order->orderId_);
-		check(NULL == ord);
+		check(nullptr == ord);
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 		check(REJECTED_ORDSTATUS == evnt.order_->status_);
 	}
 	{
@@ -885,7 +885,7 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 
 		onRecvRplOrderRejected evnt;
 		{
@@ -900,9 +900,9 @@ bool testRcvdNew2Rejected_onRecvRplOrderRejected()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS == evnt.order_->status_);
 		check(REJECTED_ORDSTATUS != ord->status_);
 	}
@@ -922,7 +922,7 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onExternalOrderRejected evnt;
 		{
@@ -938,9 +938,9 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS == ord->status_);
 	}
 
@@ -955,7 +955,7 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onExternalOrderRejected evnt;
 		{
@@ -972,9 +972,9 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS == ord->status_);
 	}
 
@@ -989,7 +989,7 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onExternalOrderRejected evnt;
 		{
@@ -1005,9 +1005,9 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 		ord = OrderStorage::instance()->locateByOrderId(order->orderId_);
-		check(NULL == ord);
+		check(nullptr == ord);
 		check(REJECTED_ORDSTATUS == evnt.order_->status_);
 	}
 
@@ -1020,7 +1020,7 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		p.start();
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 
 		onExternalOrderRejected evnt;
 		{
@@ -1037,9 +1037,9 @@ bool testRcvdNew2Rejected_onExternalOrderReject()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByOrderId(order->orderId_);
-		check(NULL == ord);
+		check(nullptr == ord);
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS != ord->status_);
 	}
 
@@ -1058,7 +1058,7 @@ bool testRcvdNew2New_onExternalOrder()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onExternalOrder evnt;
 		{
@@ -1075,9 +1075,9 @@ bool testRcvdNew2New_onExternalOrder()
 		check(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(NEW_ORDSTATUS == ord->status_);
 	}
 	{
@@ -1091,7 +1091,7 @@ bool testRcvdNew2New_onExternalOrder()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onExternalOrder evnt;
 		{
@@ -1107,9 +1107,9 @@ bool testRcvdNew2New_onExternalOrder()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		ord = OrderStorage::instance()->locateByOrderId(ord->orderId_);
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS == ord->status_);
 	}
 	{
@@ -1123,7 +1123,7 @@ bool testRcvdNew2New_onExternalOrder()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 
 		onExternalOrder evnt;
 		{
@@ -1138,7 +1138,7 @@ bool testRcvdNew2New_onExternalOrder()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL == ord);
+		check(nullptr == ord);
 		check(REJECTED_ORDSTATUS == evnt.order_->status_);
 	}
 	{
@@ -1151,7 +1151,7 @@ bool testRcvdNew2New_onExternalOrder()
 		p.checkStates("Rcvd_New", "NoCnlReplace");
 		check(!order->orderId_.isValid());
 		OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 
 		onExternalOrder evnt;
 		{
@@ -1166,7 +1166,7 @@ bool testRcvdNew2New_onExternalOrder()
 		check(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 		trCntxt.clear();
 		ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
-		check(NULL != ord);
+		check(nullptr != ord);
 		check(REJECTED_ORDSTATUS == evnt.order_->status_);
 		check(REJECTED_ORDSTATUS != ord->status_);
 	}

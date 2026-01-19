@@ -21,13 +21,13 @@ using namespace tbb;
 using namespace std;
 using namespace COP::Store;
 
-OrderDataStorage::OrderDataStorage(): saver_(NULL)
+OrderDataStorage::OrderDataStorage(): saver_(nullptr)
 {
 	aux::ExchLogger::instance()->note("OrderDataStorage created");
 }
 
 void OrderDataStorage::attach(OrderSaver *saver){
-	assert(NULL == saver_);
+	assert(nullptr == saver_);
 	saver_ = saver;
 }
 
@@ -58,7 +58,7 @@ OrderEntry *OrderDataStorage::locateByClOrderId(const RawDataEntry &clOrderId)co
 	mutex::scoped_lock lock(orderLock_);
 	OrdersByClientIDT::const_iterator it = ordersByClId_.find(clOrderId);
 	if(ordersByClId_.end() == it)
-		return NULL;
+		return nullptr;
 	return it->second;
 }
 
@@ -68,7 +68,7 @@ OrderEntry *OrderDataStorage::locateByOrderId(const IdT &orderId)const
 	mutex::scoped_lock lock(orderLock_);
 	OrdersByIDT::const_iterator it = ordersById_.find(orderId);
 	if(ordersById_.end() == it)
-		return NULL;
+		return nullptr;
 	return it->second;
 }
 
@@ -77,7 +77,7 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 	if(aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OrderDataStorage saving order");
 
-	assert(NULL != idGenerator);
+	assert(nullptr != idGenerator);
 	{
 		mutex::scoped_lock lock(orderLock_);
 		if((order.orderId_.isValid())&&(ordersById_.end() != ordersById_.find(order.orderId_)))
@@ -97,7 +97,7 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 			st = 1;
 			ordersByClId_.insert(OrdersByClientIDT::value_type(cp->clOrderId_.get(), cp.get()));
 			st = 2;
-			if(NULL != saver_)
+			if(nullptr != saver_)
 				saver_->save(*cp.get());
 			return cp.release();
 		}catch(...){
@@ -132,7 +132,7 @@ void OrderDataStorage::restore(OrderEntry *order)
 			st = 1;
 			ordersByClId_.insert(OrdersByClientIDT::value_type(order->clOrderId_.get(), order));
 			st = 2;
-			if(NULL != saver_)
+			if(nullptr != saver_)
 				saver_->save(*order);
 			return;
 		}catch(...){
@@ -152,7 +152,7 @@ ExecutionEntry *OrderDataStorage::locateByExecId(const IdT &execId)const
 	mutex::scoped_lock lock(execLock_);
 	ExecByIDT::const_iterator it = executionsById_.find(execId);
 	if(executionsById_.end() == it)
-		return NULL;
+		return nullptr;
 	return it->second;
 }
 
@@ -165,7 +165,7 @@ void OrderDataStorage::save(const ExecutionEntry *exec)
 	if(executionsById_.end() != executionsById_.find(exec->execId_))
 		throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
 	executionsById_.insert(ExecByIDT::value_type(exec->execId_, exec->clone()));
-	//assert(NULL != saver_);
+	//assert(nullptr != saver_);
 	//saver_->save(*cp.get());
 }
 
@@ -174,7 +174,7 @@ ExecutionEntry *OrderDataStorage::save(const ExecutionEntry &exec, IdTValueGener
 	if(aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OrderDataStorage saving execution 2");
 
-	assert(NULL != idGenerator);
+	assert(nullptr != idGenerator);
 	mutex::scoped_lock lock(execLock_);
 	if((exec.execId_.isValid())&&(executionsById_.end() != executionsById_.find(exec.execId_)))
 		throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
@@ -183,7 +183,7 @@ ExecutionEntry *OrderDataStorage::save(const ExecutionEntry &exec, IdTValueGener
 	if(!cp->execId_.isValid())
 		cp->execId_ = idGenerator->getId();
 	executionsById_.insert(ExecByIDT::value_type(cp->execId_, cp.get()));
-	//assert(NULL != saver_);
+	//assert(nullptr != saver_);
 	//saver_->save(*cp.get());
 	return cp.release();
 }

@@ -22,7 +22,7 @@ void Rejected::on_entry(onReplace const& evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = REJECTED_ORDSTATUS;
 
 	//todo: add reject reason
@@ -35,7 +35,7 @@ void Rejected::on_entry(onRecvOrderRejected const& evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = REJECTED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateRejectExecReportTrOperation(evnt.reason_, COP::REJECTED_ORDSTATUS, 
@@ -47,7 +47,7 @@ void Rejected::on_entry(onRecvRplOrderRejected const& evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = REJECTED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateRejectExecReportTrOperation(evnt.reason_, COP::REJECTED_ORDSTATUS, 
@@ -59,7 +59,7 @@ void Rejected::on_entry(onExternalOrderRejected const& evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = REJECTED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateRejectExecReportTrOperation(evnt.reason_, COP::REJECTED_ORDSTATUS, 
@@ -71,7 +71,7 @@ void Rejected::on_entry(onOrderAccepted const& evnt)
 {
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = REJECTED_ORDSTATUS;
 
 	///todo: add reject reason
@@ -82,7 +82,7 @@ void Rejected::on_entry(onOrderAccepted const& evnt)
 void Rejected::on_entry(onOrderRejected const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = REJECTED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateRejectExecReportTrOperation(evnt.reason_, COP::REJECTED_ORDSTATUS, *evnt.order4StateMachine_));
@@ -91,7 +91,7 @@ void Rejected::on_entry(onOrderRejected const& evnt){
 void Rejected::on_entry(onRplOrderRejected const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = REJECTED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateRejectExecReportTrOperation(evnt.reason_, COP::REJECTED_ORDSTATUS, *evnt.order4StateMachine_));
@@ -101,7 +101,7 @@ void Rejected::on_entry(onExternalOrder const& evnt){
 	if(evnt.testStateMachine_)
 		return;
 	// unable to assign order status here - it's the first state
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = REJECTED_ORDSTATUS;
 
 	///todo: add reject reason
@@ -112,7 +112,7 @@ void Rejected::on_entry(onExternalOrder const& evnt){
 void New::on_entry(onExternalOrder const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = NEW_ORDSTATUS;
 	auto_ptr<Operation> op1(new CreateExecReportTrOperation(COP::NEW_ORDSTATUS, 
 				COP::NEW_EXECTYPE, *evnt.order4StateMachine_));
@@ -122,7 +122,7 @@ void New::on_entry(onExternalOrder const& evnt){
 void New::on_entry(onOrderReceived const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = NEW_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(COP::NEW_ORDSTATUS, COP::NEW_EXECTYPE, *evnt.order4StateMachine_));
@@ -132,7 +132,7 @@ void New::on_entry(onOrderReceived const& evnt){
 void New::on_entry(onOrderAccepted const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = NEW_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(COP::NEW_ORDSTATUS, COP::NEW_EXECTYPE, *evnt.order4StateMachine_));
@@ -142,7 +142,7 @@ void New::on_entry(onOrderAccepted const& evnt){
 void New::on_entry(onReplace const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = NEW_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateReplaceExecReportTrOperation(evnt.origOrderId_, COP::NEW_ORDSTATUS, *evnt.order4StateMachine_));
@@ -151,7 +151,7 @@ void New::on_entry(onReplace const& evnt){
 void New::on_entry(onNewDay const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = NEW_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(COP::NEW_ORDSTATUS, COP::NEW_EXECTYPE, *evnt.order4StateMachine_));
@@ -160,7 +160,7 @@ void New::on_entry(onNewDay const& evnt){
 void New::on_entry(onContinue const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = NEW_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(COP::NEW_ORDSTATUS, COP::NEW_EXECTYPE, *evnt.order4StateMachine_));
@@ -170,7 +170,7 @@ void New::on_entry(onContinue const& evnt){
 void Expired::on_entry(onExpired const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = EXPIRED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(COP::EXPIRED_ORDSTATUS, COP::EXPIRED_EXECTYPE, *evnt.order4StateMachine_));
@@ -180,7 +180,7 @@ void Expired::on_entry(onExpired const& evnt){
 void Expired::on_entry(onRplOrderExpired const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = EXPIRED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(COP::EXPIRED_ORDSTATUS, COP::EXPIRED_EXECTYPE, *evnt.order4StateMachine_));
@@ -190,7 +190,7 @@ void Expired::on_entry(onRplOrderExpired const& evnt){
 void CnclReplaced::on_entry(onExecCancel const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = CANCELED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(COP::CANCELED_ORDSTATUS, COP::CANCEL_EXECTYPE, *evnt.order4StateMachine_));
@@ -200,7 +200,7 @@ void CnclReplaced::on_entry(onExecCancel const& evnt){
 void CnclReplaced::on_entry(onInternalCancel const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = CANCELED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(COP::CANCELED_ORDSTATUS, COP::CANCEL_EXECTYPE, *evnt.order4StateMachine_));
@@ -210,7 +210,7 @@ void CnclReplaced::on_entry(onInternalCancel const& evnt){
 void CnclReplaced::on_entry(onExecReplace const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = REPLACED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateReplaceExecReportTrOperation(evnt.orderId_, COP::REPLACED_ORDSTATUS, *evnt.order4StateMachine_));
@@ -220,7 +220,7 @@ void CnclReplaced::on_entry(onExecReplace const& evnt){
 void Suspended::on_entry(onSuspended const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = SUSPENDED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(COP::SUSPENDED_ORDSTATUS, COP::SUSPENDED_EXECTYPE, *evnt.order4StateMachine_));
@@ -230,7 +230,7 @@ void Suspended::on_entry(onSuspended const& evnt){
 void DoneForDay::on_entry(onFinished const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = DFD_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(COP::DFD_ORDSTATUS, COP::DFD_EXECTYPE, *evnt.order4StateMachine_));
@@ -240,7 +240,7 @@ void DoneForDay::on_entry(onFinished const& evnt){
 void New::on_entry(onTradeCrctCncl const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = NEW_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateCorrectExecReportTrOperation(evnt.correct(), NEW_ORDSTATUS, *evnt.order4StateMachine_));
@@ -249,7 +249,7 @@ void New::on_entry(onTradeCrctCncl const& evnt){
 void PartFill::on_entry(onTradeExecution const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = PARTFILL_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateTradeExecReportTrOperation(evnt.trade(), PARTFILL_ORDSTATUS, *evnt.order4StateMachine_));
@@ -258,7 +258,7 @@ void PartFill::on_entry(onTradeExecution const& evnt){
 void PartFill::on_entry(onTradeCrctCncl const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = PARTFILL_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateCorrectExecReportTrOperation(evnt.correct(), PARTFILL_ORDSTATUS, *evnt.order4StateMachine_));
@@ -267,7 +267,7 @@ void PartFill::on_entry(onTradeCrctCncl const& evnt){
 void PartFill::on_entry(onNewDay const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = PARTFILL_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(PARTFILL_ORDSTATUS, COP::RESTATED_EXECTYPE, *evnt.order4StateMachine_));
@@ -276,7 +276,7 @@ void PartFill::on_entry(onNewDay const& evnt){
 void PartFill::on_entry(onContinue const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = PARTFILL_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateExecReportTrOperation(PARTFILL_ORDSTATUS, COP::RESTATED_EXECTYPE, *evnt.order4StateMachine_));
@@ -286,7 +286,7 @@ void PartFill::on_entry(onContinue const& evnt){
 void Filled::on_entry(onTradeExecution const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = FILLED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateTradeExecReportTrOperation(evnt.trade(), PARTFILL_ORDSTATUS, *evnt.order4StateMachine_));
@@ -296,7 +296,7 @@ void Filled::on_entry(onTradeExecution const& evnt){
 void Suspended::on_entry(onTradeCrctCncl const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = SUSPENDED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateCorrectExecReportTrOperation(evnt.correct(), SUSPENDED_ORDSTATUS, *evnt.order4StateMachine_));
@@ -310,7 +310,7 @@ void CnclReplaced::on_entry(onTradeCrctCncl const& evnt){
 void Expired::on_entry(onTradeCrctCncl const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = EXPIRED_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateCorrectExecReportTrOperation(evnt.correct(), EXPIRED_ORDSTATUS, *evnt.order4StateMachine_));
@@ -320,7 +320,7 @@ void Expired::on_entry(onTradeCrctCncl const& evnt){
 void DoneForDay::on_entry(onTradeCrctCncl const& evnt){
 	if(evnt.testStateMachine_)
 		return;
-	assert(NULL != evnt.order4StateMachine_);
+	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = DFD_ORDSTATUS;
 
 	auto_ptr<Operation> op(new CreateCorrectExecReportTrOperation(evnt.correct(), DFD_ORDSTATUS, *evnt.order4StateMachine_));

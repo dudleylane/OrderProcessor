@@ -29,7 +29,7 @@ bool InstrumentIdFilter::match(const InstrumentEntry &params)const
 
 bool InstrumentIdFilter::getInstrumentEntry(InstrumentEntry *val)const
 {
-	assert(NULL != val);
+	assert(nullptr != val);
 	return impl_.getVal(&(val->id_));
 }
 
@@ -48,7 +48,7 @@ bool InstrumentSymbolFilter::match(const InstrumentEntry &params)const
 
 bool InstrumentSymbolFilter::getInstrumentEntry(InstrumentEntry *val)const
 {
-	assert(NULL != val);
+	assert(nullptr != val);
 	return filter_->getVal(&(val->symbol_));
 }
 
@@ -62,7 +62,7 @@ bool InstrumentSecurityIdFilter::match(const InstrumentEntry &params)const
 
 bool InstrumentSecurityIdFilter::getInstrumentEntry(InstrumentEntry *val)const
 {
-	assert(NULL != val);
+	assert(nullptr != val);
 	return filter_->getVal(&(val->securityId_));
 }
 
@@ -76,14 +76,14 @@ bool InstrumentSecurityIdSourceFilter::match(const InstrumentEntry &params)const
 
 bool InstrumentSecurityIdSourceFilter::getInstrumentEntry(InstrumentEntry *val)const
 {
-	assert(NULL != val);
+	assert(nullptr != val);
 	return filter_->getVal(&(val->securityIdSource_));
 }
 
 void InstrumentFilter::release()
 {
 	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		if(NULL != *it)
+		if(nullptr != *it)
 			delete *it;
 	}
 	filters_.clear();
@@ -92,7 +92,7 @@ void InstrumentFilter::release()
 bool InstrumentFilter::getInstrumentEntry(InstrumentEntry *val)const
 {
 	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		assert(NULL != *it);
+		assert(nullptr != *it);
 		if(!(*it)->getInstrumentEntry(val))
 			return false;
 	}	
@@ -101,7 +101,7 @@ bool InstrumentFilter::getInstrumentEntry(InstrumentEntry *val)const
 
 void InstrumentFilter::addFilter(InstrumentElementFilter *fltr)
 {
-	assert(NULL != fltr);
+	assert(nullptr != fltr);
 	filters_.push_back(fltr);
 }
 
@@ -111,7 +111,7 @@ bool InstrumentFilter::match(const OrderParams &params)const
 		return true;
 	const InstrumentEntry &entry = params.instrument_.get();
 	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		assert(NULL != *it);
+		assert(nullptr != *it);
 		if(!(*it)->match(entry))
 			return false;
 	}
@@ -160,14 +160,14 @@ bool AccountTypeInFilter::match(const AccountEntry &params)const
 
 void AccountFilter::addFilter(AccountElementFilter *fltr)
 {
-	assert(NULL != fltr);
+	assert(nullptr != fltr);
 	filters_.push_back(fltr);
 }
 
 void AccountFilter::release()
 {
 	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		if(NULL != *it)
+		if(nullptr != *it)
 			delete *it;
 	}
 	filters_.clear();
@@ -179,7 +179,7 @@ bool AccountFilter::match(const OrderParams &params)const
 		return true;
 	const AccountEntry &entry = params.account_.get();
 	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		assert(NULL != *it);
+		assert(nullptr != *it);
 		if(!(*it)->match(entry))
 			return false;
 	}
@@ -204,14 +204,14 @@ bool ClearingFirmFilter::match(const ClearingEntry &params)const
 
 void ClearingFilter::addFilter(ClearingElementFilter *fltr)
 {
-	assert(NULL != fltr);
+	assert(nullptr != fltr);
 	filters_.push_back(fltr);
 }
 
 void ClearingFilter::release()
 {
 	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		if(NULL != *it)
+		if(nullptr != *it)
 			delete *it;
 	}
 	filters_.clear();
@@ -223,7 +223,7 @@ bool ClearingFilter::match(const OrderParams &params)const
 		return true;
 	const ClearingEntry &entry = params.clearing_.get();
 	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		assert(NULL != *it);
+		assert(nullptr != *it);
 		if(!(*it)->match(entry))
 			return false;
 	}

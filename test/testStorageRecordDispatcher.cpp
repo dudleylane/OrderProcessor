@@ -52,23 +52,23 @@ namespace{
 		}
 
 		virtual void restore(InstrumentEntry *val){
-			assert(NULL != val);
+			assert(nullptr != val);
 			instr_.push_back(val);
 		}
 		virtual void restore(const IdT& id, StringT *val){
-			assert(NULL != val);
+			assert(nullptr != val);
 			string_.push_back(IdString(val, id));
 		}
 		virtual void restore(RawDataEntry *val){
-			assert(NULL != val);
+			assert(nullptr != val);
 			rawData_.push_back(val);	
 		}
 		virtual void restore(AccountEntry *val){
-			assert(NULL != val);
+			assert(nullptr != val);
 			account_.push_back(val);	
 		}
 		virtual void restore(ClearingEntry *val){			
-			assert(NULL != val);
+			assert(nullptr != val);
 			clearing_.push_back(val);	
 		}
 		virtual void restore(ExecutionsT *val){}
@@ -90,7 +90,7 @@ namespace{
 			StringT *str_;
 			IdT id_;
 
-			IdString(): str_(NULL), id_(){}
+			IdString(): str_(nullptr), id_(){}
 			IdString(StringT *v, const IdT &id): str_(v), id_(id){}
 		};
 		typedef std::deque<IdString> StringsT;
@@ -131,19 +131,19 @@ namespace{
 
 		virtual void load(const std::string &fileName, FileStorageObserver *observer){}
 		virtual IdT save(const char *buf, size_t size){
-			assert(NULL != buf);
+			assert(nullptr != buf);
 			assert(0 < size);
 			records_.insert(RecordsT::value_type(IdT(), Record(string(buf, size))));
 			return IdT();
 		}
 		virtual void save(const IdT &id, const char *buf, size_t size){
-			assert(NULL != buf);
+			assert(nullptr != buf);
 			assert(0 < size);
 			records_.insert(RecordsT::value_type(id, Record(string(buf, size))));
 		}
 		virtual u32 update(const IdT& id, const char *buf, size_t size){
 			assert(false);
-			assert(NULL != buf);
+			assert(nullptr != buf);
 			assert(0 < size);
 			//records_.push_back(Record(id, string(buf, size)));
 			return 0;
@@ -261,7 +261,7 @@ bool testStorageRecordDispatcher()
 
 			tst.onRecordLoaded(id, version, buf.c_str(), buf.size());
 			check(1 == restore.instr_.size());
-			check(NULL != restore.instr_.at(0));
+			check(nullptr != restore.instr_.at(0));
 			check(restore.instr_.at(0)->id_ == val.id_);
 			check(restore.instr_.at(0)->securityId_ == val.securityId_);
 			check(restore.instr_.at(0)->securityIdSource_ == val.securityIdSource_);
@@ -285,7 +285,7 @@ bool testStorageRecordDispatcher()
 			check(1 == restore.instr_.size());
 			check(1 == restore.string_.size());
 			check(restore.string_.at(0).id_ == id);
-			check(NULL != restore.string_.at(0).str_);
+			check(nullptr != restore.string_.at(0).str_);
 			check(*(restore.string_.at(0).str_) == "string_");
 		}
 		{// load ACCOUNT_RECORDTYPE
@@ -310,7 +310,7 @@ bool testStorageRecordDispatcher()
 			check(1 == restore.instr_.size());
 			check(1 == restore.string_.size());
 			check(1 == restore.account_.size());
-			check(NULL != restore.account_.at(0));
+			check(nullptr != restore.account_.at(0));
 			check(restore.account_.at(0)->id_ == val.id_);
 			check(restore.account_.at(0)->account_ == val.account_);
 			check(restore.account_.at(0)->firm_ == val.firm_);
@@ -337,7 +337,7 @@ bool testStorageRecordDispatcher()
 			check(1 == restore.string_.size());
 			check(1 == restore.account_.size());
 			check(1 == restore.clearing_.size());
-			check(NULL != restore.clearing_.at(0));
+			check(nullptr != restore.clearing_.at(0));
 			check(restore.clearing_.at(0)->id_ == val.id_);
 			check(restore.clearing_.at(0)->firm_ == val.firm_);
 		}
@@ -366,7 +366,7 @@ bool testStorageRecordDispatcher()
 			check(1 == restore.account_.size());
 			check(1 == restore.clearing_.size());
 			check(1 == restore.rawData_.size());
-			check(NULL != restore.rawData_.at(0));
+			check(nullptr != restore.rawData_.at(0));
 			check(restore.rawData_.at(0)->id_ == val.id_);
 			check(restore.rawData_.at(0)->length_ == val.length_);
 			check(restore.rawData_.at(0)->type_ == val.type_);
@@ -394,7 +394,7 @@ bool testStorageRecordDispatcher()
 			check(1 == restore.clearing_.size());
 			check(1 == restore.rawData_.size());
 			check(1 == ordBook.orders_.size());
-			check(NULL != ordBook.orders_.at(0));
+			check(nullptr != ordBook.orders_.at(0));
 			check(ordBook.orders_.at(0)->compare(*val));			
 		}
 

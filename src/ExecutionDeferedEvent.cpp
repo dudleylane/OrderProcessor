@@ -25,12 +25,12 @@ using namespace COP::ACID;
 using namespace COP::OrdState;
 using namespace COP::Store;
 
-ExecutionDeferedEvent::ExecutionDeferedEvent(): baseOrder_(NULL)
+ExecutionDeferedEvent::ExecutionDeferedEvent(): baseOrder_(nullptr)
 {}
 
 ExecutionDeferedEvent::ExecutionDeferedEvent(OrderEntry *ord): baseOrder_(ord)
 {
-	assert(NULL != baseOrder_);
+	assert(nullptr != baseOrder_);
 }
 
 void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope, const TradeParams &param)
@@ -60,8 +60,8 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
 {
 	//aux::ExchLogger::instance()->debug("ExecutionDeferedEvent: Start execution of trades.");
 
-	assert(NULL != func);
-	assert(NULL != baseOrder_);
+	assert(nullptr != func);
+	assert(nullptr != baseOrder_);
 	assert(0 < trades_.size());
 
 	TradeParams baseOrderParam;
@@ -69,7 +69,7 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
 	baseOrderParam.lastQty_ = 0;
 	baseOrderParam.lastPx_ = 0.0;
 	for(TradesT::const_iterator it = trades_.begin(); it != trades_.end(); ++it){
-		assert(NULL != it->order_);
+		assert(nullptr != it->order_);
 		assert(0 < it->lastQty_);
 		assert(0 < it->lastPx_);
 

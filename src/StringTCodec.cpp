@@ -44,8 +44,8 @@ void StringTCodec::serialize(const StringT &val, std::string *tgtbuf)
 
 const char *StringTCodec::restore(const char *buf, size_t size, StringT *val)
 {
-	assert(NULL != val);
-	assert(NULL != buf);
+	assert(nullptr != val);
+	assert(nullptr != buf);
 
 	size_t valSize = 0;
 	assert(sizeof(valSize) <= size);
@@ -61,14 +61,14 @@ const char *StringTCodec::restore(const char *buf, size_t size, StringT *val)
 
 void StringTCodec::encode(const StringT &val, std::string *buf)
 {
-	assert(NULL != buf);
+	assert(nullptr != buf);
 	serialize(val, buf);
 }
 
 void StringTCodec::decode(const char *buf, size_t size, StringT *val)
 {
-	assert(NULL != buf);
-	assert(NULL != val);
+	assert(nullptr != buf);
+	assert(nullptr != val);
 	assert(0 < size);
 
 	restore(buf, size, val);

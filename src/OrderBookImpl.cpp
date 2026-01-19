@@ -88,7 +88,7 @@ namespace {
 
 }
 
-OrderBookImpl::OrderBookImpl(void): storage_(NULL)
+OrderBookImpl::OrderBookImpl(void): storage_(nullptr)
 {
 	//aux::ExchLogger::instance()->note("OrderBook created.");
 }
@@ -107,8 +107,8 @@ OrderBookImpl::~OrderBookImpl(void)
 void OrderBookImpl::init(const InstrumentsT &instr, OrderSaver *storage)
 {
 	//aux::ExchLogger::instance()->debug("OrderBook initializing.");
-	assert(NULL != storage);
-	assert(NULL == storage_);
+	assert(nullptr != storage);
+	assert(nullptr == storage_);
 	storage_ = storage;
 
 	for(InstrumentsT::const_iterator it = instr.begin(); it != instr.end(); ++it){
@@ -139,7 +139,7 @@ void OrderBookImpl::add(const OrderEntry& order)
 	}else
 		throw std::runtime_error("Unable to add order into book - side is not supported!");
 
-	if(NULL != storage_){
+	if(nullptr != storage_){
 		storage_->save(order);
 	}
 	if(aux::ExchLogger::instance()->isNoteOn()){
@@ -259,7 +259,7 @@ IdT OrderBookImpl::find(const OrderFunctor &functor)const
 
 void OrderBookImpl::findAll(const OrderFunctor &functor, OrdersT *result)const
 {
-	assert(NULL != result);
+	assert(nullptr != result);
 	//aux::ExchLogger::instance()->debug("Searching for the orders in OrderBook");
 	OrderGroupsByInstrumentT::const_iterator it = orderGroups_.find(functor.instrument());
 	if(orderGroups_.end() != it){

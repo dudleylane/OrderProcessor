@@ -26,10 +26,10 @@ using namespace test;
 namespace {
 	const int MAX_ITERATION = 1000000;
 	const int MAX_CONCURR_TIMES = 2;
-	InterLockCache<int> *gCache = NULL;
+	InterLockCache<int> *gCache = nullptr;
 
 	void cacheBenchmark(){
-		assert(NULL != gCache);
+		assert(nullptr != gCache);
 		std::vector<int> step(MAX_ITERATION, 0);
 		std::deque<int *> queue;
 
@@ -44,7 +44,7 @@ namespace {
 			{
 				if((0 == step[i])||queue.empty()){
 					int *val = gCache->popFront();
-					assert(NULL != val);
+					assert(nullptr != val);
 					queue.push_back(val);			
 					++steps;
 				}else{
@@ -79,7 +79,7 @@ bool testInterlockCache()
 		InterLockCache<int> cache("base");
 		for(size_t i = 0; i < 10; ++i){
 			int *val = cache.popFront();
-			assert(NULL != val);
+			assert(nullptr != val);
 			queue.push_back(val);
 		}
 		for(size_t i = 0; i < queue.size(); ++i){
@@ -88,7 +88,7 @@ bool testInterlockCache()
 		queue.clear();
 		for(size_t i = 0; i < 10; ++i){
 			int *val = cache.popFront();
-			assert(NULL != val);
+			assert(nullptr != val);
 			queue.push_back(val);
 		}
 		for(size_t i = 0; i < queue.size(); ++i){
@@ -110,7 +110,7 @@ bool testInterlockCache()
 		{
 			if((0 == step[i])||queue.empty()){
 				int *val = cache.popFront();
-				assert(NULL != val);
+				assert(nullptr != val);
 				queue.push_back(val);			
 				++steps;
 			}else{

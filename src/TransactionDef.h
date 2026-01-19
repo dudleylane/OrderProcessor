@@ -99,8 +99,8 @@ namespace COP{
 			IdTValueGenerator *idGenerator_;
 
 			Context(): 
-				orderStorage_(NULL), orderBook_(NULL), inQueues_(NULL), outQueues_(NULL), 
-				orderMatch_(NULL), idGenerator_(NULL)
+				orderStorage_(nullptr), orderBook_(nullptr), inQueues_(nullptr), outQueues_(nullptr), 
+				orderMatch_(nullptr), idGenerator_(nullptr)
 			{}
 
 			Context(Store::OrderDataStorage *orderStorage, OrderBook *orderBook,

@@ -66,10 +66,10 @@ namespace aux{
 		}
 	private:
 		T *allocate(){
-			T *ptr = NULL;
+			T *ptr = nullptr;
 			if(0 <= lastAvailable_){
 				ptr = cache_[lastAvailable_];
-				cache_[lastAvailable_] = NULL;
+				cache_[lastAvailable_] = nullptr;
 				--lastAvailable_;
 			}else{
 				ptr = allocator_.allocate(1);
@@ -92,7 +92,7 @@ namespace aux{
 	template<typename V>
 	class AllocAutoPtr{
 	public:
-		AllocAutoPtr(): val_(NULL), alloc_(NULL){}
+		AllocAutoPtr(): val_(nullptr), alloc_(nullptr){}
 		AllocAutoPtr(V *val, AllocateCache<V> *alloc): val_(val), alloc_(alloc){}
 
 		AllocAutoPtr(AllocAutoPtr<V>& val): val_(val.release()), alloc_(val.alloc_){}
@@ -104,14 +104,14 @@ namespace aux{
 		}
 
 		~AllocAutoPtr(){
-			if(NULL != val_){
-				assert(NULL != alloc_);
+			if(nullptr != val_){
+				assert(nullptr != alloc_);
 				alloc_->destroy(val_);
 			}
 		}
 
 		V& operator*() const{
-			assert(NULL != val_);
+			assert(nullptr != val_);
 			return *val_;
 		}
 
@@ -123,22 +123,22 @@ namespace aux{
 
 		V *release(){
 			V *t = val_;
-			val_ = NULL;
-			alloc_ = NULL;
+			val_ = nullptr;
+			alloc_ = nullptr;
 			return t;
 		}
 
 		void reset(){
-			if(NULL != val_){
-				assert(NULL != alloc_);
+			if(nullptr != val_){
+				assert(nullptr != alloc_);
 				alloc_->destroy(val_);
 			}
 			release();
 		}
 
 		void reset(V *val, AllocateCache<V> *alloc){
-			if(NULL != val_){
-				assert(NULL != alloc_);
+			if(nullptr != val_){
+				assert(nullptr != alloc_);
 				alloc_->destroy(val_);
 			}
 			val_ = val;

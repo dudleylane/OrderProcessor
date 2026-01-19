@@ -54,12 +54,12 @@ namespace{
 
 		NLinkTree tree;
 		{
-			//Transaction *ptr = NULL;
+			//Transaction *ptr = nullptr;
 			cout<< "\tCreate tree starts..."<< endl;
 			tick_count bs = tick_count::now();
 			for(size_t i = 0; i < MAX_TRANSACTIONS; ++i)
 			{
-				tree.add(TransactionId(i, 1), NULL, deps[i], &ready);
+				tree.add(TransactionId(i, 1), nullptr, deps[i], &ready);
 			}
 			tick_count es = tick_count::now();
 			double diff = (es - bs).seconds();
@@ -72,7 +72,7 @@ namespace{
 			for(size_t i = 0; i < MAX_TRANSACTIONS; ++i)
 			{
 				TransactionId k;
-				Transaction *v = NULL;
+				Transaction *v = nullptr;
 				check(tree.next(TransactionId(), &k, &v));
 				check(tree.remove(k, &ready));
 			}
@@ -82,7 +82,7 @@ namespace{
 		}
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			size_t initialSize = MAX_TRANSACTIONS/20;
 
 			cout<< "\tCreateRemove tree starts..."<< endl;
@@ -92,7 +92,7 @@ namespace{
 				size_t pos = 0;
 				for(; pos < initialSize; ++pos)
 				{
-					tree.add(TransactionId(pos, 1), NULL, deps[pos], &ready);
+					tree.add(TransactionId(pos, 1), nullptr, deps[pos], &ready);
 				}
 				//size_t removed = 0;
 				bool hasElements = true;
@@ -100,14 +100,14 @@ namespace{
 					int p = rand();
 					bool addNew = (0 == (p&1))&&(pos < MAX_TRANSACTIONS);
 					if(addNew){
-						tree.add(TransactionId(pos, 1), NULL, deps[pos], &ready);
+						tree.add(TransactionId(pos, 1), nullptr, deps[pos], &ready);
 						++pos;
 					}else{
 						hasElements	= tree.next(TransactionId(), &k, &v);
 						if(hasElements)
 							tree.remove(k, &ready);
 						else if(pos < MAX_TRANSACTIONS){
-							tree.add(TransactionId(pos, 1), NULL, deps[pos], &ready);
+							tree.add(TransactionId(pos, 1), nullptr, deps[pos], &ready);
 							++pos;
 							hasElements = true;
 						}
@@ -131,8 +131,8 @@ bool testNLinkTree()
 		NLinkTree tree;
 
 		DependObjs dep;
-		check(tree.add(TransactionId(1, 1), NULL, dep, &ready));
-		//check(!tree.add(TransactionId(1, 1), NULL, dep, &ready));
+		check(tree.add(TransactionId(1, 1), nullptr, dep, &ready));
+		//check(!tree.add(TransactionId(1, 1), nullptr, dep, &ready));
 		check(tree.remove(TransactionId(1, 1), &ready));
 		check(!tree.remove(TransactionId(1, 1), &ready));
 	}
@@ -144,25 +144,25 @@ bool testNLinkTree()
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(1, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(1, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(1, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(2, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(2, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(2, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(3, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(3, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(3, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(4, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(4, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(4, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
@@ -171,130 +171,130 @@ bool testNLinkTree()
 			dep.list_[2] = ObjectInTransaction(order_ObjectType, TransactionId(4, 1));
 			dep.list_[3] = ObjectInTransaction(order_ObjectType, TransactionId(5, 1));
 			dep.size_ = 4;
-			check(tree.add(TransactionId(5, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(5, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(2, 1));
 			dep.list_[1] = ObjectInTransaction(order_ObjectType, TransactionId(4, 1));
 			dep.size_ = 2;
-			check(tree.add(TransactionId(6, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(6, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(2, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(7, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(7, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(1, 1));
 			dep.list_[1] = ObjectInTransaction(order_ObjectType, TransactionId(5, 1));
 			dep.size_ = 2;
-			check(tree.add(TransactionId(8, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(8, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(3, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(9, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(9, 1), nullptr, dep, &ready));
 		}
 		TransactionId k;
-		Transaction *v = NULL;
+		Transaction *v = nullptr;
 		check(tree.next(TransactionId(), &k, &v));
-		check(TransactionId(1, 1) == k);check(NULL == v);
+		check(TransactionId(1, 1) == k);check(nullptr == v);
 		check(tree.next(k, &k, &v));
-		check(TransactionId(2, 1) == k);check(NULL == v);
+		check(TransactionId(2, 1) == k);check(nullptr == v);
 		check(tree.next(k, &k, &v));
-		check(TransactionId(3, 1) == k);check(NULL == v);
+		check(TransactionId(3, 1) == k);check(nullptr == v);
 		check(tree.next(k, &k, &v));
-		check(TransactionId(4, 1) == k);check(NULL == v);
+		check(TransactionId(4, 1) == k);check(nullptr == v);
 		check(!tree.next(k, &k, &v));
 
 		check(tree.remove(TransactionId(1, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(2, 1) == k);check(NULL == v);
+			check(TransactionId(2, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(3, 1) == k);check(NULL == v);
+			check(TransactionId(3, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(4, 1) == k);check(NULL == v);
+			check(TransactionId(4, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		check(tree.remove(TransactionId(2, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(3, 1) == k);check(NULL == v);
+			check(TransactionId(3, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(4, 1) == k);check(NULL == v);
+			check(TransactionId(4, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		check(tree.remove(TransactionId(3, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(4, 1) == k);check(NULL == v);
+			check(TransactionId(4, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		check(tree.remove(TransactionId(4, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(5, 1) == k);check(NULL == v);
+			check(TransactionId(5, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		check(tree.remove(TransactionId(5, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(6, 1) == k);check(NULL == v);
+			check(TransactionId(6, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(8, 1) == k);check(NULL == v);
+			check(TransactionId(8, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(9, 1) == k);check(NULL == v);
+			check(TransactionId(9, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		check(tree.remove(TransactionId(6, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(8, 1) == k);check(NULL == v);
+			check(TransactionId(8, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(9, 1) == k);check(NULL == v);
+			check(TransactionId(9, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(7, 1) == k);check(NULL == v);
+			check(TransactionId(7, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		check(tree.remove(TransactionId(8, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(9, 1) == k);check(NULL == v);
+			check(TransactionId(9, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(7, 1) == k);check(NULL == v);
+			check(TransactionId(7, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		check(tree.remove(TransactionId(9, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(7, 1) == k);check(NULL == v);
+			check(TransactionId(7, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		check(tree.remove(TransactionId(7, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(!tree.next(TransactionId(), &k, &v));
 		}
 
@@ -308,25 +308,25 @@ bool testNLinkTree()
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(1, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(1, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(1, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(2, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(2, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(2, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(3, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(3, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(3, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(4, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(4, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(4, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
@@ -335,33 +335,33 @@ bool testNLinkTree()
 			dep.list_[2] = ObjectInTransaction(order_ObjectType, TransactionId(4, 1));
 			dep.list_[3] = ObjectInTransaction(order_ObjectType, TransactionId(5, 1));
 			dep.size_ = 4;
-			check(tree.add(TransactionId(5, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(5, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(2, 1));
 			dep.list_[1] = ObjectInTransaction(order_ObjectType, TransactionId(4, 1));
 			dep.size_ = 2;
-			check(tree.add(TransactionId(6, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(6, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(2, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(7, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(7, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(1, 1));
 			dep.list_[1] = ObjectInTransaction(order_ObjectType, TransactionId(5, 1));
 			dep.size_ = 2;
-			check(tree.add(TransactionId(8, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(8, 1), nullptr, dep, &ready));
 		}
 		{
 			DependObjs dep;
 			dep.list_[0] = ObjectInTransaction(order_ObjectType, TransactionId(3, 1));
 			dep.size_ = 1;
-			check(tree.add(TransactionId(9, 1), NULL, dep, &ready));
+			check(tree.add(TransactionId(9, 1), nullptr, dep, &ready));
 		}
 
 		cout<< "\t2create_finish..."<< endl;
@@ -369,109 +369,109 @@ bool testNLinkTree()
 		cout<< "\t2 5 checking..."<< endl;
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(1, 1) == k);check(NULL == v);
+			check(TransactionId(1, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(2, 1) == k);check(NULL == v);
+			check(TransactionId(2, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(3, 1) == k);check(NULL == v);
+			check(TransactionId(3, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(4, 1) == k);check(NULL == v);
+			check(TransactionId(4, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		cout<< "\t2 5 removed..."<< endl;
 		check(tree.remove(TransactionId(1, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(2, 1) == k);check(NULL == v);
+			check(TransactionId(2, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(3, 1) == k);check(NULL == v);
+			check(TransactionId(3, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(4, 1) == k);check(NULL == v);
+			check(TransactionId(4, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(8, 1) == k);check(NULL == v);
+			check(TransactionId(8, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		cout<< "\t2 1 removed..."<< endl;
 		check(tree.remove(TransactionId(2, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(3, 1) == k);check(NULL == v);
+			check(TransactionId(3, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(4, 1) == k);check(NULL == v);
+			check(TransactionId(4, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(8, 1) == k);check(NULL == v);
+			check(TransactionId(8, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		cout<< "\t2 2 removed..."<< endl;
 		check(tree.remove(TransactionId(3, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(4, 1) == k);check(NULL == v);
+			check(TransactionId(4, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(8, 1) == k);check(NULL == v);
+			check(TransactionId(8, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(9, 1) == k);check(NULL == v);
+			check(TransactionId(9, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		cout<< "\t2 3 removed..."<< endl;
 		check(tree.remove(TransactionId(4, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(k, &k, &v));
-			check(TransactionId(8, 1) == k);check(NULL == v);
+			check(TransactionId(8, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(9, 1) == k);check(NULL == v);
+			check(TransactionId(9, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(6, 1) == k);check(NULL == v);
+			check(TransactionId(6, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		cout<< "\t2 4 removed..."<< endl;
 		check(tree.remove(TransactionId(6, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(8, 1) == k);check(NULL == v);
+			check(TransactionId(8, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(9, 1) == k);check(NULL == v);
+			check(TransactionId(9, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(7, 1) == k);check(NULL == v);
+			check(TransactionId(7, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		cout<< "\t2 6 removed..."<< endl;
 		check(tree.remove(TransactionId(7, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(8, 1) == k);check(NULL == v);
+			check(TransactionId(8, 1) == k);check(nullptr == v);
 			check(tree.next(k, &k, &v));
-			check(TransactionId(9, 1) == k);check(NULL == v);
+			check(TransactionId(9, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		cout<< "\t2 7 removed..."<< endl;
 		check(tree.remove(TransactionId(8, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(tree.next(TransactionId(), &k, &v));
-			check(TransactionId(9, 1) == k);check(NULL == v);
+			check(TransactionId(9, 1) == k);check(nullptr == v);
 			check(!tree.next(k, &k, &v));
 		}
 		cout<< "\t2 8 removed..."<< endl;
 		check(tree.remove(TransactionId(9, 1), &ready));
 		{
 			TransactionId k;
-			Transaction *v = NULL;
+			Transaction *v = nullptr;
 			check(!tree.next(TransactionId(), &k, &v));
 		}
 	}

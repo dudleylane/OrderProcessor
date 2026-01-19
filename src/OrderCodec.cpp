@@ -89,9 +89,9 @@ OrderCodec::~OrderCodec(void)
 
 void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *version)
 {
-	assert(NULL != buf);
-	assert(NULL != id);
-	assert(NULL != version);
+	assert(nullptr != buf);
+	assert(nullptr != id);
+	assert(nullptr != version);
 
 	*id = val.orderId_;
 	*version = 0;
@@ -220,9 +220,9 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
 
 char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version)
 {
-	assert(NULL != buf);
-	assert(NULL != id);
-	assert(NULL != version);
+	assert(nullptr != buf);
+	assert(nullptr != id);
+	assert(nullptr != version);
 
 	*id = val.orderId_;
 	*version = 0;
@@ -350,7 +350,7 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
 
 OrderEntry *OrderCodec::decode(const IdT& id, u32 /*version*/, const char *buf, size_t size)
 {
-	assert(NULL != buf);
+	assert(nullptr != buf);
 	assert(0 < size);
 
 	SourceIdT sourceId, destId, clOrderId, origClOrderID, instrumentId, accountId, clearingId, executionsId;

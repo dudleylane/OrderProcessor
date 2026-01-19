@@ -25,24 +25,24 @@ struct Singleton
 
 	static void create()
 	{
-		assert(NULL == instance_);
-		if(NULL != instance_)
+		assert(nullptr == instance_);
+		if(nullptr != instance_)
 			throw std::runtime_error("Singleton initialised twice!");
 		instance_ = new T;
 	}
 	static void destroy(){
 		delete instance_;
-		instance_ = NULL;
+		instance_ = nullptr;
 	}
 	static T *instance(){
-		assert(NULL != instance_);
-		if(NULL == instance_)
+		assert(nullptr != instance_);
+		if(nullptr == instance_)
 			throw std::runtime_error("Singleton was not initialised!");
 		return instance_;
 	}
 };
 
 template<typename T>
-T *Singleton<T>::instance_ = NULL;
+T *Singleton<T>::instance_ = nullptr;
 
 } 

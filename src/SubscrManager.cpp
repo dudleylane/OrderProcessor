@@ -125,7 +125,7 @@ void SubscrManager::getSubscribers(const OrderEntry &order, MatchedSubscribersT 
 				for(SubscriptionsT::const_iterator it = sit; it != eit; ++it){
 					if(ORDER_SUBSCRIPTION != it->type_)
 						throw std::runtime_error("Subscription with invalid type enqueued at Orders subscriptions!");
-					if((NULL != it->subscription_.order_)&&(it->subscription_.order_->match(order))){
+					if((nullptr != it->subscription_.order_)&&(it->subscription_.order_->match(order))){
 						subscribers->push_back(it->handlerId_);
 						found = true;
 						break;
@@ -139,7 +139,7 @@ void SubscrManager::getSubscribers(const OrderEntry &order, MatchedSubscribersT 
 				for(SubscriptionsT::const_iterator it = bit; it != eit; ++it){
 					if(ORDER_SUBSCRIPTION != it->type_)
 						throw std::runtime_error("Subscription with invalid type enqueued at Orders subscriptions!");
-					if((NULL != it->subscription_.order_)&&(it->subscription_.order_->match(order))){
+					if((nullptr != it->subscription_.order_)&&(it->subscription_.order_->match(order))){
 						subscribers->push_back(it->handlerId_);
 						break;
 					}

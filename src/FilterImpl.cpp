@@ -33,7 +33,7 @@ bool StringEqualFilter::filter(const StringT &val)const
 
 bool StringEqualFilter::getVal(StringT *val)const
 {
-	assert(NULL != val);
+	assert(nullptr != val);
 	*val = val_;
 	return true;
 }
@@ -172,7 +172,7 @@ bool IdTDateEqualFilter::filter(const u32 &val)const
 
 bool IdTDateEqualFilter::getVal(u32 *val)const
 {
-	assert(NULL != val);
+	assert(nullptr != val);
 	*val = val_;
 	return true;
 }
@@ -266,7 +266,7 @@ bool IdTIdEqualFilter::filter(const IdT &val)const
 
 bool IdTIdEqualFilter::getVal(IdT *val)const
 {
-	assert(NULL != val);
+	assert(nullptr != val);
 	*val = val_;
 	return true;
 }
@@ -320,12 +320,12 @@ bool QuantityInRangeFilter::filter(const QuantityT &val)const
 	return (val <= end_)&&(val >= begin_);
 }
 
-IdTFilter::IdTFilter():idFilter_(NULL)
+IdTFilter::IdTFilter():idFilter_(nullptr)
 {}
 
 void IdTFilter::setIdFilter(IdTIdEqualFilter *fltr)
 {
-	assert(NULL == idFilter_);
+	assert(nullptr == idFilter_);
 	idFilter_ = fltr;
 }
 
@@ -336,10 +336,10 @@ void IdTFilter::addFilter(IdTDateFilter *fltr)
 
 bool IdTFilter::match(const IdT &params)const
 {
-	if((NULL != idFilter_)&& (!idFilter_->filter(params)))
+	if((nullptr != idFilter_)&& (!idFilter_->filter(params)))
 		return false;
 	for(FiltersT::const_iterator it = dateFilters_.begin(); it != dateFilters_.end(); ++it){
-		assert(NULL != *it);
+		assert(nullptr != *it);
 		if(!(*it)->filter(params.date_))
 			return false;
 	}
@@ -348,7 +348,7 @@ bool IdTFilter::match(const IdT &params)const
 
 bool IdTFilter::getVal(IdT *params)const
 {
-	if((NULL != idFilter_)&& (!idFilter_->getVal(params)))
+	if((nullptr != idFilter_)&& (!idFilter_->getVal(params)))
 		return false;
 
 	if((1 == dateFilters_.size())&&(*(dateFilters_.begin()))->getVal(&(params->date_)))

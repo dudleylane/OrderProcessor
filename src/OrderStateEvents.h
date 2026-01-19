@@ -40,8 +40,8 @@ namespace OrdState{
 		OrderBook *orderBook_;
 
 		OrderStateEvent():
-			generator_(NULL), orderStorage_(NULL), transaction_(NULL), testStateMachine_(false), 
-			testStateMachineCheckResult_(true), orderId_(), order4StateMachine_(NULL), orderBook_(NULL){}
+			generator_(nullptr), orderStorage_(nullptr), transaction_(nullptr), testStateMachine_(false), 
+			testStateMachineCheckResult_(true), orderId_(), order4StateMachine_(nullptr), orderBook_(nullptr){}
 
 		OrderStateEvent(IdTValueGenerator *generator, 
 						Store::OrderDataStorage *orderStorage,
@@ -51,19 +51,19 @@ namespace OrdState{
 						bool testStateMachineCheckResult):
 			generator_(generator), orderStorage_(orderStorage), orderId_(orderId), 
 			testStateMachine_(testStateMachine), testStateMachineCheckResult_(testStateMachineCheckResult),
-			order4StateMachine_(NULL), transaction_(NULL), orderBook_(orderBook){}
+			order4StateMachine_(nullptr), transaction_(nullptr), orderBook_(orderBook){}
 
 		OrderStateEvent(const OrderStateEvent &evnt):
 			generator_(evnt.generator_), orderStorage_(evnt.orderStorage_), orderId_(evnt.orderId_), 
 			testStateMachine_(evnt.testStateMachine_), testStateMachineCheckResult_(evnt.testStateMachineCheckResult_),
-			order4StateMachine_(NULL), transaction_(evnt.transaction_), orderBook_(evnt.orderBook_){}
+			order4StateMachine_(nullptr), transaction_(evnt.transaction_), orderBook_(evnt.orderBook_){}
 	};
 
 	struct onOrderReceived: public OrderStateEvent
 	{
 		OrderEntry *order_;	
 
-		onOrderReceived(): order_(NULL)
+		onOrderReceived(): order_(nullptr)
 		{}
 		explicit onOrderReceived(OrderEntry *order): order_(order)
 		{}
@@ -72,7 +72,7 @@ namespace OrdState{
 	{
 		OrderEntry *order_;	
 
-		onRplOrderReceived(): order_(NULL)
+		onRplOrderReceived(): order_(nullptr)
 		{}
 		explicit onRplOrderReceived(OrderEntry *order): order_(order)
 		{}	
@@ -91,7 +91,7 @@ namespace OrdState{
 	};
 	struct onExternalOrder: public OrderStateEvent
 	{
-		onExternalOrder(): order_(NULL)
+		onExternalOrder(): order_(nullptr)
 		{}
 		explicit onExternalOrder(OrderEntry *order): order_(order)
 		{}
@@ -100,7 +100,7 @@ namespace OrdState{
 	};
 	struct onExternalOrderRejected: public OrderStateEvent
 	{
-		onExternalOrderRejected(): order_(NULL)
+		onExternalOrderRejected(): order_(nullptr)
 		{}
 		explicit onExternalOrderRejected(OrderEntry *order): order_(order)
 		{}
@@ -114,7 +114,7 @@ namespace OrdState{
 
 	struct onRecvRplOrderRejected: public OrderStateEvent
 	{
-		onRecvRplOrderRejected(): order_(NULL)
+		onRecvRplOrderRejected(): order_(nullptr)
 		{}
 		explicit onRecvRplOrderRejected(OrderEntry *order): order_(order)
 		{}			
@@ -177,7 +177,7 @@ namespace OrdState{
 
 	struct onRecvOrderRejected: public OrderStateEvent
 	{
-		onRecvOrderRejected(): order_(NULL)
+		onRecvOrderRejected(): order_(nullptr)
 		{}
 		explicit onRecvOrderRejected(OrderEntry *order): order_(order)
 		{}		

@@ -196,7 +196,7 @@ namespace{
 			IdT id;
 			u32 version = 0;
 			val.type_ = INVALID_RAWDATATYPE;
-			val.data_ = NULL;
+			val.data_ = nullptr;
 			val.length_ = 0;
 			RawDataCodec::encode(val, &buf, &id, &version);
 			check(!buf.empty());
@@ -264,7 +264,7 @@ namespace{
 			val.cumQty_ = 0;
 			val.dayOrderQty_ = 0;
 			val.dayCumQty_ = 0;
-			val.stateMachinePersistance_.orderData_ = NULL;
+			val.stateMachinePersistance_.orderData_ = nullptr;
 			val.stateMachinePersistance_.stateZone1Id_ = 0;
 			val.stateMachinePersistance_.stateZone2Id_ = 0;
 			OrderCodec::encode(val, &buf, &id, &version);
@@ -272,7 +272,7 @@ namespace{
 			check(id == val.orderId_);
 
 			auto_ptr<OrderEntry> decVal(OrderCodec::decode(id, version, buf.c_str(), buf.size()));
-			check(NULL != decVal.get());
+			check(nullptr != decVal.get());
 			check(decVal->instrument_.getId() == val.instrument_.getId());
 			check(decVal->account_.getId() == val.account_.getId());
 			check(decVal->clearing_.getId() == val.clearing_.getId());
@@ -350,7 +350,7 @@ namespace{
 			check(id == val.orderId_);
 
 			auto_ptr<OrderEntry> decVal(OrderCodec::decode(id, version, buf.c_str(), buf.size()));
-			check(NULL != decVal.get());
+			check(nullptr != decVal.get());
 			check(decVal->instrument_.getId() == val.instrument_.getId());
 			check(decVal->account_.getId() == val.account_.getId());
 			check(decVal->clearing_.getId() == val.clearing_.getId());
@@ -383,7 +383,7 @@ namespace{
 			check(decVal->orderId_ == val.orderId_);
 			check(decVal->origOrderId_ == val.origOrderId_);
 			check(decVal->executions_.getId() == val.executions_.getId());
-			check(NULL == decVal->stateMachinePersistance_.orderData_);
+			check(nullptr == decVal->stateMachinePersistance_.orderData_);
 			check(decVal->stateMachinePersistance_.stateZone1Id_ == val.stateMachinePersistance_.stateZone1Id_);
 			check(decVal->stateMachinePersistance_.stateZone2Id_ == val.stateMachinePersistance_.stateZone2Id_);
 		}

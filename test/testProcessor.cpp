@@ -151,7 +151,7 @@ namespace {
 		{}
 		virtual ACID::TransactionObserver *detach()
 		{
-			return NULL;
+			return nullptr;
 		}
 		virtual void addTransaction(std::auto_ptr<ACID::Transaction> &tr)
 		{
@@ -172,7 +172,7 @@ namespace {
 		}
 		virtual ACID::TransactionIterator *iterator()
 		{
-			return NULL;
+			return nullptr;
 		}
 		Processor *proc_;
 	};
@@ -214,33 +214,33 @@ bool testProcessor()
 
 			proc.process();
 			OrderEntry *order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
-			check(NULL != order);
+			check(nullptr != order);
 			check(NEW_ORDSTATUS == order->status_);
 			order = OrderStorage::instance()->locateByClOrderId(ord2ClOrdId);
-			check(NULL == order);
+			check(nullptr == order);
 
 			proc.process();
 			order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
-			check(NULL != order);
+			check(nullptr != order);
 			check(NEW_ORDSTATUS == order->status_);
 			order = OrderStorage::instance()->locateByClOrderId(ord2ClOrdId);
-			check(NULL != order);
-			check(NEW_ORDSTATUS == order->status_);
-
-			proc.process();
-			order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
-			check(NULL != order);
-			check(NEW_ORDSTATUS == order->status_);
-			order = OrderStorage::instance()->locateByClOrderId(ord2ClOrdId);
-			check(NULL != order);
+			check(nullptr != order);
 			check(NEW_ORDSTATUS == order->status_);
 
 			proc.process();
 			order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
-			check(NULL != order);
+			check(nullptr != order);
 			check(NEW_ORDSTATUS == order->status_);
 			order = OrderStorage::instance()->locateByClOrderId(ord2ClOrdId);
-			check(NULL != order);
+			check(nullptr != order);
+			check(NEW_ORDSTATUS == order->status_);
+
+			proc.process();
+			order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
+			check(nullptr != order);
+			check(NEW_ORDSTATUS == order->status_);
+			order = OrderStorage::instance()->locateByClOrderId(ord2ClOrdId);
+			check(nullptr != order);
 			check(NEW_ORDSTATUS == order->status_);
 
 		}
@@ -257,12 +257,12 @@ bool testProcessor()
 
 			proc.process();
 			OrderEntry *order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
-			check(NULL != order);
+			check(nullptr != order);
 			check(NEW_ORDSTATUS == order->status_);
 
 			proc.process();
 			order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
-			check(NULL != order);
+			check(nullptr != order);
 			check(NEW_ORDSTATUS == order->status_);
 
 			auto_ptr<OrderEntry> ord2(createCorrectOrder(instrId1));
@@ -276,10 +276,10 @@ bool testProcessor()
 
 			proc.process();
 			order = OrderStorage::instance()->locateByClOrderId(ord2ClOrdId);
-			check(NULL != order);
+			check(nullptr != order);
 			check(FILLED_ORDSTATUS == order->status_);
 			order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
-			check(NULL != order);
+			check(nullptr != order);
 			check(PARTFILL_ORDSTATUS == order->status_);
 		}
 		OrderStorage::destroy();

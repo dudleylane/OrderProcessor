@@ -31,7 +31,7 @@ namespace COP{
 			Queues::InQueueProcessorsPoolT evntProcessors_;
 			Queues::InQueuesContainer *inQueues_;
 
-			TaskManagerParams(): transactMgr_(NULL), transactProcessors_(), evntProcessors_(), inQueues_(NULL){}
+			TaskManagerParams(): transactMgr_(nullptr), transactProcessors_(), evntProcessors_(), inQueues_(nullptr){}
 		};
 
 class TaskManager: public ExecTaskManager, public ACID::TransactionObserver, public Queues::InQueuesObserver

@@ -53,7 +53,7 @@ TestInfo tests[] = {
 	{"testProcessor", &testProcessor},
 	{"testTaskManager", &testTaskManager},
 	{"testIntegral", &testIntegral},
-	{"", NULL},
+	{"", nullptr},
 };
 
 int main(int, char**)
@@ -68,7 +68,7 @@ int main(int, char**)
 	TaskManager::init(4);
 
 	int i = 0;
-	while(NULL != tests[i].func_){
+	while(nullptr != tests[i].func_){
 		cout<< "Execute test '"<< tests[i].name_<< "':"<< endl;
 		bool rez;
 		try{ 

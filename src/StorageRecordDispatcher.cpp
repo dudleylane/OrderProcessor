@@ -30,7 +30,7 @@ namespace{
 }
 
 StorageRecordDispatcher::StorageRecordDispatcher(void): 
-	storage_(NULL), orderBook_(NULL), fileStorage_(NULL), orderStorage_(NULL)
+	storage_(nullptr), orderBook_(nullptr), fileStorage_(nullptr), orderStorage_(nullptr)
 {
 }
 
@@ -40,10 +40,10 @@ StorageRecordDispatcher::~StorageRecordDispatcher(void)
 
 void StorageRecordDispatcher::init(DataStorageRestore *storage, OrderBook *orderBook, FileSaver *fileStorage, OrderDataStorage *orderStorage)
 {
-	assert(NULL == storage_);
-	assert(NULL == orderBook_);
-	assert(NULL == fileStorage_);
-	assert(NULL == orderStorage_);
+	assert(nullptr == storage_);
+	assert(nullptr == orderBook_);
+	assert(nullptr == fileStorage_);
+	assert(nullptr == orderStorage_);
 
 	storage_ = storage;
 	orderBook_ = orderBook;
@@ -58,7 +58,7 @@ void StorageRecordDispatcher::startLoad()
 
 void StorageRecordDispatcher::onRecordLoaded(const IdT& id, u32 version, const char *buf, size_t size)
 {
-	assert(NULL != buf);
+	assert(nullptr != buf);
 
 	if(MINIMAL_SIZE > size)
 		throw std::runtime_error("Record size invalid, record could not be restored!");

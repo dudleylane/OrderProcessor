@@ -28,9 +28,9 @@ using namespace COP::ACID;
 using namespace COP::OrdState;
 using namespace COP::Store;
 
-Processor::Processor(void): generator_(NULL), orderStorage_(NULL), orderBook_(NULL), 
-	inQueues_(NULL), outQueues_(NULL), stateMachine_(NULL), testStateMachine_(false), 
-	testStateMachineCheckResult_(NULL)
+Processor::Processor(void): generator_(nullptr), orderStorage_(nullptr), orderBook_(nullptr), 
+	inQueues_(nullptr), outQueues_(nullptr), stateMachine_(nullptr), testStateMachine_(false), 
+	testStateMachineCheckResult_(nullptr)
 {
 	//aux::ExchLogger::instance()->note("Processor created.");
 }
@@ -38,7 +38,7 @@ Processor::Processor(void): generator_(NULL), orderStorage_(NULL), orderBook_(NU
 Processor::~Processor(void)
 {
 	delete stateMachine_;
-	stateMachine_ = NULL;
+	stateMachine_ = nullptr;
 	//aux::ExchLogger::instance()->note("Processor destroyed.");
 }
 
@@ -55,13 +55,13 @@ void Processor::init(const ProcessorParams &params)
 	testStateMachine_ = params.testStateMachine_;
 	testStateMachineCheckResult_ = params.testStateMachineCheckResult_;	
 
-	assert(NULL != generator_);
-	assert(NULL != orderStorage_);
-	assert(NULL != orderBook_);
-	assert(NULL != inQueues_);
-	assert(NULL != outQueues_);
-	assert(NULL != inQueue_);
-	assert(NULL != transactMgr_);
+	assert(nullptr != generator_);
+	assert(nullptr != orderStorage_);
+	assert(nullptr != orderBook_);
+	assert(nullptr != inQueues_);
+	assert(nullptr != outQueues_);
+	assert(nullptr != inQueue_);
+	assert(nullptr != transactMgr_);
 
 	stateMachine_ = new OrderState();
 	stateMachine_->start();
@@ -75,7 +75,7 @@ void Processor::init(const ProcessorParams &params)
 bool Processor::process()
 {
 	//aux::ExchLogger::instance()->debug("Processor start processing.");
-	assert(NULL != inQueue_);
+	assert(nullptr != inQueue_);
 	bool rez = inQueue_->pop(this);
 	//aux::ExchLogger::instance()->debug("Processor finish processing.");
 	return rez;
@@ -83,7 +83,7 @@ bool Processor::process()
 
 void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 {
-	assert(NULL != evnt.order_);
+	assert(nullptr != evnt.order_);
 	assert(events_.empty());
 	
 	//aux::ExchLogger::instance()->debug("Processor start onEvent(OrderEvent).");
@@ -100,17 +100,17 @@ void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 	evnt2Proc.orderBook_ = orderBook_;
 
 	// restore state of the state machine
-	assert(NULL != stateMachine_);
+	assert(nullptr != stateMachine_);
 	stateMachine_->setPersistance(initialSMState_);
 	// process event
 	stateMachine_->process_event(evnt2Proc);
 	// save state machine state into the order
 	OrderStatePersistence smState = stateMachine_->getPersistence();
-	assert(NULL != smState.orderData_);
+	assert(nullptr != smState.orderData_);
 	smState.orderData_->setStateMachinePersistance(smState);
 
 	// enqueue transaction, prepared by state machine
-	assert(NULL != transactMgr_);
+	assert(nullptr != transactMgr_);
 	auto_ptr<Transaction> tr(scope.release());
 	transactMgr_->addTransaction(tr);//scope.executeTransaction(cntxt);
 
@@ -152,9 +152,9 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 			evnt2Proc.transaction_ = scope.get();
 			evnt2Proc.orderStorage_ = orderStorage_;
 
-			assert(NULL != stateMachine_);
+			assert(nullptr != stateMachine_);
 			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			assert(NULL != ord);
+			assert(nullptr != ord);
 			stateMachine_->setPersistance(ord->stateMachinePersistance());
 			// process event
 			stateMachine_->process_event(evnt2Proc);	
@@ -169,9 +169,9 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 			evnt2Proc.orderStorage_ = orderStorage_;
 			evnt2Proc.orderBook_ = orderBook_;
 
-			assert(NULL != stateMachine_);
+			assert(nullptr != stateMachine_);
 			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			assert(NULL != ord);
+			assert(nullptr != ord);
 			stateMachine_->setPersistance(ord->stateMachinePersistance());
 			// process event
 			stateMachine_->process_event(evnt2Proc);	
@@ -185,9 +185,9 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 			evnt2Proc.transaction_ = scope.get();
 			evnt2Proc.orderStorage_ = orderStorage_;
 
-			assert(NULL != stateMachine_);
+			assert(nullptr != stateMachine_);
 			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			assert(NULL != ord);
+			assert(nullptr != ord);
 			stateMachine_->setPersistance(ord->stateMachinePersistance());
 			// process event
 			stateMachine_->process_event(evnt2Proc);	
@@ -201,9 +201,9 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 			evnt2Proc.transaction_ = scope.get();
 			evnt2Proc.orderStorage_ = orderStorage_;
 
-			assert(NULL != stateMachine_);
+			assert(nullptr != stateMachine_);
 			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			assert(NULL != ord);
+			assert(nullptr != ord);
 			stateMachine_->setPersistance(ord->stateMachinePersistance());
 			// process event in state machine
 			stateMachine_->process_event(evnt2Proc);
@@ -215,10 +215,10 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 
 	// save state into the order
 	OrderStatePersistence smState = stateMachine_->getPersistence();
-	assert(NULL != smState.orderData_);
+	assert(nullptr != smState.orderData_);
 	smState.orderData_->setStateMachinePersistance(smState);
 
-	assert(NULL != transactMgr_);
+	assert(nullptr != transactMgr_);
 	auto_ptr<Transaction> tr(scope.release());
 	transactMgr_->addTransaction(tr);//scope.executeTransaction(cntxt);
 
@@ -234,7 +234,7 @@ void Processor::onEvent(const std::string &/*source*/, const TimerEvent &/*evnt*
 
 void Processor::addDeferedEvent(DeferedEventBase *evnt)
 {
-	assert(NULL != evnt);
+	assert(nullptr != evnt);
 	events_.push_back(evnt);
 	//aux::ExchLogger::instance()->debug("Processor: added defered event.");
 }
@@ -248,7 +248,7 @@ void Processor::onEvent(DeferedEventBase *evnt)
 
 	evnt->execute(this, cntxt, scope.get());
 
-	assert(NULL != transactMgr_);
+	assert(nullptr != transactMgr_);
 	auto_ptr<Transaction> tr(scope.release());
 	transactMgr_->addTransaction(tr);//scope.executeTransaction(cntxt);
 
@@ -265,13 +265,13 @@ void Processor::processDeferedEvent()
 		try{
 			for(DeferedEventsT::iterator it = tmp.begin(); it != tmp.end(); ++it){
 				auto_ptr<DeferedEventBase> evnt(*it);
-				*it = NULL;
+				*it = nullptr;
 
 				onEvent(evnt.get());
 			}		
 		}catch(const std::exception &){
 			for(DeferedEventsT::iterator it = tmp.begin(); it != tmp.end(); ++it){
-				if(NULL != *it)		
+				if(nullptr != *it)		
 					delete *it;
 			}	
 		}
@@ -290,7 +290,7 @@ void Processor::process(onTradeExecution &evnt, OrderEntry *order, const ACID::C
 	stateMachine_->process_event(evnt);
 
 	OrderStatePersistence smState = stateMachine_->getPersistence();
-	assert(NULL != smState.orderData_);
+	assert(nullptr != smState.orderData_);
 	smState.orderData_->setStateMachinePersistance(smState);
 
 	//aux::ExchLogger::instance()->debug("Processor: finish processing onTradeExecution");
@@ -307,7 +307,7 @@ void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, con
 	stateMachine_->process_event(evnt);
 
 	OrderStatePersistence smState = stateMachine_->getPersistence();
-	assert(NULL != smState.orderData_);
+	assert(nullptr != smState.orderData_);
 	smState.orderData_->setStateMachinePersistance(smState);
 
 	//aux::ExchLogger::instance()->debug("Processor: finish processing onCanceled");
@@ -315,7 +315,7 @@ void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, con
 
 void Processor::process(const ACID::TransactionId &id, ACID::Transaction *tr)
 {
-	assert(NULL != tr);
+	assert(nullptr != tr);
 	assert(id.isValid());
 
 	//aux::ExchLogger::instance()->debug("Processor: start processing transaction");

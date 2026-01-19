@@ -55,7 +55,7 @@ void OutgoingQueues::push(const ExecReportEvent &evnt, const std::string &target
 			it = outQueues_.insert(OutQueuesByTargetT::value_type(target, q.get())).first;
 			q.release();
 		}
-		assert(NULL != it->second);
+		assert(nullptr != it->second);
 		it->second->execReports_.push_back(evnt);
 		it->second->order_.push_back(EXECREPORT_OUT_QUEUE_TYPE);
 	}
@@ -75,7 +75,7 @@ void OutgoingQueues::push(const CancelRejectEvent &evnt, const std::string &targ
 			it = outQueues_.insert(OutQueuesByTargetT::value_type(target, q.get())).first;
 			q.release();
 		}
-		assert(NULL != it->second);
+		assert(nullptr != it->second);
 		it->second->cnclRejects_.push_back(evnt);
 		it->second->order_.push_back(CANCELREJECT_OUT_QUEUE_TYPE);
 	}
@@ -95,7 +95,7 @@ void OutgoingQueues::push(const BusinessRejectEvent &evnt, const std::string &ta
 			it = outQueues_.insert(OutQueuesByTargetT::value_type(target, q.get())).first;
 			q.release();
 		}
-		assert(NULL != it->second);
+		assert(nullptr != it->second);
 		it->second->bsnsRejects_.push_back(evnt);
 		it->second->order_.push_back(BUSINESSREJECT_OUT_QUEUE_TYPE);
 	}

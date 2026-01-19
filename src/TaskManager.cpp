@@ -37,36 +37,36 @@ namespace{
 						ACID::TransactionProcessor *proc, TaskManager *mgr): 
 			id_(id), tr_(tr), proc_(proc), mgr_(mgr)
 		{
-			assert(NULL != tr_);
-			assert(NULL != proc_);
-			assert(NULL != mgr_);
+			assert(nullptr != tr_);
+			assert(nullptr != proc_);
+			assert(nullptr != mgr_);
 			mgr->taskCreatedTr();
 		}
 		~TransactionTask(){
-			if((NULL != mgr_)&&(NULL != proc_)){
+			if((nullptr != mgr_)&&(nullptr != proc_)){
 				mgr_->finishTransaction(id_, tr_, proc_);
 				mgr_->taskFinishedTr();
 			}
-			proc_ = NULL;
-			mgr_ = NULL;
+			proc_ = nullptr;
+			mgr_ = nullptr;
 		}
 
 	public:
 		/// reimplemented from task
 		virtual task* execute(){
-			assert(NULL != tr_);
-			assert(NULL != proc_);
+			assert(nullptr != tr_);
+			assert(nullptr != proc_);
 			proc_->process(id_, tr_);
 			mgr_->taskProcessedTr();
 
 			/// return processor back into the pool
 			mgr_->finishTransaction(id_, tr_, proc_);
-			proc_ = NULL;
-			tr_ = NULL;
+			proc_ = nullptr;
+			tr_ = nullptr;
 			mgr_->onReadyToExecute();
 			mgr_->taskFinishedTr();
-			mgr_ = NULL;
-			return NULL;
+			mgr_ = nullptr;
+			return nullptr;
 		}
 
 	private:
@@ -82,34 +82,34 @@ namespace{
 		EventTask(InQueueProcessor *proc, TaskManager *mgr): 
 			proc_(proc), mgr_(mgr)
 		{
-			assert(NULL != proc_);
-			assert(NULL != mgr_);
+			assert(nullptr != proc_);
+			assert(nullptr != mgr_);
 			mgr->taskCreated();
 		}
 		~EventTask(){
-			if((NULL != mgr_)&&(NULL != proc_)){
+			if((nullptr != mgr_)&&(nullptr != proc_)){
 				mgr_->finishEvent(proc_);
 				mgr_->taskFinished();
 			}
-			proc_ = NULL;
-			mgr_ = NULL;
+			proc_ = nullptr;
+			mgr_ = nullptr;
 		}
 
 	public:
 		/// reimplemented from task
 		virtual task* execute(){
-			assert(NULL != proc_);
+			assert(nullptr != proc_);
 			bool rez = proc_->process();
 			mgr_->taskProcessed();
 
 			mgr_->finishEvent(proc_);
-			proc_ = NULL;
+			proc_ = nullptr;
 			if(rez){
 				mgr_->onNewEvent();
 				mgr_->taskFinished();
 			}
-			mgr_ = NULL;
-			return NULL;
+			mgr_ = nullptr;
+			return nullptr;
 		}
 
 	private:
@@ -119,9 +119,9 @@ namespace{
 }
 
 TaskManager::TaskManager(const TaskManagerParams &params):
-	transactMgr_(NULL), transactIt_(NULL), lastAvailableTransactProcessor_(), lastAvailableEvntProcessor_()
+	transactMgr_(nullptr), transactIt_(nullptr), lastAvailableTransactProcessor_(), lastAvailableEvntProcessor_()
 {
-	assert(NULL != params.transactMgr_);
+	assert(nullptr != params.transactMgr_);
 	transactMgr_ = params.transactMgr_;
 	transactIt_ = transactMgr_->iterator();
 
@@ -135,10 +135,10 @@ TaskManager::TaskManager(const TaskManagerParams &params):
 	lastAvailableEvntProcessor_.fetch_and_store(static_cast<int>(evntProcessors_.size()) - 1);
 	totalAvailableEvntProcessor_.fetch_and_store(static_cast<int>(evntProcessors_.size()) - 1);
 
-	assert(NULL != transactIt_);
+	assert(nullptr != transactIt_);
 	transactMgr_->attach(this);
 
-	assert(NULL != params.inQueues_);
+	assert(nullptr != params.inQueues_);
 	inQueues_ = params.inQueues_;
 	inQueues_->attach(this);
 
@@ -157,10 +157,10 @@ using namespace std;
 
 TaskManager::~TaskManager(void)
 {
-	assert(NULL != transactMgr_);
+	assert(nullptr != transactMgr_);
 	transactMgr_->detach();
-	transactIt_ = NULL;
-	transactMgr_ = NULL;
+	transactIt_ = nullptr;
+	transactMgr_ = nullptr;
 	if(lastAvailableTransactProcessor_ != totalAvailableTransactProcessor_){
 		cout<< "lastAvailableTransactProcessor_ = "<< lastAvailableTransactProcessor_<<endl;
 		cout<< "transactProcessors_ = "<< totalAvailableTransactProcessor_<<endl;
@@ -243,15 +243,15 @@ void TaskManager::addTask(const TransactionId &/*id*/)
 {
 	assert(false);
 /*	tbb::task *task = new(task::allocate_root()) TransactionTask(id);
-	assert(NULL != task);
+	assert(nullptr != task);
     task->spawn(*task);*/
 }
 
 void TaskManager::onReadyToExecute()
 {
-	TransactionProcessor *proc = NULL;
+	TransactionProcessor *proc = nullptr;
 	TransactionId id;
-	Transaction *tr = NULL;
+	Transaction *tr = nullptr;
 	{
 		tbb::mutex::scoped_lock lock(transactLock_);
 		int lastIdx = lastAvailableTransactProcessor_;
@@ -259,32 +259,32 @@ void TaskManager::onReadyToExecute()
 			//aux::ExchLogger::instance()->debug("TaskManager::onReadyToExecute() new TransactionTask not spawned - no workers.");
 			return;
 		}
-		assert(NULL != transactIt_);
+		assert(nullptr != transactIt_);
 		if(!transactIt_->next(&id, &tr)){
 			//aux::ExchLogger::instance()->debug("TaskManager::onReadyToExecute() new TransactionTask not spawned - no transactions.");
 			return;
 		}
 		lastAvailableTransactProcessor_.fetch_and_decrement();
 		proc = transactProcessors_[lastIdx];
-		transactProcessors_[lastIdx] = NULL;
+		transactProcessors_[lastIdx] = nullptr;
 	}
 	tbb::task *task = new(task::allocate_root()) TransactionTask(id, tr, proc, this);
-	assert(NULL != task);
+	assert(nullptr != task);
     task->spawn(*task);
 	//aux::ExchLogger::instance()->debug("TaskManager new TransactionTask spawned.");
 }
 
 bool TaskManager::finishTransaction(const ACID::TransactionId &id, ACID::Transaction *tr, TransactionProcessor *proc)
 {
-	assert(NULL != proc);
-	assert(NULL != tr);
+	assert(nullptr != proc);
+	assert(nullptr != tr);
 	bool rez = false;
 	{
 		tbb::mutex::scoped_lock lock(transactLock_);
 		int v = lastAvailableTransactProcessor_.fetch_and_increment();
 		transactProcessors_[v + 1] = proc;
 	}
-	assert(NULL != transactMgr_);
+	assert(nullptr != transactMgr_);
 	rez = transactMgr_->removeTransaction(id, tr);
 	//aux::ExchLogger::instance()->debug("TaskManager new transaction finished.");
 	return rez;
@@ -292,7 +292,7 @@ bool TaskManager::finishTransaction(const ACID::TransactionId &id, ACID::Transac
 
 void TaskManager::onNewEvent()
 {
-	InQueueProcessor *proc = NULL;
+	InQueueProcessor *proc = nullptr;
 	{
 		tbb::mutex::scoped_lock lock(eventLock_);
 		int lastIdx = lastAvailableEvntProcessor_;
@@ -302,18 +302,18 @@ void TaskManager::onNewEvent()
 		}
 		lastAvailableEvntProcessor_.fetch_and_decrement();
 		proc = evntProcessors_[lastIdx];
-		assert(NULL != proc);
-		evntProcessors_[lastIdx] = NULL;
+		assert(nullptr != proc);
+		evntProcessors_[lastIdx] = nullptr;
 	}
 	tbb::task *task = new(task::allocate_root()) EventTask(proc, this);
-	assert(NULL != task);
+	assert(nullptr != task);
     task->spawn(*task);
 	//aux::ExchLogger::instance()->debug("TaskManager new EventTask spawned.");
 }
 
 void TaskManager::finishEvent(Queues::InQueueProcessor *proc)
 {
-	assert(NULL != proc);
+	assert(nullptr != proc);
 	tbb::mutex::scoped_lock lock(eventLock_);
 	int v = lastAvailableEvntProcessor_.fetch_and_increment();
 	evntProcessors_[v + 1] = proc;

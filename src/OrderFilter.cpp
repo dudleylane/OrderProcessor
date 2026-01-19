@@ -31,12 +31,12 @@ void OrderFilter::release()
 	accountFilter_.release();
 	clearingFilter_.release();
 	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		if(NULL != *it)
+		if(nullptr != *it)
 			delete *it;
 	}
 
 	for(EntryFiltersT::const_iterator eit = entryFilters_.begin(); eit != entryFilters_.end(); ++eit){
-		if(NULL != *eit)
+		if(nullptr != *eit)
 			delete *eit;
 	}
 
@@ -44,13 +44,13 @@ void OrderFilter::release()
 
 void OrderFilter::addFilter(OrderElementFilter *fltr)
 {
-	assert(NULL != fltr);
+	assert(nullptr != fltr);
 	filters_.push_back(fltr);
 }
 
 void OrderFilter::addFilter(OrderEntryFilter *fltr)
 {
-	assert(NULL != fltr);
+	assert(nullptr != fltr);
 	entryFilters_.push_back(fltr);
 }
 
@@ -75,12 +75,12 @@ bool OrderFilter::match(const OrderEntry &params)const
 		accountFilter_.match(params)&&
 		clearingFilter_.match(params)){
 		for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-			assert(NULL != *it);
+			assert(nullptr != *it);
 			if(!(*it)->match(params))
 				return false;
 		}
 		for(EntryFiltersT::const_iterator eit = entryFilters_.begin(); eit != entryFilters_.end(); ++eit){
-			assert(NULL != *eit);
+			assert(nullptr != *eit);
 			if(!(*eit)->match(params))
 				return false;
 		}

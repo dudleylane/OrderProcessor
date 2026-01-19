@@ -51,8 +51,8 @@ namespace Proc{
 		bool testStateMachine_;
 		bool testStateMachineCheckResult_;	
 
-		ProcessorParams(): generator_(NULL), orderStorage_(NULL), orderBook_(NULL),
-				inQueues_(NULL), outQueues_(NULL), inQueue_(NULL), transactMgr_(NULL), 
+		ProcessorParams(): generator_(nullptr), orderStorage_(nullptr), orderBook_(nullptr),
+				inQueues_(nullptr), outQueues_(nullptr), inQueue_(nullptr), transactMgr_(nullptr), 
 				testStateMachine_(false), testStateMachineCheckResult_(false)
 		{}
 		ProcessorParams(IdTValueGenerator *generator, Store::OrderDataStorage *orderStorage,

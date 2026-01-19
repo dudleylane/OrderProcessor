@@ -91,7 +91,7 @@ namespace{
 namespace aux{
 
 char *toStr(char *buf, size_t val){
-	assert(NULL != buf);
+	assert(nullptr != buf);
 	buf[0] = 0;
 	if(val >= NUMBERS_AMOUNT){
 		char *p = buf;
@@ -133,7 +133,7 @@ char *toStr(char *buf, size_t val){
 }
 
 char *toStr(char *buf, int val){
-	assert(NULL != buf);
+	assert(nullptr != buf);
 	if(0 > val){
 		buf[0] = '-';
 		++buf;
@@ -180,7 +180,7 @@ char *toStr(char *buf, int val, size_t pos){
 }
 
 char *toStr(char *buf, COP::u64 val){
-	assert(NULL != buf);
+	assert(nullptr != buf);
 	buf[0] = 0;
 	if(val >= NUMBERS_AMOUNT){
 		char *p = buf;
@@ -257,7 +257,7 @@ char *toStr(char *buf, COP::u64 val){
 }
 
 char *toStr(char *buf, COP::i64 val){
-	assert(NULL != buf);
+	assert(nullptr != buf);
 	if(0 > val){
 		buf[0] = '-';
 		++buf;

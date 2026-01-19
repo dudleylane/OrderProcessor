@@ -545,7 +545,7 @@ bool testMarketOrder_NotMatched()
 			/// wait until order accepted or rejected (REJECTED_ORDSTATUS == order->status_)||(NEW_ORDSTATUS == order->status_)
 			manager.waitUntilTransactionsFinished(5);
 			OrderEntry *order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
-			check(NULL != order);
+			check(nullptr != order);
 			check(NEW_ORDSTATUS == order->status_);
 		}
 
@@ -561,7 +561,7 @@ bool testMarketOrder_NotMatched()
 			/// wait until order canceled or rejected (REJECTED_ORDSTATUS == order->status_)||(CANCELED_ORDSTATUS == order->status_))
 			manager.waitUntilTransactionsFinished(5);
 			OrderEntry *order = OrderStorage::instance()->locateByClOrderId(ord2ClOrdId);
-			check(NULL != order);
+			check(nullptr != order);
 			check(CANCELED_ORDSTATUS == order->status_);
 		}
 	}

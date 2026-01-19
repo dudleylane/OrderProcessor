@@ -30,18 +30,18 @@ namespace aux{
 
 		static void create(const std::string &name, size_t cacheSize = 100)
 		{
-			assert(NULL == instance_);
-			if(NULL != instance_)
+			assert(nullptr == instance_);
+			if(nullptr != instance_)
 				throw std::runtime_error(string("Cache '") + name + "' initialised twice!");
 			instance_ = new T(name, cacheSize);
 		}
 		static void destroy(){
 			delete instance_;
-			instance_ = NULL;
+			instance_ = nullptr;
 		}
 		static T *instance(){
-			assert(NULL != instance_);
-			if(NULL == instance_)
+			assert(nullptr != instance_);
+			if(nullptr == instance_)
 				throw std::runtime_error("InterLockCache was not initialised!");
 			return instance_;
 		}
@@ -56,7 +56,7 @@ namespace aux{
 				prev = n.release();
 				val.release();
 			}
-			/// add NULL node and create circle
+			/// add nullptr node and create circle
 			std::auto_ptr<Node> n(new Node());
 			n->next_ = cache_;
 			prev->next_ = n.get();
@@ -90,9 +90,9 @@ namespace aux{
 			do{
 				Node *cur = nextFree_;
 				if (cur != nextNull_){
-					T *v = nextFree_->val_.fetch_and_store(NULL);
+					T *v = nextFree_->val_.fetch_and_store(nullptr);
 					nextFree_.compare_and_swap(cur->next_, cur);
-					if(NULL != v)
+					if(nullptr != v)
 						return v;
 				}else{
 					cacheMiss_.fetch_and_increment();
@@ -104,7 +104,7 @@ namespace aux{
 		void pushBack(T *val){
 			Node *cur = nextNull_;
 			while(cur->next_ != nextFree_){
-				bool v = (NULL != nextNull_->val_.compare_and_swap(val, NULL));
+				bool v = (nullptr != nextNull_->val_.compare_and_swap(val, nullptr));
 				nextNull_.compare_and_swap(nextNull_->next_, cur);
 				if(!v)
 					return;
@@ -115,9 +115,9 @@ namespace aux{
 
 	private:
 		struct Node{
-			Node(): next_(NULL){val_.fetch_and_store(NULL);}
-			Node(T *val): next_(NULL){val_.fetch_and_store(val);}
-			Node(Node *next): next_(next){val_.fetch_and_store(NULL);}
+			Node(): next_(nullptr){val_.fetch_and_store(nullptr);}
+			Node(T *val): next_(nullptr){val_.fetch_and_store(val);}
+			Node(Node *next): next_(next){val_.fetch_and_store(nullptr);}
 			Node(Node *next, T *val): next_(next){val_.fetch_and_store(val);}
 
 			tbb::atomic<T *> val_;
@@ -139,15 +139,15 @@ namespace aux{
 	};
 
 	template<typename T>
-	T *InterLockCache<T>::instance_ = NULL;
+	T *InterLockCache<T>::instance_ = nullptr;
 
 	template<typename V>
 	class CacheAutoPtr{
 	public:
-		CacheAutoPtr(): val_(NULL){}
+		CacheAutoPtr(): val_(nullptr){}
 		CacheAutoPtr(V *val, InterLockCache<V> *alloc): val_(val), alloc_(alloc){}
-		explicit CacheAutoPtr(InterLockCache<V> *alloc): val_(NULL), alloc_(alloc){
-			assert(NULL != alloc_);
+		explicit CacheAutoPtr(InterLockCache<V> *alloc): val_(nullptr), alloc_(alloc){
+			assert(nullptr != alloc_);
 			val_ = alloc_->popFront();
 		}
 
@@ -160,14 +160,14 @@ namespace aux{
 		}
 
 		~CacheAutoPtr(){
-			if(NULL != val_){
-				assert(NULL != alloc_);
+			if(nullptr != val_){
+				assert(nullptr != alloc_);
 				alloc_->pushBack(val_);
 			}
 		}
 
 		V& operator*() const{
-			assert(NULL != val_);
+			assert(nullptr != val_);
 			return *val_;
 		}
 
@@ -179,22 +179,22 @@ namespace aux{
 
 		V *release(){
 			V *t = val_;
-			val_ = NULL;
-			alloc_ = NULL;
+			val_ = nullptr;
+			alloc_ = nullptr;
 			return t;
 		}
 
 		void reset(){
-			if(NULL != val_){
-				assert(NULL != alloc_);
+			if(nullptr != val_){
+				assert(nullptr != alloc_);
 				alloc_->pushBack(val_);
 			}
 			release();
 		}
 
 		void reset(V *val, InterLockCache<V> *alloc){
-			if(NULL != val_){
-				assert(NULL != alloc_);
+			if(nullptr != val_){
+				assert(nullptr != alloc_);
 				alloc_->pushBack(val_);
 			}
 			val_ = val;
