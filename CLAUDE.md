@@ -76,7 +76,7 @@ IncomingQueues → Processor → OrderStateMachine → OrderMatcher/OrderStorage
 
 | Module | Location | Purpose |
 |--------|----------|---------|
-| **Queues** | `src/IncomingQueues.cpp`, `src/OutgoingQueues.cpp` | Thread-safe event queues |
+| **Queues** | `src/IncomingQueues.cpp`, `src/OutgoingQueues.cpp` | Lock-free event queues (MPMC) |
 | **Processor** | `src/Processor.cpp` | Main event handler, central entry point |
 | **State Machine** | `src/StateMachine.cpp`, `src/OrderStateMachineImpl.cpp` | Order state management (20+ states) |
 | **OrderMatcher** | `src/OrderMatcher.cpp` | Order matching logic |
@@ -98,10 +98,26 @@ class Processor: public InQueueProcessor,
 ### Concurrency Model
 
 - **std::atomic:** Lock-free atomics for counters and flags
+- **oneapi::tbb::concurrent_queue:** Lock-free MPMC queue for event ingestion (`IncomingQueues`)
+- **oneapi::tbb::concurrent_hash_map:** Fine-grained bucket-level locking (`OrderStorage` executions)
+- **oneapi::tbb::spin_rw_mutex:** Reader-writer lock for read-heavy data (`WideDataStorage`, `OrderStorage` orders)
 - **oneapi::tbb::mutex:** Mutual exclusion for shared data
+- **oneapi::tbb::spin_mutex:** Lightweight locking for short critical sections
 - **oneapi::tbb::task_group:** Task parallelism in TaskManager
 - **InterLockCache:** Wait-free object caching (`src/InterLockCache.h`)
 - **NLinkedTree:** Transaction dependency ordering (`src/NLinkedTree.cpp`)
+
+### Lock-Free Components
+
+| Component | Implementation | Operations |
+|-----------|---------------|------------|
+| **IncomingQueues** | `tbb::concurrent_queue` + `std::variant` | `push()`, `pop()`, `size()` are lock-free |
+| **OutgoingQueues** | `tbb::concurrent_queue` + `std::variant` | `push()` is lock-free |
+| **WideDataStorage** | `tbb::spin_rw_mutex` | Concurrent `get()` reads, exclusive `add()`/`restore()` writes |
+| **OrderStorage** | `tbb::spin_rw_mutex` + `tbb::concurrent_hash_map` | Concurrent order lookups; fine-grained execution access |
+| **InterLockCache** | CAS-based circular buffer | Wait-free `popFront()`, `pushBack()` |
+| **IdTGenerator** | `std::atomic<u64>` | Lock-free monotonic ID generation |
+| **Logger flags** | `std::atomic<char>` | Lock-free flag checking |
 
 ## Code Conventions
 
@@ -112,7 +128,7 @@ class Processor: public InQueueProcessor,
 
 ## Key Dependencies
 
-- **oneTBB 2021.x+:** Concurrent containers, mutex, task scheduling
+- **oneTBB 2021.x+:** Lock-free concurrent_queue, mutex, spin_mutex, task scheduling
 - **spdlog:** Logging infrastructure
 - **Boost (headers):** MPL for Meta State Machine
 - **Google Test:** Unit testing framework
@@ -122,6 +138,7 @@ class Processor: public InQueueProcessor,
 
 Tests are in `test/` using Google Test framework:
 - `CodecsTest.cpp` - Codec encode/decode tests
+- `IncomingQueuesTest.cpp` - Lock-free event queue tests
 - `InterlockCacheTest.cpp` - Lock-free cache tests
 - `NLinkTreeTest.cpp` - Transaction tree tests
 - `ProcessorTest.cpp` - Main processor tests

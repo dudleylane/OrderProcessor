@@ -11,7 +11,6 @@
 */
 
 
-#include <stdexcept>
 #include <cassert>
 #include "IncomingQueues.h"
 #include "DataModelDef.h"
@@ -19,21 +18,20 @@
 
 using namespace std;
 using namespace COP;
-using namespace tbb;
 using namespace COP::Queues;
 
 IncomingQueues::IncomingQueues(void)
+	: processor_(nullptr)
+	, observer_(nullptr)
+	, queueSize_(0)
 {
-	processor_.store(nullptr);
-	observer_.store(nullptr);
-
-	aux::ExchLogger::instance()->note("IncomingQueues created.");	
+	aux::ExchLogger::instance()->note("IncomingQueues created.");
 }
 
 IncomingQueues::~IncomingQueues(void)
 {
 	clear();
-	aux::ExchLogger::instance()->note("IncomingQueues destroyed.");	
+	aux::ExchLogger::instance()->note("IncomingQueues destroyed.");
 }
 
 InQueueProcessor *IncomingQueues::attach(InQueueProcessor *obs)
@@ -53,7 +51,7 @@ InQueuesObserver *IncomingQueues::attach(InQueuesObserver *obs)
 	aux::ExchLogger::instance()->note("IncomingQueues attaching InQueuesObserver.");
 	InQueuesObserver *obsOld = observer_.exchange(obs);
 	InQueuesObserver *current = observer_.load();
-	if((nullptr != current)&&(!processingQueue_.empty()))
+	if ((nullptr != current) && (queueSize_.load(std::memory_order_acquire) > 0))
 		current->onNewEvent();
 	return obsOld;
 }
@@ -64,483 +62,214 @@ InQueuesObserver *IncomingQueues::detach()
 	return observer_.exchange(nullptr);
 }
 
-u32 IncomingQueues::size()const
+u32 IncomingQueues::size() const
 {
-	tbb::mutex::scoped_lock lock(lock_);
-	return static_cast<u32>(processingQueue_.size());
+	return queueSize_.load(std::memory_order_acquire);
 }
 
 bool IncomingQueues::top(InQueueProcessor *obs)
 {
 	assert(nullptr != obs);
 
-	//aux::ExchLogger::instance()->debug("IncomingQueues::top(InQueueProcessor ) start execution");
+	QueuedEvent event;
 
-	Element elem;
-	OrderEvent order;
-	OrderCancelEvent cancel;
-	OrderReplaceEvent replace;
-	OrderChangeStateEvent state;
-	ProcessEvent process;
-	TimerEvent timer;
-	std::unique_ptr<OrderEntry> ord;
+	// Check if we have a pending event from a previous top() call
 	{
-		tbb::mutex::scoped_lock lock(lock_);
-		if(0 == processingQueue_.size())
-			return false;
-		elem = processingQueue_.front();
-		switch(elem.type_){
-		case ORDER_QUEUE_TYPE:
-			{
-				OrderQueuesT::const_iterator it = orders_.find(elem.source_);
-				if((orders_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate Order element!");
-				order = it->second->front();
-				ord.reset(order.order_);
-			}
-			break;
-		case ORDER_CANCEL_QUEUE_TYPE:
-			{
-				OrderCancelQueuesT::const_iterator it = orderCancels_.find(elem.source_);
-				if((orderCancels_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate OrderCancel element!");
-				cancel = it->second->front();
-			}
-			break;
-		case ORDER_REPLACE_QUEUE_TYPE:
-			{
-				OrderReplaceQueuesT::const_iterator it = orderReplaces_.find(elem.source_);
-				if((orderReplaces_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate OrderReplace element!");
-				replace = it->second->front();
-			}
-			break;
-		case ORDER_STATE_QUEUE_TYPE:
-			{
-				OrderStateQueuesT::const_iterator it = orderStates_.find(elem.source_);
-				if((orderStates_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate OrderState element!");
-				state = it->second->front();
-			}
-			break;
-		case PROCESS_QUEUE_TYPE:
-			{
-				ProcessQueuesT::const_iterator it = processes_.find(elem.source_);
-				if((processes_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate Process element!");
-				process = it->second->front();
-			}
-			break;
-		case TIMER_QUEUE_TYPE:
-			{
-				TimerQueuesT::const_iterator it = timers_.find(elem.source_);
-				if((timers_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate Timer element!");
-				timer = it->second->front();
-			}
-			break;
-		default:
-			throw std::runtime_error("Invalid structure: Unknown type of the element!");
-		};
+		oneapi::tbb::spin_mutex::scoped_lock lock(pendingLock_);
+		if (pendingEvent_.has_value()) {
+			event = pendingEvent_.value();
+			dispatchEvent(obs, event.source_, event.event_);
+			return true;
+		}
 	}
 
-	switch(elem.type_){
-	case ORDER_QUEUE_TYPE:
-		obs->onEvent(elem.source_, order);
-		break;
-	case ORDER_CANCEL_QUEUE_TYPE:
-		obs->onEvent(elem.source_, cancel);
-		break;
-	case ORDER_REPLACE_QUEUE_TYPE:
-		obs->onEvent(elem.source_, replace);
-		break;
-	case ORDER_STATE_QUEUE_TYPE:
-		obs->onEvent(elem.source_, state);
-		break;
-	case PROCESS_QUEUE_TYPE:
-		obs->onEvent(elem.source_, process);
-		break;
-	case TIMER_QUEUE_TYPE:
-		obs->onEvent(elem.source_, timer);
-		break;
-	};
+	// Try to get a new event from the queue
+	if (!eventQueue_.try_pop(event)) {
+		return false;
+	}
 
-	//aux::ExchLogger::instance()->debug("IncomingQueues::top(InQueueProcessor ) finish execution");
+	// Store as pending (will be consumed by pop())
+	{
+		oneapi::tbb::spin_mutex::scoped_lock lock(pendingLock_);
+		pendingEvent_ = event;
+	}
+
+	dispatchEvent(obs, event.source_, event.event_);
 	return true;
 }
 
 bool IncomingQueues::pop()
 {
-	//aux::ExchLogger::instance()->debug("IncomingQueues::pop start execution");
+	// Check if we have a pending event from top()
 	{
-		tbb::mutex::scoped_lock lock(lock_);
-		if(0 == processingQueue_.size())
-			return false;
-		Element elem = processingQueue_.front();
-		processingQueue_.pop_front();
-		switch(elem.type_){
-		case ORDER_QUEUE_TYPE:
-			{
-				OrderQueuesT::iterator it = orders_.find(elem.source_);
-				if((orders_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate Order element!");
-				it->second->pop_front();
+		oneapi::tbb::spin_mutex::scoped_lock lock(pendingLock_);
+		if (pendingEvent_.has_value()) {
+			// Handle OrderEvent memory cleanup
+			if (auto *orderEvt = std::get_if<OrderEvent>(&pendingEvent_->event_)) {
+				std::unique_ptr<OrderEntry> ord(orderEvt->order_);
 			}
-			break;
-		case ORDER_CANCEL_QUEUE_TYPE:
-			{
-				OrderCancelQueuesT::iterator it = orderCancels_.find(elem.source_);
-				if((orderCancels_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate OrderCancel element!");
-				it->second->pop_front();
-			}
-			break;
-		case ORDER_REPLACE_QUEUE_TYPE:
-			{
-				OrderReplaceQueuesT::iterator it = orderReplaces_.find(elem.source_);
-				if((orderReplaces_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate OrderReplace element!");
-				it->second->pop_front();
-			}
-			break;
-		case ORDER_STATE_QUEUE_TYPE:
-			{
-				OrderStateQueuesT::iterator it = orderStates_.find(elem.source_);
-				if((orderStates_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate OrderState element!");
-				it->second->pop_front();
-			}
-			break;
-		case PROCESS_QUEUE_TYPE:
-			{
-				ProcessQueuesT::iterator it = processes_.find(elem.source_);
-				if((processes_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate Process element!");
-				it->second->pop_front();
-			}
-			break;
-		case TIMER_QUEUE_TYPE:
-			{
-				TimerQueuesT::iterator it = timers_.find(elem.source_);
-				if((timers_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate Timer element!");
-				it->second->pop_front();
-			}
-			break;
-		default:
-			throw std::runtime_error("Invalid structure: Unknown type of the element!");
-		};
+			pendingEvent_.reset();
+			queueSize_.fetch_sub(1, std::memory_order_release);
+			return true;
+		}
 	}
-	//aux::ExchLogger::instance()->debug("IncomingQueues::pop finish execution");
+
+	// No pending event, try to pop directly from queue
+	QueuedEvent event;
+	if (!eventQueue_.try_pop(event)) {
+		return false;
+	}
+
+	// Handle OrderEvent memory cleanup
+	if (auto *orderEvt = std::get_if<OrderEvent>(&event.event_)) {
+		std::unique_ptr<OrderEntry> ord(orderEvt->order_);
+	}
+
+	queueSize_.fetch_sub(1, std::memory_order_release);
 	return true;
 }
 
 bool IncomingQueues::pop(InQueueProcessor *obs)
 {
 	assert(nullptr != obs);
-	
-	//aux::ExchLogger::instance()->debug("IncomingQueues::pop(InQueueProcessor) start execution");
 
-	Element elem;
-	OrderEvent order;
-	OrderCancelEvent cancel;
-	OrderReplaceEvent replace;
-	OrderChangeStateEvent state;
-	ProcessEvent process;
-	TimerEvent timer;
-	std::unique_ptr<OrderEntry> ord;
+	QueuedEvent event;
+
+	// Check if we have a pending event from top()
 	{
-		tbb::mutex::scoped_lock lock(lock_);
-		if(0 == processingQueue_.size())
-			return false;
-		elem = processingQueue_.front();
-		processingQueue_.pop_front();
-		switch(elem.type_){
-		case ORDER_QUEUE_TYPE:
-			{
-				OrderQueuesT::const_iterator it = orders_.find(elem.source_);
-				if((orders_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate Order element!");
-				order = it->second->front();
-				ord.reset(order.order_);
-				it->second->pop_front();
-			}
-			break;
-		case ORDER_CANCEL_QUEUE_TYPE:
-			{
-				OrderCancelQueuesT::const_iterator it = orderCancels_.find(elem.source_);
-				if((orderCancels_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate OrderCancel element!");
-				cancel = it->second->front();
-				it->second->pop_front();
-			}
-			break;
-		case ORDER_REPLACE_QUEUE_TYPE:
-			{
-				OrderReplaceQueuesT::const_iterator it = orderReplaces_.find(elem.source_);
-				if((orderReplaces_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate OrderReplace element!");
-				replace = it->second->front();
-				it->second->pop_front();
-			}
-			break;
-		case ORDER_STATE_QUEUE_TYPE:
-			{
-				OrderStateQueuesT::const_iterator it = orderStates_.find(elem.source_);
-				if((orderStates_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate OrderState element!");
-				state = it->second->front();
-				it->second->pop_front();
-			}
-			break;
-		case PROCESS_QUEUE_TYPE:
-			{
-				ProcessQueuesT::const_iterator it = processes_.find(elem.source_);
-				if((processes_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate Process element!");
-				process = it->second->front();
-				it->second->pop_front();
-			}
-			break;
-		case TIMER_QUEUE_TYPE:
-			{
-				TimerQueuesT::const_iterator it = timers_.find(elem.source_);
-				if((timers_.end() == it)||(nullptr == it->second)||(0 == it->second->size()))
-					throw std::runtime_error("Invalid structure: Unable to locate Timer element!");
-				timer = it->second->front();
-				it->second->pop_front();
-			}
-			break;
-		default:
-			throw std::runtime_error("Invalid structure: Unknown type of the element!");
-		};
+		oneapi::tbb::spin_mutex::scoped_lock lock(pendingLock_);
+		if (pendingEvent_.has_value()) {
+			event = std::move(pendingEvent_.value());
+			pendingEvent_.reset();
+		}
 	}
 
-	switch(elem.type_){
-	case ORDER_QUEUE_TYPE:
-		obs->onEvent(elem.source_, order);
-		break;
-	case ORDER_CANCEL_QUEUE_TYPE:
-		obs->onEvent(elem.source_, cancel);
-		break;
-	case ORDER_REPLACE_QUEUE_TYPE:
-		obs->onEvent(elem.source_, replace);
-		break;
-	case ORDER_STATE_QUEUE_TYPE:
-		obs->onEvent(elem.source_, state);
-		break;
-	case PROCESS_QUEUE_TYPE:
-		obs->onEvent(elem.source_, process);
-		break;
-	case TIMER_QUEUE_TYPE:
-		obs->onEvent(elem.source_, timer);
-		break;
-	};
-	//aux::ExchLogger::instance()->debug("IncomingQueues::pop(InQueueProcessor) finish execution");
+	// If no pending event, try to get from queue
+	if (event.source_.empty()) {
+		if (!eventQueue_.try_pop(event)) {
+			return false;
+		}
+	}
+
+	queueSize_.fetch_sub(1, std::memory_order_release);
+
+	// Handle OrderEvent memory - ensure cleanup after dispatch
+	std::unique_ptr<OrderEntry> ordCleanup;
+	if (auto *orderEvt = std::get_if<OrderEvent>(&event.event_)) {
+		ordCleanup.reset(orderEvt->order_);
+	}
+
+	dispatchEvent(obs, event.source_, event.event_);
 	return true;
+}
+
+void IncomingQueues::dispatchEvent(InQueueProcessor *obs, const std::string &source, const EventVariant &event)
+{
+	std::visit([obs, &source](auto &&evt) {
+		using T = std::decay_t<decltype(evt)>;
+		if constexpr (std::is_same_v<T, OrderEvent>) {
+			obs->onEvent(source, evt);
+		} else if constexpr (std::is_same_v<T, OrderCancelEvent>) {
+			obs->onEvent(source, evt);
+		} else if constexpr (std::is_same_v<T, OrderReplaceEvent>) {
+			obs->onEvent(source, evt);
+		} else if constexpr (std::is_same_v<T, OrderChangeStateEvent>) {
+			obs->onEvent(source, evt);
+		} else if constexpr (std::is_same_v<T, ProcessEvent>) {
+			obs->onEvent(source, evt);
+		} else if constexpr (std::is_same_v<T, TimerEvent>) {
+			obs->onEvent(source, evt);
+		}
+	}, event);
 }
 
 void IncomingQueues::push(const std::string &source, const OrderEvent &evnt)
 {
-	//aux::ExchLogger::instance()->debug("IncomingQueues start push OrderEvent");
 	std::unique_ptr<OrderEntry> ord(evnt.order_);
-	{
-		tbb::mutex::scoped_lock lock(lock_);
-		OrderQueuesT::iterator it = orders_.find(source);
-		if(orders_.end() == it){
-			it = orders_.insert(OrderQueuesT::value_type(source, new OrderQueueT())).first;
-		}
-		assert(orders_.end() != it);
-		assert(nullptr != it->second);
-		it->second->push_back(evnt);
-		ord.release();
-		processingQueue_.push_back(Element(source, ORDER_QUEUE_TYPE));
-	}	
-	{
-		InQueuesObserver *obs = observer_.load();
-		if(nullptr != obs)
-			obs->onNewEvent();
-	}
-	//aux::ExchLogger::instance()->debug("IncomingQueues finish push OrderEvent");
+
+	eventQueue_.push(QueuedEvent(source, evnt));
+	ord.release();
+	queueSize_.fetch_add(1, std::memory_order_release);
+
+	InQueuesObserver *obs = observer_.load(std::memory_order_acquire);
+	if (nullptr != obs)
+		obs->onNewEvent();
 }
 
 void IncomingQueues::push(const std::string &source, const OrderCancelEvent &evnt)
 {
-	//aux::ExchLogger::instance()->debug("IncomingQueues start push OrderCancelEvent");
+	eventQueue_.push(QueuedEvent(source, evnt));
+	queueSize_.fetch_add(1, std::memory_order_release);
 
-	{
-		tbb::mutex::scoped_lock lock(lock_);
-		OrderCancelQueuesT::iterator it = orderCancels_.find(source);
-		if(orderCancels_.end() == it){
-			it = orderCancels_.insert(OrderCancelQueuesT::value_type(source, new OrderCancelQueueT())).first;
-		}
-		assert(orderCancels_.end() != it);
-		assert(nullptr != it->second);
-		it->second->push_back(evnt);
-
-		processingQueue_.push_back(Element(source, ORDER_CANCEL_QUEUE_TYPE));
-	}
-	{
-		InQueuesObserver *obs = observer_.load();
-		if(nullptr != obs)
-			obs->onNewEvent();
-	}
-
-	//aux::ExchLogger::instance()->debug("IncomingQueues finish push OrderCancelEvent");
+	InQueuesObserver *obs = observer_.load(std::memory_order_acquire);
+	if (nullptr != obs)
+		obs->onNewEvent();
 }
 
 void IncomingQueues::push(const std::string &source, const OrderReplaceEvent &evnt)
 {
-	//aux::ExchLogger::instance()->debug("IncomingQueues start push OrderReplaceEvent");
+	eventQueue_.push(QueuedEvent(source, evnt));
+	queueSize_.fetch_add(1, std::memory_order_release);
 
-	{
-		tbb::mutex::scoped_lock lock(lock_);
-		OrderReplaceQueuesT::iterator it = orderReplaces_.find(source);
-		if(orderReplaces_.end() == it){
-			it = orderReplaces_.insert(OrderReplaceQueuesT::value_type(source, new OrderReplaceQueueT())).first;
-		}
-		assert(orderReplaces_.end() != it);
-		assert(nullptr != it->second);
-		it->second->push_back(evnt);
-
-		processingQueue_.push_back(Element(source, ORDER_REPLACE_QUEUE_TYPE));
-	}
-	{
-		InQueuesObserver *obs = observer_.load();
-		if(nullptr != obs)
-			obs->onNewEvent();
-	}
-
-	//aux::ExchLogger::instance()->debug("IncomingQueues finish push OrderReplaceEvent");
+	InQueuesObserver *obs = observer_.load(std::memory_order_acquire);
+	if (nullptr != obs)
+		obs->onNewEvent();
 }
 
 void IncomingQueues::push(const std::string &source, const OrderChangeStateEvent &evnt)
 {
-	//aux::ExchLogger::instance()->debug("IncomingQueues start push OrderStateEvent");
+	eventQueue_.push(QueuedEvent(source, evnt));
+	queueSize_.fetch_add(1, std::memory_order_release);
 
-	{
-		tbb::mutex::scoped_lock lock(lock_);
-		OrderStateQueuesT::iterator it = orderStates_.find(source);
-		if(orderStates_.end() == it){
-			it = orderStates_.insert(OrderStateQueuesT::value_type(source, new OrderStateQueueT())).first;
-		}
-		assert(orderStates_.end() != it);
-		assert(nullptr != it->second);
-		it->second->push_back(evnt);
-
-		processingQueue_.push_back(Element(source, ORDER_STATE_QUEUE_TYPE));
-	}
-	{
-		InQueuesObserver *obs = observer_.load();
-		if(nullptr != obs)
-			obs->onNewEvent();
-	}
-
-	//aux::ExchLogger::instance()->debug("IncomingQueues finish push OrderStateEvent");
+	InQueuesObserver *obs = observer_.load(std::memory_order_acquire);
+	if (nullptr != obs)
+		obs->onNewEvent();
 }
 
 void IncomingQueues::push(const std::string &source, const ProcessEvent &evnt)
 {
-	//aux::ExchLogger::instance()->debug("IncomingQueues start push ProcessEvent");
-	{
-		tbb::mutex::scoped_lock lock(lock_);
-		ProcessQueuesT::iterator it = processes_.find(source);
-		if(processes_.end() == it){
-			it = processes_.insert(ProcessQueuesT::value_type(source, new ProcessQueueT())).first;
-		}
-		assert(processes_.end() != it);
-		assert(nullptr != it->second);
-		it->second->push_back(evnt);
+	eventQueue_.push(QueuedEvent(source, evnt));
+	queueSize_.fetch_add(1, std::memory_order_release);
 
-		processingQueue_.push_back(Element(source, PROCESS_QUEUE_TYPE));
-	}
-	{
-		InQueuesObserver *obs = observer_.load();
-		if(nullptr != obs)
-			obs->onNewEvent();
-	}
-
-	//aux::ExchLogger::instance()->debug("IncomingQueues finish push ProcessEvent");
+	InQueuesObserver *obs = observer_.load(std::memory_order_acquire);
+	if (nullptr != obs)
+		obs->onNewEvent();
 }
 
 void IncomingQueues::push(const std::string &source, const TimerEvent &evnt)
 {
-	//aux::ExchLogger::instance()->debug("IncomingQueues start push TimerEvent");
+	eventQueue_.push(QueuedEvent(source, evnt));
+	queueSize_.fetch_add(1, std::memory_order_release);
 
-	{
-		tbb::mutex::scoped_lock lock(lock_);
-		TimerQueuesT::iterator it = timers_.find(source);
-		if(timers_.end() == it){
-			it = timers_.insert(TimerQueuesT::value_type(source, new TimerQueueT())).first;
-		}
-		assert(timers_.end() != it);
-		assert(nullptr != it->second);
-		it->second->push_back(evnt);
-
-		processingQueue_.push_back(Element(source, TIMER_QUEUE_TYPE));
-	}
-	{
-		InQueuesObserver *obs = observer_.load();
-		if(nullptr != obs)
-			obs->onNewEvent();
-	}
-
-	//aux::ExchLogger::instance()->debug("IncomingQueues finish push TimerEvent");
+	InQueuesObserver *obs = observer_.load(std::memory_order_acquire);
+	if (nullptr != obs)
+		obs->onNewEvent();
 }
 
 void IncomingQueues::clear()
 {
 	aux::ExchLogger::instance()->debug("IncomingQueues start clear");
 
-	OrderQueuesT ordersTmp;
-	OrderCancelQueuesT orderCancelsTmp;
-	OrderReplaceQueuesT orderReplacesTmp;
-	OrderStateQueuesT orderStatesTmp;
-	ProcessQueuesT processesTmp;
-	TimerQueuesT timersTmp;
+	// Clear pending event
 	{
-		ProcessingQueueT tmp;
-		tbb::mutex::scoped_lock lock(lock_);
-		swap(tmp, processingQueue_);
-		swap(ordersTmp, orders_);
-		swap(orderCancelsTmp, orderCancels_);
-		swap(orderReplacesTmp, orderReplaces_);
-		swap(orderStatesTmp, orderStates_);
-		swap(processesTmp, processes_);
-		swap(timersTmp, timers_);
+		oneapi::tbb::spin_mutex::scoped_lock lock(pendingLock_);
+		if (pendingEvent_.has_value()) {
+			if (auto *orderEvt = std::get_if<OrderEvent>(&pendingEvent_->event_)) {
+				std::unique_ptr<OrderEntry> ord(orderEvt->order_);
+			}
+			pendingEvent_.reset();
+		}
 	}
 
-	{
-		for(OrderQueuesT::iterator it = ordersTmp.begin(); it != ordersTmp.end(); ++it){
-			std::unique_ptr<OrderQueueT> ap(it->second);
-			for(OrderQueueT::iterator oIt = ap->begin(); oIt != ap->begin(); ++oIt)
-				std::unique_ptr<OrderEntry> ord(oIt->order_);
+	// Drain the queue and cleanup OrderEntry pointers
+	QueuedEvent event;
+	while (eventQueue_.try_pop(event)) {
+		if (auto *orderEvt = std::get_if<OrderEvent>(&event.event_)) {
+			std::unique_ptr<OrderEntry> ord(orderEvt->order_);
 		}
 	}
-	{
-		for(OrderCancelQueuesT::iterator it = orderCancelsTmp.begin(); it != orderCancelsTmp.end(); ++it){
-			std::unique_ptr<OrderCancelQueueT> ap(it->second);
-		}
-	}
-	{
-		for(OrderReplaceQueuesT::iterator it = orderReplacesTmp.begin(); it != orderReplacesTmp.end(); ++it){
-			std::unique_ptr<OrderReplaceQueueT> ap(it->second);
-		}
-	}
-	{
-		for(OrderStateQueuesT::iterator it = orderStatesTmp.begin(); it != orderStatesTmp.end(); ++it){
-			std::unique_ptr<OrderStateQueueT> ap(it->second);
-		}
-	}
-	{
-		for(ProcessQueuesT::iterator it = processesTmp.begin(); it != processesTmp.end(); ++it){
-			std::unique_ptr<ProcessQueueT> ap(it->second);
-		}
-	}
-	{
-		for(TimerQueuesT::iterator it = timersTmp.begin(); it != timersTmp.end(); ++it){
-			std::unique_ptr<TimerQueueT> ap(it->second);
-		}
-	}
+
+	queueSize_.store(0, std::memory_order_release);
+
 	aux::ExchLogger::instance()->debug("IncomingQueues finish clear");
 }

@@ -14,7 +14,8 @@
 
 #include "Singleton.h"
 #include "TypesDef.h"
-#include <oneapi/tbb/mutex.h>
+#include <oneapi/tbb/spin_rw_mutex.h>
+#include <oneapi/tbb/concurrent_hash_map.h>
 #include <map>
 #include "DataModelDef.h"
 
@@ -43,7 +44,9 @@ public:
 	ExecutionEntry *save(const ExecutionEntry &exec, IdTValueGenerator *idGenerator);
 
 private:
-	mutable oneapi::tbb::mutex orderLock_;
+	/// Reader-writer lock for order maps (dual-map inserts require atomicity)
+	/// Allows concurrent reads, exclusive writes
+	mutable oneapi::tbb::spin_rw_mutex orderRwLock_;
 
 	typedef std::map<IdT, OrderEntry *> OrdersByIDT;
 	OrdersByIDT ordersById_;
@@ -51,8 +54,19 @@ private:
 	typedef std::map<RawDataEntry, OrderEntry *> OrdersByClientIDT;
 	OrdersByClientIDT ordersByClId_;
 
-	mutable oneapi::tbb::mutex execLock_;
-	typedef std::map<SourceIdT, ExecutionEntry *> ExecByIDT;
+	/// Hash functor for SourceIdT in concurrent_hash_map
+	struct SourceIdTHash {
+		size_t hash(const SourceIdT &key) const {
+			// Combine id_ and date_ for hash
+			return std::hash<u64>()(key.id_) ^ (std::hash<u32>()(key.date_) << 1);
+		}
+		bool equal(const SourceIdT &a, const SourceIdT &b) const {
+			return a == b;
+		}
+	};
+
+	/// Lock-free concurrent hash map for executions (single-map operations)
+	typedef oneapi::tbb::concurrent_hash_map<SourceIdT, ExecutionEntry*, SourceIdTHash> ExecByIDT;
 	ExecByIDT executionsById_;
 
 	OrderSaver *saver_;

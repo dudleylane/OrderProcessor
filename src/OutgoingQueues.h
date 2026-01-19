@@ -13,9 +13,9 @@
 #pragma once
 
 #include <string>
-#include <map>
-#include <deque>
-#include <oneapi/tbb/mutex.h>
+#include <variant>
+#include <oneapi/tbb/concurrent_queue.h>
+#include <oneapi/tbb/concurrent_hash_map.h>
 
 #include "QueuesDef.h"
 
@@ -32,30 +32,28 @@ namespace Queues{
 		virtual void push(const ExecReportEvent &evnt, const std::string &target);
 		virtual void push(const CancelRejectEvent &evnt, const std::string &target);
 		virtual void push(const BusinessRejectEvent &evnt, const std::string &target);
+
 	private:
-		mutable oneapi::tbb::mutex lock_;
+		/// Unified event type using std::variant for lock-free queue
+		using OutEventVariant = std::variant<
+			std::monostate,  // Default state for empty initialization
+			ExecReportEvent,
+			CancelRejectEvent,
+			BusinessRejectEvent
+		>;
 
-		typedef std::deque<ExecReportEvent> ExecRepQueueT;
-		typedef std::deque<CancelRejectEvent> CancelRejectQueueT;
-		typedef std::deque<BusinessRejectEvent> BusinessRejectQueueT;
-		
-		enum OutQueueType{
-			INVALID_OUT_QUEUE_TYPE = 0,
-			EXECREPORT_OUT_QUEUE_TYPE,
-			CANCELREJECT_OUT_QUEUE_TYPE,
-			BUSINESSREJECT_OUT_QUEUE_TYPE,
-			TOTAL_OUT_QUEUE_TYPE
-		};
-		typedef std::deque<OutQueueType> EventOrderT;
+		/// Queued outgoing event with target
+		struct QueuedOutEvent {
+			std::string target_;
+			OutEventVariant event_;
 
-		struct OutQueues{
-			EventOrderT order_;
-			ExecRepQueueT execReports_;
-			CancelRejectQueueT cnclRejects_;
-			BusinessRejectQueueT bsnsRejects_;
+			QueuedOutEvent() = default;
+			QueuedOutEvent(const std::string &tgt, OutEventVariant evt)
+				: target_(tgt), event_(std::move(evt)) {}
 		};
-		typedef std::map<std::string, OutQueues *> OutQueuesByTargetT;
-		OutQueuesByTargetT outQueues_;
+
+		/// Lock-free concurrent queue for all outgoing events (MPSC pattern)
+		oneapi::tbb::concurrent_queue<QueuedOutEvent> eventQueue_;
 
 	private:
 		void clear();

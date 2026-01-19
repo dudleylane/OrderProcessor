@@ -13,9 +13,10 @@
 #pragma once
 
 #include <atomic>
-#include <oneapi/tbb/mutex.h>
-#include <map>
-#include <deque>
+#include <optional>
+#include <variant>
+#include <oneapi/tbb/concurrent_queue.h>
+#include <oneapi/tbb/spin_mutex.h>
 
 #include "QueuesDef.h"
 
@@ -53,54 +54,40 @@ namespace Queues{
 	private:
 		std::atomic<InQueueProcessor *> processor_;
 		std::atomic<InQueuesObserver *> observer_;
-		
 
-		mutable oneapi::tbb::mutex lock_;
+		/// Unified event type using std::variant for lock-free queue
+		using EventVariant = std::variant<
+			OrderEvent,
+			OrderCancelEvent,
+			OrderReplaceEvent,
+			OrderChangeStateEvent,
+			ProcessEvent,
+			TimerEvent
+		>;
 
-		typedef std::deque<OrderEvent> OrderQueueT;
-		typedef std::deque<OrderCancelEvent> OrderCancelQueueT;
-		typedef std::deque<OrderReplaceEvent> OrderReplaceQueueT;
-		typedef std::deque<OrderChangeStateEvent> OrderStateQueueT;
-		typedef std::deque<ProcessEvent> ProcessQueueT;
-		typedef std::deque<TimerEvent> TimerQueueT;
-
-		typedef std::map<std::string, OrderQueueT*> OrderQueuesT;
-		typedef std::map<std::string, OrderCancelQueueT*> OrderCancelQueuesT;
-		typedef std::map<std::string, OrderReplaceQueueT*> OrderReplaceQueuesT;
-		typedef std::map<std::string, OrderStateQueueT*> OrderStateQueuesT;
-		typedef std::map<std::string, ProcessQueueT*> ProcessQueuesT;
-		typedef std::map<std::string, TimerQueueT*> TimerQueuesT;
-
-		enum QueueType{
-			INVALID_QUEUE_TYPE = 0,
-			ORDER_QUEUE_TYPE,
-			ORDER_CANCEL_QUEUE_TYPE,
-			ORDER_REPLACE_QUEUE_TYPE,
-			ORDER_STATE_QUEUE_TYPE,
-			PROCESS_QUEUE_TYPE,
-			TIMER_QUEUE_TYPE,
-			TOTAL_QUEUE_TYPE
-		};
-		struct Element{
+		/// Queued event containing source and the event data
+		struct QueuedEvent {
 			std::string source_;
-			QueueType type_;
+			EventVariant event_;
 
-			Element():source_(), type_(INVALID_QUEUE_TYPE){}
-			Element(const std::string &src, QueueType type): source_(src), type_(type){}
+			QueuedEvent() = default;
+			QueuedEvent(const std::string &src, EventVariant evt)
+				: source_(src), event_(std::move(evt)) {}
 		};
-		typedef std::deque<Element> ProcessingQueueT;
 
-		OrderQueuesT orders_;
-		OrderCancelQueuesT orderCancels_;
-		OrderReplaceQueuesT orderReplaces_;
-		OrderStateQueuesT orderStates_;
-		ProcessQueuesT processes_;
-		TimerQueuesT timers_;
+		/// Lock-free concurrent queue (MPMC safe)
+		oneapi::tbb::concurrent_queue<QueuedEvent> eventQueue_;
 
-		ProcessingQueueT processingQueue_;
+		/// Atomic size counter for O(1) size() queries
+		std::atomic<u32> queueSize_{0};
+
+		/// Pending event for top() without pop() - protected by pendingLock_
+		mutable oneapi::tbb::spin_mutex pendingLock_;
+		std::optional<QueuedEvent> pendingEvent_;
 
 	private:
 		void clear();
+		void dispatchEvent(InQueueProcessor *obs, const std::string &source, const EventVariant &event);
 	};
 
 }

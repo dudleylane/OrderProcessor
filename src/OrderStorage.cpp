@@ -17,7 +17,6 @@
 #include "Logger.h"
 
 using namespace COP;
-using namespace tbb;
 using namespace std;
 using namespace COP::Store;
 
@@ -34,28 +33,34 @@ void OrderDataStorage::attach(OrderSaver *saver){
 OrderDataStorage::~OrderDataStorage(void)
 {
 	aux::ExchLogger::instance()->note("OrderDataStorage destroying");
+
+	// Clean up orders with exclusive write lock
 	OrdersByIDT tmp;
 	{
-		tbb::mutex::scoped_lock lock(orderLock_);
+		oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, true);
 		std::swap(tmp, ordersById_);
 		ordersByClId_.clear();
 	}
 	for(OrdersByIDT::iterator it = tmp.begin(); it != tmp.end(); ++it)
 		delete it->second;
 
-	ExecByIDT execTmp;
-	{
-		tbb::mutex::scoped_lock lock(execLock_);
-		std::swap(execTmp, executionsById_);
-	}
-	for(ExecByIDT::iterator it = execTmp.begin(); it != execTmp.end(); ++it)
+	// Clean up executions - iterate through concurrent_hash_map
+	// No lock needed for iteration during destruction (single-threaded)
+	for(ExecByIDT::iterator it = executionsById_.begin(); it != executionsById_.end(); ++it)
 		delete it->second;
+	executionsById_.clear();
+
 	aux::ExchLogger::instance()->note("OrderDataStorage destroyed");
 }
 
+// ============================================================================
+// Order operations - use reader-writer lock for concurrent reads
+// ============================================================================
+
 OrderEntry *OrderDataStorage::locateByClOrderId(const RawDataEntry &clOrderId)const
 {
-	tbb::mutex::scoped_lock lock(orderLock_);
+	// Shared read lock - allows concurrent lookups
+	oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
 	OrdersByClientIDT::const_iterator it = ordersByClId_.find(clOrderId);
 	if(ordersByClId_.end() == it)
 		return nullptr;
@@ -64,8 +69,8 @@ OrderEntry *OrderDataStorage::locateByClOrderId(const RawDataEntry &clOrderId)co
 
 OrderEntry *OrderDataStorage::locateByOrderId(const IdT &orderId)const
 {
-	/// changed for concurrent_hash_map
-	tbb::mutex::scoped_lock lock(orderLock_);
+	// Shared read lock - allows concurrent lookups
+	oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
 	OrdersByIDT::const_iterator it = ordersById_.find(orderId);
 	if(ordersById_.end() == it)
 		return nullptr;
@@ -79,10 +84,11 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 
 	assert(nullptr != idGenerator);
 	{
-		tbb::mutex::scoped_lock lock(orderLock_);
+		// Exclusive write lock - atomic dual-map insert
+		oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, true);
 		if((order.orderId_.isValid())&&(ordersById_.end() != ordersById_.find(order.orderId_)))
 			throw std::runtime_error("Unable to save order - order with same OrderId already exists.");
-		
+
 		if(0 == order.clOrderId_.get().length_)
 			throw std::runtime_error("Unable to save order - order contains empty ClOrderId.");
 		if(ordersByClId_.end() != ordersByClId_.find(order.clOrderId_.get()))
@@ -104,6 +110,7 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 			switch(st){
 			case 2:
 				ordersByClId_.erase(order.clOrderId_.get());
+				[[fallthrough]];
 			case 1:
 				ordersById_.erase(order.orderId_);
 			}
@@ -118,7 +125,8 @@ void OrderDataStorage::restore(OrderEntry *order)
 		aux::ExchLogger::instance()->note("OrderDataStorage restoring order");
 
 	{
-		tbb::mutex::scoped_lock lock(orderLock_);
+		// Exclusive write lock - atomic dual-map insert
+		oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, true);
 		if((order->orderId_.isValid())&&(ordersById_.end() != ordersById_.find(order->orderId_)))
 			throw std::runtime_error("Unable to restore order - order with same OrderId already exists.");
 		if(0 == order->clOrderId_.get().length_)
@@ -139,6 +147,7 @@ void OrderDataStorage::restore(OrderEntry *order)
 			switch(st){
 			case 2:
 				ordersByClId_.erase(order->clOrderId_.get());
+				[[fallthrough]];
 			case 1:
 				ordersById_.erase(order->orderId_);
 			}
@@ -147,13 +156,17 @@ void OrderDataStorage::restore(OrderEntry *order)
 	}
 }
 
+// ============================================================================
+// Execution operations - use concurrent_hash_map for fine-grained locking
+// ============================================================================
+
 ExecutionEntry *OrderDataStorage::locateByExecId(const IdT &execId)const
 {
-	tbb::mutex::scoped_lock lock(execLock_);
-	ExecByIDT::const_iterator it = executionsById_.find(execId);
-	if(executionsById_.end() == it)
-		return nullptr;
-	return it->second;
+	// Lock-free lookup using concurrent_hash_map accessor
+	ExecByIDT::const_accessor accessor;
+	if(executionsById_.find(accessor, execId))
+		return accessor->second;
+	return nullptr;
 }
 
 void OrderDataStorage::save(const ExecutionEntry *exec)
@@ -161,12 +174,13 @@ void OrderDataStorage::save(const ExecutionEntry *exec)
 	if(aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OrderDataStorage saving execution");
 
-	tbb::mutex::scoped_lock lock(execLock_);
-	if(executionsById_.end() != executionsById_.find(exec->execId_))
+	// Use accessor to check and insert atomically
+	ExecByIDT::accessor accessor;
+	if(!executionsById_.insert(accessor, exec->execId_)) {
+		// Key already exists
 		throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
-	executionsById_.insert(ExecByIDT::value_type(exec->execId_, exec->clone()));
-	//assert(nullptr != saver_);
-	//saver_->save(*cp.get());
+	}
+	accessor->second = exec->clone();
 }
 
 ExecutionEntry *OrderDataStorage::save(const ExecutionEntry &exec, IdTValueGenerator *idGenerator)
@@ -175,15 +189,17 @@ ExecutionEntry *OrderDataStorage::save(const ExecutionEntry &exec, IdTValueGener
 		aux::ExchLogger::instance()->note("OrderDataStorage saving execution 2");
 
 	assert(nullptr != idGenerator);
-	tbb::mutex::scoped_lock lock(execLock_);
-	if((exec.execId_.isValid())&&(executionsById_.end() != executionsById_.find(exec.execId_)))
-		throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
 
 	std::unique_ptr<ExecutionEntry> cp(exec.clone());
 	if(!cp->execId_.isValid())
 		cp->execId_ = idGenerator->getId();
-	executionsById_.insert(ExecByIDT::value_type(cp->execId_, cp.get()));
-	//assert(nullptr != saver_);
-	//saver_->save(*cp.get());
+
+	// Use accessor to check and insert atomically
+	ExecByIDT::accessor accessor;
+	if(!executionsById_.insert(accessor, cp->execId_)) {
+		// Key already exists
+		throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
+	}
+	accessor->second = cp.get();
 	return cp.release();
 }

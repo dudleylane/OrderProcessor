@@ -10,11 +10,9 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
-#include <cassert>
 #include "OutgoingQueues.h"
 #include "Logger.h"
 
-using namespace tbb;
 using namespace std;
 using namespace COP::Queues;
 
@@ -31,74 +29,46 @@ OutgoingQueues::~OutgoingQueues(void)
 
 void OutgoingQueues::clear()
 {
-	OutQueuesByTargetT tmp;
-	{
-		tbb::mutex::scoped_lock lock(lock_);
-		swap(tmp, outQueues_);
-	}
-	for(OutQueuesByTargetT::iterator it = tmp.begin(); it != tmp.end(); ++it){
-		std::unique_ptr<OutQueues> t(it->second);
+	// Drain the lock-free queue
+	QueuedOutEvent event;
+	while (eventQueue_.try_pop(event)) {
+		// Events don't own heap memory, no cleanup needed
 	}
 	aux::ExchLogger::instance()->note("OutgoingQueues cleared.");
 }
 
-
 void OutgoingQueues::push(const ExecReportEvent &evnt, const std::string &target)
 {
-	if(aux::ExchLogger::instance()->isNoteOn())
+	if (aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OutgoingQueues push new ExecReportEvent.");
-	{
-		tbb::mutex::scoped_lock lock(lock_);
-		OutQueuesByTargetT::iterator it = outQueues_.find(target);
-		if(outQueues_.end() == it){
-			std::unique_ptr<OutQueues> q(new OutQueues);
-			it = outQueues_.insert(OutQueuesByTargetT::value_type(target, q.get())).first;
-			q.release();
-		}
-		assert(nullptr != it->second);
-		it->second->execReports_.push_back(evnt);
-		it->second->order_.push_back(EXECREPORT_OUT_QUEUE_TYPE);
-	}
-	if(aux::ExchLogger::instance()->isNoteOn())
+
+	// Lock-free push to concurrent queue
+	eventQueue_.push(QueuedOutEvent(target, evnt));
+
+	if (aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OutgoingQueues pushed new ExecReportEvent.");
 }
 
 void OutgoingQueues::push(const CancelRejectEvent &evnt, const std::string &target)
 {
-	if(aux::ExchLogger::instance()->isNoteOn())
+	if (aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OutgoingQueues push new CancelRejectEvent.");
-	{
-		tbb::mutex::scoped_lock lock(lock_);
-		OutQueuesByTargetT::iterator it = outQueues_.find(target);
-		if(outQueues_.end() == it){
-			std::unique_ptr<OutQueues> q(new OutQueues);
-			it = outQueues_.insert(OutQueuesByTargetT::value_type(target, q.get())).first;
-			q.release();
-		}
-		assert(nullptr != it->second);
-		it->second->cnclRejects_.push_back(evnt);
-		it->second->order_.push_back(CANCELREJECT_OUT_QUEUE_TYPE);
-	}
-	if(aux::ExchLogger::instance()->isNoteOn())
+
+	// Lock-free push to concurrent queue
+	eventQueue_.push(QueuedOutEvent(target, evnt));
+
+	if (aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OutgoingQueues pushed new CancelRejectEvent.");
 }
 
 void OutgoingQueues::push(const BusinessRejectEvent &evnt, const std::string &target)
 {
-	if(aux::ExchLogger::instance()->isNoteOn())
+	if (aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OutgoingQueues push new BusinessRejectEvent.");
-	{
-		tbb::mutex::scoped_lock lock(lock_);
-		OutQueuesByTargetT::iterator it = outQueues_.find(target);
-		if(outQueues_.end() == it){
-			std::unique_ptr<OutQueues> q(new OutQueues);
-			it = outQueues_.insert(OutQueuesByTargetT::value_type(target, q.get())).first;
-			q.release();
-		}
-		assert(nullptr != it->second);
-		it->second->bsnsRejects_.push_back(evnt);
-		it->second->order_.push_back(BUSINESSREJECT_OUT_QUEUE_TYPE);
-	}
-	if(aux::ExchLogger::instance()->isNoteOn())
+
+	// Lock-free push to concurrent queue
+	eventQueue_.push(QueuedOutEvent(target, evnt));
+
+	if (aux::ExchLogger::instance()->isNoteOn())
 		aux::ExchLogger::instance()->note("OutgoingQueues pushed new BusinessRejectEvent.");
 }

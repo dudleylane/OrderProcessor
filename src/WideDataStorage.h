@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include <oneapi/tbb/mutex.h>
+#include <oneapi/tbb/spin_rw_mutex.h>
 #include <atomic>
 #include <map>
 #include "Singleton.h"
@@ -59,7 +59,9 @@ public:
 	virtual void restore(ExecutionsT *val);
 
 private:
-	mutable oneapi::tbb::mutex lock_;
+	/// Reader-writer lock for read-heavy reference data access
+	/// Allows concurrent reads, exclusive writes
+	mutable oneapi::tbb::spin_rw_mutex rwLock_;
 
 	std::atomic<u64> subscrCounter_;
 
