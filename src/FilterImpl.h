@@ -12,11 +12,11 @@
 
 #pragma once
 
-#include<set>
-#include<string>
+#include <set>
+#include <string>
 #include <deque>
+#include <regex>
 #include "TypesDef.h"
-#include <boost/regex.hpp>
 
 namespace COP{ namespace Impl{
 
@@ -104,7 +104,7 @@ public:
 	virtual bool getVal(StringT *val)const;
 private:
 	std::string pattern_;
-	boost::regex regex_;
+	std::regex regex_;
 };
 
 class DateTimeFilter{

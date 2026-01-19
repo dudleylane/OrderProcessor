@@ -13,8 +13,7 @@
 #include "FilterImpl.h"
 
 #include <cassert>
- 
-#include <boost/regex.hpp>
+#include <regex>
 
 using namespace COP;
 using namespace COP::Impl;
@@ -56,7 +55,7 @@ StringMatchFilter::StringMatchFilter(const std::string &val):pattern_(val), rege
 
 bool StringMatchFilter::filter(const StringT &val)const
 {
-	return boost::regex_match( val, regex_/*boost::regex(pattern_)*/);
+	return std::regex_match(val, regex_);
 }
 
 bool StringMatchFilter::getVal(StringT *)const
