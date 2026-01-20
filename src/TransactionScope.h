@@ -15,6 +15,7 @@
 #include <string>
 #include <memory>
 #include <deque>
+#include <vector>
 #include "TransactionDef.h"
 
 namespace COP{
@@ -48,6 +49,10 @@ private:
 
 	typedef std::deque<Operation *> OperationsT;
 	OperationsT operations_;
+
+	// Stage boundaries - each entry is the starting index of a stage in operations_
+	typedef std::vector<size_t> StageBoundariesT;
+	StageBoundariesT stageBoundaries_;
 
 	TransactionId id_;
 private:

@@ -40,18 +40,45 @@ void TransactionScope::addOperation(std::unique_ptr<Operation> &op)
 
 void TransactionScope::removeLastOperation()
 {
-	throw std::runtime_error("Not implemented!");
+	if(operations_.empty())
+		return;
+
+	// Delete the last operation and remove it from the deque
+	delete operations_.back();
+	operations_.pop_back();
+
+	// If the last operation was at a stage boundary, remove that boundary too
+	while(!stageBoundaries_.empty() && stageBoundaries_.back() >= operations_.size()) {
+		stageBoundaries_.pop_back();
+	}
 }
 
 size_t TransactionScope::startNewStage()
 {
-	throw std::runtime_error("Not implemented!");
-//	return 0;
+	// Record the current position as the start of a new stage
+	size_t stageId = stageBoundaries_.size();
+	stageBoundaries_.push_back(operations_.size());
+	return stageId;
 }
 
-void TransactionScope::removeStage(const size_t &)
+void TransactionScope::removeStage(const size_t &stageId)
 {
-	throw std::runtime_error("Not implemented!");
+	if(stageId >= stageBoundaries_.size())
+		throw std::runtime_error("TransactionScope::removeStage(): invalid stage id!");
+
+	// Get the starting index of this stage
+	size_t stageStart = stageBoundaries_[stageId];
+
+	// Delete all operations from stageStart to the end
+	for(size_t i = stageStart; i < operations_.size(); ++i) {
+		delete operations_[i];
+	}
+
+	// Remove operations from stageStart onwards
+	operations_.erase(operations_.begin() + static_cast<std::ptrdiff_t>(stageStart), operations_.end());
+
+	// Remove this stage and all subsequent stage boundaries
+	stageBoundaries_.erase(stageBoundaries_.begin() + static_cast<std::ptrdiff_t>(stageId), stageBoundaries_.end());
 }
 
 void TransactionScope::setTransactionId(const TransactionId &id)

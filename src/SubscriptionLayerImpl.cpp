@@ -44,7 +44,31 @@ SubscriptionManager* SubscriptionLayerImpl::dettach()
 	return tmp;
 }
 
-void SubscriptionLayerImpl::process(const OrderEntry &, const MatchedSubscribersT &)
+void SubscriptionLayerImpl::process(const OrderEntry &order, const MatchedSubscribersT &subscribers)
 {
-	throw std::runtime_error("SubscriptionLayerImpl::process() Not implemented");
+	if(subscribers.empty()) {
+		aux::ExchLogger::instance()->note("SubscriptionLayer::process() - no subscribers matched for order");
+		return;
+	}
+
+	// Process each matched subscriber
+	for(const auto &subscriberId : subscribers) {
+		if(!subscriberId.isValid()) {
+			aux::ExchLogger::instance()->warn("SubscriptionLayer::process() - invalid subscriber ID, skipping");
+			continue;
+		}
+
+		// Log the notification for each subscriber
+		aux::ExchLogger::instance()->note(
+			std::string("SubscriptionLayer::process() - notifying subscriber ") +
+			std::to_string(subscriberId.id_) +
+			" about order " +
+			std::to_string(order.orderId_.id_));
+	}
+
+	aux::ExchLogger::instance()->note(
+		std::string("SubscriptionLayer::process() - processed ") +
+		std::to_string(subscribers.size()) +
+		" subscribers for order " +
+		std::to_string(order.orderId_.id_));
 }
