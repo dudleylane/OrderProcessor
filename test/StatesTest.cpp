@@ -141,14 +141,15 @@ std::unique_ptr<OrderEntry> createReplOrder() {
 
 static int clOrderIdCounter = 0;
 
-void assignClOrderId(OrderEntry* order, const std::string& val = "") {
-    std::string actualVal = val;
-    if (actualVal.empty()) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "TestClOrderId_%d", ++clOrderIdCounter);
-        actualVal = buf;
-    }
-    std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, actualVal.c_str(), static_cast<u32>(actualVal.size())));
+void assignClOrderId(OrderEntry* order) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "TestClOrderId_%d", ++clOrderIdCounter);
+    std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, buf, static_cast<u32>(strlen(buf))));
+    order->clOrderId_ = WideDataStorage::instance()->add(clOrd.release());
+}
+
+void assignClOrderIdWithValue(OrderEntry* order, const std::string& val) {
+    std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
     order->clOrderId_ = WideDataStorage::instance()->add(clOrd.release());
 }
 
@@ -166,7 +167,7 @@ void assignOrigClOrderId(OrderEntry* order, const std::string& val) {
 class StatesTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        aux::ExchLogger::create();
+        // Note: ExchLogger is created globally by TestMain.cpp
         WideDataStorage::create();
         SubscriptionMgr::create();
         IdTGenerator::create();
@@ -179,7 +180,7 @@ protected:
         IdTGenerator::destroy();
         SubscriptionMgr::destroy();
         WideDataStorage::destroy();
-        aux::ExchLogger::destroy();
+        // Note: ExchLogger is destroyed globally by TestMain.cpp
     }
 };
 
@@ -285,7 +286,7 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_EmptyClOrderId) {
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
-    assignClOrderId(order.get(), "");
+    assignClOrderIdWithValue(order.get(), "");
 
     p.start();
     p.checkStates("Rcvd_New", "NoCnlReplace");
@@ -339,7 +340,7 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnRecvOrderRejected_EmptyClOrderId) {
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
-    assignClOrderId(order.get(), "");
+    assignClOrderIdWithValue(order.get(), "");
 
     p.start();
     p.checkStates("Rcvd_New", "NoCnlReplace");
@@ -614,7 +615,7 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrder_EmptyClOrderId) {
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
-    assignClOrderId(order.get(), "");
+    assignClOrderIdWithValue(order.get(), "");
 
     p.start();
     p.checkStates("Rcvd_New", "NoCnlReplace");

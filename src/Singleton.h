@@ -16,7 +16,7 @@
 #include <cassert>
 #include <exception>
 
-namespace aux{ 
+namespace aux{
 
 template<typename T>
 struct Singleton

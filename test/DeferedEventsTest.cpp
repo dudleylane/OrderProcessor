@@ -72,7 +72,7 @@ OrderEntry* createTestOrder(SourceIdT instrId, Side side, PriceT price, Quantity
 class DeferedEventsTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        aux::ExchLogger::create();
+        // Note: ExchLogger is created globally by TestMain.cpp
         WideDataStorage::create();
         IdTGenerator::create();
         OrderStorage::create();
@@ -89,7 +89,7 @@ protected:
         OrderStorage::destroy();
         IdTGenerator::destroy();
         WideDataStorage::destroy();
-        aux::ExchLogger::destroy();
+        // Note: ExchLogger is destroyed globally by TestMain.cpp
     }
 
     SourceIdT instrId_;
@@ -286,19 +286,28 @@ TEST_F(DeferedEventsTest, MultipleOrdersWithSameEventType) {
     delete order2;
 }
 
-TEST_F(DeferedEventsTest, ExecutionDeferedEventWithNullBaseOrder) {
-    ExecutionDeferedEvent event(nullptr);
-    EXPECT_EQ(event.baseOrder_, nullptr);
+TEST_F(DeferedEventsTest, ExecutionDeferedEventWithValidOrder) {
+    // Note: null base orders are not allowed (assertion in implementation)
+    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+    ExecutionDeferedEvent event(order);
+    EXPECT_EQ(event.baseOrder_, order);
+    delete order;
 }
 
-TEST_F(DeferedEventsTest, MatchOrderDeferedEventWithNullOrder) {
-    MatchOrderDeferedEvent event(nullptr);
-    EXPECT_EQ(event.order_, nullptr);
+TEST_F(DeferedEventsTest, MatchOrderDeferedEventWithValidOrder) {
+    // Note: null orders are not allowed (assertion in implementation)
+    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+    MatchOrderDeferedEvent event(order);
+    EXPECT_EQ(event.order_, order);
+    delete order;
 }
 
-TEST_F(DeferedEventsTest, CancelOrderDeferedEventWithNullOrder) {
-    CancelOrderDeferedEvent event(nullptr);
-    EXPECT_EQ(event.order_, nullptr);
+TEST_F(DeferedEventsTest, CancelOrderDeferedEventWithValidOrder) {
+    // Note: null orders are not allowed (assertion in implementation)
+    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+    CancelOrderDeferedEvent event(order);
+    EXPECT_EQ(event.order_, order);
+    delete order;
 }
 
 // =============================================================================

@@ -77,7 +77,7 @@ public:
 class SubscrManagerTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        aux::ExchLogger::create();
+        // Note: ExchLogger is created globally by TestMain.cpp
         WideDataStorage::create();
         IdTGenerator::create();
         OrderStorage::create();
@@ -96,7 +96,7 @@ protected:
         OrderStorage::destroy();
         IdTGenerator::destroy();
         WideDataStorage::destroy();
-        aux::ExchLogger::destroy();
+        // Note: ExchLogger is destroyed globally by TestMain.cpp
     }
 
     SourceIdT instrId_;
@@ -238,7 +238,7 @@ TEST_F(SubscrManagerTest, GetSubscribersFindsMatch) {
 class SubscriptionLayerImplTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        aux::ExchLogger::create();
+        // Note: ExchLogger is created globally by TestMain.cpp
         WideDataStorage::create();
         IdTGenerator::create();
         OrderStorage::create();
@@ -254,7 +254,7 @@ protected:
         OrderStorage::destroy();
         IdTGenerator::destroy();
         WideDataStorage::destroy();
-        aux::ExchLogger::destroy();
+        // Note: ExchLogger is destroyed globally by TestMain.cpp
     }
 
     SourceIdT instrId_;

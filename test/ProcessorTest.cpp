@@ -403,13 +403,12 @@ TEST_F(ProcessorTest, ProcessReplaceEvent) {
 // Process Event Tests
 // =============================================================================
 
-TEST_F(ProcessorTest, ProcessProcessEvent) {
-    ProcessEvent event;
+TEST_F(ProcessorTest, ProcessProcessEventWithInvalidType) {
+    ProcessEvent event;  // Default constructor creates INVALID type
     inQueues_->push("test", event);
 
-    // Should not crash
-    processor_->process();
-    SUCCEED();
+    // Invalid ProcessEvent type should throw
+    EXPECT_THROW(processor_->process(), std::runtime_error);
 }
 
 // =============================================================================

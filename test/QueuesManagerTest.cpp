@@ -28,11 +28,11 @@ using namespace COP::Queues;
 class QueuesManagerTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        aux::ExchLogger::create();
+        // Note: ExchLogger is created globally by TestMain.cpp
     }
 
     void TearDown() override {
-        aux::ExchLogger::destroy();
+        // Note: ExchLogger is destroyed globally by TestMain.cpp
     }
 };
 

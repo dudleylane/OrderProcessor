@@ -142,20 +142,21 @@ TEST_F(OrderStorageTest, LocateByClOrderIdReturnsNullForMissing) {
 // Order Restore Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, RestoreUpdatesOrder) {
-    auto order = createCorrectOrder();
-    OrderEntry* saved = storage()->save(*order, IdTGenerator::instance());
-    ASSERT_NE(nullptr, saved);
+TEST_F(OrderStorageTest, RestoreLoadsOrder) {
+    // restore() is for loading orders from persistence (creates new entry)
+    // Create an order with a pre-assigned OrderId (as if from a different storage)
+    auto order = test::createCorrectOrder();
+    order->orderId_ = IdTGenerator::instance()->getId();
+    order->status_ = NEW_ORDSTATUS;
+    order->price_ = 99.99;
 
-    // Modify the order
-    saved->status_ = NEW_ORDSTATUS;
-    saved->price_ = 99.99;
+    IdT savedOrderId = order->orderId_;
 
-    // Restore
-    storage()->restore(saved);
+    // Restore the order (simulating a load from persistence)
+    storage()->restore(order.release());
 
-    // Verify by re-locating
-    OrderEntry* found = storage()->locateByOrderId(saved->orderId_);
+    // Verify by locating - the order should now be in storage
+    OrderEntry* found = storage()->locateByOrderId(savedOrderId);
     ASSERT_NE(nullptr, found);
     EXPECT_EQ(NEW_ORDSTATUS, found->status_);
     EXPECT_DOUBLE_EQ(99.99, found->price_);
@@ -180,22 +181,25 @@ TEST_F(OrderStorageTest, SaveExecutionAssignsId) {
     EXPECT_TRUE(savedExec->execId_.isValid());
 }
 
-TEST_F(OrderStorageTest, SaveExecutionWithPointer) {
+TEST_F(OrderStorageTest, SaveAndLocateExecution) {
     auto order = createCorrectOrder();
     OrderEntry* savedOrder = storage()->save(*order, IdTGenerator::instance());
     ASSERT_NE(nullptr, savedOrder);
 
-    auto exec = new ExecutionEntry();
-    exec->orderId_ = savedOrder->orderId_;
-    exec->type_ = TRADE_EXECTYPE;
-    exec->execId_ = IdTGenerator::instance()->getId();
+    // Use the reference version which assigns the ID
+    ExecutionEntry exec;
+    exec.orderId_ = savedOrder->orderId_;
+    exec.type_ = NEW_EXECTYPE;
 
-    storage()->save(exec);
+    ExecutionEntry* savedExec = storage()->save(exec, IdTGenerator::instance());
+
+    ASSERT_NE(nullptr, savedExec);
+    EXPECT_TRUE(savedExec->execId_.isValid());
 
     // Verify by locating
-    ExecutionEntry* found = storage()->locateByExecId(exec->execId_);
+    ExecutionEntry* found = storage()->locateByExecId(savedExec->execId_);
     ASSERT_NE(nullptr, found);
-    EXPECT_EQ(exec->execId_, found->execId_);
+    EXPECT_EQ(savedExec->execId_, found->execId_);
 }
 
 // =============================================================================
