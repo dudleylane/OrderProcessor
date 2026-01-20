@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include "Singleton.h"
 
@@ -88,7 +89,7 @@ namespace aux{
 		bool isFatalOn()const;
 
 	private:
-		LoggerImpl *impl_;
+		std::unique_ptr<LoggerImpl> impl_;
 	};
 
 	typedef Singleton<Logger> ExchLogger;

@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -54,11 +54,8 @@ SubscriptionLayer *EventManager::dettach()
 
 void EventManager::dispatch(const NewOrderEvent &evnt)const
 {
-	//aux::ExchLogger::instance()->debug("EventManager dispatching NewOrderEvent.");
-
 	MatchedSubscribersT subscribers;
 	subscrMgr_->getSubscribers(*evnt.order_, &subscribers);
 	assert(nullptr != sl_);
 	sl_->process(*evnt.order_, subscribers);
-	//aux::ExchLogger::instance()->debug("EventManager dispatched NewOrderEvent.");
 }

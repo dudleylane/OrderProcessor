@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 

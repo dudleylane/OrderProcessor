@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -90,43 +90,34 @@ namespace {
 
 OrderBookImpl::OrderBookImpl(void): storage_(nullptr)
 {
-	//aux::ExchLogger::instance()->note("OrderBook created.");
 }
 
 OrderBookImpl::~OrderBookImpl(void)
 {
-	//aux::ExchLogger::instance()->debug("OrderBook destroing.");
 	OrderGroupsByInstrumentT tmp;
 	swap(tmp, orderGroups_);
 	for(OrderGroupsByInstrumentT::const_iterator it = tmp.begin(); it != tmp.end(); ++it){
 		delete it->second;
 	}
-	//aux::ExchLogger::instance()->note("OrderBook destroyed.");
 }
 
 void OrderBookImpl::init(const InstrumentsT &instr, OrderSaver *storage)
 {
-	//aux::ExchLogger::instance()->debug("OrderBook initializing.");
 	assert(nullptr != storage);
 	assert(nullptr == storage_);
 	storage_ = storage;
 
 	for(InstrumentsT::const_iterator it = instr.begin(); it != instr.end(); ++it){
 		std::unique_ptr<OrdersGroup> grp(new OrdersGroup);
-		orderGroups_.insert(OrderGroupsByInstrumentT::value_type(*it, grp.get()));	
+		orderGroups_.insert(OrderGroupsByInstrumentT::value_type(*it, grp.get()));
 		grp.release();
 	}
-	//aux::ExchLogger::instance()->note("OrderBook initialized.");
 }
 
 void OrderBookImpl::add(const OrderEntry& order)
 {
 	assert(order.orderId_.isValid());
 	assert(order.instrument_.getId().isValid());
-	{
-		//OBLogMessage msg(ADDORDER_START_MSG, order.orderId_);
-		//aux::ExchLogger::instance()->debug(msg);
-	}
 	OrderGroupsByInstrumentT::iterator it = orderGroups_.find(order.instrument_.getId());
 	if(orderGroups_.end() == it)
 		throw std::runtime_error("Unable to add order into book - instrument not registered!");
@@ -152,10 +143,6 @@ void OrderBookImpl::restore(const OrderEntry& order)
 {
 	assert(order.orderId_.isValid());
 	assert(order.instrument_.getId().isValid());
-	{
-		//OBLogMessage msg(RESTOREORDER_START_MSG, order.orderId_);
-		//aux::ExchLogger::instance()->debug(msg);
-	}
 	OrderGroupsByInstrumentT::iterator it = orderGroups_.find(order.instrument_.getId());
 	if(orderGroups_.end() == it)
 		throw std::runtime_error("Unable to restore order into book - instrument not registered!");
@@ -225,8 +212,6 @@ void OrderBookImpl::remove(const OrderEntry& order)
 
 IdT OrderBookImpl::find(const OrderFunctor &functor)const
 {
-	//aux::ExchLogger::instance()->debug("Searching for the order in ORderBook");
-
 	OrderGroupsByInstrumentT::const_iterator it = orderGroups_.find(functor.instrument());
 	if(orderGroups_.end() != it){
 		if(BUY_SIDE == functor.side()){
@@ -255,14 +240,12 @@ IdT OrderBookImpl::find(const OrderFunctor &functor)const
 	}else{
 		throw std::runtime_error("Unknown instrument for the order's search");
 	}
-	//aux::ExchLogger::instance()->debug("Order search in OrderBook failed");
 	return IdT();
 }
 
 void OrderBookImpl::findAll(const OrderFunctor &functor, OrdersT *result)const
 {
 	assert(nullptr != result);
-	//aux::ExchLogger::instance()->debug("Searching for the orders in OrderBook");
 	OrderGroupsByInstrumentT::const_iterator it = orderGroups_.find(functor.instrument());
 	if(orderGroups_.end() != it){
 		if(BUY_SIDE == functor.side()){
@@ -295,8 +278,6 @@ void OrderBookImpl::findAll(const OrderFunctor &functor, OrdersT *result)const
 
 IdT OrderBookImpl::getTop(const SourceIdT &instrument, const Side &side)const
 {
-	//aux::ExchLogger::instance()->debug("Locating top order in OrderBook");
-
 	OrderGroupsByInstrumentT::const_iterator it = orderGroups_.find(instrument);
 	if(orderGroups_.end() != it){
 		if(BUY_SIDE == side){
@@ -313,6 +294,5 @@ IdT OrderBookImpl::getTop(const SourceIdT &instrument, const Side &side)const
 	}else{
 		throw std::runtime_error("Unknown instrument for the order's top");
 	}
-	//aux::ExchLogger::instance()->debug("Top order locate failed in OrderBook");
 	return IdT();
 }

@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -19,10 +19,8 @@
 #include "TransactionScope.h"
 #include "TrOperations.h"
 #include "DataModelDef.h"
-#include "Logger.h"
 
 using namespace std;
-using namespace aux;
 using namespace COP;
 using namespace COP::ACID;
 using namespace COP::Store;
@@ -102,8 +100,6 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
 	assert(nullptr == *orderData);
 	assert(nullptr != evnt.order_);
 
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processReceive(onOrderReceived) start");
-
 	std::string reason;
 	if(!evnt.order_->isValid(&reason))
 		throw std::runtime_error(reason.c_str());
@@ -121,7 +117,6 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
 			throw std::runtime_error("There is no market for this instrument!");
 	}
 
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onOrderAccepted) add matchOrder and Add2OrderBook operations");
 	std::unique_ptr<Operation> op(new MatchOrderTrOperation((*orderData)));
 	evnt.transaction_->addOperation(op);
 
@@ -137,8 +132,6 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onRplOrderRe
 {
 	assert(nullptr != orderData);
 	assert(nullptr == *orderData);
-
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processReceive(onRplOrderReceived) starting");
 
 	*orderData = evnt.order_;
 
@@ -161,7 +154,6 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onRplOrderRe
 												(*orderData)->instrument_.getId()));
 	evnt.transaction_->addOperation(op);
 
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processReceive(onRplOrderReceived) finished");
 }
 
 void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvOrderRejected const&evnt)
@@ -169,7 +161,6 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvOrderRe
 	assert(nullptr != orderData);
 	assert((nullptr == *orderData)||(evnt.order_ == *orderData));
 
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processReject(onRecvOrderRejected) starting");
 
 	if(nullptr == *orderData)
 		*orderData = evnt.order_;
@@ -180,8 +171,6 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvOrderRe
 		*orderData = evnt.orderStorage_->save(**orderData, evnt.generator_);
 	}catch(const std::exception &) //save could fails if ClOrderId already exists, just continue reject it
 	{}
-
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processReject(onRecvOrderRejected) finished");
 }
 
 void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvRplOrderRejected const&evnt)
@@ -189,7 +178,6 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvRplOrde
 	assert(nullptr != orderData);
 	assert((nullptr == *orderData)||(evnt.order_ == *orderData));
 
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processReject(onRecvRplOrderRejected) starting");
 
 	*orderData = evnt.order_;
 	// generate id for the order
@@ -199,8 +187,6 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvRplOrde
 		*orderData = evnt.orderStorage_->save(**orderData, evnt.generator_);
 	}catch(const std::exception &) //save could fails if ClOrderId already exists, just continue reject it
 	{}
-
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processReject(onRecvRplOrderRejected) finished");
 }
 
 void OrdStateImpl::processAccept(OrderEntry **orderData, OrdState::onExternalOrder const&evnt)
@@ -208,7 +194,6 @@ void OrdStateImpl::processAccept(OrderEntry **orderData, OrdState::onExternalOrd
 	assert(nullptr != orderData);
 	assert(nullptr == *orderData);
 
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onExternalOrder) starting");
 
 	*orderData = evnt.order_;
 	string reason;
@@ -233,7 +218,6 @@ void OrdStateImpl::processAccept(OrderEntry **orderData, OrdState::onExternalOrd
 		std::unique_ptr<Operation> op2(new AddToOrderBookTrOperation(*evnt.order_, (*orderData)->instrument_.getId()));
 		evnt.transaction_->addOperation(op2);
 	}
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onExternalOrder) finished");
 }
 
 void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onExternalOrderRejected const&evnt)
@@ -241,7 +225,6 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onExternalOrd
 	assert(nullptr != orderData);
 	assert((nullptr == *orderData)||(evnt.order_ == *orderData));
 
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processReject(onExternalOrderRejected) started");
 
 	*orderData = evnt.order_;
 	// generate id for the order
@@ -251,15 +234,12 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onExternalOrd
 		*orderData = evnt.orderStorage_->save(**orderData, evnt.generator_);
 	}catch(const std::exception &) //save could fails if ClOrderId already exists, just continue reject it
 	{}
-
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processReject(onExternalOrderRejected) finished");
 }
 
 void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onOrderAccepted const&evnt)
 {
 	string reason;
 	assert(nullptr != orderData);
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onOrderAccepted) started");
 
 	if(!orderData->isValid(&reason))
 		throw std::runtime_error(reason.c_str());
@@ -269,7 +249,6 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onOrderAccepte
 			throw std::runtime_error("There is no market for this instrument!");
 	}
 
-	////aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onOrderAccepted) add matchOrder and Add2OrderBook operations");
 	std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
 	evnt.transaction_->addOperation(op);
 
@@ -278,13 +257,10 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onOrderAccepte
 		std::unique_ptr<Operation> op2(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op2);
 	}
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onOrderAccepted) finished");
 }
 
 void OrdStateImpl::processReject(OrderEntry *, OrdState::onOrderRejected const&)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processReject(onOrderRejected) finished");
 	// Pend_New->Rejected: nothing to do
 }
 
@@ -293,7 +269,6 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onReplace cons
 	std::string reason;
 	assert(nullptr != orderData);
 
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onReplace) started");
 
 	if(!orderData->isValid(&reason))
 		throw std::runtime_error(reason.c_str());
@@ -323,14 +298,11 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onReplace cons
 	std::unique_ptr<Operation> execOp(new EnqueueOrderEventTrOperation<onExecReplace>(*origOrder, 
 												onExecReplace(orderData->orderId_)));
 	evnt.transaction_->addOperation(execOp);
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processAccept(onReplace) finished");
 }
 
 
 void OrdStateImpl::processReject(OrderEntry *orderData, OrdState::onRplOrderRejected const&evnt)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processReject(onRplOrderRejected) started");
 
 	OrderEntry *origOrder = evnt.orderStorage_->locateByOrderId(orderData->origOrderId_);
 	if(nullptr == origOrder)
@@ -340,13 +312,10 @@ void OrdStateImpl::processReject(OrderEntry *orderData, OrdState::onRplOrderReje
 	std::unique_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder, 
 												onReplaceRejected(orderData->orderId_)));
 	evnt.transaction_->addOperation(op);
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processReject(onRplOrderRejected) finished");
 }
 
 void OrdStateImpl::processExpire(OrderEntry *orderData, OrdState::onRplOrderExpired const&evnt)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processExpire(onRplOrderExpired) started");
 
 	OrderEntry *origOrder = evnt.orderStorage_->locateByOrderId(orderData->origOrderId_);
 	if(nullptr == origOrder)
@@ -356,8 +325,6 @@ void OrdStateImpl::processExpire(OrderEntry *orderData, OrdState::onRplOrderExpi
 	std::unique_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder, 
 												onReplaceRejected(orderData->orderId_)));
 	evnt.transaction_->addOperation(op);
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processExpire(onRplOrderExpired) finished");
 }
 
 
@@ -365,26 +332,21 @@ void OrdStateImpl::processExpire(OrderEntry *orderData, OrdState::onRplOrderExpi
 
 void OrdStateImpl::processReject(OrderEntry *, OrdState::onReplaceRejected const &)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processReject(onReplaceRejected) finished");
 }
 void OrdStateImpl::processReject(OrderEntry *, OrdState::onCancelRejected const &)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processReject(onCancelRejected) finished");
 }
 
 bool OrdStateImpl::processComplete(OrderEntry *orderData, OrdState::onTradeExecution const &evnt)
 {
 	assert(nullptr != orderData);
 
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processComplete(onTradeExecution) started");
 
 	const ExecTradeParams *trade = evnt.trade();
 	if(nullptr == trade)
 		throw std::runtime_error("Invalid onTradeExecution event - trade is nullptr!");
 	if(orderData->leavesQty_ < trade->lastQty_)
 		throw std::runtime_error("Unable to execute trade - order's leaves Qty less than traded Qty!");
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processComplete(onTradeExecution) finished");
 
 	return trade->lastQty_ == orderData->leavesQty_;
 }
@@ -396,7 +358,6 @@ void OrdStateImpl::processFill(OrderEntry *orderData, OrdState::onTradeExecution
 	assert(nullptr != evnt.generator_);
 	assert(nullptr != evnt.orderStorage_);
 
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processFill(onTradeExecution) started");
 
 	const ExecTradeParams *trade = evnt.trade();
 	assert(nullptr != trade);
@@ -419,28 +380,22 @@ void OrdStateImpl::processFill(OrderEntry *orderData, OrdState::onTradeExecution
 		tr->orderStatus_ = FILLED_ORDSTATUS;
 	}else
 		tr->orderStatus_ = PARTFILL_ORDSTATUS;
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processFill(onTradeExecution) finished");
 }
 
-bool OrdStateImpl::processNotexecuted(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt)
+bool OrdStateImpl::processNotExecuted(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt)
 {
 	assert(nullptr != orderData);
 
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processNotexecuted(onTradeCrctCncl) started");
 
 	const ExecCorrectExecEntry *crct = evnt.correct();
 	if(nullptr == crct)
 		throw std::runtime_error("Invalid onTradeCrctCncl event - correctExecution is nullptr!");
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processNotexecuted(onTradeCrctCncl) finished");
 
 	return crct->leavesQty_ == orderData->orderQty_;
 }
 
 void OrdStateImpl::processCorrected(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processCorrected(onTradeCrctCncl) started");
 
 	const ExecCorrectExecEntry *crct = evnt.correct();
 	if(nullptr == crct)
@@ -460,13 +415,10 @@ void OrdStateImpl::processCorrected(OrderEntry *orderData, OrdState::onTradeCrct
 	orderData->leavesQty_ = crct->leavesQty_;
 	orderData->cumQty_ = crct->cumQty_;
 	orderData->currency_ = crct->currency_;
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processCorrected(onTradeCrctCncl) finished");
 }
 
 void OrdStateImpl::processCorrectedWithoutRestore(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processCorrectedWithoutRestore(onTradeCrctCncl) started");
 
 	const ExecCorrectExecEntry *crct = evnt.correct();
 	if(nullptr == crct)
@@ -476,26 +428,21 @@ void OrdStateImpl::processCorrectedWithoutRestore(OrderEntry *orderData, OrdStat
 	orderData->leavesQty_ = crct->leavesQty_;
 	orderData->cumQty_ = crct->cumQty_;
 	orderData->currency_ = crct->currency_;
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processCorrectedWithoutRestore(onTradeCrctCncl) finished");
 }
 
 void OrdStateImpl::processRejectNew(OrderEntry *orderData, OrdState::onOrderRejected const&evnt)
 {
 	assert(nullptr != orderData);
 	
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processRejectNew(onOrderRejected) started");
 
 	if(MARKET_ORDERTYPE != orderData->ordType_){
 		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processRejectNew(onOrderRejected) finished");
 }
 
-bool OrdStateImpl::processNotexecuted(OrderEntry *, OrdState::onTradeExecution const &)
+bool OrdStateImpl::processNotExecuted(OrderEntry *, OrdState::onTradeExecution const &)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processNotexecuted(onTradeExecution) finished");
 	return true;
 }
 
@@ -504,45 +451,37 @@ void OrdStateImpl::processExpire(OrderEntry *orderData, OrdState::onExpired cons
 	// Pend_New->Expired: nothing to do
 	assert(nullptr != orderData);
 
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processExpire(onExpired) started");
 
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 		((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
 		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processExpire(onExpired) finished");
 }
 
 void OrdStateImpl::processFinished(OrderEntry *orderData, OrdState::onFinished const&evnt)
 {
 	assert(nullptr != orderData);
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processFinished(onFinished) started");
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 	   ((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
 		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processFinished(onFinished) finished");
 }
 
-bool OrdStateImpl::processNotexecuted(OrderEntry *orderData, OrdState::onNewDay const &)
+bool OrdStateImpl::processNotExecuted(OrderEntry *orderData, OrdState::onNewDay const &)
 {
 	assert(nullptr != orderData);
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processNotexecuted(onNewDay) finished");
-	return orderData->leavesQty_ == orderData->orderQty_;	
+	return orderData->leavesQty_ == orderData->orderQty_;
 }
-bool OrdStateImpl::processNotexecuted(OrderEntry *orderData, OrdState::onContinue const &)
+bool OrdStateImpl::processNotExecuted(OrderEntry *orderData, OrdState::onContinue const &)
 {
 	assert(nullptr != orderData);
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processNotexecuted(onContinue) finished");
-	return orderData->leavesQty_ == orderData->orderQty_;	
+	return orderData->leavesQty_ == orderData->orderQty_;
 }
 void OrdStateImpl::processRestored(OrderEntry *orderData, OrdState::onNewDay const &evnt)
 {
 	assert(nullptr != orderData);
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processRestored(onNewDay) started");
 	if(0 < orderData->leavesQty_){
 		std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
 		evnt.transaction_->addOperation(op);
@@ -551,28 +490,22 @@ void OrdStateImpl::processRestored(OrderEntry *orderData, OrdState::onNewDay con
 		std::unique_ptr<Operation> op1(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);			
 	}
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processRestored(onNewDay) finished");
 }
 
 void OrdStateImpl::processSuspended(OrderEntry *orderData, OrdState::onSuspended const&evnt)
 {
 	assert(nullptr != orderData);
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processSuspended(onSuspended) started");
 
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 	   ((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
 		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processSuspended(onSuspended) finished");
 }
 
 void OrdStateImpl::processContinued(OrderEntry *orderData, OrdState::onContinue const &evnt)
 {
 	assert(nullptr != orderData);
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processContinued(onContinue) started");
 
 	if(0 < orderData->leavesQty_){
 		std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
@@ -584,64 +517,48 @@ void OrdStateImpl::processContinued(OrderEntry *orderData, OrdState::onContinue 
 			evnt.transaction_->addOperation(op1);			
 		}
 	}
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processContinued(onContinue) finished");
 }
 
 void OrdStateImpl::processCancel(OrderEntry *, OrdState::onCanceled const&)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processCancel(onCanceled) finished");
 }
 void OrdStateImpl::processCanceled(OrderEntry *orderData, OrdState::onExecCancel const&evnt)
 {
 	assert(nullptr != orderData);
-	
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processCanceled(onExecCancel) started");
 
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 	   ((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
 		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processCanceled(onExecCancel) finished");
 }
 
 void OrdStateImpl::processCanceled(OrderEntry *orderData, OrdState::onInternalCancel const&evnt)
 {
 	assert(nullptr != orderData);
-	
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processCanceled(onInternalCancel) started");
 
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 	   ((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
 		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processCanceled(onInternalCancel) finished");
 }
 
 void OrdStateImpl::processReplaced(OrderEntry *orderData, OrdState::onExecReplace const&evnt)
 {
 	assert(nullptr != orderData);
 
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processReplaced(onExecReplace) started");
 	if((MARKET_ORDERTYPE != orderData->ordType_) && 
 	   ((NEW_ORDSTATUS == orderData->status_)||(PARTFILL_ORDSTATUS == orderData->status_))){
 		std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
 		evnt.transaction_->addOperation(op1);	
 	}
-
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processReplaced(onExecReplace) finished");
 }
 void OrdStateImpl::processReceive(OrderEntry *, OrdState::onReplaceReceived const&)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processReceive(onReplaceReceived) finished");
 }
 bool OrdStateImpl::processAcceptable(OrdState::onReplaceReceived const&/*evnt*/)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processAcceptable(onReplaceReceived) finished");
 	return true;
 
 /*	assert(nullptr != evnt.order_);
@@ -655,12 +572,10 @@ bool OrdStateImpl::processAcceptable(OrdState::onReplaceReceived const&/*evnt*/)
 
 void OrdStateImpl::processReceive(OrderEntry *, OrdState::onCancelReceived const&)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processReceive(onCancelReceived) finished");
 }
 
 bool OrdStateImpl::processAcceptable(OrdState::onCancelReceived const&/*evnt*/)
 {
-	//aux::ExchLogger::instance()->debug("OrdStateImpl::processAcceptable(onCancelReceived) finished");
 	return true;
 
 /*	assert(nullptr != evnt.order_);

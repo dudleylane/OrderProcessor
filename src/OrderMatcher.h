@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <memory>
 #include "TransactionDef.h"
 #include "StateMachine.h"
 
@@ -32,7 +33,7 @@ namespace Proc{
 		void init(DeferedEventContainer *cont);
 		void match(OrderEntry *order, const ACID::Context &ctxt);
 	private:
-		OrdState::OrderState *stateMachine_;
+		std::unique_ptr<OrdState::OrderState> stateMachine_;
 		DeferedEventContainer *defered_;
 	};
 

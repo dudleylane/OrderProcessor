@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -155,9 +155,9 @@ namespace aux{
 	};
 }
 
-Logger::Logger(void): impl_(nullptr)
+Logger::Logger(void)
 {
-	impl_ = new LoggerImpl();
+	impl_ = std::make_unique<LoggerImpl>();
 
 	note("----------------------------------------------------------------------");
 	note(" LogSystem initialized.");
@@ -167,7 +167,6 @@ Logger::~Logger(void)
 {
 	note(" LogSystem stopped.");
 	note("----------------------------------------------------------------------");
-	delete impl_;
 }
 
 void Logger::setDebugOn(bool val)

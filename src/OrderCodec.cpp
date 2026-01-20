@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -22,63 +22,6 @@ using namespace COP::Codec;
 namespace{
 	const int BUFFER_SIZE = 256;
 }
-
-/*	
-	struct OrderParams{
-	public:
-		explicit OrderParams(const SourceIdT &dest, const SourceIdT &instrument, 
-				const SourceIdT &account, const SourceIdT &clearing,
-				const SourceIdT &source, const SourceIdT &clOrderId, 
-				const SourceIdT &origClOrderID, const SourceIdT &executions);
-		OrderParams(const OrderParams &ord);
-		~OrderParams();
-
-		WideDataLazyRef<InstrumentEntry> instrument_;//136
-		WideDataLazyRef<AccountEntry> account_;//112
-		WideDataLazyRef<ClearingEntry> clearing_;//72
-		WideDataLazyRef<StringT> destination_; //~32 + 24
-		InstructionSetT execInstruct_; //28
-
-		DateTimeT creationTime_; //8
-		DateTimeT lastUpdateTime_;
-		DateTimeT expireTime_;
-		DateTimeT settlDate_;
-
-		PriceT price_; //8
-		PriceT stopPx_;
-		PriceT avgPx_;
-		PriceT dayAvgPx_;
-
-		OrderStatus status_;
-		Side side_;
-		OrderType ordType_;
-		TimeInForce tif_;
-		SettlTypeBase settlType_;
-		Capacity capacity_;
-		Currency currency_;
-		QuantityT minQty_; //4
-		QuantityT orderQty_;
-		QuantityT leavesQty_;
-		QuantityT cumQty_;
-		QuantityT dayOrderQty_;
-		QuantityT dayCumQty_;
-
-		WideDataLazyRef<RawDataEntry> clOrderId_; //56
-		WideDataLazyRef<RawDataEntry> origClOrderId_;
-		WideDataLazyRef<StringT> source_;
-
-		IdT orderId_;
-		IdT origOrderId_;
-
-		WideDataLazyRef<ExecutionsT *> executions_; //todo: add executions when transaction commits
-
-		OrdState::OrderStatePersistence stateMachinePersistance_;
-
-		void applyTrade(const TradeExecEntry *trade);
-	private:
-		const OrderParams& operator =(const OrderParams &);
-	};
-*/
 
 OrderCodec::OrderCodec(void)
 {

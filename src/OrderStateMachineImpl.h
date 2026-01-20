@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -38,10 +38,10 @@ namespace OrdStateImpl{
 	void processAccept(OrderEntry *orderData, OrdState::onReplace const&evnt);
 
 	void processFill(OrderEntry *orderData, OrdState::onTradeExecution const&evnt);
-	bool processNotexecuted(OrderEntry *orderData, OrdState::onTradeExecution const &evnt);
-	bool processNotexecuted(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt);
-	bool processNotexecuted(OrderEntry *orderData, OrdState::onNewDay const &evnt);
-	bool processNotexecuted(OrderEntry *orderData, OrdState::onContinue const &evnt);
+	bool processNotExecuted(OrderEntry *orderData, OrdState::onTradeExecution const &evnt);
+	bool processNotExecuted(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt);
+	bool processNotExecuted(OrderEntry *orderData, OrdState::onNewDay const &evnt);
+	bool processNotExecuted(OrderEntry *orderData, OrdState::onContinue const &evnt);
 	bool processComplete(OrderEntry *orderData, OrdState::onTradeExecution const &evnt);
 	void processCorrected(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt);
 	void processCorrectedWithoutRestore(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt);

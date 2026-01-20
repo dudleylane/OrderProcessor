@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -170,7 +170,7 @@ bool OrderState_::notexecuted(onTradeExecution const &evnt){
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
 
-	bool res = OrdStateImpl::processNotexecuted(orderData_, evnt);
+	bool res = OrdStateImpl::processNotExecuted(orderData_, evnt);
 	evnt.order4StateMachine_ = orderData_;
 	return res;
 }
@@ -179,7 +179,7 @@ bool OrderState_::notexecuted(onTradeCrctCncl const &evnt){
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
 
-	bool res = OrdStateImpl::processNotexecuted(orderData_, evnt);
+	bool res = OrdStateImpl::processNotExecuted(orderData_, evnt);
 	evnt.order4StateMachine_ = orderData_;
 	return res;
 }
@@ -188,7 +188,7 @@ bool OrderState_::notexecuted(onNewDay const &evnt){
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
 
-	bool res = OrdStateImpl::processNotexecuted(orderData_, evnt);
+	bool res = OrdStateImpl::processNotExecuted(orderData_, evnt);
 	evnt.order4StateMachine_ = orderData_;
 	return res;
 }
@@ -197,7 +197,7 @@ bool OrderState_::notexecuted(onContinue const &evnt){
 	if(evnt.testStateMachine_)
 		return evnt.testStateMachineCheckResult_;
 
-	bool res = OrdStateImpl::processNotexecuted(orderData_, evnt);
+	bool res = OrdStateImpl::processNotExecuted(orderData_, evnt);
 	evnt.order4StateMachine_ = orderData_;
 	return res;
 }

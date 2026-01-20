@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -12,9 +12,7 @@
 
 #include "TransactionMgr.h"
 #include "IdTGenerator.h"
-#include "Logger.h"
 
-using namespace aux;
 using namespace std;
 using namespace tbb;
 using namespace COP;
@@ -22,13 +20,11 @@ using namespace COP::ACID;
 
 TransactionMgr::TransactionMgr(void): idGenerator_(nullptr), started_(false), obs_(nullptr)
 {
-	//aux::ExchLogger::instance()->note("TransactionMgr created.");
 }
 
 TransactionMgr::~TransactionMgr(void)
 {
 	assert(!started_);
-	//aux::ExchLogger::instance()->note("TransactionMgr destroyed.");
 	transactionTree_.dumpTree();
 }
 
@@ -38,7 +34,6 @@ void TransactionMgr::attach(TransactionObserver *obs)
 	assert(nullptr == obs_);
 	tbb::mutex::scoped_lock lock(lock_);
 	obs_ = obs;
-	//aux::ExchLogger::instance()->note("TransactionMgr TransactionObserver attached.");
 }
 
 TransactionObserver *TransactionMgr::detach()
@@ -46,7 +41,6 @@ TransactionObserver *TransactionMgr::detach()
 	tbb::mutex::scoped_lock lock(lock_);
 	TransactionObserver *obs = obs_;
 	obs_ = nullptr;
-	//aux::ExchLogger::instance()->note("TransactionMgr TransactionObserver detached.");
 	return obs;
 }
 
@@ -57,20 +51,16 @@ void TransactionMgr::init(const TransactionMgrParams &params)
 	assert(nullptr != params.idGenerator_);
 	idGenerator_ = params.idGenerator_;
 	started_ = true;
-	//aux::ExchLogger::instance()->note("TransactionMgr initialized.");
 }
 
 void TransactionMgr::stop()
 {
 	assert(started_);
 
-	//aux::ExchLogger::instance()->note("TransactionMgr stopping.");
-
 	{
 		tbb::mutex::scoped_lock lock(lock_);
 		started_ = false;
 	}
-	//aux::ExchLogger::instance()->note("TransactionMgr stopped.");
 }
 
 void TransactionMgr::addTransaction(std::unique_ptr<Transaction> &tr)
@@ -79,8 +69,6 @@ void TransactionMgr::addTransaction(std::unique_ptr<Transaction> &tr)
 	assert(nullptr != tr.get());
 	assert(!tr->transactionId().isValid());
 	assert(nullptr != idGenerator_);
-
-	//aux::ExchLogger::instance()->debug("TransactionMgr adding transaction.");
 
 	Transaction *trPtr = tr.get();
 
@@ -97,7 +85,6 @@ void TransactionMgr::addTransaction(std::unique_ptr<Transaction> &tr)
 	if((0 < ready2Exec)&&(nullptr != obs_)){
 		obs_->onReadyToExecute();
 	}
-	//aux::ExchLogger::instance()->debug("TransactionMgr added transaction.");
 }
 
 bool TransactionMgr::removeTransaction(const TransactionId &id, Transaction *t)
@@ -106,7 +93,6 @@ bool TransactionMgr::removeTransaction(const TransactionId &id, Transaction *t)
 	assert(nullptr != t);
 	assert(id.isValid());
 	std::unique_ptr<Transaction> trans(t);
-	//aux::ExchLogger::instance()->debug("TransactionMgr removing transaction.");
 
 	int ready2Exec = 0;
 	bool rez = false;
@@ -115,10 +101,8 @@ bool TransactionMgr::removeTransaction(const TransactionId &id, Transaction *t)
 		rez = transactionTree_.remove(id, &ready2Exec);
 	}
 	if((0 < ready2Exec)&&(nullptr != obs_)){
-		//aux::ExchLogger::instance()->debug("TransactionMgr starts new transaction after remove previous.");
 		obs_->onReadyToExecute();
 	}
-	//aux::ExchLogger::instance()->debug("TransactionMgr removed transaction.");
 	return rez;
 }
 

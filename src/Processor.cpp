@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -18,7 +18,6 @@
 #include "TransactionScope.h"
 #include "DataModelDef.h"
 #include "OrderStorage.h"
-#include "Logger.h"
 
 using namespace std;
 using namespace COP;
@@ -28,18 +27,14 @@ using namespace COP::ACID;
 using namespace COP::OrdState;
 using namespace COP::Store;
 
-Processor::Processor(void): generator_(nullptr), orderStorage_(nullptr), orderBook_(nullptr), 
-	inQueues_(nullptr), outQueues_(nullptr), stateMachine_(nullptr), testStateMachine_(false), 
-	testStateMachineCheckResult_(nullptr)
+Processor::Processor(void): generator_(nullptr), orderStorage_(nullptr), orderBook_(nullptr),
+	inQueues_(nullptr), outQueues_(nullptr), testStateMachine_(false),
+	testStateMachineCheckResult_(false)
 {
-	//aux::ExchLogger::instance()->note("Processor created.");
 }
 
 Processor::~Processor(void)
 {
-	delete stateMachine_;
-	stateMachine_ = nullptr;
-	//aux::ExchLogger::instance()->note("Processor destroyed.");
 }
 
 void Processor::init(const ProcessorParams &params)
@@ -63,21 +58,17 @@ void Processor::init(const ProcessorParams &params)
 	assert(nullptr != inQueue_);
 	assert(nullptr != transactMgr_);
 
-	stateMachine_ = new OrderState();
+	stateMachine_ = std::make_unique<OrderState>();
 	stateMachine_->start();
 	initialSMState_ = stateMachine_->getPersistence();
 
 	matcher_.init(this);
-
-	//aux::ExchLogger::instance()->note("Processor initialized.");
 }
 
 bool Processor::process()
 {
-	//aux::ExchLogger::instance()->debug("Processor start processing.");
 	assert(nullptr != inQueue_);
 	bool rez = inQueue_->pop(this);
-	//aux::ExchLogger::instance()->debug("Processor finish processing.");
 	return rez;
 }
 
@@ -87,8 +78,6 @@ void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 		throw std::runtime_error("Processor::onEvent(OrderEvent): order pointer is null!");
 	if(!events_.empty())
 		throw std::runtime_error("Processor::onEvent(OrderEvent): events queue is not empty!");
-
-	//aux::ExchLogger::instance()->debug("Processor start onEvent(OrderEvent).");
 
 	// prepare context
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
@@ -118,28 +107,22 @@ void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 
 	// process defered events
 	processDeferedEvent();
-
-	//aux::ExchLogger::instance()->debug("Processor finished onEvent(OrderEvent).");
 }
 
 void Processor::onEvent(const std::string &/*source*/, const OrderCancelEvent &/*evnt*/)
 {
-	//aux::ExchLogger::instance()->debug("Processor finished onEvent(OrderCancelEvent).");
 }
 
 void Processor::onEvent(const std::string &/*source*/, const OrderReplaceEvent &/*evnt*/)
 {
-	//aux::ExchLogger::instance()->debug("Processor finished onEvent(OrderReplaceEvent).");
 }
 
 void Processor::onEvent(const std::string &/*source*/, const COP::Queues::OrderChangeStateEvent &/*evnt*/)
 {
-	//aux::ExchLogger::instance()->debug("Processor finished onEvent(OrderStateEvent).");
 }
 
 void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 {
-	//aux::ExchLogger::instance()->debug("Processor start onEvent(ProcessEvent).");
 	///prepare context
 	assert(events_.empty());
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
@@ -225,26 +208,20 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 	transactMgr_->addTransaction(tr);//scope.executeTransaction(cntxt);
 
 	processDeferedEvent();
-
-	//aux::ExchLogger::instance()->debug("Processor finished onEvent(ProcessEvent).");
 }
 
 void Processor::onEvent(const std::string &/*source*/, const TimerEvent &/*evnt*/)
 {
-	//aux::ExchLogger::instance()->debug("Processor finished onEvent(TimerEvent).");
 }
 
 void Processor::addDeferedEvent(DeferedEventBase *evnt)
 {
 	assert(nullptr != evnt);
 	events_.push_back(evnt);
-	//aux::ExchLogger::instance()->debug("Processor: added defered event.");
 }
 
 void Processor::onEvent(DeferedEventBase *evnt)
 {
-	//aux::ExchLogger::instance()->debug("Processor: start onEvent(DeferedEventBase)");
-
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
 	std::unique_ptr<TransactionScope> scope(new TransactionScope());
 
@@ -253,13 +230,10 @@ void Processor::onEvent(DeferedEventBase *evnt)
 	assert(nullptr != transactMgr_);
 	std::unique_ptr<Transaction> tr(scope.release());
 	transactMgr_->addTransaction(tr);//scope.executeTransaction(cntxt);
-
-	//aux::ExchLogger::instance()->debug("Processor: finished onEvent(DeferedEventBase)");
 }
 
 void Processor::processDeferedEvent()
 {
-	//aux::ExchLogger::instance()->debug("Processor: start processDeferedEvent");
 	/// Defered events may enqueue another chain of defered events - need to process them also.
 	while(!events_.empty()){
 		DeferedEventsT tmp;
@@ -278,13 +252,10 @@ void Processor::processDeferedEvent()
 			}	
 		}
 	}
-	//aux::ExchLogger::instance()->debug("Processor: finished processDeferedEvent");
 }
 
 void Processor::process(onTradeExecution &evnt, OrderEntry *order, const ACID::Context &/*cnxt*/)
 {
-	//aux::ExchLogger::instance()->debug("Processor: start processing  onTradeExecution");
-
 	evnt.generator_ = generator_;
 	evnt.orderStorage_ = orderStorage_;
 
@@ -294,14 +265,10 @@ void Processor::process(onTradeExecution &evnt, OrderEntry *order, const ACID::C
 	OrderStatePersistence smState = stateMachine_->getPersistence();
 	assert(nullptr != smState.orderData_);
 	smState.orderData_->setStateMachinePersistance(smState);
-
-	//aux::ExchLogger::instance()->debug("Processor: finish processing onTradeExecution");
 }
 
 void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, const ACID::Context & /*cnxt*/)
 {
-	//aux::ExchLogger::instance()->debug("Processor: start processing  onCanceled");
-
 	evnt.generator_ = generator_;
 	evnt.orderStorage_ = orderStorage_;
 
@@ -311,8 +278,6 @@ void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, con
 	OrderStatePersistence smState = stateMachine_->getPersistence();
 	assert(nullptr != smState.orderData_);
 	smState.orderData_->setStateMachinePersistance(smState);
-
-	//aux::ExchLogger::instance()->debug("Processor: finish processing onCanceled");
 }
 
 void Processor::process(const ACID::TransactionId &id, ACID::Transaction *tr)
@@ -320,13 +285,9 @@ void Processor::process(const ACID::TransactionId &id, ACID::Transaction *tr)
 	assert(nullptr != tr);
 	assert(id.isValid());
 
-	//aux::ExchLogger::instance()->debug("Processor: start processing transaction");
-
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
 
 	tr->executeTransaction(cntxt);
 
 	processDeferedEvent();
-
-	//aux::ExchLogger::instance()->debug("Processor: finish processing transaction");
 }

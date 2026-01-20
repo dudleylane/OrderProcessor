@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -82,15 +82,13 @@ namespace{
 	}
 }
 
-OrderMatcher::OrderMatcher(void): stateMachine_(nullptr), defered_(nullptr)
+OrderMatcher::OrderMatcher(void): defered_(nullptr)
 {
 	aux::ExchLogger::instance()->note("OrderMatcher created.");
 }
 
 OrderMatcher::~OrderMatcher(void)
 {
-	delete stateMachine_;
-	stateMachine_ = nullptr;
 	aux::ExchLogger::instance()->note("OrderMatcher destroyed.");
 }
 
@@ -99,7 +97,7 @@ void OrderMatcher::init(DeferedEventContainer *cont)
 	assert(nullptr != cont);
 	defered_ = cont;
 
-	stateMachine_ = new OrderState();
+	stateMachine_ = std::make_unique<OrderState>();
 	stateMachine_->start();
 	aux::ExchLogger::instance()->note("OrderMatcher initialized.");
 }
@@ -109,8 +107,6 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 	assert(nullptr != order);
 	assert(nullptr != ctxt.orderBook_);
 	assert(nullptr != ctxt.orderStorage_);
-
-	//aux::ExchLogger::instance()->debug("OrderMatcher start matching.");
 
 	IdT id = ctxt.orderBook_->find(FindOpositeOrder(order, ctxt.orderStorage_));
 	if(!id.isValid()){
@@ -145,10 +141,8 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 	if(order->leavesQty_ - trade.lastQty_ > 0){
 		std::unique_ptr<MatchOrderDeferedEvent> defEvnt(new MatchOrderDeferedEvent(order));
 		defEvnt->order_ = order;
-		defered_->addDeferedEvent(defEvnt.release());	
+		defered_->addDeferedEvent(defEvnt.release());
 	}
-
-	//aux::ExchLogger::instance()->debug("OrderMatcher finish matching.");
 }
 
 

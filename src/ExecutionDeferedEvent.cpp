@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -16,7 +16,6 @@
 #include "TransactionDef.h"
 #include "DataModelDef.h"
 #include "OrderStorage.h"
-#include "Logger.h"
 
 using namespace COP;
 using namespace COP::Proc;
@@ -35,8 +34,6 @@ ExecutionDeferedEvent::ExecutionDeferedEvent(OrderEntry *ord): baseOrder_(ord)
 
 void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope, const TradeParams &param)
 {
-	//aux::ExchLogger::instance()->debug("ExecutionDeferedEvent: Start execution.");
-
 	TradeExecEntry trade;
 	trade.lastQty_ = param.lastQty_;
 	trade.lastPx_ = param.lastPx_;
@@ -52,14 +49,10 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const ACID::Conte
 	evnt4Proc.transaction_ = scope;
 
 	func->process(evnt4Proc, param.order_, cnxt);
-
-	//aux::ExchLogger::instance()->debug("ExecutionDeferedEvent: Finish execution.");
 }
 
 void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cnxt, ACID::Scope *scope)
 {
-	//aux::ExchLogger::instance()->debug("ExecutionDeferedEvent: Start execution of trades.");
-
 	assert(nullptr != func);
 	assert(nullptr != baseOrder_);
 	assert(0 < trades_.size());
@@ -87,7 +80,5 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
 
 		execute(func, cnxt, scope, baseOrderParam);
 	}
-
-	//aux::ExchLogger::instance()->debug("ExecutionDeferedEvent: Finish execution of trades.");
 }
 

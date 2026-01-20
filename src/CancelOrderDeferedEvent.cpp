@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -16,7 +16,6 @@
 #include "TransactionDef.h"
 #include "DataModelDef.h"
 #include "OrderStorage.h"
-#include "Logger.h"
 
 using namespace COP;
 using namespace COP::Proc;
@@ -35,8 +34,6 @@ CancelOrderDeferedEvent::CancelOrderDeferedEvent(OrderEntry *ord): order_(ord)
 
 void CancelOrderDeferedEvent::execute(DeferedEventFunctor *func, const Context &cnxt, ACID::Scope *scope)
 {
-	//aux::ExchLogger::instance()->debug("CancelOrderDeferedEvent: Start execution of trades.");
-
 	assert(nullptr != func);
 	assert(nullptr != order_);
 
@@ -44,7 +41,5 @@ void CancelOrderDeferedEvent::execute(DeferedEventFunctor *func, const Context &
 	evnt4Proc.transaction_ = scope;
 
 	func->process(evnt4Proc, order_, cnxt);
-
-	//aux::ExchLogger::instance()->debug("CancelOrderDeferedEvent: Finish execution of trades.");
 }
 

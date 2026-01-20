@@ -3,7 +3,7 @@
 
  Author: Sergey Mikhailik
 
- Copyright (C) 2009 Sergey Mikhailik
+ Copyright (C) 2009-2026 Sergey Mikhailik
 
  Distributed under the GNU General Public License (GPL).
 
@@ -13,6 +13,7 @@
 #pragma once
 
 #include <list>
+#include <memory>
 #include "QueuesDef.h"
 #include "StateMachineDef.h"
 #include "TransactionDef.h"
@@ -112,7 +113,7 @@ namespace Proc{
 		bool testStateMachine_;
 		bool testStateMachineCheckResult_;
 
-		OrdState::OrderState *stateMachine_;
+		std::unique_ptr<OrdState::OrderState> stateMachine_;
 		OrdState::OrderStatePersistence initialSMState_;
 
 		OrderMatcher matcher_;
