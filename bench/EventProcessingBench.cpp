@@ -19,6 +19,7 @@
 #include "IdTGenerator.h"
 #include "DataModelDef.h"
 #include "QueuesDef.h"
+#include "Logger.h"
 
 using namespace COP;
 using namespace COP::Queues;
@@ -33,19 +34,32 @@ namespace {
 class BenchmarkSetup {
 public:
     BenchmarkSetup() {
+        aux::ExchLogger::create();
         WideDataStorage::create();
         IdTGenerator::create();
+
+        // Add test instrument
+        auto instr = new InstrumentEntry();
+        instr->symbol_ = "BENCH";
+        instr->securityId_ = "BENCHSEC";
+        instr->securityIdSource_ = "ISIN";
+        instrId_ = WideDataStorage::instance()->add(instr);
     }
 
     ~BenchmarkSetup() {
         IdTGenerator::destroy();
         WideDataStorage::destroy();
+        aux::ExchLogger::destroy();
     }
+
+    static SourceIdT instrId_;
 };
 
+SourceIdT BenchmarkSetup::instrId_;
+
 OrderEvent createOrderEvent() {
-    SourceIdT srcId, destId, clOrdId, origClOrdId, instrId, accountId, clearingId, execList;
-    auto order = new OrderEntry(srcId, destId, clOrdId, origClOrdId, instrId, accountId, clearingId, execList);
+    SourceIdT srcId, destId, clOrdId, origClOrdId, accountId, clearingId, execList;
+    auto order = new OrderEntry(srcId, destId, clOrdId, origClOrdId, BenchmarkSetup::instrId_, accountId, clearingId, execList);
     order->side_ = BUY_SIDE;
     order->ordType_ = LIMIT_ORDERTYPE;
     order->price_ = 100.0;

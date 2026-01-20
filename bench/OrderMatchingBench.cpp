@@ -20,6 +20,7 @@
 #include "WideDataStorage.h"
 #include "IdTGenerator.h"
 #include "DataModelDef.h"
+#include "Logger.h"
 #include "TestAux.h"
 
 using namespace COP;
@@ -36,6 +37,7 @@ namespace {
 class OrderBookBenchmarkSetup {
 public:
     OrderBookBenchmarkSetup() {
+        aux::ExchLogger::create();
         WideDataStorage::create();
         IdTGenerator::create();
         OrderStorage::create();
@@ -59,10 +61,19 @@ public:
         OrderStorage::destroy();
         IdTGenerator::destroy();
         WideDataStorage::destroy();
+        aux::ExchLogger::destroy();
     }
 
     OrderEntry* createOrder(Side side, PriceT price, QuantityT qty) {
-        SourceIdT srcId, destId, clOrdId, origClOrdId, accountId, clearingId, execList;
+        SourceIdT srcId, destId, origClOrdId, accountId, clearingId, execList;
+
+        // Create a clOrderId
+        static int clOrdIdCounter = 0;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "CLORD%d", ++clOrdIdCounter);
+        auto* rawClOrdId = new RawDataEntry(STRING_RAWDATATYPE, buf, static_cast<u32>(strlen(buf)));
+        SourceIdT clOrdId = WideDataStorage::instance()->add(rawClOrdId);
+
         auto order = new OrderEntry(srcId, destId, clOrdId, origClOrdId, instrId_, accountId, clearingId, execList);
         order->side_ = side;
         order->price_ = price;
