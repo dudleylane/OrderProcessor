@@ -37,15 +37,34 @@ namespace Queues{
 	};
 
 	struct OrderCancelEvent: public EventBase{
-		
+		std::string cancelReason_;
+
+		OrderCancelEvent() = default;
+		explicit OrderCancelEvent(const IdT &orderId) { id_ = orderId; }
+		OrderCancelEvent(const IdT &orderId, const std::string &reason)
+			: cancelReason_(reason) { id_ = orderId; }
 	};
 
 	struct OrderReplaceEvent: public EventBase{
-		
+		OrderEntry *replacementOrder_;
+
+		OrderReplaceEvent() : replacementOrder_(nullptr) {}
+		explicit OrderReplaceEvent(const IdT &origOrderId, OrderEntry *replacement = nullptr)
+			: replacementOrder_(replacement) { id_ = origOrderId; }
 	};
 
 	struct OrderChangeStateEvent: public EventBase{
-		
+		enum StateChangeType {
+			INVALID_CHANGE = 0,
+			SUSPEND,
+			RESUME,
+			FINISH
+		};
+		StateChangeType changeType_;
+
+		OrderChangeStateEvent() : changeType_(INVALID_CHANGE) {}
+		OrderChangeStateEvent(const IdT &orderId, StateChangeType type)
+			: changeType_(type) { id_ = orderId; }
 	};
 
 	struct ExecReportEvent: public EventBase{
@@ -82,7 +101,17 @@ namespace Queues{
 	};
 
 	struct TimerEvent: public EventBase{
-	
+		enum TimerType {
+			INVALID_TIMER = 0,
+			EXPIRATION,
+			DAY_END,
+			DAY_START
+		};
+		TimerType timerType_;
+
+		TimerEvent() : timerType_(INVALID_TIMER) {}
+		TimerEvent(const IdT &orderId, TimerType type)
+			: timerType_(type) { id_ = orderId; }
 	};
 
 	class InQueues{

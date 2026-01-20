@@ -109,16 +109,167 @@ void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 	processDeferedEvent();
 }
 
-void Processor::onEvent(const std::string &/*source*/, const OrderCancelEvent &/*evnt*/)
+void Processor::onEvent(const std::string &/*source*/, const OrderCancelEvent &evnt)
 {
+	if(!evnt.id_.isValid())
+		throw std::runtime_error("Processor::onEvent(OrderCancelEvent): order id is invalid!");
+
+	// prepare context
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	std::unique_ptr<TransactionScope> scope(new TransactionScope());
+
+	// locate the order to cancel
+	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
+	if(nullptr == ord)
+		throw std::runtime_error("Processor::onEvent(OrderCancelEvent): unable to locate order!");
+
+	// create cancel received event
+	onCancelReceived evnt2Proc;
+	evnt2Proc.generator_ = generator_;
+	evnt2Proc.transaction_ = scope.get();
+	evnt2Proc.orderStorage_ = orderStorage_;
+	evnt2Proc.orderBook_ = orderBook_;
+
+	// restore state machine from order and process event
+	assert(nullptr != stateMachine_);
+	stateMachine_->setPersistance(ord->stateMachinePersistance());
+	stateMachine_->process_event(evnt2Proc);
+
+	// save updated state back to order
+	OrderStatePersistence smState = stateMachine_->getPersistence();
+	assert(nullptr != smState.orderData_);
+	smState.orderData_->setStateMachinePersistance(smState);
+
+	// enqueue transaction
+	assert(nullptr != transactMgr_);
+	std::unique_ptr<Transaction> tr(scope.release());
+	transactMgr_->addTransaction(tr);
+
+	processDeferedEvent();
 }
 
-void Processor::onEvent(const std::string &/*source*/, const OrderReplaceEvent &/*evnt*/)
+void Processor::onEvent(const std::string &/*source*/, const OrderReplaceEvent &evnt)
 {
+	if(!evnt.id_.isValid())
+		throw std::runtime_error("Processor::onEvent(OrderReplaceEvent): order id is invalid!");
+
+	// prepare context
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	std::unique_ptr<TransactionScope> scope(new TransactionScope());
+
+	if(nullptr != evnt.replacementOrder_) {
+		// New replacement order submission - process via state machine
+		onRplOrderReceived evnt2Proc(evnt.replacementOrder_);
+		evnt2Proc.generator_ = generator_;
+		evnt2Proc.transaction_ = scope.get();
+		evnt2Proc.orderStorage_ = orderStorage_;
+		evnt2Proc.orderBook_ = orderBook_;
+
+		// use initial state for new replacement order
+		assert(nullptr != stateMachine_);
+		stateMachine_->setPersistance(initialSMState_);
+		stateMachine_->process_event(evnt2Proc);
+
+		// save state machine state into the replacement order
+		OrderStatePersistence smState = stateMachine_->getPersistence();
+		assert(nullptr != smState.orderData_);
+		smState.orderData_->setStateMachinePersistance(smState);
+	} else {
+		// Notify existing order about replace received (similar to ProcessEvent::ON_REPLACE_RECEVIED)
+		OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
+		if(nullptr == ord)
+			throw std::runtime_error("Processor::onEvent(OrderReplaceEvent): unable to locate order!");
+
+		onReplaceReceived evnt2Proc(evnt.id_);
+		evnt2Proc.generator_ = generator_;
+		evnt2Proc.transaction_ = scope.get();
+		evnt2Proc.orderStorage_ = orderStorage_;
+
+		assert(nullptr != stateMachine_);
+		stateMachine_->setPersistance(ord->stateMachinePersistance());
+		stateMachine_->process_event(evnt2Proc);
+
+		// save updated state back to order
+		OrderStatePersistence smState = stateMachine_->getPersistence();
+		assert(nullptr != smState.orderData_);
+		smState.orderData_->setStateMachinePersistance(smState);
+	}
+
+	// enqueue transaction
+	assert(nullptr != transactMgr_);
+	std::unique_ptr<Transaction> tr(scope.release());
+	transactMgr_->addTransaction(tr);
+
+	processDeferedEvent();
 }
 
-void Processor::onEvent(const std::string &/*source*/, const COP::Queues::OrderChangeStateEvent &/*evnt*/)
+void Processor::onEvent(const std::string &/*source*/, const COP::Queues::OrderChangeStateEvent &evnt)
 {
+	if(!evnt.id_.isValid())
+		throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): order id is invalid!");
+	if(evnt.changeType_ == OrderChangeStateEvent::INVALID_CHANGE)
+		throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): invalid change type!");
+
+	// prepare context
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	std::unique_ptr<TransactionScope> scope(new TransactionScope());
+
+	// locate the order
+	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
+	if(nullptr == ord)
+		throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): unable to locate order!");
+
+	// restore state machine from order
+	assert(nullptr != stateMachine_);
+	stateMachine_->setPersistance(ord->stateMachinePersistance());
+
+	// process the appropriate state change event
+	switch(evnt.changeType_) {
+	case OrderChangeStateEvent::SUSPEND:
+		{
+			onSuspended evnt2Proc;
+			evnt2Proc.generator_ = generator_;
+			evnt2Proc.transaction_ = scope.get();
+			evnt2Proc.orderStorage_ = orderStorage_;
+			evnt2Proc.orderBook_ = orderBook_;
+			stateMachine_->process_event(evnt2Proc);
+		}
+		break;
+	case OrderChangeStateEvent::RESUME:
+		{
+			onContinue evnt2Proc;
+			evnt2Proc.generator_ = generator_;
+			evnt2Proc.transaction_ = scope.get();
+			evnt2Proc.orderStorage_ = orderStorage_;
+			evnt2Proc.orderBook_ = orderBook_;
+			stateMachine_->process_event(evnt2Proc);
+		}
+		break;
+	case OrderChangeStateEvent::FINISH:
+		{
+			onFinished evnt2Proc;
+			evnt2Proc.generator_ = generator_;
+			evnt2Proc.transaction_ = scope.get();
+			evnt2Proc.orderStorage_ = orderStorage_;
+			evnt2Proc.orderBook_ = orderBook_;
+			stateMachine_->process_event(evnt2Proc);
+		}
+		break;
+	default:
+		throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): unknown change type!");
+	}
+
+	// save updated state back to order
+	OrderStatePersistence smState = stateMachine_->getPersistence();
+	assert(nullptr != smState.orderData_);
+	smState.orderData_->setStateMachinePersistance(smState);
+
+	// enqueue transaction
+	assert(nullptr != transactMgr_);
+	std::unique_ptr<Transaction> tr(scope.release());
+	transactMgr_->addTransaction(tr);
+
+	processDeferedEvent();
 }
 
 void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
@@ -210,8 +361,73 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 	processDeferedEvent();
 }
 
-void Processor::onEvent(const std::string &/*source*/, const TimerEvent &/*evnt*/)
+void Processor::onEvent(const std::string &/*source*/, const TimerEvent &evnt)
 {
+	if(!evnt.id_.isValid())
+		throw std::runtime_error("Processor::onEvent(TimerEvent): order id is invalid!");
+	if(evnt.timerType_ == TimerEvent::INVALID_TIMER)
+		throw std::runtime_error("Processor::onEvent(TimerEvent): invalid timer type!");
+
+	// prepare context
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	std::unique_ptr<TransactionScope> scope(new TransactionScope());
+
+	// locate the order
+	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
+	if(nullptr == ord)
+		throw std::runtime_error("Processor::onEvent(TimerEvent): unable to locate order!");
+
+	// restore state machine from order
+	assert(nullptr != stateMachine_);
+	stateMachine_->setPersistance(ord->stateMachinePersistance());
+
+	// process the appropriate timer event
+	switch(evnt.timerType_) {
+	case TimerEvent::EXPIRATION:
+		{
+			onExpired evnt2Proc;
+			evnt2Proc.generator_ = generator_;
+			evnt2Proc.transaction_ = scope.get();
+			evnt2Proc.orderStorage_ = orderStorage_;
+			evnt2Proc.orderBook_ = orderBook_;
+			stateMachine_->process_event(evnt2Proc);
+		}
+		break;
+	case TimerEvent::DAY_END:
+		{
+			onNewDay evnt2Proc;
+			evnt2Proc.generator_ = generator_;
+			evnt2Proc.transaction_ = scope.get();
+			evnt2Proc.orderStorage_ = orderStorage_;
+			evnt2Proc.orderBook_ = orderBook_;
+			stateMachine_->process_event(evnt2Proc);
+		}
+		break;
+	case TimerEvent::DAY_START:
+		{
+			onContinue evnt2Proc;
+			evnt2Proc.generator_ = generator_;
+			evnt2Proc.transaction_ = scope.get();
+			evnt2Proc.orderStorage_ = orderStorage_;
+			evnt2Proc.orderBook_ = orderBook_;
+			stateMachine_->process_event(evnt2Proc);
+		}
+		break;
+	default:
+		throw std::runtime_error("Processor::onEvent(TimerEvent): unknown timer type!");
+	}
+
+	// save updated state back to order
+	OrderStatePersistence smState = stateMachine_->getPersistence();
+	assert(nullptr != smState.orderData_);
+	smState.orderData_->setStateMachinePersistance(smState);
+
+	// enqueue transaction
+	assert(nullptr != transactMgr_);
+	std::unique_ptr<Transaction> tr(scope.release());
+	transactMgr_->addTransaction(tr);
+
+	processDeferedEvent();
 }
 
 void Processor::addDeferedEvent(DeferedEventBase *evnt)
