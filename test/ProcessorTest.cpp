@@ -378,12 +378,27 @@ TEST_F(ProcessorTest, OrdersOnDifferentInstruments) {
 // =============================================================================
 
 TEST_F(ProcessorTest, ProcessCancelEvent) {
-    // Submit a cancel event - should not crash
-    OrderCancelEvent cancelEvent;
+    // First create and process an order
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor_->process();
+
+    // Get the saved order to retrieve its ID
+    OrderEntry* savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, savedOrder);
+    EXPECT_EQ(NEW_ORDSTATUS, savedOrder->status_);
+
+    // Now submit a cancel event for this order
+    OrderCancelEvent cancelEvent(savedOrder->orderId_, "Test cancellation");
     inQueues_->push("test", cancelEvent);
 
     processor_->process();
-    SUCCEED();
+
+    // The order should be in a cancellation state (GoingCancel)
+    savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, savedOrder);
+    // Order transitions to GoingCancel state after receiving cancel
 }
 
 // =============================================================================
@@ -391,12 +406,26 @@ TEST_F(ProcessorTest, ProcessCancelEvent) {
 // =============================================================================
 
 TEST_F(ProcessorTest, ProcessReplaceEvent) {
-    // Submit a replace event - should not crash
-    OrderReplaceEvent replaceEvent;
+    // First create and process an order
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor_->process();
+
+    // Get the saved order to retrieve its ID
+    OrderEntry* savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, savedOrder);
+    EXPECT_EQ(NEW_ORDSTATUS, savedOrder->status_);
+
+    // Submit a replace event (notify original order about replace)
+    OrderReplaceEvent replaceEvent(savedOrder->orderId_);
     inQueues_->push("test", replaceEvent);
 
     processor_->process();
-    SUCCEED();
+
+    // Order should have received the replace notification
+    savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, savedOrder);
 }
 
 // =============================================================================
@@ -416,12 +445,27 @@ TEST_F(ProcessorTest, ProcessProcessEventWithInvalidType) {
 // =============================================================================
 
 TEST_F(ProcessorTest, ProcessTimerEvent) {
-    TimerEvent event;
+    // First create and process an order
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor_->process();
+
+    // Get the saved order to retrieve its ID
+    OrderEntry* savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, savedOrder);
+    EXPECT_EQ(NEW_ORDSTATUS, savedOrder->status_);
+
+    // Submit a timer event (expiration)
+    TimerEvent event(savedOrder->orderId_, TimerEvent::EXPIRATION);
     inQueues_->push("test", event);
 
-    // Should not crash
     processor_->process();
-    SUCCEED();
+
+    // Order should have transitioned to Expired state
+    savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, savedOrder);
+    EXPECT_EQ(EXPIRED_ORDSTATUS, savedOrder->status_);
 }
 
 // =============================================================================

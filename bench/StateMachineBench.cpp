@@ -17,17 +17,20 @@
 #include "WideDataStorage.h"
 #include "IdTGenerator.h"
 #include "OrderStorage.h"
+#include "OrderBookImpl.h"
 #include "DataModelDef.h"
 #include "Logger.h"
+#include "TestAux.h"
 
 using namespace COP;
 using namespace COP::Store;
 using namespace COP::OrdState;
+using test::DummyOrderSaver;
 
 namespace {
 
 // =============================================================================
-// Benchmark Setup
+// Benchmark Setup - includes OrderBook for proper state machine operation
 // =============================================================================
 
 class StateMachineBenchmarkSetup {
@@ -44,9 +47,16 @@ public:
         instr->securityId_ = "BENCHSEC";
         instr->securityIdSource_ = "ISIN";
         instrId_ = WideDataStorage::instance()->add(instr);
+
+        // Initialize order book (required for some state transitions)
+        OrderBookImpl::InstrumentsT instruments;
+        instruments.insert(instrId_);
+        orderBook_ = std::make_unique<OrderBookImpl>();
+        orderBook_->init(instruments, &orderSaver_);
     }
 
     ~StateMachineBenchmarkSetup() {
+        orderBook_.reset();
         OrderStorage::destroy();
         IdTGenerator::destroy();
         WideDataStorage::destroy();
@@ -73,13 +83,27 @@ public:
         return OrderStorage::instance()->save(*order, IdTGenerator::instance());
     }
 
+    // Create an event with required dependencies
+    template<typename EventT>
+    EventT createEvent() {
+        EventT evnt;
+        evnt.generator_ = IdTGenerator::instance();
+        evnt.orderStorage_ = OrderStorage::instance();
+        evnt.orderBook_ = orderBook_.get();
+        evnt.testStateMachine_ = true;
+        evnt.testStateMachineCheckResult_ = true;
+        return evnt;
+    }
+
     SourceIdT instrId_;
+    std::unique_ptr<OrderBookImpl> orderBook_;
+    DummyOrderSaver orderSaver_;
 };
 
 } // namespace
 
 // =============================================================================
-// State Machine Creation Benchmarks
+// State Machine Creation Benchmark
 // =============================================================================
 
 static void BM_StateMachineCreate(benchmark::State& state) {
@@ -88,6 +112,7 @@ static void BM_StateMachineCreate(benchmark::State& state) {
     for (auto _ : state) {
         OrderEntry* order = setup.createOrder();
         auto stateMachine = std::make_unique<OrderState>(order);
+        stateMachine->start();
         benchmark::DoNotOptimize(stateMachine.get());
     }
     state.SetItemsProcessed(state.iterations());
@@ -95,167 +120,189 @@ static void BM_StateMachineCreate(benchmark::State& state) {
 BENCHMARK(BM_StateMachineCreate)->Range(8, 8 << 10);
 
 // =============================================================================
-// State Transition Benchmarks - New Order Flow
+// State Transition Benchmarks - Using actual process_event() calls
 // =============================================================================
 
-static void BM_StateTransitionReceivedToNew(benchmark::State& state) {
+static void BM_StateTransitionOrderAccepted(benchmark::State& state) {
     StateMachineBenchmarkSetup setup;
 
     for (auto _ : state) {
         OrderEntry* order = setup.createOrder();
-        order->status_ = RECEIVEDNEW_ORDSTATUS;
-
         auto stateMachine = std::make_unique<OrderState>(order);
+        stateMachine->start();
 
-        // Transition to NEW
-        order->status_ = NEW_ORDSTATUS;
-        benchmark::DoNotOptimize(order->status_);
+        // Actually process the onOrderAccepted event through state machine
+        onOrderAccepted evnt = setup.createEvent<onOrderAccepted>();
+        stateMachine->process_event(evnt);
+
+        benchmark::DoNotOptimize(stateMachine->getPersistence());
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_StateTransitionReceivedToNew)->Range(8, 8 << 10);
+BENCHMARK(BM_StateTransitionOrderAccepted)->Range(8, 8 << 10);
 
-static void BM_StateTransitionNewToPartialFill(benchmark::State& state) {
+static void BM_StateTransitionCancelReceived(benchmark::State& state) {
     StateMachineBenchmarkSetup setup;
 
     for (auto _ : state) {
         OrderEntry* order = setup.createOrder();
-        order->status_ = NEW_ORDSTATUS;
-
         auto stateMachine = std::make_unique<OrderState>(order);
+        stateMachine->start();
 
-        // Transition to PARTIAL FILL
-        order->status_ = PARTFILL_ORDSTATUS;
-        order->cumQty_ = 50;
-        order->leavesQty_ = 50;
-        benchmark::DoNotOptimize(order->status_);
+        // First accept the order
+        onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+        stateMachine->process_event(acceptEvnt);
+
+        // Then process cancel received
+        onCancelReceived cancelEvnt = setup.createEvent<onCancelReceived>();
+        stateMachine->process_event(cancelEvnt);
+
+        benchmark::DoNotOptimize(stateMachine->getPersistence());
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_StateTransitionNewToPartialFill)->Range(8, 8 << 10);
+BENCHMARK(BM_StateTransitionCancelReceived)->Range(8, 8 << 10);
 
-static void BM_StateTransitionNewToFilled(benchmark::State& state) {
+static void BM_StateTransitionSuspend(benchmark::State& state) {
     StateMachineBenchmarkSetup setup;
 
     for (auto _ : state) {
         OrderEntry* order = setup.createOrder();
-        order->status_ = NEW_ORDSTATUS;
-
         auto stateMachine = std::make_unique<OrderState>(order);
+        stateMachine->start();
 
-        // Transition to FILLED
-        order->status_ = FILLED_ORDSTATUS;
-        order->cumQty_ = 100;
-        order->leavesQty_ = 0;
-        benchmark::DoNotOptimize(order->status_);
+        // First accept the order
+        onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+        stateMachine->process_event(acceptEvnt);
+
+        // Then suspend
+        onSuspended suspendEvnt = setup.createEvent<onSuspended>();
+        stateMachine->process_event(suspendEvnt);
+
+        benchmark::DoNotOptimize(stateMachine->getPersistence());
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_StateTransitionNewToFilled)->Range(8, 8 << 10);
+BENCHMARK(BM_StateTransitionSuspend)->Range(8, 8 << 10);
 
-static void BM_StateTransitionNewToCanceled(benchmark::State& state) {
+static void BM_StateTransitionExpire(benchmark::State& state) {
     StateMachineBenchmarkSetup setup;
 
     for (auto _ : state) {
         OrderEntry* order = setup.createOrder();
-        order->status_ = NEW_ORDSTATUS;
-
         auto stateMachine = std::make_unique<OrderState>(order);
+        stateMachine->start();
 
-        // Transition to CANCELED
-        order->status_ = CANCELED_ORDSTATUS;
-        benchmark::DoNotOptimize(order->status_);
+        // First accept the order
+        onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+        stateMachine->process_event(acceptEvnt);
+
+        // Then expire
+        onExpired expireEvnt = setup.createEvent<onExpired>();
+        stateMachine->process_event(expireEvnt);
+
+        benchmark::DoNotOptimize(stateMachine->getPersistence());
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_StateTransitionNewToCanceled)->Range(8, 8 << 10);
+BENCHMARK(BM_StateTransitionExpire)->Range(8, 8 << 10);
 
 // =============================================================================
-// Full Order Lifecycle Benchmarks
+// Full Order Lifecycle Benchmarks - Multiple transitions
 // =============================================================================
 
-static void BM_OrderLifecycleNewToFilled(benchmark::State& state) {
+static void BM_OrderLifecycleAcceptToSuspendToResume(benchmark::State& state) {
     StateMachineBenchmarkSetup setup;
 
     for (auto _ : state) {
         OrderEntry* order = setup.createOrder();
-
-        // RECEIVED_NEW
-        order->status_ = RECEIVEDNEW_ORDSTATUS;
         auto stateMachine = std::make_unique<OrderState>(order);
+        stateMachine->start();
 
-        // NEW
-        order->status_ = NEW_ORDSTATUS;
+        // Accept
+        onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+        stateMachine->process_event(acceptEvnt);
 
-        // PARTIAL FILL
-        order->status_ = PARTFILL_ORDSTATUS;
-        order->cumQty_ = 50;
-        order->leavesQty_ = 50;
+        // Suspend
+        onSuspended suspendEvnt = setup.createEvent<onSuspended>();
+        stateMachine->process_event(suspendEvnt);
 
-        // FILLED
-        order->status_ = FILLED_ORDSTATUS;
-        order->cumQty_ = 100;
-        order->leavesQty_ = 0;
+        // Resume (Continue)
+        onContinue continueEvnt = setup.createEvent<onContinue>();
+        stateMachine->process_event(continueEvnt);
 
-        benchmark::DoNotOptimize(order->status_);
+        benchmark::DoNotOptimize(stateMachine->getPersistence());
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_OrderLifecycleNewToFilled)->Range(8, 8 << 10);
+BENCHMARK(BM_OrderLifecycleAcceptToSuspendToResume)->Range(8, 8 << 10);
 
-static void BM_OrderLifecycleNewToCanceled(benchmark::State& state) {
+static void BM_OrderLifecycleAcceptToCancelToRejected(benchmark::State& state) {
     StateMachineBenchmarkSetup setup;
 
     for (auto _ : state) {
         OrderEntry* order = setup.createOrder();
-
-        // RECEIVED_NEW
-        order->status_ = RECEIVEDNEW_ORDSTATUS;
         auto stateMachine = std::make_unique<OrderState>(order);
+        stateMachine->start();
 
-        // NEW
-        order->status_ = NEW_ORDSTATUS;
+        // Accept order
+        onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+        stateMachine->process_event(acceptEvnt);
 
-        // CANCELED
-        order->status_ = CANCELED_ORDSTATUS;
+        // Cancel received
+        onCancelReceived cancelEvnt = setup.createEvent<onCancelReceived>();
+        stateMachine->process_event(cancelEvnt);
 
-        benchmark::DoNotOptimize(order->status_);
+        // Cancel rejected
+        onCancelRejected rejectEvnt = setup.createEvent<onCancelRejected>();
+        stateMachine->process_event(rejectEvnt);
+
+        benchmark::DoNotOptimize(stateMachine->getPersistence());
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_OrderLifecycleNewToCanceled)->Range(8, 8 << 10);
+BENCHMARK(BM_OrderLifecycleAcceptToCancelToRejected)->Range(8, 8 << 10);
 
-static void BM_OrderLifecycleWithReplace(benchmark::State& state) {
+// =============================================================================
+// State Persistence Benchmarks
+// =============================================================================
+
+static void BM_StateMachineGetPersistence(benchmark::State& state) {
     StateMachineBenchmarkSetup setup;
+    OrderEntry* order = setup.createOrder();
+    auto stateMachine = std::make_unique<OrderState>(order);
+    stateMachine->start();
+
+    // Pre-transition to a meaningful state
+    onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+    stateMachine->process_event(acceptEvnt);
 
     for (auto _ : state) {
-        OrderEntry* order = setup.createOrder();
-
-        // RECEIVED_NEW
-        order->status_ = RECEIVEDNEW_ORDSTATUS;
-        auto stateMachine = std::make_unique<OrderState>(order);
-
-        // NEW
-        order->status_ = NEW_ORDSTATUS;
-
-        // PENDING REPLACE
-        order->status_ = PENDINGREPLACE_ORDSTATUS;
-
-        // REPLACED (back to NEW with new values)
-        order->status_ = NEW_ORDSTATUS;
-        order->price_ = 105.0;
-        order->orderQty_ = 150;
-
-        // FILLED
-        order->status_ = FILLED_ORDSTATUS;
-        order->cumQty_ = 150;
-        order->leavesQty_ = 0;
-
-        benchmark::DoNotOptimize(order->status_);
+        auto persistence = stateMachine->getPersistence();
+        benchmark::DoNotOptimize(persistence);
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_OrderLifecycleWithReplace)->Range(8, 8 << 10);
+BENCHMARK(BM_StateMachineGetPersistence)->Range(8, 8 << 10);
+
+static void BM_StateMachineSetPersistence(benchmark::State& state) {
+    StateMachineBenchmarkSetup setup;
+    OrderEntry* order = setup.createOrder();
+    auto stateMachine = std::make_unique<OrderState>(order);
+    stateMachine->start();
+
+    // Get a persistence to restore
+    onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+    stateMachine->process_event(acceptEvnt);
+    auto persistence = stateMachine->getPersistence();
+
+    for (auto _ : state) {
+        stateMachine->setPersistance(persistence);
+        benchmark::DoNotOptimize(stateMachine.get());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_StateMachineSetPersistence)->Range(8, 8 << 10);
 
 // =============================================================================
 // Batch State Transition Benchmarks
@@ -264,27 +311,37 @@ BENCHMARK(BM_OrderLifecycleWithReplace)->Range(8, 8 << 10);
 static void BM_BatchStateTransitions(benchmark::State& state) {
     StateMachineBenchmarkSetup setup;
     const int batchSize = state.range(0);
-    std::vector<OrderEntry*> orders;
 
-    // Pre-create orders
+    // Pre-create orders and state machines
+    std::vector<OrderEntry*> orders;
+    std::vector<std::unique_ptr<OrderState>> machines;
     for (int i = 0; i < batchSize; ++i) {
         orders.push_back(setup.createOrder());
+        auto sm = std::make_unique<OrderState>(orders.back());
+        sm->start();
+        machines.push_back(std::move(sm));
     }
 
     for (auto _ : state) {
-        for (auto* order : orders) {
-            order->status_ = NEW_ORDSTATUS;
+        // Process accept event for all
+        for (auto& sm : machines) {
+            onOrderAccepted evnt = setup.createEvent<onOrderAccepted>();
+            sm->process_event(evnt);
         }
-        for (auto* order : orders) {
-            order->status_ = PARTFILL_ORDSTATUS;
+        // Process suspend for all
+        for (auto& sm : machines) {
+            onSuspended evnt = setup.createEvent<onSuspended>();
+            sm->process_event(evnt);
         }
-        for (auto* order : orders) {
-            order->status_ = FILLED_ORDSTATUS;
+        // Process continue for all
+        for (auto& sm : machines) {
+            onContinue evnt = setup.createEvent<onContinue>();
+            sm->process_event(evnt);
         }
     }
     state.SetItemsProcessed(state.iterations() * batchSize * 3);
 }
-BENCHMARK(BM_BatchStateTransitions)->RangeMultiplier(4)->Range(16, 1024);
+BENCHMARK(BM_BatchStateTransitions)->RangeMultiplier(4)->Range(16, 256);
 
 // =============================================================================
 // State Machine Memory Benchmark
@@ -303,9 +360,10 @@ static void BM_StateMachineMemoryUsage(benchmark::State& state) {
         for (int64_t i = 0; i < state.range(0); ++i) {
             OrderEntry* order = setup.createOrder();
             auto machine = std::make_unique<OrderState>(order);
+            machine->start();
             machines.push_back(std::move(machine));
         }
     }
     state.SetItemsProcessed(state.iterations() * state.range(0));
 }
-BENCHMARK(BM_StateMachineMemoryUsage)->RangeMultiplier(4)->Range(64, 4096);
+BENCHMARK(BM_StateMachineMemoryUsage)->RangeMultiplier(4)->Range(64, 1024);
