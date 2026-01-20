@@ -109,6 +109,19 @@ class Processor: public InQueueProcessor,
                  public TransactionProcessor
 ```
 
+### Supported Event Types
+
+The Processor handles the following incoming events (defined in `src/QueuesDef.h`):
+
+| Event Type | Purpose | Key Fields |
+|------------|---------|------------|
+| `OrderEvent` | New order submission | `order_` - pointer to OrderEntry |
+| `OrderCancelEvent` | Cancel existing order | `id_` - order to cancel, `cancelReason_` |
+| `OrderReplaceEvent` | Replace/modify order | `id_` - original order, `replacementOrder_` - new order |
+| `OrderChangeStateEvent` | External state change | `id_` - order, `changeType_` (SUSPEND/RESUME/FINISH) |
+| `TimerEvent` | Time-based triggers | `id_` - order, `timerType_` (EXPIRATION/DAY_END/DAY_START) |
+| `ProcessEvent` | Internal processing | `type_` - event subtype, `id_` - related order |
+
 ### Concurrency Model
 
 - **std::atomic:** Lock-free atomics for counters and flags
