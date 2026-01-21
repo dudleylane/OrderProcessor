@@ -1,3 +1,9 @@
+================================================================================
+DEPRECATED: This file is retained for historical reference only.
+Many items in this list have been completed during the migration to C++23.
+See AUDIT_REPORT.md for current implementation status.
+================================================================================
+
 /**
  Concurrent Order Processor library
 
@@ -10,7 +16,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
-ToDo list:
+ToDo list (Historical - many items now complete):
 
  - merge pending_new and new events to increase processing time and decrease thread switching
  - add weak transactions to able process dependant transactions concurently

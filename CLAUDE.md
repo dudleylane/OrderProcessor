@@ -78,7 +78,7 @@ IncomingQueues → Processor → OrderStateMachine → OrderMatcher/OrderStorage
 |--------|----------|---------|
 | **Queues** | `src/IncomingQueues.cpp`, `src/OutgoingQueues.cpp` | Lock-free event queues (MPMC) |
 | **Processor** | `src/Processor.cpp` | Main event handler, central entry point |
-| **State Machine** | `src/StateMachine.cpp`, `src/OrderStateMachineImpl.cpp` | Order state management (20+ states) |
+| **State Machine** | `src/StateMachine.cpp`, `src/OrderStateMachineImpl.cpp` | Order state management (14 states, 47+ transitions) |
 | **OrderMatcher** | `src/OrderMatcher.cpp` | Order matching logic |
 | **OrderBook** | `src/OrderBookImpl.cpp` | Price-sorted buy/sell sides |
 | **Transaction** | `src/TransactionMgr.cpp`, `src/TransactionScope.cpp` | ACID transaction coordination |
@@ -163,25 +163,56 @@ The Processor handles the following incoming events (defined in `src/QueuesDef.h
 
 ## Test Structure
 
-Tests are in `test/` using Google Test framework:
+Tests are in `test/` using Google Test framework (24 test files):
+
+### Core Tests
 - `CodecsTest.cpp` - Codec encode/decode tests
 - `IncomingQueuesTest.cpp` - Lock-free event queue tests
+- `OutgoingQueuesTest.cpp` - Outgoing queue tests
 - `InterlockCacheTest.cpp` - Lock-free cache tests
 - `NLinkTreeTest.cpp` - Transaction tree tests
 - `ProcessorTest.cpp` - Main processor tests
 - `StateMachineTest.cpp` - State machine transitions
-- `OrderBookTest.cpp` - Order book operations
-- `FileStorageTest.cpp` - Persistence tests
 - `StatesTest.cpp` - Order state tests
+- `OrderBookTest.cpp` - Order book operations
+- `OrderMatcherTest.cpp` - Order matching tests
+- `OrderStorageTest.cpp` - Order storage tests
+
+### Transaction Tests
+- `TransactionMgrTest.cpp` - Transaction manager tests
+- `TransactionScopeTest.cpp` - Transaction scope tests
+- `TrOperationsTest.cpp` - Transaction operations tests
+
+### Storage Tests
+- `FileStorageTest.cpp` - Persistence tests
 - `StorageRecordDispatcherTest.cpp` - Storage dispatcher tests
+- `WideDataStorageTest.cpp` - Wide data storage tests
+
+### Other Tests
+- `DeferedEventsTest.cpp` - Deferred event tests
+- `FiltersTest.cpp` - Order filter tests
+- `IdTGeneratorTest.cpp` - ID generator tests
+- `QueuesManagerTest.cpp` - Queue manager tests
+- `SubscriptionTest.cpp` - Subscription layer tests
 - `TaskManagerTest.cpp` - Task manager tests
 - `IntegrationTest.cpp` - Full integration tests
 
-Helper utilities: `TestAux.cpp/h`, `StateMachineHelper.cpp/h`
+### Test Utilities
+- `TestAux.cpp/h` - Test helper functions and mock contexts
+- `StateMachineHelper.cpp/h` - State machine test helpers
+- `TestFixtures.h` - Shared test fixtures
+
+### Mock Objects (`test/mocks/`)
+- `MockDefered.h` - Mock deferred event handlers
+- `MockOrderBook.h` - Mock order book
+- `MockQueues.h` - Mock queue implementations
+- `MockStorage.h` - Mock storage layer
+- `MockTasks.h` - Mock task manager
+- `MockTransaction.h` - Mock transaction components
 
 ### Legacy Test Files
 
-The `test/` directory contains legacy test files (`test*.cpp`) with original test implementations being migrated to Google Test format. These files are retained for reference during migration.
+The `test/` directory contains 10 legacy test files (`test*.cpp`) with original test implementations. These files are retained for reference during migration to Google Test format.
 
 Benchmarks in `bench/`:
 - `EventProcessingBench.cpp` - Event queue throughput

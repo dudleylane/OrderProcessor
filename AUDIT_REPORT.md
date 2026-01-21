@@ -275,7 +275,7 @@ gcovr -r .. --html-details coverage.html
 
 | Component | Implementation Status |
 |-----------|----------------------|
-| Order State Machine | Implemented (13 states, full Boost MSM) |
+| Order State Machine | Implemented (14 states, 47+ transitions, full Boost MSM) |
 | Order Matching | Implemented (price-time priority) |
 | Order Book | Implemented (buy/sell sides, sorted) |
 | Transaction Management | **Fully Implemented** (commit/rollback + staging) |

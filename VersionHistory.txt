@@ -1,3 +1,9 @@
+================================================================================
+HISTORICAL DOCUMENT: Version history from original Windows/MSVC development.
+The project was migrated to Linux/GCC with C++23 in January 2026.
+See AUDIT_REPORT.md for current status and README.md for build instructions.
+================================================================================
+
 /**
  Concurrent Order Processor library
 
@@ -11,7 +17,7 @@
 */
 
 
-History of changes
+History of changes (2009-2010, Windows/MSVC era)
 
 2010.Oct.01 v.0.0.0.20
 -----------------------------------------------------------------------------------------

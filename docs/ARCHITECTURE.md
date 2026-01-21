@@ -26,7 +26,7 @@
 OrderProcessor is a high-performance, concurrent order processing library written in C++23. It provides:
 
 - **ACID-compliant** transaction processing
-- **State machine-based** order lifecycle management (13 states, 47+ transitions)
+- **State machine-based** order lifecycle management (14 states, 47+ transitions)
 - **Order matching** against an in-memory order book with price-time priority
 - **Lock-free** and fine-grained locking for maximum throughput
 - **File-based persistence** with versioned records
@@ -80,7 +80,7 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 │  ┌───────────────────┐ ┌────────────┐ ┌──────────────────┐                  │
 │  │  OrderStateMachine│ │OrderMatcher│ │ TransactionScope │                  │
 │  │  (Boost.MSM)      │ │            │ │                  │                  │
-│  │  • 13 States      │ │ • Price-   │ │ • Operation      │                  │
+│  │  • 14 States      │ │ • Price-   │ │ • Operation      │                  │
 │  │  • 47+ Transitions│ │   Time     │ │   Collection     │                  │
 │  │  • Event Handlers │ │   Priority │ │ • Atomic Exec    │                  │
 │  └───────────────────┘ └────────────┘ └──────────────────┘                  │
@@ -192,9 +192,9 @@ COP (Concurrent Order Processor)
 
 | Test File | Test Case | Description |
 |-----------|-----------|-------------|
-| `testProcessor.cpp` | `testProcessor()` | Event pipeline validation |
-| `testIntegral.cpp` | `testIntegral()` | End-to-end integration |
-| `testEventBenchmark.cpp` | `processNewOrders()` | Throughput benchmarking |
+| `ProcessorTest.cpp` | `ProcessorTest.*` | Event pipeline validation |
+| `IntegrationTest.cpp` | `IntegrationTest.*` | End-to-end integration |
+| `EventProcessingBench.cpp` | `BM_EventProcessing*` | Throughput benchmarking |
 
 ---
 
@@ -246,7 +246,7 @@ COP (Concurrent Order Processor)
 
 | Test File | Test Case | Description |
 |-----------|-----------|-------------|
-| `testIncomingQueues.cpp` | `testIncomingQueues()` | Queue insertion/retrieval |
+| `IncomingQueuesTest.cpp` | `IncomingQueuesTest.*` | Queue insertion/retrieval |
 | `InterlockCacheTest.cpp` | `PopAndPushBasic` | Underlying cache mechanism |
 
 ---
@@ -289,8 +289,8 @@ COP (Concurrent Order Processor)
 
 | Test File | Test Case | Description |
 |-----------|-----------|-------------|
-| `testProcessor.cpp` | `testProcessor()` | Output queue validation |
-| `testIntegral.cpp` | `testIntegral()` | End-to-end output verification |
+| `OutgoingQueuesTest.cpp` | `OutgoingQueuesTest.*` | Output queue validation |
+| `IntegrationTest.cpp` | `IntegrationTest.*` | End-to-end output verification |
 
 ---
 
@@ -342,8 +342,8 @@ COP (Concurrent Order Processor)
 
 | Test File | Test Case | Description |
 |-----------|-----------|-------------|
-| `testOrderBook.cpp` | `testOrderBook()` | Insert/remove/lookup operations |
-| `testIntegral.cpp` | `testMarketOrder_NotMatched()` | Unmatched order book state |
+| `OrderBookTest.cpp` | `OrderBookTest.*` | Insert/remove/lookup operations |
+| `IntegrationTest.cpp` | `IntegrationTest.*` | Order book integration scenarios |
 
 ---
 
@@ -400,9 +400,9 @@ COP (Concurrent Order Processor)
 
 | Test File | Test Case | Description |
 |-----------|-----------|-------------|
-| `testIntegral.cpp` | `testIntegral()` | Order matching in full flow |
-| `testIntegral.cpp` | `testMarketOrder_NotMatched()` | No counterparty scenario |
-| `bench/OrderMatchingBench.cpp` | Various | Matching performance |
+| `OrderMatcherTest.cpp` | `OrderMatcherTest.*` | Order matching unit tests |
+| `IntegrationTest.cpp` | `IntegrationTest.*` | Order matching in full flow |
+| `OrderMatchingBench.cpp` | `BM_OrderMatching*` | Matching performance |
 
 ---
 
@@ -688,8 +688,8 @@ COP (Concurrent Order Processor)
 
 | Test File | Test Cases | Coverage |
 |-----------|------------|----------|
-| `testStates.cpp` | 47 individual state tests | All transitions |
-| `testStateMachine.cpp` | `testStateMachine()` | Full lifecycle scenarios |
+| `StatesTest.cpp` | 47 individual state tests | All transitions |
+| `StateMachineTest.cpp` | `StateMachineTest.*` | Full lifecycle scenarios |
 | `StateMachineHelper.cpp` | Helper class | Test event dispatching |
 
 ---
@@ -840,10 +840,9 @@ COP (Concurrent Order Processor)
 | Test File | Test Cases | Coverage |
 |-----------|------------|----------|
 | `InterlockCacheTest.cpp` | `PopAndPushBasic`, `ExceedCacheSize` | Lock-free cache |
-| `testInterlockCache.cpp` | `cacheBenchmark()` | Cache performance |
+| `InterlockCacheBench.cpp` | `BM_InterlockCache*` | Cache performance |
 | `NLinkTreeTest.cpp` | `AddSingleNode`, `ClearTree` | Dependency graph |
-| `testNLinkTree.cpp` | `testNLinkTreeBenchmark()` | Graph performance |
-| `testTaskManager.cpp` | `testTaskManager()` | Task parallelism |
+| `TaskManagerTest.cpp` | `TaskManagerTest.*` | Task parallelism |
 
 ---
 
@@ -1001,10 +1000,10 @@ COP (Concurrent Order Processor)
 
 | Test File | Test Cases | Coverage |
 |-----------|------------|----------|
-| `NLinkTreeTest.cpp` | `AddSingleNode` | Dependency tracking |
-| `testNLinkTree.cpp` | `testNLinkTreeBenchmark()` | Dependency performance |
-| `testIntegral.cpp` | `testIntegral()` | Full transaction flow |
-| `TestAux.cpp` | `TestTransactionContext` | Transaction scope mocking |
+| `NLinkTreeTest.cpp` | `AddSingleNode`, `ClearTree` | Dependency tracking |
+| `TransactionMgrTest.cpp` | `TransactionMgrTest.*` | Transaction manager tests |
+| `TransactionScopeTest.cpp` | `TransactionScopeTest.*` | Transaction scope tests |
+| `IntegrationTest.cpp` | `IntegrationTest.*` | Full transaction flow |
 
 ---
 
@@ -1134,10 +1133,10 @@ COP (Concurrent Order Processor)
 | Test File | Test Cases | Coverage |
 |-----------|------------|----------|
 | `CodecsTest.cpp` | `InstrumentCodecFilled`, `OrderCodecFilled`, etc. | All codec types |
-| `testCodecs.cpp` | `testInstrumentCodec()`, `testOrderCodec()`, etc. | Round-trip validation |
-| `FileStorageTest.cpp` | Placeholder | File I/O (pending) |
-| `testFileStorage.cpp` | `testFileStorage()` | File read/write/recovery |
-| `testStorageRecordDispatcher.cpp` | `testStorageRecordDispatcher()` | Record routing |
+| `FileStorageTest.cpp` | `FileStorageTest.*` | File I/O operations |
+| `StorageRecordDispatcherTest.cpp` | `StorageRecordDispatcherTest.*` | Record routing |
+| `OrderStorageTest.cpp` | `OrderStorageTest.*` | Order storage operations |
+| `WideDataStorageTest.cpp` | `WideDataStorageTest.*` | Reference data storage |
 
 ---
 
@@ -1158,31 +1157,29 @@ COP (Concurrent Order Processor)
 
 ### 9.2 Test File Details
 
-#### Unit Tests (Google Test Format)
+#### Google Test Files (24 files)
 
-| Test File | Test Class | Key Test Cases |
-|-----------|------------|----------------|
-| `CodecsTest.cpp` | `CodecsTest`, `OrderCodecTest` | `InstrumentCodecEmpty`, `InstrumentCodecFilled`, `StringTCodecEmpty`, `StringTCodecFilled`, `AccountCodecEmpty`, `AccountCodecFilled`, `ClearingCodecEmpty`, `ClearingCodecFilled`, `RawDataCodecEmpty`, `RawDataCodecFilled`, `OrderCodecEmpty`, `OrderCodecFilled` |
-| `InterlockCacheTest.cpp` | `InterlockCacheTest` | `PopAndPushBasic`, `MultiplePopPush`, `ExceedCacheSize` |
-| `NLinkTreeTest.cpp` | `NLinkTreeTest` | `AddSingleNode`, `ClearTree` |
+| Category | Test Files |
+|----------|------------|
+| **Core** | `CodecsTest.cpp`, `IncomingQueuesTest.cpp`, `OutgoingQueuesTest.cpp`, `InterlockCacheTest.cpp`, `NLinkTreeTest.cpp`, `ProcessorTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp` |
+| **Transactions** | `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp` |
+| **Storage** | `FileStorageTest.cpp`, `StorageRecordDispatcherTest.cpp`, `WideDataStorageTest.cpp` |
+| **Other** | `DeferedEventsTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `QueuesManagerTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `IntegrationTest.cpp` |
 
-#### Legacy Tests (Comprehensive Implementation)
+#### Legacy Tests (10 files, retained for reference)
 
-| Test File | Functions | Coverage |
-|-----------|-----------|----------|
-| `testStateMachine.cpp` | `testStateMachineOnly()`, `testStateMachine()` | Full state machine lifecycle |
-| `testStates.cpp` | 47 individual `test*()` functions | All 47 state transitions |
-| `testOrderBook.cpp` | `testOrderBook()` | Order book operations |
-| `testIncomingQueues.cpp` | `testIncomingQueues()` | Queue operations |
-| `testProcessor.cpp` | `testProcessor()` | Processor coordination |
-| `testIntegral.cpp` | `testMarketOrder_NotMatched()`, `testIntegralBenchmark_OneProduct()`, `testIntegralBenchmark_2Products()`, `testIntegral()` | End-to-end integration |
-| `testFileStorage.cpp` | `testFileStorage()` | File persistence |
-| `testStorageRecordDispatcher.cpp` | `testStorageRecordDispatcher()` | Record dispatching |
-| `testTaskManager.cpp` | `testTaskManager()` | Task scheduling |
-| `testNLinkTree.cpp` | `testNLinkTreeBenchmark()` | Dependency tree |
-| `testInterlockCache.cpp` | `cacheBenchmark()` | Cache performance |
-| `testEventBenchmark.cpp` | `processNewOrders()`, `processCancels()`, `processReplaces()`, `processTradeExecutions()` | Event throughput |
-| `testCodecs.cpp` | `testInstrumentCodec()`, `testStringTCodec()`, `testAccountCodec()`, `testClearingCodec()`, `testRawDataCodec()`, `testOrderCodec()`, `testCodecs()` | All codecs |
+| Test File | Coverage |
+|-----------|----------|
+| `testStateMachine.cpp` | Full state machine lifecycle |
+| `testStates.cpp` | All 47 state transitions |
+| `testOrderBook.cpp` | Order book operations |
+| `testIncomingQueues.cpp` | Queue operations |
+| `testProcessor.cpp` | Processor coordination |
+| `testIntegral.cpp` | End-to-end integration |
+| `testFileStorage.cpp` | File persistence |
+| `testStorageRecordDispatcher.cpp` | Record dispatching |
+| `testNLinkTree.cpp` | Dependency tree |
+| `testCodecs.cpp` | All codecs |
 
 ### 9.3 State Machine Test Coverage
 
@@ -1239,9 +1236,10 @@ COP (Concurrent Order Processor)
 
 | Category | Files |
 |----------|-------|
-| **Google Test** | `CodecsTest.cpp`, `InterlockCacheTest.cpp`, `NLinkTreeTest.cpp`, `ProcessorTest.cpp`, `StateMachineTest.cpp`, `OrderBookTest.cpp`, `FileStorageTest.cpp`, `IncomingQueuesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `TaskManagerTest.cpp`, `StatesTest.cpp` |
-| **Legacy Tests** | `testCodecs.cpp`, `testStateMachine.cpp`, `testStates.cpp`, `testOrderBook.cpp`, `testIncomingQueues.cpp`, `testProcessor.cpp`, `testIntegral.cpp`, `testFileStorage.cpp`, `testInterlockCache.cpp`, `testNLinkTree.cpp`, `testTaskManager.cpp`, `testStorageRecordDispatcher.cpp`, `testEventBenchmark.cpp` |
-| **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestMain.cpp`, `orderProcessorTest.cpp` |
+| **Google Test (24)** | `CodecsTest.cpp`, `DeferedEventsTest.cpp`, `FiltersTest.cpp`, `FileStorageTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `InterlockCacheTest.cpp`, `NLinkTreeTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp` |
+| **Legacy Tests (10)** | `testCodecs.cpp`, `testFileStorage.cpp`, `testIncomingQueues.cpp`, `testIntegral.cpp`, `testNLinkTree.cpp`, `testOrderBook.cpp`, `testProcessor.cpp`, `testStateMachine.cpp`, `testStates.cpp`, `testStorageRecordDispatcher.cpp` |
+| **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
+| **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 
 ### 10.3 Benchmark Files
 

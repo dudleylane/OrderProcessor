@@ -1,3 +1,9 @@
+================================================================================
+DEPRECATED: This file is retained for historical reference only.
+See README.md for current build instructions and project documentation.
+The project has been migrated from Windows/MSVC to Linux/GCC with C++23.
+================================================================================
+
 /**
  Concurrent Order Processor library
 

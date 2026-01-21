@@ -8,7 +8,7 @@ A high-performance, concurrent order processing library written in C++23. Provid
 ## Features
 
 - **ACID Transactions:** Full transaction support with rollback capability
-- **State Machine:** 20+ order states managed via Boost Meta State Machine (MSM)
+- **State Machine:** 14 order states with 47+ transitions managed via Boost Meta State Machine (MSM)
 - **Order Matching:** Price-time priority matching engine with order book
 - **Concurrent Design:** Lock-free queues, reader-writer locks, concurrent hash maps, wait-free caching
 - **Persistence:** File-based storage with versioning and codecs
@@ -85,16 +85,16 @@ Export results to JSON:
 
 ### Performance Results (Release Build)
 
-Benchmark results on 8-core CPU @ 3.8 GHz (with lock-free optimizations):
+Benchmark results on 8-core CPU @ 3.8 GHz:
 
-| Benchmark | Size | Time (ns) | Throughput |
-|-----------|------|-----------|------------|
-| EventProcessing | 8-8192 | 0.54 | ~1.85B ops/sec |
-| OrderMatching | 8-8192 | 0.54 | ~1.85B ops/sec |
-| StateMachineTransitions | 8-8192 | 0.55 | ~1.82B ops/sec |
-| InterlockCache | 8-8192 | 0.55 | ~1.82B ops/sec |
+| Benchmark | Time (ns) | Throughput |
+|-----------|-----------|------------|
+| EventProcessing | ~7,200 | ~139K ops/sec |
+| OrderMatching | ~7,300 | ~137K ops/sec |
+| StateMachineTransitions | ~9,100 | ~110K ops/sec |
+| InterlockCache | ~150 | ~6.7M ops/sec |
 
-All benchmarks achieve **sub-nanosecond** latency with consistent performance across batch sizes.
+Benchmarks measure complete operation cycles including state machine initialization, event processing, and storage operations.
 
 ## Architecture
 
