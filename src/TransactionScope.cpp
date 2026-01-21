@@ -11,6 +11,7 @@
 */
 
 #include <stdexcept>
+#include <utility>  // For std::swap
 #include "TransactionScope.h"
 #include "TrOperations.h"
 
@@ -26,6 +27,34 @@ TransactionScope::~TransactionScope(void)
 	for(size_t pos = 0; pos < operations_.size(); ++pos){
 		delete operations_[pos];
 	}
+}
+
+void TransactionScope::reset()
+{
+	// Delete all operations but keep the container capacity
+	for(size_t pos = 0; pos < operations_.size(); ++pos){
+		delete operations_[pos];
+	}
+	operations_.clear();
+	// Note: std::deque doesn't have shrink_to_fit guarantee but clear() is efficient
+
+	// Clear stage boundaries, preserving vector capacity
+	stageBoundaries_.clear();
+
+	// Reset transaction ID
+	id_ = TransactionId();
+
+	// Clear invalid reason string, preserving capacity
+	invalidReason_.clear();
+}
+
+void TransactionScope::swap(TransactionScope& other) noexcept
+{
+	// Swap all member variables efficiently
+	invalidReason_.swap(other.invalidReason_);
+	operations_.swap(other.operations_);
+	stageBoundaries_.swap(other.stageBoundaries_);
+	std::swap(id_, other.id_);
 }
 
 const TransactionId &TransactionScope::transactionId()const

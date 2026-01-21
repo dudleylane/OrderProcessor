@@ -17,6 +17,7 @@
 #include "QueuesDef.h"
 #include "StateMachineDef.h"
 #include "TransactionDef.h"
+#include "TransactionScopePool.h"
 #include "OrderMatcher.h"
 #include "DeferedEvents.h"
 
@@ -123,6 +124,9 @@ namespace Proc{
 
 		typedef std::list<DeferedEventBase *> DeferedEventsT;
 		DeferedEventsT events_;
+
+		/// Pool for TransactionScope objects to eliminate heap allocations
+		std::unique_ptr<ACID::TransactionScopePool> scopePool_;
 	};
 
 }

@@ -19,6 +19,7 @@
 #include <oneapi/tbb/spin_mutex.h>
 
 #include "QueuesDef.h"
+#include "CacheAlignedAtomic.h"
 
 namespace COP{
 namespace Queues{
@@ -78,8 +79,8 @@ namespace Queues{
 		/// Lock-free concurrent queue (MPMC safe)
 		oneapi::tbb::concurrent_queue<QueuedEvent> eventQueue_;
 
-		/// Atomic size counter for O(1) size() queries
-		std::atomic<u32> queueSize_{0};
+		/// Atomic size counter for O(1) size() queries - cache aligned
+		CacheAlignedAtomic<u32> queueSize_;
 
 		/// Pending event for top() without pop() - protected by pendingLock_
 		mutable oneapi::tbb::spin_mutex pendingLock_;

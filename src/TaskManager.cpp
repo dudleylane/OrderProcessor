@@ -79,19 +79,19 @@ TaskManager::~TaskManager(void)
 
 	char buf[64];
 	buf[0] = 0;
-	aux::toStr(buf, processed_.fetch_add(1));
+	aux::toStr(buf, processed_.load(std::memory_order_relaxed));
 	aux::ExchLogger::instance()->debug(string("Tasks processed: ") + buf);
 	buf[0] = 0;
-	aux::toStr(buf, finished_.fetch_add(1));
+	aux::toStr(buf, finished_.load(std::memory_order_relaxed));
 	aux::ExchLogger::instance()->debug(string("Tasks finished: ") + buf);
 	buf[0] = 0;
-	aux::toStr(buf, createdTr_.fetch_add(1));
+	aux::toStr(buf, createdTr_.load(std::memory_order_relaxed));
 	aux::ExchLogger::instance()->debug(string("TrTasks created: ") + buf);
 	buf[0] = 0;
-	aux::toStr(buf, processedTr_.fetch_add(1));
+	aux::toStr(buf, processedTr_.load(std::memory_order_relaxed));
 	aux::ExchLogger::instance()->debug(string("TrTasks processed: ") + buf);
 	buf[0] = 0;
-	aux::toStr(buf, finishedTr_.fetch_add(1));
+	aux::toStr(buf, finishedTr_.load(std::memory_order_relaxed));
 	aux::ExchLogger::instance()->debug(string("TrTasks finished: ") + buf);
 
 	aux::ExchLogger::instance()->note("TaskManager destroyed.");
@@ -233,30 +233,36 @@ void TaskManager::finishEvent(Queues::InQueueProcessor *proc)
 
 void TaskManager::taskCreated()
 {
-	created_.fetch_add(1);
+	// Relaxed ordering - statistics counters don't need memory synchronization
+	created_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void TaskManager::taskProcessed()
 {
-	processed_.fetch_add(1);
+	// Relaxed ordering - statistics counters don't need memory synchronization
+	processed_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void TaskManager::taskFinished()
 {
-	finished_.fetch_add(1);
+	// Relaxed ordering - statistics counters don't need memory synchronization
+	finished_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void TaskManager::taskCreatedTr()
 {
-	createdTr_.fetch_add(1);
+	// Relaxed ordering - statistics counters don't need memory synchronization
+	createdTr_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void TaskManager::taskProcessedTr()
 {
-	processedTr_.fetch_add(1);
+	// Relaxed ordering - statistics counters don't need memory synchronization
+	processedTr_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void TaskManager::taskFinishedTr()
 {
-	finishedTr_.fetch_add(1);
+	// Relaxed ordering - statistics counters don't need memory synchronization
+	finishedTr_.fetch_add(1, std::memory_order_relaxed);
 }

@@ -17,6 +17,21 @@ option(BUILD_BENCHMARKS "Build performance benchmarks" ON)
 
 # Compiler flags
 add_compile_options(-msse2 -fexceptions)
+
+# Ultra low-latency optimization flags for Release builds
+if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    add_compile_options(
+        -O3                    # Aggressive optimization
+        -march=native          # CPU-specific optimizations
+        -mtune=native          # CPU-specific tuning
+        -flto                  # Link-time optimization
+        -ffast-math            # Fast floating-point (safe for price comparisons)
+        -funroll-loops         # Loop unrolling
+        -fomit-frame-pointer   # Free up register for hot paths
+    )
+    add_link_options(-flto)    # Enable LTO at link time
+endif()
+
 add_compile_definitions(
     BOOST_MPL_CFG_NO_PREPROCESSED_HEADERS
     BOOST_MPL_LIMIT_VECTOR_SIZE=50

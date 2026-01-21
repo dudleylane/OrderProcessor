@@ -20,25 +20,25 @@ namespace COP{
 
 	namespace ACID{
 	
-		class CreateExecReportTrOperation: public Operation{
+		class CreateExecReportTrOperation final : public Operation{
 		public:
 			CreateExecReportTrOperation(OrderStatus status, ExecType execType, const OrderEntry &order);
 			~CreateExecReportTrOperation();
 
-			virtual void execute(const Context &cnxt);
-			virtual void rollback(const Context &cnxt);
+			void execute(const Context &cnxt) override;
+			void rollback(const Context &cnxt) override;
 		private:
 			OrderStatus status_;
 			ExecType execType_;
 		};
 
-		class CreateTradeExecReportTrOperation: public Operation{
+		class CreateTradeExecReportTrOperation final : public Operation{
 		public:
 			CreateTradeExecReportTrOperation(const TradeExecEntry *trade, OrderStatus status, const OrderEntry &order);
 			~CreateTradeExecReportTrOperation();
 
-			virtual void execute(const Context &cnxt);
-			virtual void rollback(const Context &cnxt);
+			void execute(const Context &cnxt) override;
+			void rollback(const Context &cnxt) override;
 		private:
 			QuantityT lastQty_;
 			PriceT lastPx_;
@@ -47,37 +47,37 @@ namespace COP{
 			OrderStatus status_;
 		};
 
-		class CreateRejectExecReportTrOperation: public Operation{
+		class CreateRejectExecReportTrOperation final : public Operation{
 		public:
 			CreateRejectExecReportTrOperation(const std::string &reason, OrderStatus status, const OrderEntry &order);
 			~CreateRejectExecReportTrOperation();
 
-			virtual void execute(const Context &cnxt);
-			virtual void rollback(const Context &cnxt);
+			void execute(const Context &cnxt) override;
+			void rollback(const Context &cnxt) override;
 		private:
 			std::string reason_;
 			OrderStatus status_;
 		};
 
-		class CreateReplaceExecReportTrOperation: public Operation{
+		class CreateReplaceExecReportTrOperation final : public Operation{
 		public:
 			CreateReplaceExecReportTrOperation(const IdT &origOrderId, OrderStatus status, const OrderEntry &order);
 			~CreateReplaceExecReportTrOperation();
 
-			virtual void execute(const Context &cnxt);
-			virtual void rollback(const Context &cnxt);
+			void execute(const Context &cnxt) override;
+			void rollback(const Context &cnxt) override;
 		private:
 			IdT origOrderId_;
 			OrderStatus status_;
 		};
 
-		class CreateCorrectExecReportTrOperation: public Operation{
+		class CreateCorrectExecReportTrOperation final : public Operation{
 		public:
 			CreateCorrectExecReportTrOperation(const ExecCorrectExecEntry *correct, OrderStatus status, const OrderEntry &order);
 			~CreateCorrectExecReportTrOperation();
 
-			virtual void execute(const Context &cnxt);
-			virtual void rollback(const Context &cnxt);
+			void execute(const Context &cnxt) override;
+			void rollback(const Context &cnxt) override;
 		private:
 			QuantityT cumQty_;
 			QuantityT leavesQty_;
@@ -91,26 +91,26 @@ namespace COP{
 			OrderStatus status_;
 		};
 
-		class AddToOrderBookTrOperation: public Operation{
+		class AddToOrderBookTrOperation final : public Operation{
 		public:
 			AddToOrderBookTrOperation(const OrderEntry &order, const IdT &instrId);
 			~AddToOrderBookTrOperation();
 
-			virtual void execute(const Context &cnxt);
-			virtual void rollback(const Context &cnxt);
+			void execute(const Context &cnxt) override;
+			void rollback(const Context &cnxt) override;
 		private:
 			AddToOrderBookTrOperation(const AddToOrderBookTrOperation &);
 			AddToOrderBookTrOperation &operator=(const AddToOrderBookTrOperation &);
 			const OrderEntry &order_;
 		};
 
-		class RemoveFromOrderBookTrOperation: public Operation{
+		class RemoveFromOrderBookTrOperation final : public Operation{
 		public:
 			RemoveFromOrderBookTrOperation(const OrderEntry &order, const IdT &instrId);
 			~RemoveFromOrderBookTrOperation();
 
-			virtual void execute(const Context &cnxt);
-			virtual void rollback(const Context &cnxt);
+			void execute(const Context &cnxt) override;
+			void rollback(const Context &cnxt) override;
 		private:
 			RemoveFromOrderBookTrOperation(const RemoveFromOrderBookTrOperation &);
 			RemoveFromOrderBookTrOperation &operator=(const RemoveFromOrderBookTrOperation &);
@@ -147,24 +147,24 @@ namespace COP{
 			T event_;
 		};
 
-		class CancelRejectTrOperation: public Operation{
+		class CancelRejectTrOperation final : public Operation{
 		public:
 			CancelRejectTrOperation(OrderStatus status, const OrderEntry &order);
 			~CancelRejectTrOperation();
 
-			virtual void execute(const Context &cnxt);
-			virtual void rollback(const Context &cnxt);
+			void execute(const Context &cnxt) override;
+			void rollback(const Context &cnxt) override;
 		private:
 			OrderStatus status_;
 		};
 
-		class MatchOrderTrOperation: public Operation{
+		class MatchOrderTrOperation final : public Operation{
 		public:
 			MatchOrderTrOperation(OrderEntry *order);
 			~MatchOrderTrOperation();
 
-			virtual void execute(const Context &cnxt);
-			virtual void rollback(const Context &cnxt);
+			void execute(const Context &cnxt) override;
+			void rollback(const Context &cnxt) override;
 		private:
 			OrderEntry *order_;
 			size_t eventCountBefore_;

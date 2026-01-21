@@ -23,11 +23,24 @@ namespace COP{
 	namespace ACID{
 		class TransactOperation;
 
-class TransactionScope: public Scope, public Transaction
+class TransactionScope final : public Scope, public Transaction
 {
 public:
 	TransactionScope(void);
 	~TransactionScope(void);
+
+	/**
+	 * Reset the TransactionScope for reuse without deallocation.
+	 * Clears all operations and stage boundaries while preserving
+	 * allocated capacity for better performance.
+	 */
+	void reset();
+
+	/**
+	 * Swap the contents of this TransactionScope with another.
+	 * Used by the pool to transfer data from a pooled scope to a heap-allocated one.
+	 */
+	void swap(TransactionScope& other) noexcept;
 
 public:
 	/// reimplemented from Scope

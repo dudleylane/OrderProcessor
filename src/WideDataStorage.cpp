@@ -12,16 +12,40 @@
 
 
 #include <stdexcept>
+#include <immintrin.h>  // For _mm_pause()
+#include <algorithm>    // For std::min
 #include "WideDataStorage.h"
+#include "CacheAlignedAtomic.h"
 #include "DataModelDef.h"
 #include "Logger.h"
 
 using namespace COP;
 using namespace COP::Store;
 
-WideParamsDataStorage::WideParamsDataStorage(void): storage_(nullptr)
+namespace {
+    /**
+     * CAS loop with exponential backoff using _mm_pause() to reduce
+     * contention and improve performance under high load.
+     *
+     * Updates 'counter' to 'newVal' if current value is less than newVal.
+     */
+    inline void casUpdateWithBackoff(CacheAlignedAtomic<u64>& counter, u64 newVal) {
+        u64 current = counter.load(std::memory_order_acquire);
+        int backoff = 1;
+        while (current < newVal &&
+               !counter.compare_exchange_weak(current, newVal,
+                   std::memory_order_release, std::memory_order_acquire)) {
+            // Exponential backoff with _mm_pause() to reduce cache line bouncing
+            for (int i = 0; i < backoff; ++i) {
+                _mm_pause();
+            }
+            backoff = std::min(backoff * 2, 64);
+        }
+    }
+}
+
+WideParamsDataStorage::WideParamsDataStorage(void): subscrCounter_(1), storage_(nullptr)
 {
-	subscrCounter_.store(1);
 
 	aux::ExchLogger::instance()->note("WideParamsDataStorage created");
 }
@@ -118,7 +142,7 @@ void WideParamsDataStorage::get(const SourceIdT &id, ExecutionsT **val)const
 
 SourceIdT WideParamsDataStorage::add(InstrumentEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1), 1);
+	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -132,7 +156,7 @@ SourceIdT WideParamsDataStorage::add(InstrumentEntry *val)
 
 SourceIdT WideParamsDataStorage::add(StringT *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1), 0);
+	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 0);
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -145,7 +169,7 @@ SourceIdT WideParamsDataStorage::add(StringT *val)
 
 SourceIdT WideParamsDataStorage::add(RawDataEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1), 1);
+	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -159,7 +183,7 @@ SourceIdT WideParamsDataStorage::add(RawDataEntry *val)
 
 SourceIdT WideParamsDataStorage::add(AccountEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1), 1);
+	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -173,7 +197,7 @@ SourceIdT WideParamsDataStorage::add(AccountEntry *val)
 
 SourceIdT WideParamsDataStorage::add(ClearingEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1), 1);
+	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -187,7 +211,7 @@ SourceIdT WideParamsDataStorage::add(ClearingEntry *val)
 
 SourceIdT WideParamsDataStorage::add(ExecutionsT *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1), 1);
+	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -204,11 +228,8 @@ SourceIdT WideParamsDataStorage::add(ExecutionsT *val)
 
 void WideParamsDataStorage::restore(InstrumentEntry *val)
 {
-	// Atomically update subscrCounter_ if needed using compare-exchange
-	u64 current = subscrCounter_.load(std::memory_order_acquire);
-	u64 newVal = val->id_.id_ + 1;
-	while(current < newVal && !subscrCounter_.compare_exchange_weak(current, newVal, std::memory_order_release, std::memory_order_acquire))
-		; // Empty body - CAS loop
+	// Atomically update subscrCounter_ with exponential backoff
+	casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -218,11 +239,8 @@ void WideParamsDataStorage::restore(InstrumentEntry *val)
 
 void WideParamsDataStorage::restore(const IdT& id, StringT *val)
 {
-	// Atomically update subscrCounter_ if needed using compare-exchange
-	u64 current = subscrCounter_.load(std::memory_order_acquire);
-	u64 newVal = id.id_ + 1;
-	while(current < newVal && !subscrCounter_.compare_exchange_weak(current, newVal, std::memory_order_release, std::memory_order_acquire))
-		; // Empty body - CAS loop
+	// Atomically update subscrCounter_ with exponential backoff
+	casUpdateWithBackoff(subscrCounter_, id.id_ + 1);
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -232,11 +250,8 @@ void WideParamsDataStorage::restore(const IdT& id, StringT *val)
 
 void WideParamsDataStorage::restore(RawDataEntry *val)
 {
-	// Atomically update subscrCounter_ if needed using compare-exchange
-	u64 current = subscrCounter_.load(std::memory_order_acquire);
-	u64 newVal = val->id_.id_ + 1;
-	while(current < newVal && !subscrCounter_.compare_exchange_weak(current, newVal, std::memory_order_release, std::memory_order_acquire))
-		; // Empty body - CAS loop
+	// Atomically update subscrCounter_ with exponential backoff
+	casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -246,11 +261,8 @@ void WideParamsDataStorage::restore(RawDataEntry *val)
 
 void WideParamsDataStorage::restore(AccountEntry *val)
 {
-	// Atomically update subscrCounter_ if needed using compare-exchange
-	u64 current = subscrCounter_.load(std::memory_order_acquire);
-	u64 newVal = val->id_.id_ + 1;
-	while(current < newVal && !subscrCounter_.compare_exchange_weak(current, newVal, std::memory_order_release, std::memory_order_acquire))
-		; // Empty body - CAS loop
+	// Atomically update subscrCounter_ with exponential backoff
+	casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
@@ -260,11 +272,8 @@ void WideParamsDataStorage::restore(AccountEntry *val)
 
 void WideParamsDataStorage::restore(ClearingEntry *val)
 {
-	// Atomically update subscrCounter_ if needed using compare-exchange
-	u64 current = subscrCounter_.load(std::memory_order_acquire);
-	u64 newVal = val->id_.id_ + 1;
-	while(current < newVal && !subscrCounter_.compare_exchange_weak(current, newVal, std::memory_order_release, std::memory_order_acquire))
-		; // Empty body - CAS loop
+	// Atomically update subscrCounter_ with exponential backoff
+	casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
 	{
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);

@@ -26,10 +26,12 @@ using namespace COP::Queues;
 using namespace COP::ACID;
 using namespace COP::OrdState;
 using namespace COP::Store;
+using COP::ACID::PooledTransactionScope;
 
 Processor::Processor(void): generator_(nullptr), orderStorage_(nullptr), orderBook_(nullptr),
 	inQueues_(nullptr), outQueues_(nullptr), testStateMachine_(false),
-	testStateMachineCheckResult_(false)
+	testStateMachineCheckResult_(false),
+	scopePool_(std::make_unique<ACID::TransactionScopePool>())
 {
 }
 
@@ -48,7 +50,7 @@ void Processor::init(const ProcessorParams &params)
 	transactMgr_ = params.transactMgr_;
 
 	testStateMachine_ = params.testStateMachine_;
-	testStateMachineCheckResult_ = params.testStateMachineCheckResult_;	
+	testStateMachineCheckResult_ = params.testStateMachineCheckResult_;
 
 	assert(nullptr != generator_);
 	assert(nullptr != orderStorage_);
@@ -81,7 +83,7 @@ void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 
 	// prepare context
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
-	std::unique_ptr<TransactionScope> scope(new TransactionScope());
+	PooledTransactionScope scope(scopePool_.get());
 
 	// restore event to process
 	onOrderReceived evnt2Proc(evnt.order_);
@@ -103,7 +105,7 @@ void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 	// enqueue transaction, prepared by state machine
 	assert(nullptr != transactMgr_);
 	std::unique_ptr<Transaction> tr(scope.release());
-	transactMgr_->addTransaction(tr);//scope.executeTransaction(cntxt);
+	transactMgr_->addTransaction(tr);
 
 	// process defered events
 	processDeferedEvent();
@@ -116,7 +118,7 @@ void Processor::onEvent(const std::string &/*source*/, const OrderCancelEvent &e
 
 	// prepare context
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
-	std::unique_ptr<TransactionScope> scope(new TransactionScope());
+	PooledTransactionScope scope(scopePool_.get());
 
 	// locate the order to cancel
 	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
@@ -155,7 +157,7 @@ void Processor::onEvent(const std::string &/*source*/, const OrderReplaceEvent &
 
 	// prepare context
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
-	std::unique_ptr<TransactionScope> scope(new TransactionScope());
+	PooledTransactionScope scope(scopePool_.get());
 
 	if(nullptr != evnt.replacementOrder_) {
 		// New replacement order submission - process via state machine
@@ -212,7 +214,7 @@ void Processor::onEvent(const std::string &/*source*/, const COP::Queues::OrderC
 
 	// prepare context
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
-	std::unique_ptr<TransactionScope> scope(new TransactionScope());
+	PooledTransactionScope scope(scopePool_.get());
 
 	// locate the order
 	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
@@ -277,7 +279,7 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 	///prepare context
 	assert(events_.empty());
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
-	std::unique_ptr<TransactionScope> scope(new TransactionScope());
+	PooledTransactionScope scope(scopePool_.get());
 
 	switch(evnt.type_){
 	case ProcessEvent::ON_REPLACE_RECEVIED:
@@ -370,7 +372,7 @@ void Processor::onEvent(const std::string &/*source*/, const TimerEvent &evnt)
 
 	// prepare context
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
-	std::unique_ptr<TransactionScope> scope(new TransactionScope());
+	PooledTransactionScope scope(scopePool_.get());
 
 	// locate the order
 	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
@@ -460,13 +462,13 @@ void Processor::removeDeferedEventsFrom(size_t startIndex)
 void Processor::onEvent(DeferedEventBase *evnt)
 {
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
-	std::unique_ptr<TransactionScope> scope(new TransactionScope());
+	PooledTransactionScope scope(scopePool_.get());
 
 	evnt->execute(this, cntxt, scope.get());
 
 	assert(nullptr != transactMgr_);
 	std::unique_ptr<Transaction> tr(scope.release());
-	transactMgr_->addTransaction(tr);//scope.executeTransaction(cntxt);
+	transactMgr_->addTransaction(tr);
 }
 
 void Processor::processDeferedEvent()

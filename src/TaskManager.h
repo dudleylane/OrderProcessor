@@ -22,6 +22,7 @@
 #include "TasksDef.h"
 #include "QueuesDef.h"
 #include "TransactionDef.h"
+#include "CacheAlignedAtomic.h"
 
 namespace COP{
 
@@ -85,20 +86,23 @@ private:
 	Queues::InQueuesContainer *inQueues_;
 
 	ACID::ProcessorPoolT transactProcessors_;
-	std::atomic<int> lastAvailableTransactProcessor_;
-	std::atomic<int> totalAvailableTransactProcessor_;
+	// Cache-aligned to prevent false sharing between threads
+	CacheAlignedAtomic<int> lastAvailableTransactProcessor_;
+	CacheAlignedAtomic<int> totalAvailableTransactProcessor_;
 
 	Queues::InQueueProcessorsPoolT evntProcessors_;
-	std::atomic<int> lastAvailableEvntProcessor_;
-	std::atomic<int> totalAvailableEvntProcessor_;
+	// Cache-aligned to prevent false sharing between threads
+	CacheAlignedAtomic<int> lastAvailableEvntProcessor_;
+	CacheAlignedAtomic<int> totalAvailableEvntProcessor_;
 
-	std::atomic<int> created_;
-	std::atomic<int> processed_;
-	std::atomic<int> finished_;
+	// Statistics counters - cache aligned for independent access
+	CacheAlignedAtomic<int> created_;
+	CacheAlignedAtomic<int> processed_;
+	CacheAlignedAtomic<int> finished_;
 
-	std::atomic<int> createdTr_;
-	std::atomic<int> processedTr_;
-	std::atomic<int> finishedTr_;
+	CacheAlignedAtomic<int> createdTr_;
+	CacheAlignedAtomic<int> processedTr_;
+	CacheAlignedAtomic<int> finishedTr_;
 
 };
 

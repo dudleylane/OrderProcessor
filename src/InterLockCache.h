@@ -135,12 +135,12 @@ namespace aux{
 
 		std::string name_;
 		Node *cache_;
-		char align1_[256];
-		std::atomic<Node *> nextFree_;
-		char align2_[256];
-		std::atomic<Node *> nextNull_;
-		char align3_[256];
-		std::atomic<int> cacheMiss_;
+		// Use cache line alignment (64 bytes) to prevent false sharing
+		// between frequently accessed atomics. Previous 256-byte padding
+		// was excessive (4x a cache line) and wasted memory.
+		alignas(64) std::atomic<Node *> nextFree_;
+		alignas(64) std::atomic<Node *> nextNull_;
+		alignas(64) std::atomic<int> cacheMiss_;
 		
 	protected:
 		InterLockCache(const InterLockCache &);

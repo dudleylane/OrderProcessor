@@ -17,6 +17,7 @@
 #include <map>
 #include "Singleton.h"
 #include "FileStorageDef.h"
+#include "CacheAlignedAtomic.h"
 
 namespace COP{
 
@@ -63,7 +64,8 @@ private:
 	/// Allows concurrent reads, exclusive writes
 	mutable oneapi::tbb::spin_rw_mutex rwLock_;
 
-	std::atomic<u64> subscrCounter_;
+	/// Cache-aligned to prevent false sharing with rwLock_
+	CacheAlignedAtomic<u64> subscrCounter_;
 
 	typedef std::map<SourceIdT, InstrumentEntry *> InstrumentsT;
 	InstrumentsT instruments_;
