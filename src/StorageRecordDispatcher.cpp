@@ -202,9 +202,22 @@ void StorageRecordDispatcher::save(const ClearingEntry &val)
 	fileStorage_->save(id, buffer.c_str(), buffer.size());
 }
 
-void StorageRecordDispatcher::save(const ExecutionsT &/*val*/)
+void StorageRecordDispatcher::save(const ExecutionsT &val)
 {
-	assert(false);
+	string buffer;
+	{
+		char typebuf[36];
+		int t = StorageRecordDispatcher::EXECUTIONS_RECORDTYPE;
+		memcpy(typebuf, &t, sizeof(t));
+		buffer.append(typebuf, sizeof(t));
+	}
+	u64 count = val.size();
+	buffer.append(reinterpret_cast<const char*>(&count), sizeof(count));
+	for(const auto &entry : val){
+		entry.eventId_.serialize(buffer);
+	}
+	IdT id(count, 0);
+	fileStorage_->save(id, buffer.c_str(), buffer.size());
 }
 
 void StorageRecordDispatcher::save(const OrderEntry &val)

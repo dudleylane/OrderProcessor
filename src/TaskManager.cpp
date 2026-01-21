@@ -141,7 +141,7 @@ bool TaskManager::waitUntilTransactionsFinished(int waitIntervalSeconds)const
 
 void TaskManager::addTask(const TransactionId &/*id*/)
 {
-	assert(false);
+	onReadyToExecute();
 }
 
 void TaskManager::onReadyToExecute()

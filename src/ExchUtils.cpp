@@ -307,7 +307,11 @@ char *toStr(char *buf, COP::i64 val){
 
 COP::DateTimeT currentDateTime()
 {
-	return 0;
+	return static_cast<COP::DateTimeT>(
+		std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch()
+		).count()
+	);
 }
 
 void WaitInterval(int mseconds)
