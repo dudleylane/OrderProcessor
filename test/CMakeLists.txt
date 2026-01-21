@@ -35,6 +35,10 @@ target_sources(orderProcessorTest
         IdTGeneratorTest.cpp
         QueuesManagerTest.cpp
         SubscriptionTest.cpp
+
+        # Transaction rollback tests
+        TransactionScopeTest.cpp
+        TrOperationsTest.cpp
 )
 
 target_include_directories(orderProcessorTest

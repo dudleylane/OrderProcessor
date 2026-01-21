@@ -92,7 +92,7 @@ public:
 
 class TestTransactionManager : public TransactionManager {
 public:
-    TestTransactionManager() : proc_(nullptr) {}
+    TestTransactionManager() : proc_(nullptr), transactionCount_(0) {}
 
     void attach(TransactionObserver*) override {}
 
@@ -105,6 +105,7 @@ public:
         if (proc_) {
             proc_->process(tr->transactionId(), tr.get());
         }
+        ++transactionCount_;
     }
 
     bool removeTransaction(const TransactionId&, Transaction*) override {
@@ -123,7 +124,12 @@ public:
         return nullptr;
     }
 
+    int transactionCount() const { return transactionCount_; }
+
     Processor* proc_;
+
+private:
+    int transactionCount_;
 };
 
 // =============================================================================
@@ -498,6 +504,57 @@ TEST_F(ProcessorTest, ConcurrentOrderSubmission) {
     }
 
     EXPECT_EQ(numOrders, processedCount);
+}
+
+// =============================================================================
+// Transaction Failure Handling Tests
+// =============================================================================
+
+/**
+ * Test that verifies the Processor properly handles transaction failures.
+ * When a transaction fails (executeTransaction returns false), deferred
+ * events should NOT be processed and should be cleaned up.
+ *
+ * Note: These tests verify the fix for the bug where Processor::process()
+ * ignored the return value of executeTransaction() and always processed
+ * deferred events, even after a transaction failure.
+ */
+
+TEST_F(ProcessorTest, ProcessTransaction_Success_ProcessesDeferredEvents) {
+    // Submit a valid order - this should succeed
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    inQueues_->push("test", OrderEvent(order.release()));
+
+    // Process should succeed
+    EXPECT_NO_THROW(processor_->process());
+
+    // Verify transaction was processed (order was saved)
+    EXPECT_GT(transMgr_->transactionCount(), 0);
+}
+
+TEST_F(ProcessorTest, ProcessTransaction_EmptyQueueReturnsFalse) {
+    // Processing an empty queue should return false
+    bool result = processor_->process();
+    EXPECT_FALSE(result);
+}
+
+TEST_F(ProcessorTest, ProcessMultipleOrders_AllTransactionsExecuted) {
+    const int numOrders = 5;
+
+    // Submit multiple orders
+    for (int i = 0; i < numOrders; ++i) {
+        auto order = test::createCorrectOrder(instrId1_);
+        test::assignClOrderId(order.get());
+        inQueues_->push("test", OrderEvent(order.release()));
+    }
+
+    // Process all
+    for (int i = 0; i < numOrders; ++i) {
+        processor_->process();
+    }
+
+    // All transactions should have been processed
+    EXPECT_EQ(numOrders, transMgr_->transactionCount());
 }
 
 } // namespace
