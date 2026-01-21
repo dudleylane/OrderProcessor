@@ -82,6 +82,7 @@ IncomingQueues → Processor → OrderStateMachine → OrderMatcher/OrderStorage
 | **OrderMatcher** | `src/OrderMatcher.cpp` | Order matching logic |
 | **OrderBook** | `src/OrderBookImpl.cpp` | Price-sorted buy/sell sides |
 | **Transaction** | `src/TransactionMgr.cpp`, `src/TransactionScope.cpp` | ACID transaction coordination |
+| **TransactionScopePool** | `src/TransactionScopePool.h` | Lock-free object pool for zero-allocation hot path |
 | **Storage** | `src/FileStorage.cpp`, `src/StorageRecordDispatcher.cpp` | Persistence with versioning |
 | **TaskManager** | `src/TaskManager.cpp` | oneTBB-based parallel task scheduling |
 | **Logger** | `src/Logger.cpp` | spdlog-based logging |
@@ -96,6 +97,7 @@ IncomingQueues → Processor → OrderStateMachine → OrderMatcher/OrderStorage
 | **Deferred Events** | `src/*DeferedEvent.cpp` | Async event handling: `CancelOrderDeferedEvent`, `ExecutionDeferedEvent`, `MatchOrderDeferedEvent` |
 | **Subscriptions** | `src/SubscriptionLayerImpl.cpp`, `src/SubscrManager.cpp` | Event subscription management |
 | **Utilities** | `src/IdTGenerator.cpp`, `src/ExchUtils.cpp`, `src/AllocateCache.cpp` | ID generation, exchange utilities, memory caching |
+| **Low-Latency Utilities** | `src/CacheAlignedAtomic.h`, `src/CpuAffinity.h`, `src/HugePages.h` | Cache alignment, CPU pinning, huge page allocation |
 | **State Definitions** | `src/OrderStates.cpp`, `src/TrOperations.cpp` | Order states and transaction operations |
 | **Queue Management** | `src/QueuesManager.cpp`, `src/EventManager.cpp` | Queue coordination and event dispatch |
 | **Type Definitions** | `src/DataModelDef.cpp` | Data model definitions |
@@ -133,6 +135,18 @@ The Processor handles the following incoming events (defined in `src/QueuesDef.h
 - **oneapi::tbb::task_group:** Task parallelism in TaskManager
 - **InterLockCache:** Wait-free object caching (`src/InterLockCache.h`)
 - **NLinkedTree:** Transaction dependency ordering (`src/NLinkedTree.cpp`)
+- **TransactionScopePool:** Lock-free object pool with CAS-based ring buffer (`src/TransactionScopePool.h`)
+- **CacheAlignedAtomic:** Cache line-aligned atomics to prevent false sharing (`src/CacheAlignedAtomic.h`)
+
+### Ultra Low-Latency Features
+
+- **Zero-Allocation Hot Path:** `TransactionScopePool` pre-allocates objects, eliminating heap allocations during event processing
+- **Cache Line Alignment:** `alignas(64)` ensures atomics don't share cache lines, preventing false sharing
+- **Relaxed Memory Ordering:** Statistics counters use `memory_order_relaxed` where synchronization isn't needed
+- **CAS Backoff:** Exponential backoff with `_mm_pause()` reduces contention on CAS loops
+- **Devirtualization:** Classes marked `final` enable compiler devirtualization optimizations
+- **CPU Affinity:** Utilities for pinning threads to cores (`src/CpuAffinity.h`)
+- **Huge Pages:** Support for 2MB huge pages to reduce TLB misses (`src/HugePages.h`)
 
 ### Lock-Free Components
 
@@ -142,9 +156,11 @@ The Processor handles the following incoming events (defined in `src/QueuesDef.h
 | **OutgoingQueues** | `tbb::concurrent_queue` + `std::variant` | `push()` is lock-free |
 | **WideDataStorage** | `tbb::spin_rw_mutex` | Concurrent `get()` reads, exclusive `add()`/`restore()` writes |
 | **OrderStorage** | `tbb::spin_rw_mutex` + `tbb::concurrent_hash_map` | Concurrent order lookups; fine-grained execution access |
-| **InterLockCache** | CAS-based circular buffer | Wait-free `popFront()`, `pushBack()` |
-| **IdTGenerator** | `std::atomic<u64>` | Lock-free monotonic ID generation |
+| **InterLockCache** | CAS-based circular buffer with `alignas(64)` | Wait-free `popFront()`, `pushBack()` |
+| **TransactionScopePool** | Lock-free ring buffer with CAS | Wait-free `acquire()`, `release()` |
+| **IdTGenerator** | `std::atomic<u64>` with `memory_order_relaxed` | Lock-free monotonic ID generation |
 | **Logger flags** | `std::atomic<char>` | Lock-free flag checking |
+| **TaskManager counters** | `CacheAlignedAtomic<int>` | Cache-aligned statistics without false sharing |
 
 ## Code Conventions
 

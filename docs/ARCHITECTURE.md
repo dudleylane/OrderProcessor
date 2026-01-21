@@ -42,6 +42,18 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 | Google Test | Unit and integration testing |
 | Google Benchmark | Performance benchmarking |
 
+### Ultra Low-Latency Optimizations (January 2026)
+
+| Optimization | Implementation | Benefit |
+|--------------|---------------|---------|
+| Zero-Allocation Hot Path | `TransactionScopePool` | Eliminates heap allocations during event processing |
+| Cache Line Alignment | `alignas(64)` / `CacheAlignedAtomic` | Prevents false sharing on contended atomics |
+| Relaxed Memory Ordering | `memory_order_relaxed` | Reduces memory barrier overhead for counters |
+| CAS Backoff | `_mm_pause()` with exponential backoff | Reduces contention on CAS loops |
+| Devirtualization | `final` classes | Enables compiler inlining of virtual calls |
+| CPU Pinning | `CpuAffinity` utilities | Reduces context switches and cache pollution |
+| Huge Pages | `HugePages` utilities | Reduces TLB misses for large allocations |
+
 ---
 
 ## 2. System Architecture Overview
@@ -722,10 +734,24 @@ COP (Concurrent Order Processor)
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                  TransactionScopePool                               │   │
+│   │                                                                      │   │
+│   │   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐                       │   │
+│   │   │Scp1│──►│Scp2│──►│Scp3│──►│Scp4│──►│... │  (1024 pre-allocated) │   │
+│   │   └────┘   └────┘   └────┘   └────┘   └────┘                       │   │
+│   │      ▲                                   ▲                          │   │
+│   │      │                                   │                          │   │
+│   │   head_ (alignas(64))              tail_ (alignas(64))             │   │
+│   │                                                                      │   │
+│   │   acquire(): atomic_compare_exchange_strong                         │   │
+│   │   release(): atomic_compare_exchange_strong                         │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
 │   │                    Atomic Counters/Flags                             │   │
 │   │   • processor_ in IncomingQueues (lock-free attachment)             │   │
-│   │   • Task counters in TaskManager                                    │   │
-│   │   • Transaction IDs                                                 │   │
+│   │   • Task counters in TaskManager (CacheAlignedAtomic)               │   │
+│   │   • Transaction IDs (memory_order_relaxed)                          │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 
@@ -1228,7 +1254,8 @@ COP (Concurrent Order Processor)
 | **Transactions** | `TransactionDef.h`, `TransactionMgr.h/cpp`, `TransactionScope.h/cpp`, `TrOperations.h` |
 | **Storage** | `FileStorage.h/cpp`, `FileStorageDef.h`, `OrderStorage.h/cpp`, `StorageRecordDispatcher.h/cpp` |
 | **Data Models** | `DataModelDef.h`, `TypesDef.h`, `QueuesDef.h` |
-| **Concurrency** | `TaskManager.h/cpp`, `NLinkedTree.h/cpp`, `InterLockCache.h` |
+| **Concurrency** | `TaskManager.h/cpp`, `NLinkedTree.h/cpp`, `InterLockCache.h`, `TransactionScopePool.h` |
+| **Low-Latency Utilities** | `CacheAlignedAtomic.h`, `CpuAffinity.h`, `HugePages.h` |
 | **Codecs** | `OrderCodec.h`, `InstrumentCodec.h`, `AccountCodec.h`, `ClearingCodec.h`, `RawDataCodec.h`, `StringTCodec.h` |
 | **Utilities** | `Logger.h/cpp`, `DeferedEvents.h`, `Singleton.h` |
 
@@ -1257,6 +1284,7 @@ COP (Concurrent Order Processor)
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | January 2026 | Generated | Initial architecture document |
+| 1.1 | January 2026 | Generated | Added ultra low-latency optimizations: TransactionScopePool, CacheAlignedAtomic, CpuAffinity, HugePages |
 
 ---
 

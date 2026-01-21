@@ -92,9 +92,17 @@ Benchmark results on 8-core CPU @ 3.8 GHz:
 | EventProcessing | ~7,200 | ~139K ops/sec |
 | OrderMatching | ~7,300 | ~137K ops/sec |
 | StateMachineTransitions | ~9,100 | ~110K ops/sec |
-| InterlockCache | ~150 | ~6.7M ops/sec |
+| InterlockCache | ~30-40 | ~25-33M ops/sec |
+| IncomingQueues Push | ~15 | ~66M ops/sec |
+| IncomingQueues Pop | ~15 | ~66M ops/sec |
 
 Benchmarks measure complete operation cycles including state machine initialization, event processing, and storage operations.
+
+**Ultra Low-Latency Optimizations (January 2026):**
+- Lock-free TransactionScope object pooling eliminates heap allocations on hot path
+- Cache line alignment (`alignas(64)`) prevents false sharing
+- Relaxed memory ordering for statistics counters
+- Exponential backoff with `_mm_pause()` on CAS contention
 
 ## Architecture
 
@@ -115,6 +123,7 @@ IncomingQueues → Processor → OrderStateMachine → OrderMatcher/OrderStorage
 | **OrderMatcher** | Price-time priority matching engine |
 | **OrderBook** | Price-sorted buy/sell order sides |
 | **TransactionManager** | ACID transaction coordination |
+| **TransactionScopePool** | Lock-free object pool for zero-allocation hot path |
 | **TaskManager** | oneTBB-based parallel task scheduling |
 | **InterLockCache** | Wait-free object caching |
 
@@ -127,6 +136,8 @@ IncomingQueues → Processor → OrderStateMachine → OrderMatcher/OrderStorage
 | **WideDataStorage** | `tbb::spin_rw_mutex` | Concurrent reads for reference data |
 | **OrderStorage** | `tbb::spin_rw_mutex` + `tbb::concurrent_hash_map` | Concurrent lookups, fine-grained execution access |
 | **InterLockCache** | CAS-based circular buffer | Wait-free memory pooling |
+| **TransactionScopePool** | Lock-free ring buffer with CAS | Zero-allocation transaction processing |
+| **CacheAlignedAtomic** | `alignas(64)` wrapper | Prevents false sharing on contended atomics |
 
 ## Project Structure
 
@@ -138,10 +149,15 @@ OrderProcessor/
 │   ├── OrderMatcher.cpp    # Matching engine
 │   ├── OrderBookImpl.cpp   # Order book implementation
 │   ├── TransactionMgr.cpp  # Transaction management
+│   ├── TransactionScopePool.h  # Lock-free object pool
+│   ├── CacheAlignedAtomic.h    # Cache-aligned atomic wrapper
+│   ├── CpuAffinity.h       # CPU pinning utilities
+│   ├── HugePages.h         # Huge page allocation utilities
 │   ├── FileStorage.cpp     # Persistence layer
 │   └── ...
 ├── test/                   # Google Test unit tests
 ├── bench/                  # Google Benchmark performance tests
+├── docs/                   # Architecture documentation
 ├── CMakeLists.txt          # Build configuration
 └── CLAUDE.md               # Developer documentation
 ```
