@@ -34,6 +34,7 @@ namespace COP{
 
 	namespace Proc{
 		class OrderMatcher;
+		class DeferedEventContainer;
 	}
 
 	namespace ACID{
@@ -97,17 +98,20 @@ namespace COP{
 			Queues::OutQueues *outQueues_;
 			Proc::OrderMatcher *orderMatch_;
 			IdTValueGenerator *idGenerator_;
+			Proc::DeferedEventContainer *deferedEvents_;
 
-			Context(): 
-				orderStorage_(nullptr), orderBook_(nullptr), inQueues_(nullptr), outQueues_(nullptr), 
-				orderMatch_(nullptr), idGenerator_(nullptr)
+			Context():
+				orderStorage_(nullptr), orderBook_(nullptr), inQueues_(nullptr), outQueues_(nullptr),
+				orderMatch_(nullptr), idGenerator_(nullptr), deferedEvents_(nullptr)
 			{}
 
 			Context(Store::OrderDataStorage *orderStorage, OrderBook *orderBook,
-					Queues::InQueues *inQueues, Queues::OutQueues *outQueues, 
-					Proc::OrderMatcher *orderMatch, IdTValueGenerator *idGenerator): 
-				orderStorage_(orderStorage), orderBook_(orderBook), inQueues_(inQueues), 
-				outQueues_(outQueues), orderMatch_(orderMatch), idGenerator_(idGenerator)
+					Queues::InQueues *inQueues, Queues::OutQueues *outQueues,
+					Proc::OrderMatcher *orderMatch, IdTValueGenerator *idGenerator,
+					Proc::DeferedEventContainer *deferedEvents = nullptr):
+				orderStorage_(orderStorage), orderBook_(orderBook), inQueues_(inQueues),
+				outQueues_(outQueues), orderMatch_(orderMatch), idGenerator_(idGenerator),
+				deferedEvents_(deferedEvents)
 			{}
 		};
 

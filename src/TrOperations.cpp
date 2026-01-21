@@ -17,6 +17,7 @@
 #include "OrderMatcher.h"
 #include "OrderStorage.h"
 #include "ExchUtils.h"
+#include "DeferedEvents.h"
 
 using namespace std;
 using namespace COP;
@@ -476,7 +477,7 @@ void CancelRejectTrOperation::rollback(const Context &)
 }
 
 MatchOrderTrOperation::MatchOrderTrOperation(OrderEntry *order):
-	Operation(MATCH_ORDER_TROPERATION, order->orderId_), order_(order)
+	Operation(MATCH_ORDER_TROPERATION, order->orderId_), order_(order), eventCountBefore_(0)
 {
 }
 
@@ -486,10 +487,19 @@ MatchOrderTrOperation::~MatchOrderTrOperation()
 void MatchOrderTrOperation::execute(const Context &cnxt)
 {
 	assert(nullptr != order_);
+
+	// Record event count before matching so we can rollback if needed
+	if (cnxt.deferedEvents_ != nullptr) {
+		eventCountBefore_ = cnxt.deferedEvents_->deferedEventCount();
+	}
+
 	cnxt.orderMatch_->match(order_, cnxt);
 }
 
-void MatchOrderTrOperation::rollback(const Context &)
+void MatchOrderTrOperation::rollback(const Context &cnxt)
 {
-	/// initiate order reject 
+	// Remove any deferred events that were added during execute()
+	if (cnxt.deferedEvents_ != nullptr) {
+		cnxt.deferedEvents_->removeDeferedEventsFrom(eventCountBefore_);
+	}
 }

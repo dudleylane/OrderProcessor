@@ -31,6 +31,8 @@ public:
 class MockDeferedEventContainer : public COP::Proc::DeferedEventContainer {
 public:
     MOCK_METHOD(void, addDeferedEvent, (COP::Proc::DeferedEventBase *evnt), (override));
+    MOCK_METHOD(size_t, deferedEventCount, (), (const, override));
+    MOCK_METHOD(void, removeDeferedEventsFrom, (size_t startIndex), (override));
 };
 
 /**

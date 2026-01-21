@@ -42,6 +42,8 @@ namespace Proc{
 	public:
 		virtual ~DeferedEventContainer(){}
 		virtual void addDeferedEvent(DeferedEventBase *evnt) = 0;
+		virtual size_t deferedEventCount() const = 0;
+		virtual void removeDeferedEventsFrom(size_t startIndex) = 0;
 	};
 
 	struct TradeParams{

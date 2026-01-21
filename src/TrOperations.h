@@ -167,6 +167,7 @@ namespace COP{
 			virtual void rollback(const Context &cnxt);
 		private:
 			OrderEntry *order_;
+			size_t eventCountBefore_;
 		};
 
 	}

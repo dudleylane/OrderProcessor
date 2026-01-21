@@ -75,6 +75,8 @@ namespace Proc{
 	public:
 		/// reimplemented from DeferedEventContainer
 		virtual void addDeferedEvent(DeferedEventBase *evnt);
+		virtual size_t deferedEventCount() const;
+		virtual void removeDeferedEventsFrom(size_t startIndex);
 
 	public:
 		/// reimplemented from TransactionProcessor
@@ -100,6 +102,7 @@ namespace Proc{
 
 	private:
 		void processDeferedEvent();
+		void clearDeferedEvents();
 	private:
 		IdTValueGenerator *generator_;
 		Store::OrderDataStorage *orderStorage_;

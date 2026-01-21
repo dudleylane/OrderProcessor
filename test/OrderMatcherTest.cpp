@@ -40,6 +40,18 @@ public:
         events_.push_back(evnt);
     }
 
+    size_t deferedEventCount() const override { return events_.size(); }
+
+    void removeDeferedEventsFrom(size_t startIndex) override {
+        if (startIndex >= events_.size()) {
+            return;
+        }
+        for (size_t i = startIndex; i < events_.size(); ++i) {
+            delete events_[i];
+        }
+        events_.erase(events_.begin() + startIndex, events_.end());
+    }
+
     size_t eventCount() const { return events_.size(); }
     void clear() {
         for (auto* e : events_) {

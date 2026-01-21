@@ -80,7 +80,7 @@ void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 		throw std::runtime_error("Processor::onEvent(OrderEvent): events queue is not empty!");
 
 	// prepare context
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	std::unique_ptr<TransactionScope> scope(new TransactionScope());
 
 	// restore event to process
@@ -115,7 +115,7 @@ void Processor::onEvent(const std::string &/*source*/, const OrderCancelEvent &e
 		throw std::runtime_error("Processor::onEvent(OrderCancelEvent): order id is invalid!");
 
 	// prepare context
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	std::unique_ptr<TransactionScope> scope(new TransactionScope());
 
 	// locate the order to cancel
@@ -154,7 +154,7 @@ void Processor::onEvent(const std::string &/*source*/, const OrderReplaceEvent &
 		throw std::runtime_error("Processor::onEvent(OrderReplaceEvent): order id is invalid!");
 
 	// prepare context
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	std::unique_ptr<TransactionScope> scope(new TransactionScope());
 
 	if(nullptr != evnt.replacementOrder_) {
@@ -211,7 +211,7 @@ void Processor::onEvent(const std::string &/*source*/, const COP::Queues::OrderC
 		throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): invalid change type!");
 
 	// prepare context
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	std::unique_ptr<TransactionScope> scope(new TransactionScope());
 
 	// locate the order
@@ -276,7 +276,7 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 {
 	///prepare context
 	assert(events_.empty());
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	std::unique_ptr<TransactionScope> scope(new TransactionScope());
 
 	switch(evnt.type_){
@@ -369,7 +369,7 @@ void Processor::onEvent(const std::string &/*source*/, const TimerEvent &evnt)
 		throw std::runtime_error("Processor::onEvent(TimerEvent): invalid timer type!");
 
 	// prepare context
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	std::unique_ptr<TransactionScope> scope(new TransactionScope());
 
 	// locate the order
@@ -436,9 +436,30 @@ void Processor::addDeferedEvent(DeferedEventBase *evnt)
 	events_.push_back(evnt);
 }
 
+size_t Processor::deferedEventCount() const
+{
+	return events_.size();
+}
+
+void Processor::removeDeferedEventsFrom(size_t startIndex)
+{
+	if (startIndex >= events_.size()) {
+		return;
+	}
+
+	DeferedEventsT::iterator it = events_.begin();
+	std::advance(it, startIndex);
+
+	// Delete events from startIndex to end
+	for (DeferedEventsT::iterator delIt = it; delIt != events_.end(); ++delIt) {
+		delete *delIt;
+	}
+	events_.erase(it, events_.end());
+}
+
 void Processor::onEvent(DeferedEventBase *evnt)
 {
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	std::unique_ptr<TransactionScope> scope(new TransactionScope());
 
 	evnt->execute(this, cntxt, scope.get());
@@ -501,9 +522,21 @@ void Processor::process(const ACID::TransactionId &id, ACID::Transaction *tr)
 	assert(nullptr != tr);
 	assert(id.isValid());
 
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_);
+	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 
-	tr->executeTransaction(cntxt);
+	bool success = tr->executeTransaction(cntxt);
 
-	processDeferedEvent();
+	if (success) {
+		processDeferedEvent();
+	} else {
+		clearDeferedEvents();
+	}
+}
+
+void Processor::clearDeferedEvents()
+{
+	for (DeferedEventsT::iterator it = events_.begin(); it != events_.end(); ++it) {
+		delete *it;
+	}
+	events_.clear();
 }
