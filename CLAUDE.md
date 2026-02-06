@@ -2,63 +2,32 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
-
-OrderProcessor is a high-performance, concurrent order processing library written in C++23. It provides ACID-compliant transaction processing, state machine-based order lifecycle management, and order matching against an in-memory order book.
-
-## Build System
-
-**Build Tool:** CMake 3.21+
-**C++ Standard:** C++23
-**Platform:** CentOS 10 / Linux (GCC)
-
-### Required Dependencies
-
-Install these before building:
-- **oneTBB** - Intel Threading Building Blocks (concurrent containers, task scheduling)
-- **spdlog** - Fast C++ logging library
-- **Boost** - Headers only (for MPL, optional helpers)
-
-On CentOS 10:
-```bash
-sudo dnf install tbb-devel spdlog-devel boost-devel
-```
-
-### Building
+## Build & Test Commands
 
 ```bash
+# Build (from repo root)
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 cmake --build . -j$(nproc)
+
+# Run all tests
+cd build && ctest --output-on-failure
+
+# Run a single test suite
+./build/orderProcessorTest --gtest_filter="ProcessorTest.*"
+
+# Run a single test case
+./build/orderProcessorTest --gtest_filter="ProcessorTest.ProcessSingleNewOrder"
+
+# Run benchmarks
+./build/orderProcessorBench --benchmark_format=console
 ```
 
-CMake Options:
-- `-DBUILD_TESTS=ON` (default) - Build unit tests with Google Test
-- `-DBUILD_BENCHMARKS=ON` (default) - Build benchmarks with Google Benchmark
+**Dependencies (CentOS 10):** `sudo dnf install tbb-devel spdlog-devel boost-devel cmake gcc-c++`
 
-### Build Outputs
+**CMake options:** `-DBUILD_TESTS=ON` (default), `-DBUILD_BENCHMARKS=ON` (default)
 
-- **Library:** `build/liborderEngine.a`
-- **Test Executable:** `build/orderProcessorTest`
-- **Benchmark Executable:** `build/orderProcessorBench`
-
-### Running Tests
-
-```bash
-cd build
-ctest --output-on-failure
-```
-
-Or run directly:
-```bash
-./orderProcessorTest
-```
-
-### Running Benchmarks
-
-```bash
-./orderProcessorBench --benchmark_format=console
-```
+**Build outputs:** `build/liborderEngine.a`, `build/orderProcessorTest`, `build/orderProcessorBench`
 
 ## Architecture
 
@@ -72,166 +41,83 @@ IncomingQueues → Processor → OrderStateMachine → OrderMatcher/OrderStorage
               FileStorage (persistence)
 ```
 
-### Core Modules
+**Processor** (`src/Processor.cpp`) is the central coordinator. Every event follows this pattern:
+1. Create a stack-allocated `Context` struct with pointers to all shared components
+2. Acquire a `PooledTransactionScope` from the pre-allocated pool (zero heap allocation)
+3. Restore the order's persisted state machine state via `setPersistance()`
+4. Process the event through the Boost MSM state machine
+5. Persist the new state machine state back to the order
+6. Create a Transaction from the scope and enqueue to TransactionManager
+7. Drain and process any deferred events generated during the action
 
-| Module | Location | Purpose |
-|--------|----------|---------|
-| **Queues** | `src/IncomingQueues.cpp`, `src/OutgoingQueues.cpp` | Lock-free event queues (MPMC) |
-| **Processor** | `src/Processor.cpp` | Main event handler, central entry point |
-| **State Machine** | `src/StateMachine.cpp`, `src/OrderStateMachineImpl.cpp` | Order state management (14 states, 47+ transitions) |
-| **OrderMatcher** | `src/OrderMatcher.cpp` | Order matching logic |
-| **OrderBook** | `src/OrderBookImpl.cpp` | Price-sorted buy/sell sides |
-| **Transaction** | `src/TransactionMgr.cpp`, `src/TransactionScope.cpp` | ACID transaction coordination |
-| **TransactionScopePool** | `src/TransactionScopePool.h` | Lock-free object pool for zero-allocation hot path |
-| **Storage** | `src/FileStorage.cpp`, `src/StorageRecordDispatcher.cpp` | Persistence with versioning |
-| **TaskManager** | `src/TaskManager.cpp` | oneTBB-based parallel task scheduling |
-| **Logger** | `src/Logger.cpp` | spdlog-based logging |
+### Key Architectural Patterns
 
-### Supporting Modules
+**State Machine Persistence:** The Boost MSM state machine is NOT persistent per-order. Instead, each order stores an `OrderStatePersistence` object. Before processing, the state machine is loaded from the order; after processing, the new state is saved back. See `src/StateMachine.h` for the transition table (45+ transitions across 14 states using `mpl::vector45`).
 
-| Module | Location | Purpose |
-|--------|----------|---------|
-| **Codecs** | `src/*Codec.cpp` | Serialization: `AccountCodec`, `ClearingCodec`, `InstrumentCodec`, `OrderCodec`, `RawDataCodec`, `StringTCodec` |
-| **Filters** | `src/*Filter.cpp` | Order filtering: `EntryFilter`, `OrderFilter`, `FilterImpl` |
-| **Data Storage** | `src/OrderStorage.cpp`, `src/WideDataStorage.cpp` | Runtime order and reference data storage |
-| **Deferred Events** | `src/*DeferedEvent.cpp` | Async event handling: `CancelOrderDeferedEvent`, `ExecutionDeferedEvent`, `MatchOrderDeferedEvent` |
-| **Subscriptions** | `src/SubscriptionLayerImpl.cpp`, `src/SubscrManager.cpp` | Event subscription management |
-| **Utilities** | `src/IdTGenerator.cpp`, `src/ExchUtils.cpp`, `src/AllocateCache.cpp` | ID generation, exchange utilities, memory caching |
-| **Low-Latency Utilities** | `src/CacheAlignedAtomic.h`, `src/CpuAffinity.h`, `src/HugePages.h` | Cache alignment, CPU pinning, huge page allocation |
-| **State Definitions** | `src/OrderStates.cpp`, `src/TrOperations.cpp` | Order states and transaction operations |
-| **Queue Management** | `src/QueuesManager.cpp`, `src/EventManager.cpp` | Queue coordination and event dispatch |
-| **Type Definitions** | `src/DataModelDef.cpp` | Data model definitions |
+**Deferred Event Chaining:** State machine actions can call `addDeferedEvent()` to queue follow-up processing (e.g., trade executions generating settlement events). After the primary transaction is enqueued, `processDeferedEvent()` drains these recursively — a deferred event may itself generate more deferred events.
 
-### Key Entry Point
+**Context Pattern:** Every transaction gets a stack-allocated `Context` (`src/TransactionDef.h`) containing pointers to all shared components (OrderStorage, OrderBook, queues, matcher, ID generator, deferred events). This avoids globals and passes through all state machine actions.
 
-The `Processor` class (`src/Processor.cpp`) is the central coordinator:
-```cpp
-class Processor: public InQueueProcessor,
-                 public DeferedEventContainer,
-                 public TransactionProcessor
+**Event Queue:** A single `tbb::concurrent_queue` holds all 6 event types as `std::variant<OrderEvent, OrderCancelEvent, ...>`. Dispatching uses `std::visit()` to call the correct `onEvent()` overload.
+
+### Zero-Allocation Hot Path
+
+The critical performance optimization is `TransactionScopePool` (`src/TransactionScopePool.h`):
+- Pre-allocates 1024 `TransactionScope` objects at startup
+- CAS-based acquire/release with exponential backoff (`_mm_pause()`)
+- `PooledTransactionScope` is RAII — auto-releases back to pool on destruction
+- Falls back to heap allocation if pool is exhausted (tracked as "cache miss")
+- `CacheAlignedAtomic<T>` (`src/CacheAlignedAtomic.h`) wraps atomics with `alignas(64)` to prevent false sharing
+
+`InterLockCache` (`src/InterLockCache.h`) is a similar wait-free circular buffer cache using CAS for `popFront()`/`pushBack()`.
+
+### Namespace Structure
+
 ```
-
-### Supported Event Types
-
-The Processor handles the following incoming events (defined in `src/QueuesDef.h`):
-
-| Event Type | Purpose | Key Fields |
-|------------|---------|------------|
-| `OrderEvent` | New order submission | `order_` - pointer to OrderEntry |
-| `OrderCancelEvent` | Cancel existing order | `id_` - order to cancel, `cancelReason_` |
-| `OrderReplaceEvent` | Replace/modify order | `id_` - original order, `replacementOrder_` - new order |
-| `OrderChangeStateEvent` | External state change | `id_` - order, `changeType_` (SUSPEND/RESUME/FINISH) |
-| `TimerEvent` | Time-based triggers | `id_` - order, `timerType_` (EXPIRATION/DAY_END/DAY_START) |
-| `ProcessEvent` | Internal processing | `type_` - event subtype, `id_` - related order |
+COP::Queues     - InQueues, OutQueues, InQueueProcessor
+COP::Proc       - Processor, OrderMatcher, DeferedEventContainer
+COP::ACID       - TransactionManager, Transaction, Scope, TransactionScopePool
+COP::Store      - OrderDataStorage
+COP::OrdState   - OrderState_ (Boost MSM state machine), OrderStatePersistence
+```
 
 ### Concurrency Model
 
-- **std::atomic:** Lock-free atomics for counters and flags
-- **oneapi::tbb::concurrent_queue:** Lock-free MPMC queue for event ingestion (`IncomingQueues`)
-- **oneapi::tbb::concurrent_hash_map:** Fine-grained bucket-level locking (`OrderStorage` executions)
-- **oneapi::tbb::spin_rw_mutex:** Reader-writer lock for read-heavy data (`WideDataStorage`, `OrderStorage` orders)
-- **oneapi::tbb::mutex:** Mutual exclusion for shared data
-- **oneapi::tbb::spin_mutex:** Lightweight locking for short critical sections
-- **oneapi::tbb::task_group:** Task parallelism in TaskManager
-- **InterLockCache:** Wait-free object caching (`src/InterLockCache.h`)
-- **NLinkedTree:** Transaction dependency ordering (`src/NLinkedTree.cpp`)
-- **TransactionScopePool:** Lock-free object pool with CAS-based ring buffer (`src/TransactionScopePool.h`)
-- **CacheAlignedAtomic:** Cache line-aligned atomics to prevent false sharing (`src/CacheAlignedAtomic.h`)
-
-### Ultra Low-Latency Features
-
-- **Zero-Allocation Hot Path:** `TransactionScopePool` pre-allocates objects, eliminating heap allocations during event processing
-- **Cache Line Alignment:** `alignas(64)` ensures atomics don't share cache lines, preventing false sharing
-- **Relaxed Memory Ordering:** Statistics counters use `memory_order_relaxed` where synchronization isn't needed
-- **CAS Backoff:** Exponential backoff with `_mm_pause()` reduces contention on CAS loops
-- **Devirtualization:** Classes marked `final` enable compiler devirtualization optimizations
-- **CPU Affinity:** Utilities for pinning threads to cores (`src/CpuAffinity.h`)
-- **Huge Pages:** Support for 2MB huge pages to reduce TLB misses (`src/HugePages.h`)
-
-### Lock-Free Components
-
-| Component | Implementation | Operations |
-|-----------|---------------|------------|
-| **IncomingQueues** | `tbb::concurrent_queue` + `std::variant` | `push()`, `pop()`, `size()` are lock-free |
-| **OutgoingQueues** | `tbb::concurrent_queue` + `std::variant` | `push()` is lock-free |
-| **WideDataStorage** | `tbb::spin_rw_mutex` | Concurrent `get()` reads, exclusive `add()`/`restore()` writes |
-| **OrderStorage** | `tbb::spin_rw_mutex` + `tbb::concurrent_hash_map` | Concurrent order lookups; fine-grained execution access |
-| **InterLockCache** | CAS-based circular buffer with `alignas(64)` | Wait-free `popFront()`, `pushBack()` |
-| **TransactionScopePool** | Lock-free ring buffer with CAS | Wait-free `acquire()`, `release()` |
-| **IdTGenerator** | `std::atomic<u64>` with `memory_order_relaxed` | Lock-free monotonic ID generation |
-| **Logger flags** | `std::atomic<char>` | Lock-free flag checking |
-| **TaskManager counters** | `CacheAlignedAtomic<int>` | Cache-aligned statistics without false sharing |
+- `tbb::concurrent_queue` — lock-free MPMC queues (IncomingQueues, OutgoingQueues)
+- `tbb::concurrent_hash_map` — fine-grained bucket locking (OrderStorage executions)
+- `tbb::spin_rw_mutex` — reader-writer lock for read-heavy data (WideDataStorage, OrderStorage orders)
+- `tbb::spin_mutex` / `tbb::mutex` — mutual exclusion for short/longer critical sections
+- `tbb::task_group` — task parallelism in TaskManager
+- `InterLockCache` — wait-free object caching via CAS circular buffer
+- `TransactionScopePool` — lock-free object pool with CAS ring buffer
+- Statistics counters use `memory_order_relaxed`; synchronized data uses stronger ordering
 
 ## Code Conventions
 
-- **Member variables:** Trailing underscore (`varName_`)
+- **Member variables:** trailing underscore (`varName_`)
 - **Classes:** PascalCase (`ClassName`)
 - **Namespaces:** `COP::SubModule::Component`
 - **Type suffixes:** `_T` for templates, `_t` for typedefs
-
-## Key Dependencies
-
-- **oneTBB 2021.x+:** Lock-free concurrent_queue, mutex, spin_mutex, task scheduling
-- **spdlog:** Logging infrastructure
-- **Boost (headers):** MPL for Meta State Machine
-- **Google Test:** Unit testing framework
-- **Google Benchmark:** Performance benchmarking
+- **Low-latency:** All `alignas(64)` annotations are intentional false-sharing prevention — do not remove them
+- **Classes marked `final`:** Enables compiler devirtualization — preserve when present
 
 ## Test Structure
 
-Tests are in `test/` using Google Test framework (24 test files):
+Tests are in `test/` using Google Test. Test suite names match file names (e.g., `ProcessorTest`, `StateMachineTest`, `CodecsTest`). Mocks are in `test/mocks/`.
 
-### Core Tests
-- `CodecsTest.cpp` - Codec encode/decode tests
-- `IncomingQueuesTest.cpp` - Lock-free event queue tests
-- `OutgoingQueuesTest.cpp` - Outgoing queue tests
-- `InterlockCacheTest.cpp` - Lock-free cache tests
-- `NLinkTreeTest.cpp` - Transaction tree tests
-- `ProcessorTest.cpp` - Main processor tests
-- `StateMachineTest.cpp` - State machine transitions
-- `StatesTest.cpp` - Order state tests
-- `OrderBookTest.cpp` - Order book operations
-- `OrderMatcherTest.cpp` - Order matching tests
-- `OrderStorageTest.cpp` - Order storage tests
+**Test fixture pattern:**
+- `SetUp()` creates singletons (`WideDataStorage::create()`, `IdTGenerator::create()`, `OrderStorage::create()`)
+- `TearDown()` destroys singletons in reverse order
+- Use `TEST_F(SuiteName, TestName)` for fixture-based tests
 
-### Transaction Tests
-- `TransactionMgrTest.cpp` - Transaction manager tests
-- `TransactionScopeTest.cpp` - Transaction scope tests
-- `TrOperationsTest.cpp` - Transaction operations tests
+**Test utilities:** `test/TestAux.cpp/h` (helper functions, mock contexts), `test/StateMachineHelper.cpp/h` (state machine test helpers), `test/TestFixtures.h` (shared fixtures).
 
-### Storage Tests
-- `FileStorageTest.cpp` - Persistence tests
-- `StorageRecordDispatcherTest.cpp` - Storage dispatcher tests
-- `WideDataStorageTest.cpp` - Wide data storage tests
+Legacy test files (`test/test*.cpp`) are retained for reference during migration to Google Test format.
 
-### Other Tests
-- `DeferedEventsTest.cpp` - Deferred event tests
-- `FiltersTest.cpp` - Order filter tests
-- `IdTGeneratorTest.cpp` - ID generator tests
-- `QueuesManagerTest.cpp` - Queue manager tests
-- `SubscriptionTest.cpp` - Subscription layer tests
-- `TaskManagerTest.cpp` - Task manager tests
-- `IntegrationTest.cpp` - Full integration tests
+## Key Dependencies
 
-### Test Utilities
-- `TestAux.cpp/h` - Test helper functions and mock contexts
-- `StateMachineHelper.cpp/h` - State machine test helpers
-- `TestFixtures.h` - Shared test fixtures
-
-### Mock Objects (`test/mocks/`)
-- `MockDefered.h` - Mock deferred event handlers
-- `MockOrderBook.h` - Mock order book
-- `MockQueues.h` - Mock queue implementations
-- `MockStorage.h` - Mock storage layer
-- `MockTasks.h` - Mock task manager
-- `MockTransaction.h` - Mock transaction components
-
-### Legacy Test Files
-
-The `test/` directory contains 10 legacy test files (`test*.cpp`) with original test implementations. These files are retained for reference during migration to Google Test format.
-
-Benchmarks in `bench/`:
-- `EventProcessingBench.cpp` - Event queue throughput
-- `OrderMatchingBench.cpp` - Order matching performance
-- `StateMachineBench.cpp` - State transition performance
-- `InterlockCacheBench.cpp` - Lock-free cache performance
+- **oneTBB 2021.x+** — concurrent containers, mutex, spin_mutex, task scheduling
+- **spdlog** — logging infrastructure
+- **Boost (headers only)** — MPL for Meta State Machine (`BOOST_MPL_LIMIT_VECTOR_SIZE=50` is set in CMake)
+- **Google Test/Mock** — fetched via CMake FetchContent (v1.14.0)
+- **Google Benchmark** — fetched via CMake FetchContent (v1.8.3)
