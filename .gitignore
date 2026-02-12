@@ -27,3 +27,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Project instructions (local only)
+CLAUDE.md
