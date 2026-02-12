@@ -19,6 +19,9 @@ compile_commands.json
 *.user
 *.suo
 
+# Runtime logs
+exchange.log
+
 # OS
 .DS_Store
 Thumbs.db
