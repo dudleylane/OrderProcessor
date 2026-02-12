@@ -40,6 +40,9 @@ target_sources(orderProcessorTest
         TransactionScopeTest.cpp
         TrOperationsTest.cpp
 
+        # Subscription event benchmark tests
+        EventBenchmarkTest.cpp
+
         # LMDB storage backend tests
         LMDBStorageTest.cpp
 )
