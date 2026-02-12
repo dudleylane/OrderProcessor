@@ -1,0 +1,7 @@
+src/oms-frontend/node_modules
+src/oms-frontend/dist
+src/oms-frontend/.vite
+build
+*.o
+*.a
+.git
