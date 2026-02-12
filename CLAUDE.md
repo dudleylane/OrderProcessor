@@ -23,7 +23,7 @@ cd build && ctest --output-on-failure
 ./build/orderProcessorBench --benchmark_format=console
 ```
 
-**Dependencies (CentOS 10):** `sudo dnf install tbb-devel spdlog-devel boost-devel cmake gcc-c++`
+**Dependencies (CentOS 10):** `sudo dnf install tbb-devel spdlog-devel boost-devel cmake gcc-c++ lmdb-devel`
 
 **CMake options:** `-DBUILD_TESTS=ON` (default), `-DBUILD_BENCHMARKS=ON` (default)
 

@@ -39,6 +39,9 @@ target_sources(orderProcessorTest
         # Transaction rollback tests
         TransactionScopeTest.cpp
         TrOperationsTest.cpp
+
+        # LMDB storage backend tests
+        LMDBStorageTest.cpp
 )
 
 target_include_directories(orderProcessorTest

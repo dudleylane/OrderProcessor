@@ -41,6 +41,8 @@ add_compile_definitions(
 find_package(TBB REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(Boost 1.70 REQUIRED CONFIG)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LMDB REQUIRED IMPORTED_TARGET lmdb)
 message(STATUS "Boost_INCLUDE_DIRS = ${Boost_INCLUDE_DIRS}")
 message(STATUS "Boost_LIBRARY_DIRS = ${Boost_LIBRARY_DIRS}")
 
@@ -53,6 +55,7 @@ target_link_libraries(orderEngine
         TBB::tbb
         TBB::tbbmalloc
         spdlog::spdlog
+        PkgConfig::LMDB
 )
 
 target_include_directories(orderEngine
