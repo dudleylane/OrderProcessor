@@ -30,3 +30,6 @@ Thumbs.db
 
 # Project instructions (local only)
 CLAUDE.md
+
+# Docker environment secrets
+docker/.env

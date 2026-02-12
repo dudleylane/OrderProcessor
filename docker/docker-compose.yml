@@ -1,5 +1,24 @@
 services:
   # ------------------------------------------------------------------
+  # OMS Database (PostgreSQL)
+  # ------------------------------------------------------------------
+  oms-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - oms-pgdata:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oms} -d ${POSTGRES_DB:-oms}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # ------------------------------------------------------------------
   # OMS Frontend (React + nginx)
   # ------------------------------------------------------------------
   oms-frontend:
@@ -8,6 +27,9 @@ services:
       dockerfile: docker/Dockerfile.oms-frontend
     ports:
       - "3000:3000"
+    depends_on:
+      oms-db:
+        condition: service_healthy
 
   # ------------------------------------------------------------------
   # OMS API Gateway (WebSocket bridge to OrderProcessor engine)
@@ -19,10 +41,17 @@ services:
   #     dockerfile: docker/Dockerfile.oms-api
   #   environment:
   #     PORT: 8080
+  #     DATABASE_URL: postgres://${POSTGRES_USER:-oms}:${POSTGRES_PASSWORD}@oms-db:5432/${POSTGRES_DB:-oms}
   #   ports:
   #     - "8080:8080"
+  #   depends_on:
+  #     oms-db:
+  #       condition: service_healthy
   #   healthcheck:
   #     test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
   #     interval: 5s
   #     timeout: 3s
   #     retries: 10
+
+volumes:
+  oms-pgdata:
