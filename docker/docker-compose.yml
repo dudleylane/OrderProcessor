@@ -8,23 +8,21 @@ services:
       dockerfile: docker/Dockerfile.oms-frontend
     ports:
       - "3000:3000"
-    depends_on:
-      oms-api:
-        condition: service_healthy
 
   # ------------------------------------------------------------------
   # OMS API Gateway (WebSocket bridge to OrderProcessor engine)
+  # Uncomment when Dockerfile.oms-api is implemented.
   # ------------------------------------------------------------------
-  oms-api:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.oms-api
-    environment:
-      PORT: 8080
-    ports:
-      - "8080:8080"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+  # oms-api:
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile.oms-api
+  #   environment:
+  #     PORT: 8080
+  #   ports:
+  #     - "8080:8080"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 10
