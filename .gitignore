@@ -31,5 +31,9 @@ Thumbs.db
 # Project instructions (local only)
 CLAUDE.md
 
+# Frontend
+node_modules/
+dist/
+
 # Docker environment secrets
 docker/.env
