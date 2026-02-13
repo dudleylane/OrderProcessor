@@ -12,6 +12,7 @@
 
 #include <stdexcept>
 #include "OrderBookImpl.h"
+#include "OrderStorage.h"
 #include "FileStorageDef.h"
 #include "Logger.h"
 
@@ -295,4 +296,48 @@ IdT OrderBookImpl::getTop(const SourceIdT &instrument, const Side &side)const
 		throw std::runtime_error("Unknown instrument for the order's top");
 	}
 	return IdT();
+}
+
+BookSnapshot OrderBookImpl::getSnapshot(const SourceIdT &instrument, const Store::OrderDataStorage* storage) const
+{
+	BookSnapshot snap;
+	OrderGroupsByInstrumentT::const_iterator it = orderGroups_.find(instrument);
+	if(orderGroups_.end() == it)
+		return snap;
+
+	// Aggregate bids (descending price)
+	{
+		tbb::mutex::scoped_lock lock(it->second->buyLock_);
+		std::map<PriceT, BookLevel, PriceTDescend> levels;
+		for(const auto& [price, orderId] : it->second->buyOrder_){
+			OrderEntry *order = storage->locateByOrderId(orderId);
+			if(!order) continue;
+			auto& lvl = levels[price];
+			lvl.price = price;
+			lvl.totalQty += order->leavesQty_;
+			lvl.orderCount++;
+		}
+		snap.bids.reserve(levels.size());
+		for(auto& [p, lvl] : levels)
+			snap.bids.push_back(lvl);
+	}
+
+	// Aggregate asks (ascending price)
+	{
+		tbb::mutex::scoped_lock lock(it->second->sellLock_);
+		std::map<PriceT, BookLevel, PriceTAscend> levels;
+		for(const auto& [price, orderId] : it->second->sellOrder_){
+			OrderEntry *order = storage->locateByOrderId(orderId);
+			if(!order) continue;
+			auto& lvl = levels[price];
+			lvl.price = price;
+			lvl.totalQty += order->leavesQty_;
+			lvl.orderCount++;
+		}
+		snap.asks.reserve(levels.size());
+		for(auto& [p, lvl] : levels)
+			snap.asks.push_back(lvl);
+	}
+
+	return snap;
 }

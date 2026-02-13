@@ -148,6 +148,7 @@ SourceIdT WideParamsDataStorage::add(InstrumentEntry *val)
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
 		instruments_.insert(InstrumentsT::value_type(id, val));
 		val->id_ = id;
+		instrumentsBySymbol_[val->symbol_] = id;
 	}
 	if(nullptr != storage_)
 		storage_->save(*val);
@@ -189,6 +190,7 @@ SourceIdT WideParamsDataStorage::add(AccountEntry *val)
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
 		accounts_.insert(AccountsT::value_type(id, val));
 		val->id_ = id;
+		accountsByName_[val->account_] = id;
 	}
 	if(nullptr != storage_)
 		storage_->save(*val);
@@ -234,6 +236,7 @@ void WideParamsDataStorage::restore(InstrumentEntry *val)
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
 		instruments_.insert(InstrumentsT::value_type(val->id_, val));
+		instrumentsBySymbol_[val->symbol_] = val->id_;
 	}
 }
 
@@ -267,6 +270,7 @@ void WideParamsDataStorage::restore(AccountEntry *val)
 		// Exclusive write lock
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
 		accounts_.insert(AccountsT::value_type(val->id_, val));
+		accountsByName_[val->account_] = val->id_;
 	}
 }
 

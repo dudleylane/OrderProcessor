@@ -13,11 +13,25 @@
 #pragma once
 
 #include <map>
+#include <vector>
 #include <oneapi/tbb/mutex.h>
 
 #include "DataModelDef.h"
 
 namespace COP{
+
+	namespace Store { class OrderDataStorage; }
+
+	struct BookLevel {
+		PriceT price;
+		QuantityT totalQty;
+		u32 orderCount;
+	};
+
+	struct BookSnapshot {
+		std::vector<BookLevel> bids;
+		std::vector<BookLevel> asks;
+	};
 
 	class OrderBookImpl: public OrderBook
 	{
@@ -38,6 +52,8 @@ namespace COP{
 		virtual IdT getTop(const SourceIdT &instrument, const Side &side)const;
 
 		virtual void restore(const OrderEntry& order);
+
+		BookSnapshot getSnapshot(const SourceIdT &instrument, const Store::OrderDataStorage* storage) const;
 	private:
 		typedef std::multimap<PriceT, IdT, PriceTAscend> OrdersByPriceAscT;
 		typedef std::multimap<PriceT, IdT, PriceTDescend> OrdersByPriceDescT;

@@ -39,6 +39,12 @@ public:
 	OrderEntry *save(const OrderEntry &order, IdTValueGenerator *idGenerator);
 	void restore(OrderEntry *order);
 
+	template<typename Fn> void forEachOrder(Fn&& fn) const {
+		oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
+		for (const auto& [id, entry] : ordersById_)
+			fn(id, *entry);
+	}
+
 	ExecutionEntry *locateByExecId(const IdT &execId)const;
 	void save(const ExecutionEntry *exec);
 	ExecutionEntry *save(const ExecutionEntry &exec, IdTValueGenerator *idGenerator);

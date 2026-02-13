@@ -82,6 +82,38 @@ private:
 	ExecutionListsT executions_;
 
 	DataSaver *storage_;
+
+	std::map<StringT, SourceIdT> instrumentsBySymbol_;
+	std::map<StringT, SourceIdT> accountsByName_;
+
+public:
+	template<typename Fn> void forEachInstrument(Fn&& fn) const {
+		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+		for (const auto& [id, entry] : instruments_)
+			fn(id, *entry);
+	}
+
+	template<typename Fn> void forEachAccount(Fn&& fn) const {
+		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+		for (const auto& [id, entry] : accounts_)
+			fn(id, *entry);
+	}
+
+	SourceIdT findInstrumentBySymbol(const StringT& symbol) const {
+		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+		auto it = instrumentsBySymbol_.find(symbol);
+		if (it == instrumentsBySymbol_.end())
+			return SourceIdT();
+		return it->second;
+	}
+
+	SourceIdT findAccountByName(const StringT& name) const {
+		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+		auto it = accountsByName_.find(name);
+		if (it == accountsByName_.end())
+			return SourceIdT();
+		return it->second;
+	}
 };
 
 typedef aux::Singleton<WideParamsDataStorage> WideDataStorage;

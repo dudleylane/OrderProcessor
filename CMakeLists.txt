@@ -14,6 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Build options
 option(BUILD_TESTS "Build unit tests" ON)
 option(BUILD_BENCHMARKS "Build performance benchmarks" ON)
+option(BUILD_APP "Build production WebSocket server" ON)
 
 # Compiler flags
 add_compile_options(-msse2 -fexceptions)
@@ -76,10 +77,8 @@ if(BUILD_PG)
     target_link_libraries(orderEngine PUBLIC PkgConfig::LIBPQXX)
 endif()
 
-# Testing dependencies (Google Test, Google Mock, Google Benchmark)
-if(BUILD_TESTS OR BUILD_BENCHMARKS)
-    include(FetchContent)
-endif()
+# FetchContent for external dependencies
+include(FetchContent)
 
 if(BUILD_TESTS)
     FetchContent_Declare(
@@ -123,6 +122,18 @@ if(BUILD_BENCHMARKS)
             benchmark::benchmark
             benchmark::benchmark_main
     )
+endif()
+
+if(BUILD_APP)
+    FetchContent_Declare(json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG v3.11.3)
+    FetchContent_MakeAvailable(json)
+
+    add_executable(orderProcessorServer)
+    add_subdirectory(app)
+    target_link_libraries(orderProcessorServer PRIVATE
+        orderEngine nlohmann_json::nlohmann_json pthread)
 endif()
 
 # Installation
