@@ -43,6 +43,12 @@ find_package(spdlog REQUIRED)
 find_package(Boost 1.70 REQUIRED CONFIG)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LMDB REQUIRED IMPORTED_TARGET lmdb)
+
+option(BUILD_PG "Build with PostgreSQL write-behind (requires libpqxx)" OFF)
+if(BUILD_PG)
+    pkg_check_modules(LIBPQXX REQUIRED IMPORTED_TARGET libpqxx)
+endif()
+
 message(STATUS "Boost_INCLUDE_DIRS = ${Boost_INCLUDE_DIRS}")
 message(STATUS "Boost_LIBRARY_DIRS = ${Boost_LIBRARY_DIRS}")
 
@@ -64,6 +70,11 @@ target_include_directories(orderEngine
         $<INSTALL_INTERFACE:include>
         ${Boost_INCLUDE_DIRS}
 )
+
+if(BUILD_PG)
+    target_compile_definitions(orderEngine PUBLIC BUILD_PG)
+    target_link_libraries(orderEngine PUBLIC PkgConfig::LIBPQXX)
+endif()
 
 # Testing dependencies (Google Test, Google Mock, Google Benchmark)
 if(BUILD_TESTS OR BUILD_BENCHMARKS)

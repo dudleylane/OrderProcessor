@@ -22,6 +22,11 @@
 #include "OrderCodec.h"
 #include "OrderStorage.h"
 
+#ifdef BUILD_PG
+#include "PGRequestBuilder.h"
+#include "PGWriteBehind.h"
+#endif
+
 using namespace std;
 using namespace COP;
 using namespace COP::Store;
@@ -142,6 +147,10 @@ void StorageRecordDispatcher::save(const InstrumentEntry &val)
 	u32 version;
 	Codec::InstrumentCodec::encode(val, &buffer, &id, &version);
 	fileStorage_->save(id, buffer.c_str(), buffer.size());
+#ifdef BUILD_PG
+	if (pgWriter_)
+		pgWriter_->enqueue(PG::PGRequestBuilder::fromInstrument(val));
+#endif
 }
 
 void StorageRecordDispatcher::save(const IdT& id, const StringT &val)
@@ -185,6 +194,10 @@ void StorageRecordDispatcher::save(const AccountEntry &val)
 	u32 version;
 	Codec::AccountCodec::encode(val, &buffer, &id, &version);
 	fileStorage_->save(id, buffer.c_str(), buffer.size());
+#ifdef BUILD_PG
+	if (pgWriter_)
+		pgWriter_->enqueue(PG::PGRequestBuilder::fromAccount(val));
+#endif
 }
 
 void StorageRecordDispatcher::save(const ClearingEntry &val)
@@ -200,6 +213,10 @@ void StorageRecordDispatcher::save(const ClearingEntry &val)
 	u32 version;
 	Codec::ClearingCodec::encode(val, &buffer, &id, &version);
 	fileStorage_->save(id, buffer.c_str(), buffer.size());
+#ifdef BUILD_PG
+	if (pgWriter_)
+		pgWriter_->enqueue(PG::PGRequestBuilder::fromClearing(val));
+#endif
 }
 
 void StorageRecordDispatcher::save(const ExecutionsT &val)
@@ -233,5 +250,9 @@ void StorageRecordDispatcher::save(const OrderEntry &val)
 	u32 version;
 	Codec::OrderCodec::encode(val, &buffer, &id, &version);
 	fileStorage_->save(id, buffer.c_str(), buffer.size());
+#ifdef BUILD_PG
+	if (pgWriter_)
+		pgWriter_->enqueue(PG::PGRequestBuilder::fromOrder(val));
+#endif
 }
 

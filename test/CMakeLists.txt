@@ -45,6 +45,10 @@ target_sources(orderProcessorTest
 
         # LMDB storage backend tests
         LMDBStorageTest.cpp
+
+        # PostgreSQL write-behind tests (unit tests always, integration gated by env var)
+        PGEnumStringsTest.cpp
+        PGRequestBuilderTest.cpp
 )
 
 target_include_directories(orderProcessorTest
@@ -53,3 +57,9 @@ target_include_directories(orderProcessorTest
         ${CMAKE_CURRENT_SOURCE_DIR}/mocks
         ${CMAKE_SOURCE_DIR}/src
 )
+
+if(BUILD_PG)
+    target_sources(orderProcessorTest PRIVATE
+        PGWriteBehindTest.cpp
+    )
+endif()

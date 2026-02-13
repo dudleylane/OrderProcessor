@@ -15,6 +15,10 @@
 #include "FileStorageDef.h"
 #include "DataModelDef.h"
 
+#ifdef BUILD_PG
+namespace COP::PG { class PGWriteBehind; }
+#endif
+
 namespace COP{
 
 	class OrderBook;
@@ -53,6 +57,11 @@ namespace COP{
 		/// reimplemented from OrderSaver
 		virtual void save(const OrderEntry &val);
 
+#ifdef BUILD_PG
+	public:
+		void setPGWriter(PG::PGWriteBehind* writer) { pgWriter_ = writer; }
+#endif
+
 	public:
 		enum RecordType{
 			INVALID_RECORDTYPE = 0,
@@ -72,6 +81,9 @@ namespace COP{
 		OrderBook *orderBook_;
 		FileSaver *fileStorage_;
 		OrderDataStorage *orderStorage_;
+#ifdef BUILD_PG
+		PG::PGWriteBehind* pgWriter_ = nullptr;
+#endif
 	};
 
 	}

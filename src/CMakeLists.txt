@@ -40,4 +40,11 @@ target_sources(orderEngine
         TransactionScope.cpp
         TrOperations.cpp
         WideDataStorage.cpp
+        PGRequestBuilder.cpp
 )
+
+if(BUILD_PG)
+    target_sources(orderEngine PRIVATE
+        PGWriteBehind.cpp
+    )
+endif()
