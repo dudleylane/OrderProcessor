@@ -134,6 +134,9 @@ if(BUILD_APP)
     add_subdirectory(app)
     target_link_libraries(orderProcessorServer PRIVATE
         orderEngine nlohmann_json::nlohmann_json pthread)
+
+    add_executable(seedData app/seed_data.cpp)
+    target_link_libraries(seedData PRIVATE orderEngine pthread)
 endif()
 
 # Installation
