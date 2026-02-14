@@ -1,0 +1,32 @@
+# OrderProcessor Server Dockerfile
+# Multi-stage: build with CentOS 10, run with minimal image
+
+FROM quay.io/centos/centos:stream10 AS builder
+
+RUN dnf install -y \
+        cmake gcc-c++ \
+        tbb-devel spdlog-devel boost-devel lmdb-devel \
+    && dnf clean all
+
+WORKDIR /build
+COPY CMakeLists.txt ./
+COPY src/ src/
+COPY app/ app/
+
+RUN cmake -B out -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_APP=ON \
+    && cmake --build out -j$(nproc)
+
+# --- runtime stage ---
+FROM quay.io/centos/centos:stream10-minimal
+
+RUN microdnf install -y tbb lmdb-libs spdlog && microdnf clean all
+
+COPY --from=builder /build/out/orderProcessorServer /usr/local/bin/
+COPY --from=builder /build/out/seedData /usr/local/bin/
+
+EXPOSE 8080
+VOLUME /data
+
+ENTRYPOINT ["orderProcessorServer"]
+CMD ["--port", "8080", "--data-dir", "/data"]

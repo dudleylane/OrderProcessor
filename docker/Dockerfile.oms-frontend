@@ -6,6 +6,7 @@ WORKDIR /app
 COPY src/oms-frontend/package*.json ./
 RUN npm ci
 COPY src/oms-frontend/ .
+ENV VITE_WS_URL=ws://localhost:3000/ws
 RUN npm run build
 
 FROM nginx:alpine
