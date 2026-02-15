@@ -13,6 +13,7 @@
 #pragma once
 
 #include <set>
+#include <oneapi/tbb/spin_rw_mutex.h>
 #include "TypesDef.h"
 #include "WideDataLazyRef.h"
 #include "StateMachineDef.h"
@@ -215,6 +216,11 @@ namespace COP{
 		WideDataLazyRef<ExecutionsT *> executions_;
 
 		OrdState::OrderStatePersistence stateMachinePersistance_;
+
+		/// Per-order mutex protecting all fields after locateByOrderId().
+		/// Deadlock convention: when locking two orders simultaneously,
+		/// always lock the order with the smaller orderId_ first.
+		mutable oneapi::tbb::spin_rw_mutex entryMutex_;
 
 		void applyTrade(const TradeExecEntry *trade);
 		void addExecution(const IdT &execId);

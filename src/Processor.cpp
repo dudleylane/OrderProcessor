@@ -122,6 +122,9 @@ void Processor::onEvent(const std::string &/*source*/, const OrderCancelEvent &e
 	if(nullptr == ord)
 		throw std::runtime_error("Processor::onEvent(OrderCancelEvent): unable to locate order!");
 
+	// write lock on the order for state machine processing
+	oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
+
 	// create cancel received event
 	onCancelReceived evnt2Proc;
 	evnt2Proc.generator_ = generator_;
@@ -138,6 +141,8 @@ void Processor::onEvent(const std::string &/*source*/, const OrderCancelEvent &e
 	OrderStatePersistence smState = stateMachine_->getPersistence();
 	assert(nullptr != smState.orderData_);
 	smState.orderData_->setStateMachinePersistance(smState);
+
+	ordLock.release();
 
 	// enqueue transaction
 	assert(nullptr != transactMgr_);
@@ -177,6 +182,9 @@ void Processor::onEvent(const std::string &/*source*/, const OrderReplaceEvent &
 		if(nullptr == ord)
 			throw std::runtime_error("Processor::onEvent(OrderReplaceEvent): unable to locate order!");
 
+		// write lock on the order for state machine processing
+		oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
+
 		onReplaceReceived evnt2Proc(evnt.id_);
 		evnt2Proc.generator_ = generator_;
 		evnt2Proc.transaction_ = scope.get();
@@ -213,6 +221,9 @@ void Processor::onEvent(const std::string &/*source*/, const COP::Queues::OrderC
 	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
 	if(nullptr == ord)
 		throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): unable to locate order!");
+
+	// write lock on the order for state machine processing
+	oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
 
 	// restore state machine from order
 	assert(nullptr != stateMachine_);
@@ -259,6 +270,8 @@ void Processor::onEvent(const std::string &/*source*/, const COP::Queues::OrderC
 	assert(nullptr != smState.orderData_);
 	smState.orderData_->setStateMachinePersistance(smState);
 
+	ordLock.release();
+
 	// enqueue transaction
 	assert(nullptr != transactMgr_);
 	std::unique_ptr<Transaction> tr(scope.release());
@@ -272,19 +285,24 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 	assert(events_.empty());
 	PooledTransactionScope scope(scopePool_.get());
 
+	// Locate the order — all cases use the same id
+	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
+	if(nullptr == ord)
+		throw std::runtime_error("Processor::onEvent(ProcessEvent): unable to locate order!");
+
+	// write lock on the order for state machine processing
+	oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
+
 	switch(evnt.type_){
 	case ProcessEvent::ON_REPLACE_RECEVIED:
 		{
-			// restore event ot process
+			// restore event to process
 			onReplaceReceived evnt2Proc(evnt.id_);
 			evnt2Proc.generator_ = generator_;
 			evnt2Proc.transaction_ = scope.get();
 			evnt2Proc.orderStorage_ = orderStorage_;
 
 			assert(nullptr != stateMachine_);
-			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			if(nullptr == ord)
-				throw std::runtime_error("Processor::onEvent(ProcessEvent): unable to locate order for ON_REPLACE_RECEVIED!");
 			stateMachine_->setPersistance(ord->stateMachinePersistance());
 			// process event
 			stateMachine_->process_event(evnt2Proc);
@@ -299,9 +317,6 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 			evnt2Proc.orderStorage_ = orderStorage_;
 
 			assert(nullptr != stateMachine_);
-			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			if(nullptr == ord)
-				throw std::runtime_error("Processor::onEvent(ProcessEvent): unable to locate order for ON_EXEC_REPLACE!");
 			stateMachine_->setPersistance(ord->stateMachinePersistance());
 			// process event
 			stateMachine_->process_event(evnt2Proc);
@@ -316,9 +331,6 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 			evnt2Proc.orderStorage_ = orderStorage_;
 
 			assert(nullptr != stateMachine_);
-			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			if(nullptr == ord)
-				throw std::runtime_error("Processor::onEvent(ProcessEvent): unable to locate order for ON_REPLACE_REJECTED!");
 			stateMachine_->setPersistance(ord->stateMachinePersistance());
 			// process event in state machine
 			stateMachine_->process_event(evnt2Proc);
@@ -333,9 +345,11 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 	assert(nullptr != smState.orderData_);
 	smState.orderData_->setStateMachinePersistance(smState);
 
+	ordLock.release();
+
 	assert(nullptr != transactMgr_);
 	std::unique_ptr<Transaction> tr(scope.release());
-	transactMgr_->addTransaction(tr);//scope.executeTransaction(cntxt);
+	transactMgr_->addTransaction(tr);
 
 	processDeferedEvent();
 }
@@ -353,6 +367,9 @@ void Processor::onEvent(const std::string &/*source*/, const TimerEvent &evnt)
 	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
 	if(nullptr == ord)
 		throw std::runtime_error("Processor::onEvent(TimerEvent): unable to locate order!");
+
+	// write lock on the order for state machine processing
+	oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
 
 	// restore state machine from order
 	assert(nullptr != stateMachine_);
@@ -398,6 +415,8 @@ void Processor::onEvent(const std::string &/*source*/, const TimerEvent &evnt)
 	OrderStatePersistence smState = stateMachine_->getPersistence();
 	assert(nullptr != smState.orderData_);
 	smState.orderData_->setStateMachinePersistance(smState);
+
+	ordLock.release();
 
 	// enqueue transaction
 	assert(nullptr != transactMgr_);
@@ -481,6 +500,9 @@ void Processor::process(onTradeExecution &evnt, OrderEntry *order, const ACID::C
 	evnt.generator_ = generator_;
 	evnt.orderStorage_ = orderStorage_;
 
+	// write lock on the order for state machine processing
+	oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, true);
+
 	stateMachine_->setPersistance(order->stateMachinePersistance());
 	stateMachine_->process_event(evnt);
 
@@ -493,6 +515,9 @@ void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, con
 {
 	evnt.generator_ = generator_;
 	evnt.orderStorage_ = orderStorage_;
+
+	// write lock on the order for state machine processing
+	oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, true);
 
 	stateMachine_->setPersistance(order->stateMachinePersistance());
 	stateMachine_->process_event(evnt);

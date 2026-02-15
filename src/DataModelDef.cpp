@@ -145,19 +145,20 @@ OrderParams::OrderParams(const SourceIdT &dest, const SourceIdT &instrument,
 }
 
 OrderParams::OrderParams(const OrderParams &ord):
-	instrument_(ord.instrument_), account_(ord.account_), clearing_(ord.clearing_), 
-	destination_(ord.destination_), execInstruct_(ord.execInstruct_), 
-	creationTime_(ord.creationTime_), lastUpdateTime_(ord.lastUpdateTime_), 
-	expireTime_(ord.expireTime_), settlDate_(ord.settlDate_), price_(ord.price_), 
-	stopPx_(ord.stopPx_), avgPx_(ord.avgPx_), dayAvgPx_(ord.dayAvgPx_),	
+	instrument_(ord.instrument_), account_(ord.account_), clearing_(ord.clearing_),
+	destination_(ord.destination_), execInstruct_(ord.execInstruct_),
+	creationTime_(ord.creationTime_), lastUpdateTime_(ord.lastUpdateTime_),
+	expireTime_(ord.expireTime_), settlDate_(ord.settlDate_), price_(ord.price_),
+	stopPx_(ord.stopPx_), avgPx_(ord.avgPx_), dayAvgPx_(ord.dayAvgPx_),
 	status_(ord.status_), side_(ord.side_), ordType_(ord.ordType_),
 	tif_(ord.tif_), settlType_(ord.settlType_), capacity_(ord.capacity_),
-	currency_(ord.currency_), minQty_(ord.minQty_), orderQty_(ord.orderQty_), 
-	leavesQty_(ord.leavesQty_), cumQty_(ord.cumQty_), dayOrderQty_(ord.dayOrderQty_), 
+	currency_(ord.currency_), minQty_(ord.minQty_), orderQty_(ord.orderQty_),
+	leavesQty_(ord.leavesQty_), cumQty_(ord.cumQty_), dayOrderQty_(ord.dayOrderQty_),
 	dayCumQty_(ord.dayCumQty_), clOrderId_(ord.clOrderId_), origClOrderId_(ord.origClOrderId_),
-	source_(ord.source_), orderId_(ord.orderId_), origOrderId_(ord.origOrderId_), executions_(ord.executions_)
+	source_(ord.source_), orderId_(ord.orderId_), origOrderId_(ord.origOrderId_), executions_(ord.executions_),
+	entryMutex_()
 {
-	instrument_.load();	
+	instrument_.load();
 }
 
 OrderParams::~OrderParams()

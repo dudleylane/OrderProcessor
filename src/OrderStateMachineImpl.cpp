@@ -140,6 +140,9 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onRplOrderRe
 	if(nullptr == origOrder)
 		throw std::runtime_error("Unable to locate original order for OrderReplace!");
 
+	// read lock on original order during field access
+	oneapi::tbb::spin_rw_mutex::scoped_lock origLock(origOrder->entryMutex_, false);
+
 	// generate id for the order
 	assert(nullptr != evnt.generator_);
 	assert(nullptr != evnt.orderStorage_);
@@ -260,6 +263,10 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onReplace cons
 	OrderEntry *origOrder = evnt.orderStorage_->locateByOrderId(orderData->origOrderId_);
 	if(nullptr == origOrder)
 		throw std::runtime_error("Unable to locate original order for OrderReplaceAccept!");
+
+	// read lock on original order during field access
+	oneapi::tbb::spin_rw_mutex::scoped_lock origLock(origOrder->entryMutex_, false);
+
 	if(!origOrder->isReplaceValid(&reason))
 		throw std::runtime_error(reason.c_str());
 
@@ -272,7 +279,7 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onReplace cons
 		evnt.transaction_->addOperation(addOp);
 	}
 	// change original order to CnclReplaced
-	std::unique_ptr<Operation> execOp(new EnqueueOrderEventTrOperation<onExecReplace>(*origOrder, 
+	std::unique_ptr<Operation> execOp(new EnqueueOrderEventTrOperation<onExecReplace>(*origOrder,
 												onExecReplace(orderData->orderId_)));
 	evnt.transaction_->addOperation(execOp);
 }
@@ -285,8 +292,11 @@ void OrdStateImpl::processReject(OrderEntry *orderData, OrdState::onRplOrderReje
 	if(nullptr == origOrder)
 		throw std::runtime_error("Unable to locate original order for OrderReplaceReject!");
 
+	// read lock on original order during field access
+	oneapi::tbb::spin_rw_mutex::scoped_lock origLock(origOrder->entryMutex_, false);
+
 	// change original order to NoCnlReplace
-	std::unique_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder, 
+	std::unique_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder,
 												onReplaceRejected(orderData->orderId_)));
 	evnt.transaction_->addOperation(op);
 }
@@ -298,8 +308,11 @@ void OrdStateImpl::processExpire(OrderEntry *orderData, OrdState::onRplOrderExpi
 	if(nullptr == origOrder)
 		throw std::runtime_error("Unable to locate original order for OrderReplaceExpire!");
 
+	// read lock on original order during field access
+	oneapi::tbb::spin_rw_mutex::scoped_lock origLock(origOrder->entryMutex_, false);
+
 	// change original order to NoCnlReplace
-	std::unique_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder, 
+	std::unique_ptr<Operation> op(new EnqueueOrderEventTrOperation<onReplaceRejected>(*origOrder,
 												onReplaceRejected(orderData->orderId_)));
 	evnt.transaction_->addOperation(op);
 }

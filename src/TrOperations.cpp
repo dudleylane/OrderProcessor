@@ -28,7 +28,7 @@ using namespace COP::Store;
 
 namespace COP{ namespace ACID{
 	
-	void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, 
+	void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId,
 				const ExecutionEntry &exec)
 	{
 		/// locate order and push event into the executions_
@@ -36,13 +36,18 @@ namespace COP{ namespace ACID{
 		assert(nullptr != cnxt.orderStorage_);
 		OrderEntry *ord = cnxt.orderStorage_->locateByOrderId(orderId);
 		assert(nullptr != ord);
-		
+
+		// write lock on the order during source read + addExecution
+		oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
+
 		StringT src = ord->source_.get();
 
 		ExecutionEntry *execReport = cnxt.orderStorage_->save(exec, cnxt.idGenerator_);
 		assert(nullptr != execReport);
 
 		ord->addExecution(execReport->execId_);
+
+		ordLock.release();
 
 		assert(nullptr != cnxt.outQueues_);
 		cnxt.outQueues_->push(ExecReportEvent(execReport), src);

@@ -60,6 +60,10 @@ namespace{
 		OrderEntry *contrOrd = orderStorage_->locateByOrderId(order);
 		if(nullptr == contrOrd)
 			return false;
+
+		// read lock on contra order during field reads
+		oneapi::tbb::spin_rw_mutex::scoped_lock contrLock(contrOrd->entryMutex_, false);
+
 		if(0 == contrOrd->leavesQty_)
 			return false;
 		if(MARKET_ORDERTYPE == order_->ordType_)
@@ -128,6 +132,14 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 	if(nullptr == contrOrd)
 		throw std::runtime_error("Unable to retrive order from OrderStorage after search!");
 
+	/// read lock both orders with deadlock prevention (ascending orderId_)
+	OrderEntry *first = order;
+	OrderEntry *second = contrOrd;
+	if(contrOrd->orderId_ < order->orderId_)
+		std::swap(first, second);
+	oneapi::tbb::spin_rw_mutex::scoped_lock firstLock(first->entryMutex_, false);
+	oneapi::tbb::spin_rw_mutex::scoped_lock secondLock(second->entryMutex_, false);
+
 	/// add trade event
 	std::unique_ptr<ExecutionDeferedEvent> defEvnt(new ExecutionDeferedEvent(order));
 	TradeParams trade;
@@ -137,10 +149,16 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 	if(0 == trade.lastPx_ && 0 == order->price_)
 		throw std::runtime_error("OrderMatcher: cannot match two market orders - no reference price available!");
 	defEvnt->trades_.push_back(trade);
+
+	QuantityT remainingQty = order->leavesQty_ - trade.lastQty_;
+
+	secondLock.release();
+	firstLock.release();
+
 	defered_->addDeferedEvent(defEvnt.release());
 
 	/// add another match event to continue matching
-	if(order->leavesQty_ - trade.lastQty_ > 0){
+	if(remainingQty > 0){
 		std::unique_ptr<MatchOrderDeferedEvent> defEvnt(new MatchOrderDeferedEvent(order));
 		defEvnt->order_ = order;
 		defered_->addDeferedEvent(defEvnt.release());
