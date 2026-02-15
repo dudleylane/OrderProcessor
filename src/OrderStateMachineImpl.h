@@ -26,7 +26,6 @@ namespace OrdStateImpl{
 	void processAccept(OrderEntry **orderData, OrdState::onExternalOrder const&evnt);
 	void processReject(OrderEntry **orderData, OrdState::onExternalOrderRejected const&evnt);
 
-	void processAccept(OrderEntry *orderData, OrdState::onOrderAccepted const&evnt);
 	void processReject(OrderEntry *orderData, OrdState::onOrderRejected const&evnt);
 	void processRejectNew(OrderEntry *orderData, OrdState::onOrderRejected const&evnt);
 	void processReject(OrderEntry *orderData, OrdState::onRplOrderRejected const&evnt);

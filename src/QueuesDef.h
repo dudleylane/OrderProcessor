@@ -85,8 +85,7 @@ namespace Queues{
 		enum EventType{
 			INVALID = 0,
 			ON_REPLACE_RECEVIED,
-			ON_ORDER_ACCEPTED,
-			ON_EXEC_REPLACE,
+			ON_EXEC_REPLACE = 3,
 			ON_REPLACE_REJECTED,
 		};
 

@@ -123,7 +123,7 @@ BENCHMARK(BM_StateMachineCreate)->Range(8, 8 << 10);
 // State Transition Benchmarks - Using actual process_event() calls
 // =============================================================================
 
-static void BM_StateTransitionOrderAccepted(benchmark::State& state) {
+static void BM_StateTransitionOrderReceived(benchmark::State& state) {
     StateMachineBenchmarkSetup setup;
 
     for (auto _ : state) {
@@ -131,15 +131,15 @@ static void BM_StateTransitionOrderAccepted(benchmark::State& state) {
         auto stateMachine = std::make_unique<OrderState>(order);
         stateMachine->start();
 
-        // Actually process the onOrderAccepted event through state machine
-        onOrderAccepted evnt = setup.createEvent<onOrderAccepted>();
+        // Actually process the onOrderReceived event through state machine
+        onOrderReceived evnt = setup.createEvent<onOrderReceived>();
         stateMachine->process_event(evnt);
 
         benchmark::DoNotOptimize(stateMachine->getPersistence());
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_StateTransitionOrderAccepted)->Range(8, 8 << 10);
+BENCHMARK(BM_StateTransitionOrderReceived)->Range(8, 8 << 10);
 
 static void BM_StateTransitionCancelReceived(benchmark::State& state) {
     StateMachineBenchmarkSetup setup;
@@ -150,7 +150,7 @@ static void BM_StateTransitionCancelReceived(benchmark::State& state) {
         stateMachine->start();
 
         // First accept the order
-        onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+        onOrderReceived acceptEvnt = setup.createEvent<onOrderReceived>();
         stateMachine->process_event(acceptEvnt);
 
         // Then process cancel received
@@ -172,7 +172,7 @@ static void BM_StateTransitionSuspend(benchmark::State& state) {
         stateMachine->start();
 
         // First accept the order
-        onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+        onOrderReceived acceptEvnt = setup.createEvent<onOrderReceived>();
         stateMachine->process_event(acceptEvnt);
 
         // Then suspend
@@ -194,7 +194,7 @@ static void BM_StateTransitionExpire(benchmark::State& state) {
         stateMachine->start();
 
         // First accept the order
-        onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+        onOrderReceived acceptEvnt = setup.createEvent<onOrderReceived>();
         stateMachine->process_event(acceptEvnt);
 
         // Then expire
@@ -220,7 +220,7 @@ static void BM_OrderLifecycleAcceptToSuspendToResume(benchmark::State& state) {
         stateMachine->start();
 
         // Accept
-        onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+        onOrderReceived acceptEvnt = setup.createEvent<onOrderReceived>();
         stateMachine->process_event(acceptEvnt);
 
         // Suspend
@@ -246,7 +246,7 @@ static void BM_OrderLifecycleAcceptToCancelToRejected(benchmark::State& state) {
         stateMachine->start();
 
         // Accept order
-        onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+        onOrderReceived acceptEvnt = setup.createEvent<onOrderReceived>();
         stateMachine->process_event(acceptEvnt);
 
         // Cancel received
@@ -274,7 +274,7 @@ static void BM_StateMachineGetPersistence(benchmark::State& state) {
     stateMachine->start();
 
     // Pre-transition to a meaningful state
-    onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+    onOrderReceived acceptEvnt = setup.createEvent<onOrderReceived>();
     stateMachine->process_event(acceptEvnt);
 
     for (auto _ : state) {
@@ -292,7 +292,7 @@ static void BM_StateMachineSetPersistence(benchmark::State& state) {
     stateMachine->start();
 
     // Get a persistence to restore
-    onOrderAccepted acceptEvnt = setup.createEvent<onOrderAccepted>();
+    onOrderReceived acceptEvnt = setup.createEvent<onOrderReceived>();
     stateMachine->process_event(acceptEvnt);
     auto persistence = stateMachine->getPersistence();
 
@@ -325,7 +325,7 @@ static void BM_BatchStateTransitions(benchmark::State& state) {
     for (auto _ : state) {
         // Process accept event for all
         for (auto& sm : machines) {
-            onOrderAccepted evnt = setup.createEvent<onOrderAccepted>();
+            onOrderReceived evnt = setup.createEvent<onOrderReceived>();
             sm->process_event(evnt);
         }
         // Process suspend for all

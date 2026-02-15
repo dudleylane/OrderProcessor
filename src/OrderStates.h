@@ -71,7 +71,6 @@ struct Pend_New : public boost::msm::front::state<>
 #endif
 	}
 
-	template <class FSM> void on_entry(onOrderAccepted const&, FSM& );
 };
 
 struct Pend_Replace : public boost::msm::front::state<>
@@ -105,7 +104,6 @@ struct Rejected : public boost::msm::front::state<>
 #endif
 	}
 
-	template <class FSM> void on_entry(onOrderAccepted const&, FSM& );
 	template <class FSM> void on_entry(onOrderRejected const&, FSM& );
 	template <class FSM> void on_entry(onRplOrderRejected const&, FSM& );
 	template <class FSM> void on_entry(onExternalOrder const&, FSM& );
@@ -133,7 +131,6 @@ struct New : public boost::msm::front::state<>
 
 	template <class FSM> void on_entry(onExternalOrder const&, FSM& );
 	template <class FSM> void on_entry(onOrderReceived const&, FSM& );
-	template <class FSM> void on_entry(onOrderAccepted const&, FSM& );
 	template <class FSM> void on_entry(onReplace const&, FSM& );
 	template <class FSM> void on_entry(onTradeCrctCncl const&, FSM& );
 	template <class FSM> void on_entry(onNewDay const&, FSM& );

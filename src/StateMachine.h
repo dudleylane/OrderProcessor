@@ -53,7 +53,6 @@ public:
 	/// Order replace event was received
 	void receive(onRplOrderReceived const&);
 
-	void accept(onOrderAccepted const&);
 	void accept(onExternalOrder const&);
 	void reject(onExternalOrderRejected const&);
 	void reject(onRecvOrderRejected const&);

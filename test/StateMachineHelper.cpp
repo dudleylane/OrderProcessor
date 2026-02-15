@@ -57,12 +57,6 @@ void OrderStateWrapper::processEvent(const onOrderReceived &evnt)
 	stateImpl_->state_.process_event(evnt);	
 }
 
-void OrderStateWrapper::processEvent(const onOrderAccepted &evnt)
-{
-	assert(nullptr != stateImpl_);
-	stateImpl_->state_.process_event(evnt);	
-}
-
 void OrderStateWrapper::processEvent(const COP::OrdState::onRplOrderReceived &evnt)
 {
 	assert(nullptr != stateImpl_);

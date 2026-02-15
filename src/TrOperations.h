@@ -120,8 +120,6 @@ namespace COP{
 
 		void executeEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
 		void rollbackEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
-		void executeEnqueueOrderEvent(const OrdState::onOrderAccepted &event_, const Context &cnxt);
-		void rollbackEnqueueOrderEvent(const OrdState::onOrderAccepted &event_, const Context &cnxt);
 		void executeEnqueueOrderEvent(const OrdState::onExecReplace &event_, const Context &cnxt);
 		void rollbackEnqueueOrderEvent(const OrdState::onExecReplace &event_, const Context &cnxt);
 		void executeEnqueueOrderEvent(const OrdState::onReplaceRejected &event_, const Context &cnxt);

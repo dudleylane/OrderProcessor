@@ -290,24 +290,6 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 			stateMachine_->process_event(evnt2Proc);
 		}
 		break;
-	case ProcessEvent::ON_ORDER_ACCEPTED:
-		{
-			// restore event to process
-			onOrderAccepted evnt2Proc;
-			evnt2Proc.generator_ = generator_;
-			evnt2Proc.transaction_ = scope.get();
-			evnt2Proc.orderStorage_ = orderStorage_;
-			evnt2Proc.orderBook_ = orderBook_;
-
-			assert(nullptr != stateMachine_);
-			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			if(nullptr == ord)
-				throw std::runtime_error("Processor::onEvent(ProcessEvent): unable to locate order for ON_ORDER_ACCEPTED!");
-			stateMachine_->setPersistance(ord->stateMachinePersistance());
-			// process event
-			stateMachine_->process_event(evnt2Proc);
-		}
-		break;
 	case ProcessEvent::ON_EXEC_REPLACE:
 		{
 			// restore event to process

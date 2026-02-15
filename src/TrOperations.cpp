@@ -68,26 +68,6 @@ namespace COP{ namespace ACID{
 	{
 	}
 
-	void executeEnqueueOrderEvent(const OrdState::onOrderAccepted &event_, const Context &cnxt)
-	{
-		assert(nullptr != cnxt.inQueues_);
-		cnxt.inQueues_->push("_", ProcessEvent(ProcessEvent::ON_ORDER_ACCEPTED, event_.orderId_));
-
-		ExecutionEntry execReport;
-		execReport.orderId_ = event_.orderId_;
-		execReport.type_ = NEW_EXECTYPE;
-		execReport.transactTime_ = aux::currentDateTime();
-		execReport.execId_ = IdT(); /// will be assigned when saved into the storage
-		execReport.orderStatus_ = NEW_ORDSTATUS;
-		execReport.market_ = INTERNAL_EXECUTION;
-		processEvent_GenerateExecution(cnxt, event_.orderId_, execReport);
-	}
-
-	void rollbackEnqueueOrderEvent(const OrdState::onOrderAccepted &, const Context &)
-	{
-		
-	}
-
 	void executeEnqueueOrderEvent(const OrdState::onExecReplace &event_, const Context &cnxt)
 	{
 		assert(nullptr != cnxt.inQueues_);

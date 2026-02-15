@@ -236,29 +236,6 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onExternalOrd
 	{}
 }
 
-void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onOrderAccepted const&evnt)
-{
-	string reason;
-	assert(nullptr != orderData);
-
-	if(!orderData->isValid(&reason))
-		throw std::runtime_error(reason.c_str());
-	if(MARKET_ORDERTYPE == orderData->ordType_){
-		assert(nullptr != evnt.orderBook_);
-		if(!evnt.orderBook_->find(FindAnyOpositeOrder(orderData)).isValid())
-			throw std::runtime_error("There is no market for this instrument!");
-	}
-
-	std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
-	evnt.transaction_->addOperation(op);
-
-	/// market order should be matched once - no need to put it into OrderBook
-	if(MARKET_ORDERTYPE != orderData->ordType_){
-		std::unique_ptr<Operation> op2(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-		evnt.transaction_->addOperation(op2);
-	}
-}
-
 void OrdStateImpl::processReject(OrderEntry *, OrdState::onOrderRejected const&)
 {
 	// Pend_New->Rejected: nothing to do

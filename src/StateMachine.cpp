@@ -334,38 +334,6 @@ bool OrderState_::acceptable(onCancelReceived const&evnt){
 	return res;
 }
 
-void OrderState_::accept(onOrderAccepted const &evnt)
-{
-	if(evnt.testStateMachine_){
-		if(!evnt.testStateMachineCheckResult_){
-			onOrderRejected newEvnt(evnt, "Test reject");
-			static_cast<OrderState*>(this)->process_event(newEvnt);
-			throw std::runtime_error("Test reject");
-		}
-		return;
-	}
-
-	try{
-		OrdStateImpl::processAccept(orderData_, evnt);
-		evnt.order4StateMachine_ = orderData_;
-	}catch(const std::exception &ex){
-		onOrderRejected newEvnt(evnt, ex.what());
-		newEvnt.order4StateMachine_ = orderData_;
-		static_cast<OrderState*>(this)->process_event(newEvnt);
-		throw;
-	}
-}
-
-/*bool OrderState_::acceptable(onOrderAccepted const &evnt)
-{
-	if(evnt.testStateMachine_)
-		return evnt.testStateMachineCheckResult_;
-
-	bool res = OrdStateImpl::processAcceptable(orderData_, evnt);
-	evnt.order4StateMachine_ = orderData_;
-	return res;
-}*/
-
 void OrderState_::reject(onRplOrderRejected const&evnt)
 {
 	if(evnt.testStateMachine_)

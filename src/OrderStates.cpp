@@ -72,19 +72,6 @@ void Rejected::on_entry(onExternalOrderRejected const& evnt, FSM&)
 }
 
 template <class FSM>
-void Rejected::on_entry(onOrderAccepted const& evnt, FSM&)
-{
-	if(evnt.testStateMachine_)
-		return;
-	assert(nullptr != evnt.order4StateMachine_);
-	evnt.order4StateMachine_->status_ = REJECTED_ORDSTATUS;
-
-	///todo: add reject reason
-	std::unique_ptr<Operation> op(new CreateRejectExecReportTrOperation("", COP::REJECTED_ORDSTATUS, *evnt.order4StateMachine_));
-	evnt.transaction_->addOperation(op);
-}
-
-template <class FSM>
 void Rejected::on_entry(onOrderRejected const& evnt, FSM&){
 	if(evnt.testStateMachine_)
 		return;
@@ -132,17 +119,6 @@ void New::on_entry(onExternalOrder const& evnt, FSM&){
 
 template <class FSM>
 void New::on_entry(onOrderReceived const& evnt, FSM&){
-	if(evnt.testStateMachine_)
-		return;
-	assert(nullptr != evnt.order4StateMachine_);
-	evnt.order4StateMachine_->status_ = NEW_ORDSTATUS;
-
-	std::unique_ptr<Operation> op(new CreateExecReportTrOperation(COP::NEW_ORDSTATUS, COP::NEW_EXECTYPE, *evnt.order4StateMachine_));
-	evnt.transaction_->addOperation(op);
-}
-
-template <class FSM>
-void New::on_entry(onOrderAccepted const& evnt, FSM&){
 	if(evnt.testStateMachine_)
 		return;
 	assert(nullptr != evnt.order4StateMachine_);
@@ -410,7 +386,6 @@ template void Rejected::on_entry<OrderState>(onReplace const&, OrderState&);
 template void Rejected::on_entry<OrderState>(onRecvOrderRejected const&, OrderState&);
 template void Rejected::on_entry<OrderState>(onRecvRplOrderRejected const&, OrderState&);
 template void Rejected::on_entry<OrderState>(onExternalOrderRejected const&, OrderState&);
-template void Rejected::on_entry<OrderState>(onOrderAccepted const&, OrderState&);
 template void Rejected::on_entry<OrderState>(onOrderRejected const&, OrderState&);
 template void Rejected::on_entry<OrderState>(onRplOrderRejected const&, OrderState&);
 template void Rejected::on_entry<OrderState>(onExternalOrder const&, OrderState&);
@@ -418,7 +393,6 @@ template void Rejected::on_entry<OrderState>(onExternalOrder const&, OrderState&
 // New state on_entry instantiations
 template void New::on_entry<OrderState>(onExternalOrder const&, OrderState&);
 template void New::on_entry<OrderState>(onOrderReceived const&, OrderState&);
-template void New::on_entry<OrderState>(onOrderAccepted const&, OrderState&);
 template void New::on_entry<OrderState>(onReplace const&, OrderState&);
 template void New::on_entry<OrderState>(onNewDay const&, OrderState&);
 template void New::on_entry<OrderState>(onContinue const&, OrderState&);

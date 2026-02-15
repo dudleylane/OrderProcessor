@@ -23,8 +23,6 @@ namespace test{
 
 		void start();
 		void processEvent(const COP::OrdState::onOrderReceived &evnt);
-		void processEvent(const COP::OrdState::onOrderAccepted &evnt);
-
 		void processEvent(const COP::OrdState::onRplOrderReceived &evnt);
 		void processEvent(const COP::OrdState::onNewOrder &evnt);
 		void processEvent(const COP::OrdState::onExternalOrder &evnt);

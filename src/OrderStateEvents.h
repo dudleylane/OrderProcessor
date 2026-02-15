@@ -80,15 +80,6 @@ namespace OrdState{
 
 	struct onNewOrder: public OrderStateEvent
 	{};
-	struct onOrderAccepted: public OrderStateEvent
-	{
-		onOrderAccepted(){}
-		explicit onOrderAccepted(const OrderStateEvent &evnt, const IdT &id): 
-			OrderStateEvent(evnt)
-		{
-			orderId_ = id;	
-		}
-	};
 	struct onExternalOrder: public OrderStateEvent
 	{
 		onExternalOrder(): order_(nullptr)
