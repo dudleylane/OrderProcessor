@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <mutex>
 #include "TypesDef.h"
 #include "WideDataStorage.h"
 
@@ -21,24 +23,43 @@ template<typename T>
 class WideDataLazyRef
 {
 public:
-	WideDataLazyRef(const SourceIdT &id, bool load = false): id_(id), loaded_(load){
-		if(loaded_)
-			get();
+	WideDataLazyRef(const SourceIdT &id, bool load = false): id_(id), loaded_(false){
+		if(load)
+			this->load();
 	}
+
+	WideDataLazyRef(const WideDataLazyRef &other)
+		: val_(other.val_), id_(other.id_), loaded_(other.loaded_.load(std::memory_order_acquire)){}
+
+	WideDataLazyRef &operator=(const WideDataLazyRef &other){
+		if(this != &other){
+			val_ = other.val_;
+			id_ = other.id_;
+			loaded_.store(other.loaded_.load(std::memory_order_acquire), std::memory_order_release);
+		}
+		return *this;
+	}
+
 	~WideDataLazyRef(void){}
 
 	const T &get()const{
-		if(!loaded_){
-			Store::WideDataStorage::instance()->get(id_, &val_);
-			loaded_ = true;
+		if(!loaded_.load(std::memory_order_acquire)){
+			std::lock_guard<std::mutex> guard(mtx_);
+			if(!loaded_.load(std::memory_order_relaxed)){
+				Store::WideDataStorage::instance()->get(id_, &val_);
+				loaded_.store(true, std::memory_order_release);
+			}
 		}
 		return val_;
 	}
 
 	void load(){
-		if(!loaded_){
-			Store::WideDataStorage::instance()->get(id_, &val_);
-			loaded_ = true;
+		if(!loaded_.load(std::memory_order_acquire)){
+			std::lock_guard<std::mutex> guard(mtx_);
+			if(!loaded_.load(std::memory_order_relaxed)){
+				Store::WideDataStorage::instance()->get(id_, &val_);
+				loaded_.store(true, std::memory_order_release);
+			}
 		}
 	}
 
@@ -48,7 +69,8 @@ public:
 private:
 	mutable T val_;
 	SourceIdT id_;
-	mutable bool loaded_;
+	mutable std::atomic<bool> loaded_;
+	mutable std::mutex mtx_;
 };
 
 }

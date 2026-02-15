@@ -81,8 +81,7 @@ void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 	if(!events_.empty())
 		throw std::runtime_error("Processor::onEvent(OrderEvent): events queue is not empty!");
 
-	// prepare context
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
+	// prepare scope
 	PooledTransactionScope scope(scopePool_.get());
 
 	// restore event to process
@@ -116,8 +115,6 @@ void Processor::onEvent(const std::string &/*source*/, const OrderCancelEvent &e
 	if(!evnt.id_.isValid())
 		throw std::runtime_error("Processor::onEvent(OrderCancelEvent): order id is invalid!");
 
-	// prepare context
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	PooledTransactionScope scope(scopePool_.get());
 
 	// locate the order to cancel
@@ -155,8 +152,6 @@ void Processor::onEvent(const std::string &/*source*/, const OrderReplaceEvent &
 	if(!evnt.id_.isValid())
 		throw std::runtime_error("Processor::onEvent(OrderReplaceEvent): order id is invalid!");
 
-	// prepare context
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	PooledTransactionScope scope(scopePool_.get());
 
 	if(nullptr != evnt.replacementOrder_) {
@@ -212,8 +207,6 @@ void Processor::onEvent(const std::string &/*source*/, const COP::Queues::OrderC
 	if(evnt.changeType_ == OrderChangeStateEvent::INVALID_CHANGE)
 		throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): invalid change type!");
 
-	// prepare context
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	PooledTransactionScope scope(scopePool_.get());
 
 	// locate the order
@@ -276,9 +269,7 @@ void Processor::onEvent(const std::string &/*source*/, const COP::Queues::OrderC
 
 void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 {
-	///prepare context
 	assert(events_.empty());
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	PooledTransactionScope scope(scopePool_.get());
 
 	switch(evnt.type_){
@@ -292,10 +283,11 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 
 			assert(nullptr != stateMachine_);
 			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			assert(nullptr != ord);
+			if(nullptr == ord)
+				throw std::runtime_error("Processor::onEvent(ProcessEvent): unable to locate order for ON_REPLACE_RECEVIED!");
 			stateMachine_->setPersistance(ord->stateMachinePersistance());
 			// process event
-			stateMachine_->process_event(evnt2Proc);	
+			stateMachine_->process_event(evnt2Proc);
 		}
 		break;
 	case ProcessEvent::ON_ORDER_ACCEPTED:
@@ -309,10 +301,11 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 
 			assert(nullptr != stateMachine_);
 			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			assert(nullptr != ord);
+			if(nullptr == ord)
+				throw std::runtime_error("Processor::onEvent(ProcessEvent): unable to locate order for ON_ORDER_ACCEPTED!");
 			stateMachine_->setPersistance(ord->stateMachinePersistance());
 			// process event
-			stateMachine_->process_event(evnt2Proc);	
+			stateMachine_->process_event(evnt2Proc);
 		}
 		break;
 	case ProcessEvent::ON_EXEC_REPLACE:
@@ -325,10 +318,11 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 
 			assert(nullptr != stateMachine_);
 			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			assert(nullptr != ord);
+			if(nullptr == ord)
+				throw std::runtime_error("Processor::onEvent(ProcessEvent): unable to locate order for ON_EXEC_REPLACE!");
 			stateMachine_->setPersistance(ord->stateMachinePersistance());
 			// process event
-			stateMachine_->process_event(evnt2Proc);	
+			stateMachine_->process_event(evnt2Proc);
 		}
 		break;
 	case ProcessEvent::ON_REPLACE_REJECTED:
@@ -341,7 +335,8 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 
 			assert(nullptr != stateMachine_);
 			OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-			assert(nullptr != ord);
+			if(nullptr == ord)
+				throw std::runtime_error("Processor::onEvent(ProcessEvent): unable to locate order for ON_REPLACE_REJECTED!");
 			stateMachine_->setPersistance(ord->stateMachinePersistance());
 			// process event in state machine
 			stateMachine_->process_event(evnt2Proc);
@@ -370,8 +365,6 @@ void Processor::onEvent(const std::string &/*source*/, const TimerEvent &evnt)
 	if(evnt.timerType_ == TimerEvent::INVALID_TIMER)
 		throw std::runtime_error("Processor::onEvent(TimerEvent): invalid timer type!");
 
-	// prepare context
-	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	PooledTransactionScope scope(scopePool_.get());
 
 	// locate the order
@@ -486,9 +479,17 @@ void Processor::processDeferedEvent()
 			}		
 		}catch(const std::exception &){
 			for(DeferedEventsT::iterator it = tmp.begin(); it != tmp.end(); ++it){
-				if(nullptr != *it)		
+				if(nullptr != *it)
 					delete *it;
-			}	
+			}
+			// Clear any partial-chain events enqueued before the exception
+			// to prevent processing inconsistent state
+			DeferedEventsT partial;
+			swap(partial, events_);
+			for(DeferedEventsT::iterator it = partial.begin(); it != partial.end(); ++it){
+				delete *it;
+			}
+			throw;
 		}
 	}
 }

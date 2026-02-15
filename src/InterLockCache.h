@@ -72,7 +72,7 @@ namespace aux{
 				std::unique_ptr<T> v(next->val_);
 				nodes.push_back(next);
 				next = next->next_;
-			}while(cache_ != next->next_);
+			}while(cache_ != next);
 			for(size_t i = 0; i < nodes.size(); ++i){
 				delete nodes.at(i);
 			}

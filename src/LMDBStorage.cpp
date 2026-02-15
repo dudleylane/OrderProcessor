@@ -352,13 +352,18 @@ void LMDBStorage::erase(const IdT& id)
 	MDB_val curKey, curData;
 	rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_FIRST);
 	while(rc == MDB_SUCCESS){
+		bool deleted = false;
 		if(curKey.mv_size == sizeof(CompositeKey)){
 			CompositeKey ck = readKey(curKey);
 			if(ck.id_ == id){
 				mdb_cursor_del(cursor, 0);
+				deleted = true;
 			}
 		}
-		rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);
+		if(!deleted)
+			rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);
+		else
+			rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_GET_CURRENT);
 	}
 	mdb_cursor_close(cursor);
 

@@ -100,7 +100,7 @@ public:
 	// Transition table for Order
 	// ToDo: add execCorrect, when qty not changed Fill->Fill for example
 	// ToDo: add administrative switch to any state
-	struct transition_table : mpl::vector45<
+	struct transition_table : mpl::vector42<
 		//    Start                Event           Next           Action				Guard
 		//	  +-------------+------------------+-------------+------------+----------------------+
 		// create OrderEntry from received event and generate id
@@ -183,15 +183,8 @@ public:
 		// update orderentry according to tradecorrect
 		// create ExecReport TradeCorrect
 		row  < Filled,		 onTradeCrctCncl,	New,		  &os::corrected, &os::notexecuted   >,
-		// Remove from OrderBook
-		// create ExecReport Expired
-		a_row< Filled,		 onExpired,			Expired,	  &os::expire	                     >,
-		// Remove from OrderBook
-		// create ExecReport Finished
-		a_row< Filled,		 onFinished,		DoneForDay,   &os::finished	                     >,
-		// Remove from OrderBook
-		// create ExecReport Suspended
-		a_row< Filled,		 onSuspended,		Suspended,    &os::suspended                     >,
+		// Filled orders only allow trade corrections (not Expired/DoneForDay/Suspended
+		// which could lead to re-activation via onNewDay/onContinue)
 
 		// update orderentry according to tradecorrect
 		// create ExecReport TradeCorrect
@@ -265,8 +258,6 @@ public:
     template <class FSM, class Event>
     void exception_caught (Event const&, FSM&, std::exception&)
     {
-		//throw ex;
-        //BOOST_ASSERT(false);
     }
 
 private:

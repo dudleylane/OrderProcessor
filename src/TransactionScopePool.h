@@ -37,7 +37,6 @@ public:
         : poolSize_(poolSize)
         , pool_(new Node[poolSize])
         , head_(0)
-        , tail_(0)
         , cacheMisses_(0)
     {
         // Pre-allocate all TransactionScope objects
@@ -127,7 +126,6 @@ private:
 
     // Cache-line aligned to prevent false sharing
     alignas(64) std::atomic<size_t> head_;
-    alignas(64) std::atomic<size_t> tail_;
     alignas(64) std::atomic<size_t> cacheMisses_;
 
     // Non-copyable

@@ -112,7 +112,7 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 				ordersByClId_.erase(order.clOrderId_.get());
 				[[fallthrough]];
 			case 1:
-				ordersById_.erase(order.orderId_);
+				ordersById_.erase(cp->orderId_);
 			}
 			throw;
 		}

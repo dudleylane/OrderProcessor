@@ -138,7 +138,8 @@ char *toStr(char *buf, int val){
 	if(0 > val){
 		buf[0] = '-';
 		++buf;
-		val *= -1;
+		// Use unsigned negation to avoid UB when val == INT_MIN
+		return toStr(buf, static_cast<size_t>(-(static_cast<long long>(val))));
 	}
 	return toStr(buf, static_cast<size_t>(val));
 }
@@ -159,20 +160,18 @@ char *toStr(char *buf, int val, size_t pos){
 		usePos = 3;
 	else if(val < 10000)
 		usePos = 4;
-	else if(val < 10000)
-		usePos = 5;
 	else if(val < 100000)
-		usePos = 6;
+		usePos = 5;
 	else if(val < 1000000)
-		usePos = 7;
+		usePos = 6;
 	else if(val < 10000000)
-		usePos = 8;
+		usePos = 7;
 	else if(val < 100000000)
-		usePos = 9;
+		usePos = 8;
 	else if(val < 1000000000)
+		usePos = 9;
+	else
 		usePos = 10;
-	else 
-		usePos = 11;
 	if(usePos < pos){
 		for(size_t i = usePos; i < pos; ++i)
 			buf = append(buf, 0);

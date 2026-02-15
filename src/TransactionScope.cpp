@@ -131,7 +131,7 @@ void TransactionScope::getRelatedObjects(ObjectsInTransactionT *obj)const
 			}
 			if(!duplicateId){
 				/// todo: should be redesigned
-				if(DEPENDANT_OBJECT_LIMIT - 1 == obj->size_)
+				if(DEPENDANT_OBJECT_LIMIT == obj->size_)
 					throw std::runtime_error("getRelatedObjects() failed to fill ObjectsInTransactionT, transaction use too many objects!");
 				obj->list_[(obj->size_)++] = ObjectInTransaction(order_ObjectType, id);
 			}
@@ -146,7 +146,7 @@ void TransactionScope::getRelatedObjects(ObjectsInTransactionT *obj)const
 			}
 			if(!duplicateId){
 				/// todo: should be redesigned
-				if(DEPENDANT_OBJECT_LIMIT - 1 == obj->size_)
+				if(DEPENDANT_OBJECT_LIMIT == obj->size_)
 					throw std::runtime_error("getRelatedObjects() failed to fill ObjectsInTransactionT, transaction use too many objects!");
 				obj->list_[(obj->size_)++] = ObjectInTransaction(instrument_ObjectType, rid);
 			}

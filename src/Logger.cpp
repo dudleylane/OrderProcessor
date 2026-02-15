@@ -287,7 +287,7 @@ void Logger::note(int val){
 
 void Logger::note(LogMessage &msg){
 	assert(nullptr != impl_);
-	impl_->logMessage(msg, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
+	impl_->logMessage(msg, LoggerImpl::NOTE_ON_FLAG, NOTE_PREFIX);
 }
 
 void Logger::warn(const std::string &msg){
@@ -307,7 +307,7 @@ void Logger::warn(int val){
 
 void Logger::warn(LogMessage &msg){
 	assert(nullptr != impl_);
-	impl_->logMessage(msg, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
+	impl_->logMessage(msg, LoggerImpl::WARN_ON_FLAG, WARN_PREFIX);
 }
 
 void Logger::error(const std::string &msg){
@@ -327,7 +327,7 @@ void Logger::error(int val){
 
 void Logger::error(LogMessage &msg){
 	assert(nullptr != impl_);
-	impl_->logMessage(msg, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
+	impl_->logMessage(msg, LoggerImpl::ERROR_ON_FLAG, ERROR_PREFIX);
 }
 
 void Logger::fatal(const std::string &msg){
@@ -347,5 +347,5 @@ void Logger::fatal(int val){
 
 void Logger::fatal(LogMessage &msg){
 	assert(nullptr != impl_);
-	impl_->logMessage(msg, LoggerImpl::DEBUG_ON_FLAG, DEBUG_PREFIX);
+	impl_->logMessage(msg, LoggerImpl::FATAL_ON_FLAG, FATAL_PREFIX);
 }

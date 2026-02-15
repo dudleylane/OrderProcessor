@@ -130,7 +130,7 @@ namespace{
 		record.offset_ = static_cast<size_t>(ftell(f));
 
 		u32 recSize = static_cast<u32>(size) + TAIL_SIZE + HEADER_SIZE;
-		std::unique_ptr<char> recBuffer(new char[recSize]);
+		std::unique_ptr<char[]> recBuffer(new char[recSize]);
 
 		// prepare template
 		memcpy(recBuffer.get(), HEADER_TEMPLATE, HEADER_SIZE);
@@ -151,8 +151,11 @@ namespace{
 		memcpy(recBuffer.get() + recSize - TAIL_SIZE, TAIL_BODY, TAIL_SIZE);
 
 		// save record into file
-		fwrite(recBuffer.get(), 1, recSize, f);
-		fflush(f);
+		size_t written = fwrite(recBuffer.get(), 1, recSize, f);
+		if(recSize != written)
+			throw std::runtime_error("saveRecord: fwrite failed - not all bytes written!");
+		if(0 != fflush(f))
+			throw std::runtime_error("saveRecord: fflush failed!");
 	}
 
 	// locates next record in file and skip fault block
@@ -167,7 +170,7 @@ namespace{
 			if(0 == readBytes){
 				return;
 			}
-			char *ptr = static_cast<char *>(memchr(buf, '<', bufSize));
+			char *ptr = static_cast<char *>(memchr(buf, '<', readBytes));
 			if(nullptr != ptr){
 				fseek(f, surrPos + (ptr - buf), SEEK_SET);
 				return;
@@ -184,8 +187,11 @@ namespace{
 			throw std::runtime_error("Unable to locate record in file to disable it!");
 
 		// update record in file
-		fwrite("N", 1, 1, f);
-		fflush(f);
+		size_t written = fwrite("N", 1, 1, f);
+		if(1 != written)
+			throw std::runtime_error("disableRecord: fwrite failed!");
+		if(0 != fflush(f))
+			throw std::runtime_error("disableRecord: fflush failed!");
 	}
 
 }

@@ -166,6 +166,8 @@ OrderParams::~OrderParams()
 void OrderParams::applyTrade(const TradeExecEntry *trade)
 {
 	assert(nullptr != trade);
+	if(leavesQty_ < trade->lastQty_)
+		throw std::runtime_error("OrderParams::applyTrade: trade quantity exceeds leaves quantity!");
 	leavesQty_ -= trade->lastQty_;
 	cumQty_ += trade->lastQty_;
 
@@ -285,9 +287,9 @@ bool OrderEntry::isValid(std::string *invalid)const
 			*invalid = "Invalid value of the timeInForce!";
 			return false;		
 		}
-		if(INVALID_SETTLTYPE == tif_){
+		if(INVALID_SETTLTYPE == settlType_){
 			*invalid = "Invalid value of the settlement type!";
-			return false;		
+			return false;
 		}
 		if(INVALID_CAPACITY == capacity_){
 			*invalid = "Invalid value of the order capacity!";
@@ -295,11 +297,7 @@ bool OrderEntry::isValid(std::string *invalid)const
 		}
 		if(INVALID_CURRENCY == currency_){
 			*invalid = "Invalid value of the order currency!";
-			return false;		
-		}
-		if(INVALID_CURRENCY == currency_){
-			*invalid = "Invalid value of the order currency!";
-			return false;		
+			return false;
 		}
 		return true;
 	}catch(const std::exception &ex){

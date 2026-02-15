@@ -81,9 +81,14 @@ void TransactionMgr::addTransaction(std::unique_ptr<Transaction> &tr)
 		tr->setTransactionId(id);
 		transactionTree_.add(id, trPtr, objects, &ready2Exec);
 	}
+	TransactionObserver *localObs = nullptr;
 	tr.release();
-	if((0 < ready2Exec)&&(nullptr != obs_)){
-		obs_->onReadyToExecute();
+	{
+		tbb::mutex::scoped_lock lock(lock_);
+		localObs = obs_;
+	}
+	if((0 < ready2Exec)&&(nullptr != localObs)){
+		localObs->onReadyToExecute();
 	}
 }
 
@@ -94,14 +99,16 @@ bool TransactionMgr::removeTransaction(const TransactionId &id, Transaction *t)
 	assert(id.isValid());
 	std::unique_ptr<Transaction> trans(t);
 
+	TransactionObserver *localObs = nullptr;
 	int ready2Exec = 0;
 	bool rez = false;
 	{
 		tbb::mutex::scoped_lock lock(lock_);
 		rez = transactionTree_.remove(id, &ready2Exec);
+		localObs = obs_;
 	}
-	if((0 < ready2Exec)&&(nullptr != obs_)){
-		obs_->onReadyToExecute();
+	if((0 < ready2Exec)&&(nullptr != localObs)){
+		localObs->onReadyToExecute();
 	}
 	return rez;
 }

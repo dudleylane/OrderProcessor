@@ -91,13 +91,12 @@ namespace Queues{
 		};
 
 		EventType type_;
-		IdT id_;
 
 		ProcessEvent(): type_(INVALID){}
-		ProcessEvent(EventType type): 
+		ProcessEvent(EventType type):
 			type_(type){}
-		ProcessEvent(EventType type, const IdT &id): 
-			type_(type), id_(id){}
+		ProcessEvent(EventType type, const IdT &id):
+			type_(type){ id_ = id; }
 	};
 
 	struct TimerEvent: public EventBase{

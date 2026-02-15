@@ -324,7 +324,7 @@ void Filled::on_entry(onTradeExecution const& evnt, FSM&){
 	assert(nullptr != evnt.order4StateMachine_);
 	evnt.order4StateMachine_->status_ = FILLED_ORDSTATUS;
 
-	std::unique_ptr<Operation> op(new CreateTradeExecReportTrOperation(evnt.trade(), PARTFILL_ORDSTATUS, *evnt.order4StateMachine_));
+	std::unique_ptr<Operation> op(new CreateTradeExecReportTrOperation(evnt.trade(), FILLED_ORDSTATUS, *evnt.order4StateMachine_));
 	evnt.transaction_->addOperation(op);
 }
 

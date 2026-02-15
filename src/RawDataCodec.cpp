@@ -93,7 +93,9 @@ void RawDataCodec::decode(const IdT& id, u32 /*version*/, const char *buf, size_
 
 	if(0 == val->length_)
 		return;
-	std::unique_ptr<char> arr(new char[val->length_]);
+	if(size < static_cast<size_t>(p - buf) + val->length_)
+		throw std::runtime_error("Invalid format of the encoded RawData - size less than required, unable decode data!");
+	std::unique_ptr<char[]> arr(new char[val->length_]);
 	memcpy(arr.get(), p, val->length_);
 	val->data_ = arr.release();
 }

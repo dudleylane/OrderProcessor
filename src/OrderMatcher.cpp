@@ -133,7 +133,9 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 	TradeParams trade;
 	trade.order_ = contrOrd;
 	trade.lastQty_ = std::min(order->leavesQty_, contrOrd->leavesQty_);
-	trade.lastPx_ = contrOrd->price_; // ToDo: should be changed for the situation with MarketOrder
+	trade.lastPx_ = contrOrd->price_;
+	if(0 == trade.lastPx_ && 0 == order->price_)
+		throw std::runtime_error("OrderMatcher: cannot match two market orders - no reference price available!");
 	defEvnt->trades_.push_back(trade);
 	defered_->addDeferedEvent(defEvnt.release());
 

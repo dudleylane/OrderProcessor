@@ -52,13 +52,33 @@ WideParamsDataStorage::WideParamsDataStorage(void): subscrCounter_(1), storage_(
 
 WideParamsDataStorage::~WideParamsDataStorage(void)
 {
-	InstrumentsT tmp;
+	InstrumentsT tmpInstr;
+	StringsT tmpStr;
+	RawDataT tmpRaw;
+	AccountsT tmpAcct;
+	ClearingsT tmpClr;
+	ExecutionListsT tmpExec;
 	{
 		// Exclusive lock for destruction
 		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		std::swap(tmp, instruments_);
+		std::swap(tmpInstr, instruments_);
+		std::swap(tmpStr, strings_);
+		std::swap(tmpRaw, rawDatas_);
+		std::swap(tmpAcct, accounts_);
+		std::swap(tmpClr, clearings_);
+		std::swap(tmpExec, executions_);
 	}
-	for(InstrumentsT::iterator it = tmp.begin(); it != tmp.end(); ++it)
+	for(auto it = tmpInstr.begin(); it != tmpInstr.end(); ++it)
+		delete it->second;
+	for(auto it = tmpStr.begin(); it != tmpStr.end(); ++it)
+		delete it->second;
+	for(auto it = tmpRaw.begin(); it != tmpRaw.end(); ++it)
+		delete it->second;
+	for(auto it = tmpAcct.begin(); it != tmpAcct.end(); ++it)
+		delete it->second;
+	for(auto it = tmpClr.begin(); it != tmpClr.end(); ++it)
+		delete it->second;
+	for(auto it = tmpExec.begin(); it != tmpExec.end(); ++it)
 		delete it->second;
 
 	aux::ExchLogger::instance()->note("WideParamsDataStorage destroyed");
