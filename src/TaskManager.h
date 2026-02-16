@@ -23,6 +23,7 @@
 #include "QueuesDef.h"
 #include "TransactionDef.h"
 #include "CacheAlignedAtomic.h"
+#include "CpuAffinity.h"
 
 namespace COP{
 
@@ -34,7 +35,9 @@ namespace COP{
 			Queues::InQueueProcessorsPoolT evntProcessors_;
 			Queues::InQueuesContainer *inQueues_;
 
-			TaskManagerParams(): transactMgr_(nullptr), transactProcessors_(), evntProcessors_(), inQueues_(nullptr){}
+			int cpuAffinityStart_ = -1;
+
+		TaskManagerParams(): transactMgr_(nullptr), transactProcessors_(), evntProcessors_(), inQueues_(nullptr){}
 		};
 
 class TaskManager: public ExecTaskManager, public ACID::TransactionObserver, public Queues::InQueuesObserver
@@ -82,6 +85,8 @@ private:
 
 	ACID::TransactionManager *transactMgr_;
 	ACID::TransactionIterator *transactIt_;
+
+	int cpuAffinityStart_;
 
 	Queues::InQueuesContainer *inQueues_;
 

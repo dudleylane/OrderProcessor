@@ -40,7 +40,9 @@ namespace COP{
 	// '<S'<header>'::'<record body>'E>'
 	// <header> ::= <4bytes record size (from '<S' until 'E>')>'.'<valid record Y/N>'.'<16 bytes record id>'.'<4 bytes version>
 
-	class FileStorage: public FileSaver
+	/// @deprecated FileStorage uses blocking stdio (fwrite/fflush/fseek) on the hot path.
+	/// Use LMDBStorage for production — it provides memory-mapped I/O with no syscall overhead.
+	class [[deprecated("Use LMDBStorage for production persistence")]] FileStorage: public FileSaver
 	{
 	public:
 		FileStorage();

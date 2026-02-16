@@ -128,35 +128,38 @@ bool GroupInstrumentsBySymbol::operator()(const InstrumentEntry &lft, const Inst
 
 
 
-OrderParams::OrderParams(const SourceIdT &dest, const SourceIdT &instrument, 
+OrderParams::OrderParams(const SourceIdT &dest, const SourceIdT &instrument,
 				const SourceIdT &account, const SourceIdT &clearing,
-				const SourceIdT &source, const SourceIdT &clOrderId, 
+				const SourceIdT &source, const SourceIdT &clOrderId,
 				const SourceIdT &origClOrderID, const SourceIdT &executions):
-	instrument_(instrument), account_(account), clearing_(clearing), destination_(dest), 
-	execInstruct_(), creationTime_(0), lastUpdateTime_(0), expireTime_(0),
-	settlDate_(0), price_(0.0), stopPx_(0.0), avgPx_(0.0), dayAvgPx_(0.0),	
-	status_(INVALID_ORDSTATUS),	side_(INVALID_SIDE), ordType_(INVALID_ORDERTYPE),
-	tif_(INVALID_TIF), settlType_(INVALID_SETTLTYPE), capacity_(INVALID_CAPACITY),
-	currency_(INVALID_CURRENCY), minQty_(0), orderQty_(0), leavesQty_(0),
-	cumQty_(0), dayOrderQty_(0), dayCumQty_(0), clOrderId_(clOrderId), origClOrderId_(origClOrderID),
-	source_(source), orderId_(), origOrderId_(), executions_(executions)
+	entryMutex_(), orderId_(), origOrderId_(),
+	price_(0.0), status_(INVALID_ORDSTATUS), side_(INVALID_SIDE), ordType_(INVALID_ORDERTYPE),
+	leavesQty_(0), cumQty_(0), orderQty_(0), tif_(INVALID_TIF),
+	stopPx_(0.0), avgPx_(0.0), dayAvgPx_(0.0),
+	creationTime_(0), lastUpdateTime_(0), expireTime_(0), settlDate_(0),
+	settlType_(INVALID_SETTLTYPE), capacity_(INVALID_CAPACITY), currency_(INVALID_CURRENCY),
+	minQty_(0), dayOrderQty_(0), dayCumQty_(0),
+	instrument_(instrument), account_(account), clearing_(clearing), destination_(dest),
+	execInstruct_(),
+	clOrderId_(clOrderId), origClOrderId_(origClOrderID),
+	source_(source), executions_(executions)
 {
 	instrument_.load();
 }
 
 OrderParams::OrderParams(const OrderParams &ord):
+	entryMutex_(), orderId_(ord.orderId_), origOrderId_(ord.origOrderId_),
+	price_(ord.price_), status_(ord.status_), side_(ord.side_), ordType_(ord.ordType_),
+	leavesQty_(ord.leavesQty_), cumQty_(ord.cumQty_), orderQty_(ord.orderQty_), tif_(ord.tif_),
+	stopPx_(ord.stopPx_), avgPx_(ord.avgPx_), dayAvgPx_(ord.dayAvgPx_),
+	creationTime_(ord.creationTime_), lastUpdateTime_(ord.lastUpdateTime_),
+	expireTime_(ord.expireTime_), settlDate_(ord.settlDate_),
+	settlType_(ord.settlType_), capacity_(ord.capacity_), currency_(ord.currency_),
+	minQty_(ord.minQty_), dayOrderQty_(ord.dayOrderQty_), dayCumQty_(ord.dayCumQty_),
 	instrument_(ord.instrument_), account_(ord.account_), clearing_(ord.clearing_),
 	destination_(ord.destination_), execInstruct_(ord.execInstruct_),
-	creationTime_(ord.creationTime_), lastUpdateTime_(ord.lastUpdateTime_),
-	expireTime_(ord.expireTime_), settlDate_(ord.settlDate_), price_(ord.price_),
-	stopPx_(ord.stopPx_), avgPx_(ord.avgPx_), dayAvgPx_(ord.dayAvgPx_),
-	status_(ord.status_), side_(ord.side_), ordType_(ord.ordType_),
-	tif_(ord.tif_), settlType_(ord.settlType_), capacity_(ord.capacity_),
-	currency_(ord.currency_), minQty_(ord.minQty_), orderQty_(ord.orderQty_),
-	leavesQty_(ord.leavesQty_), cumQty_(ord.cumQty_), dayOrderQty_(ord.dayOrderQty_),
-	dayCumQty_(ord.dayCumQty_), clOrderId_(ord.clOrderId_), origClOrderId_(ord.origClOrderId_),
-	source_(ord.source_), orderId_(ord.orderId_), origOrderId_(ord.origOrderId_), executions_(ord.executions_),
-	entryMutex_()
+	clOrderId_(ord.clOrderId_), origClOrderId_(ord.origClOrderId_),
+	source_(ord.source_), executions_(ord.executions_)
 {
 	instrument_.load();
 }

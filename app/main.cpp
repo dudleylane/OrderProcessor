@@ -23,6 +23,8 @@
 #include "SessionManager.h"
 #include "WsServer.h"
 #include "WsOutQueues.h"
+#include "CpuAffinity.h"
+#include "HugePages.h"
 
 using namespace COP;
 
@@ -32,6 +34,8 @@ struct Config {
     unsigned short port = 8080;
     std::string dataDir = "./data";
     int workers = 0;
+    int cpuAffinityStart = -1;  // -1 = disabled, >= 0 = pin starting from this core
+    bool hugePages = false;
 };
 
 Config parseArgs(int argc, char* argv[]) {
@@ -44,6 +48,10 @@ Config parseArgs(int argc, char* argv[]) {
             cfg.dataDir = argv[++i];
         else if (arg == "--workers" && i + 1 < argc)
             cfg.workers = std::stoi(argv[++i]);
+        else if (arg == "--cpu-affinity" && i + 1 < argc)
+            cfg.cpuAffinityStart = std::stoi(argv[++i]);
+        else if (arg == "--huge-pages")
+            cfg.hugePages = true;
     }
     return cfg;
 }
@@ -64,6 +72,28 @@ int main(int argc, char* argv[]) {
     Store::OrderStorage::create();
 
     aux::ExchLogger::instance()->note("OrderProcessor WebSocket Server starting...");
+
+    // 1b. Pin main IO thread to a dedicated core if affinity is enabled
+    if (cfg.cpuAffinityStart >= 0) {
+        if (CpuAffinity::pinThreadToCore(cfg.cpuAffinityStart)) {
+            aux::ExchLogger::instance()->note(
+                std::string("Main IO thread pinned to core ") + std::to_string(cfg.cpuAffinityStart));
+        } else {
+            aux::ExchLogger::instance()->warn(
+                std::string("Failed to pin main thread to core ") + std::to_string(cfg.cpuAffinityStart));
+        }
+    }
+
+    // 1c. Log HugePages availability
+    if (cfg.hugePages) {
+        if (HugePages::isAvailable()) {
+            aux::ExchLogger::instance()->note(
+                std::string("Huge pages enabled (") + std::to_string(HugePages::getFreeCount()) + " free)");
+        } else {
+            aux::ExchLogger::instance()->warn("Huge pages requested but not available on this system");
+            cfg.hugePages = false;
+        }
+    }
 
     // 2. Create LMDB storage and record dispatcher
     auto lmdbStorage = std::make_unique<Store::LMDBStorage>();
@@ -153,6 +183,7 @@ int main(int argc, char* argv[]) {
     taskParams.transactProcessors_ = transactProcessors;
     taskParams.evntProcessors_ = evntProcessors;
     taskParams.inQueues_ = inQueues.get();
+    taskParams.cpuAffinityStart_ = cfg.cpuAffinityStart;
 
     auto taskMgr = std::make_unique<Tasks::TaskManager>(taskParams);
 

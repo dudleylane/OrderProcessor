@@ -27,8 +27,13 @@ using namespace COP::Queues;
 std::unique_ptr<oneapi::tbb::global_control> TaskManager::scheduler_;
 oneapi::tbb::task_group TaskManager::taskGroup_;
 
+/// Global atomic counter for distributing TBB workers across CPU cores.
+/// Each TBB worker thread pins itself to the next core on first task pickup.
+static std::atomic<int> g_nextWorkerCore{0};
+
 TaskManager::TaskManager(const TaskManagerParams &params):
 	transactMgr_(nullptr), transactIt_(nullptr),
+	cpuAffinityStart_(-1),
 	lastAvailableTransactProcessor_(0), lastAvailableEvntProcessor_(0),
 	totalAvailableTransactProcessor_(0), totalAvailableEvntProcessor_(0),
 	created_(0), processed_(0), finished_(0),
@@ -54,6 +59,12 @@ TaskManager::TaskManager(const TaskManagerParams &params):
 	assert(nullptr != params.inQueues_);
 	inQueues_ = params.inQueues_;
 	inQueues_->attach(this);
+
+	cpuAffinityStart_ = params.cpuAffinityStart_;
+	if (cpuAffinityStart_ >= 0) {
+		// Reserve cores starting after the main IO thread's core
+		g_nextWorkerCore.store(cpuAffinityStart_ + 1, std::memory_order_relaxed);
+	}
 
 	aux::ExchLogger::instance()->note("TaskManager created.");
 }
@@ -167,6 +178,17 @@ void TaskManager::onReadyToExecute()
 	taskCreatedTr();
 
 	taskGroup_.run([this, id, tr, proc]() {
+		// Pin this TBB worker thread to a dedicated core (once per thread)
+		if (cpuAffinityStart_ >= 0) {
+			static thread_local bool pinned = false;
+			if (!pinned) {
+				int core = g_nextWorkerCore.fetch_add(1, std::memory_order_relaxed)
+				           % CpuAffinity::getAvailableCores();
+				CpuAffinity::pinThreadToCore(core);
+				pinned = true;
+			}
+		}
+
 		assert(nullptr != tr);
 		assert(nullptr != proc);
 		proc->process(id, tr);
@@ -211,6 +233,17 @@ void TaskManager::onNewEvent()
 	taskCreated();
 
 	taskGroup_.run([this, proc]() {
+		// Pin this TBB worker thread to a dedicated core (once per thread)
+		if (cpuAffinityStart_ >= 0) {
+			static thread_local bool pinned = false;
+			if (!pinned) {
+				int core = g_nextWorkerCore.fetch_add(1, std::memory_order_relaxed)
+				           % CpuAffinity::getAvailableCores();
+				CpuAffinity::pinThreadToCore(core);
+				pinned = true;
+			}
+		}
+
 		assert(nullptr != proc);
 		bool rez = proc->process();
 		taskProcessed();
