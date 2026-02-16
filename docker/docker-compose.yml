@@ -3,7 +3,7 @@ services:
   # OMS Database (PostgreSQL)
   # ------------------------------------------------------------------
   oms-db:
-    image: postgres:16-alpine
+    image: docker.io/library/postgres:16-alpine
     restart: unless-stopped
     env_file: .env
     ports:

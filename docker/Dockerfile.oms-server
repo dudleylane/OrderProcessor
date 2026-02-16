@@ -1,11 +1,13 @@
 # OrderProcessor Server Dockerfile
-# Multi-stage: build with CentOS 10, run with minimal image
+# Multi-stage: build with CentOS Stream 10, run with minimal image
 
 FROM quay.io/centos/centos:stream10 AS builder
 
-RUN dnf install -y \
-        cmake gcc-c++ \
-        tbb-devel spdlog-devel boost-devel lmdb-devel \
+RUN dnf install -y epel-release 'dnf-command(config-manager)' \
+    && dnf config-manager --set-enabled crb \
+    && dnf install -y \
+        cmake gcc-c++ git \
+        tbb-devel spdlog-devel boost-devel lmdb-devel numactl-devel \
     && dnf clean all
 
 WORKDIR /build
@@ -18,9 +20,11 @@ RUN cmake -B out -DCMAKE_BUILD_TYPE=Release \
     && cmake --build out -j$(nproc)
 
 # --- runtime stage ---
-FROM quay.io/centos/centos:stream10-minimal
+FROM quay.io/centos/centos:stream10
 
-RUN microdnf install -y tbb lmdb-libs spdlog && microdnf clean all
+RUN dnf install -y epel-release \
+    && dnf install -y tbb lmdb-libs spdlog numactl-libs \
+    && dnf clean all
 
 COPY --from=builder /build/out/orderProcessorServer /usr/local/bin/
 COPY --from=builder /build/out/seedData /usr/local/bin/
