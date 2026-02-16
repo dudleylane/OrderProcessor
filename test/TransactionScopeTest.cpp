@@ -8,7 +8,8 @@
  *
  * Distributed under the GNU General Public License (GPL).
  *
- * Tests for TransactionScope rollback behavior and ACID compliance.
+ * Tests for TransactionScope rollback behavior, ACID compliance,
+ * and arena allocator boundary conditions.
  */
 
 #include <gtest/gtest.h>
@@ -410,6 +411,135 @@ TEST_F(TransactionScopeTest, RemoveLastOperation_RemovesCorrectly) {
     // Only op1 should have been executed
     ASSERT_EQ(1u, execOrder_.size());
     EXPECT_EQ(1, execOrder_[0]);
+}
+
+// =============================================================================
+// Arena Allocator Tests
+// =============================================================================
+
+TEST_F(TransactionScopeTest, ArenaAllocateReturnsNonNull) {
+    TransactionScope scope;
+
+    void* ptr = scope.arenaAllocate(64, alignof(std::max_align_t));
+    EXPECT_NE(nullptr, ptr);
+}
+
+TEST_F(TransactionScopeTest, ArenaAllocateRespectsSizeLimit) {
+    TransactionScope scope;
+
+    // ARENA_SIZE is 2048 — allocating exactly that should succeed
+    void* ptr = scope.arenaAllocate(TransactionScope::ARENA_SIZE, 1);
+    EXPECT_NE(nullptr, ptr);
+
+    // Arena is now full — next allocation should return nullptr
+    void* ptr2 = scope.arenaAllocate(1, 1);
+    EXPECT_EQ(nullptr, ptr2);
+}
+
+TEST_F(TransactionScopeTest, ArenaAllocateOversizeReturnsNull) {
+    TransactionScope scope;
+
+    // Requesting more than ARENA_SIZE should return nullptr immediately
+    void* ptr = scope.arenaAllocate(TransactionScope::ARENA_SIZE + 1, 1);
+    EXPECT_EQ(nullptr, ptr);
+}
+
+TEST_F(TransactionScopeTest, ArenaAllocateMultipleSmallAllocations) {
+    TransactionScope scope;
+
+    // Allocate many small objects until arena is full
+    int count = 0;
+    while (true) {
+        void* ptr = scope.arenaAllocate(64, alignof(std::max_align_t));
+        if (!ptr) break;
+        ++count;
+    }
+
+    // With ARENA_SIZE = 2048 and 64-byte allocations (potentially aligned),
+    // we should get at least several allocations
+    EXPECT_GE(count, 10);
+}
+
+TEST_F(TransactionScopeTest, IsFromArenaIdentifiesArenaPointers) {
+    TransactionScope scope;
+
+    void* arenaPtr = scope.arenaAllocate(64, alignof(std::max_align_t));
+    ASSERT_NE(nullptr, arenaPtr);
+
+    EXPECT_TRUE(scope.isFromArena(arenaPtr));
+}
+
+TEST_F(TransactionScopeTest, IsFromArenaRejectsHeapPointers) {
+    TransactionScope scope;
+
+    int heapVar = 42;
+    EXPECT_FALSE(scope.isFromArena(&heapVar));
+
+    auto heapAlloc = std::make_unique<char[]>(64);
+    EXPECT_FALSE(scope.isFromArena(heapAlloc.get()));
+}
+
+TEST_F(TransactionScopeTest, IsFromArenaRejectsNull) {
+    TransactionScope scope;
+    EXPECT_FALSE(scope.isFromArena(nullptr));
+}
+
+TEST_F(TransactionScopeTest, ResetClearsArena) {
+    TransactionScope scope;
+
+    // Fill up most of the arena
+    for (int i = 0; i < 20; ++i) {
+        scope.arenaAllocate(64, alignof(std::max_align_t));
+    }
+
+    // Reset should reclaim arena space
+    scope.reset();
+
+    // Should be able to allocate again
+    void* ptr = scope.arenaAllocate(64, alignof(std::max_align_t));
+    EXPECT_NE(nullptr, ptr);
+}
+
+TEST_F(TransactionScopeTest, ActiveScopeIsThreadLocal) {
+    TransactionScope scope1;
+    TransactionScope scope2;
+
+    TransactionScope::s_activeScope = &scope1;
+    EXPECT_EQ(&scope1, TransactionScope::s_activeScope);
+
+    // Verify it's thread-local: another thread sees nullptr
+    TransactionScope* otherThreadScope = nullptr;
+    std::thread t([&]() {
+        otherThreadScope = TransactionScope::s_activeScope;
+    });
+    t.join();
+
+    EXPECT_EQ(nullptr, otherThreadScope);
+    EXPECT_EQ(&scope1, TransactionScope::s_activeScope);
+
+    // Cleanup
+    TransactionScope::s_activeScope = nullptr;
+}
+
+TEST_F(TransactionScopeTest, SwapExchangesContents) {
+    TransactionScope scope1;
+    TransactionScope scope2;
+
+    TransactionId id1(1, 100);
+    TransactionId id2(2, 200);
+
+    scope1.setTransactionId(id1);
+    scope2.setTransactionId(id2);
+
+    scope1.swap(scope2);
+
+    EXPECT_EQ(id2, scope1.transactionId());
+    EXPECT_EQ(id1, scope2.transactionId());
+}
+
+TEST_F(TransactionScopeTest, ArenaArenaSizeConstant) {
+    // Verify ARENA_SIZE is at least 1024 as documented
+    EXPECT_GE(TransactionScope::ARENA_SIZE, 1024u);
 }
 
 } // namespace

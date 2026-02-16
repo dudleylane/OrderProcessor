@@ -43,6 +43,12 @@ target_sources(orderProcessorTest
         # Subscription event benchmark tests
         EventBenchmarkTest.cpp
 
+        # C++23 ultra low-latency infrastructure tests
+        TransactionScopePoolTest.cpp
+        NumaAllocatorTest.cpp
+        CacheAlignedAtomicTest.cpp
+        CpuAffinityHugePagesTest.cpp
+
         # LMDB storage backend tests
         LMDBStorageTest.cpp
 

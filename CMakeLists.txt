@@ -63,6 +63,7 @@ target_link_libraries(orderEngine
         TBB::tbbmalloc
         spdlog::spdlog
         PkgConfig::LMDB
+        numa
 )
 
 target_include_directories(orderEngine
