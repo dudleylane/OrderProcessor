@@ -53,6 +53,7 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 | Devirtualization | `final` classes | Enables compiler inlining of virtual calls |
 | CPU Pinning | `CpuAffinity` utilities | Reduces context switches and cache pollution |
 | Huge Pages | `HugePages` utilities | Reduces TLB misses for large allocations |
+| NUMA Allocation | `NumaAllocator` with STL-compatible `NumaNodeAllocator<T>` | Reduces cross-socket memory traffic |
 
 ---
 
@@ -150,12 +151,17 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 
 ```
 COP (Concurrent Order Processor)
-├── Proc        → Order processing core
-├── Queues      → Event queue management
-├── ACID        → Transaction management
-├── OrdState    → Order state machine
-├── Store       → Storage and persistence
-├── Tasks       → Task scheduling
+├── Proc        → Order processing core (Processor, OrderMatcher, DeferedEventContainer)
+├── Queues      → Event queue management (InQueues, OutQueues, InQueueProcessor)
+├── ACID        → Transaction management (TransactionManager, Transaction, Scope, TransactionScopePool)
+├── OrdState    → Order state machine (OrderState_, OrderStatePersistence)
+├── Store       → Storage and persistence (OrderDataStorage)
+├── SubscrMgr   → Subscription management (SubscrManager, OrderFilter, EntryFilter)
+├── SL          → Subscription layer (SubscriptionLayerImpl)
+├── EventMgr    → Event management (EventManager, EventDispatcher)
+├── PG          → PostgreSQL write-behind (PGWriteBehind, PGRequestBuilder) [optional]
+├── Tasks       → Task scheduling (TaskManager, oneTBB integration)
+├── Impl        → Internal implementation details
 └── aux         → Utility functions and helpers
 ```
 
@@ -858,6 +864,7 @@ COP (Concurrent Order Processor)
    │   • InterLockCache: Wait-free object allocation                      │
    │   • Atomic processor attachment                                       │
    │   • Atomic counter updates                                           │
+   │   • NumaAllocator: NUMA-local memory binding via mbind()             │
    └───────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -869,6 +876,10 @@ COP (Concurrent Order Processor)
 | `InterlockCacheBench.cpp` | `BM_InterlockCache*` | Cache performance |
 | `NLinkTreeTest.cpp` | `AddSingleNode`, `ClearTree` | Dependency graph |
 | `TaskManagerTest.cpp` | `TaskManagerTest.*` | Task parallelism |
+| `TransactionScopePoolTest.cpp` | `TransactionScopePoolTest.*` | Lock-free object pool |
+| `CacheAlignedAtomicTest.cpp` | `CacheAlignedAtomicTest.*` | Cache-aligned atomics |
+| `CpuAffinityHugePagesTest.cpp` | `CpuAffinityHugePagesTest.*` | CPU pinning, huge pages |
+| `NumaAllocatorTest.cpp` | `NumaAllocatorTest.*` | NUMA-aware allocation |
 
 ---
 
@@ -1105,6 +1116,24 @@ COP (Concurrent Order Processor)
 │   │   Metadata Index: Tracks latest record offset per ID                  │ │
 │   └───────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 4: Key-Value Persistence (LMDBStorage)                                │
+│                                                                              │
+│   ┌───────────────────────────────────────────────────────────────────────┐ │
+│   │                     LMDB Backend                                       │ │
+│   │                                                                        │ │
+│   │   Location: data/data.mdb, data/lock.mdb                             │ │
+│   │                                                                        │ │
+│   │   Features:                                                            │ │
+│   │     • Memory-mapped I/O for high-performance reads                    │ │
+│   │     • ACID-compliant transactions at the storage level                │ │
+│   │     • Zero-copy reads via memory mapping                              │ │
+│   │     • Concurrent reader access (single writer)                        │ │
+│   │                                                                        │ │
+│   │   API: put(key, value), get(key), del(key), iterate()                │ │
+│   └───────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 8.2 Codec System
@@ -1163,6 +1192,7 @@ COP (Concurrent Order Processor)
 | `StorageRecordDispatcherTest.cpp` | `StorageRecordDispatcherTest.*` | Record routing |
 | `OrderStorageTest.cpp` | `OrderStorageTest.*` | Order storage operations |
 | `WideDataStorageTest.cpp` | `WideDataStorageTest.*` | Reference data storage |
+| `LMDBStorageTest.cpp` | `LMDBStorageTest.*` | LMDB key-value backend |
 
 ---
 
@@ -1179,18 +1209,23 @@ COP (Concurrent Order Processor)
 | **Processor** | testProcessor.cpp (289) | testIntegral.cpp | EventProcessingBench.cpp | 868+ |
 | **Transactions** | NLinkTreeTest.cpp (51), testNLinkTree.cpp (484) | testIntegral.cpp | - | 1,114 |
 | **Storage** | testFileStorage.cpp (289), testStorageRecordDispatcher.cpp (559) | testIntegral.cpp | - | 1,427 |
+| **Low-Latency** | CacheAlignedAtomicTest.cpp, CpuAffinityHugePagesTest.cpp, NumaAllocatorTest.cpp, TransactionScopePoolTest.cpp | - | TransactionScopePoolBench.cpp, NumaAllocatorBench.cpp, OrderParamsLayoutBench.cpp | - |
+| **LMDB Storage** | LMDBStorageTest.cpp | - | - | - |
+| **PostgreSQL** | PGEnumStringsTest.cpp, PGRequestBuilderTest.cpp, PGWriteBehindTest.cpp | - | - | - |
 | **Concurrency** | InterlockCacheTest.cpp (93), testInterlockCache.cpp (153) | testTaskManager.cpp (238) | InterlockCacheBench.cpp | 484+ |
 
 ### 9.2 Test File Details
 
-#### Google Test Files (24 files)
+#### Google Test Files (33 files, 463 tests)
 
 | Category | Test Files |
 |----------|------------|
 | **Core** | `CodecsTest.cpp`, `IncomingQueuesTest.cpp`, `OutgoingQueuesTest.cpp`, `InterlockCacheTest.cpp`, `NLinkTreeTest.cpp`, `ProcessorTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp` |
-| **Transactions** | `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp` |
-| **Storage** | `FileStorageTest.cpp`, `StorageRecordDispatcherTest.cpp`, `WideDataStorageTest.cpp` |
-| **Other** | `DeferedEventsTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `QueuesManagerTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `IntegrationTest.cpp` |
+| **Transactions** | `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TransactionScopePoolTest.cpp`, `TrOperationsTest.cpp` |
+| **Storage** | `FileStorageTest.cpp`, `StorageRecordDispatcherTest.cpp`, `WideDataStorageTest.cpp`, `LMDBStorageTest.cpp` |
+| **Low-Latency** | `CacheAlignedAtomicTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `NumaAllocatorTest.cpp` |
+| **PostgreSQL** | `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGWriteBehindTest.cpp` |
+| **Other** | `DeferedEventsTest.cpp`, `EventBenchmarkTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `QueuesManagerTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `IntegrationTest.cpp` |
 
 #### Legacy Tests (10 files, retained for reference)
 
@@ -1244,31 +1279,33 @@ COP (Concurrent Order Processor)
 
 ## 10. Appendix: File Reference
 
-### 10.1 Source Files
+### 10.1 Source Files (101 total: 54 .h, 47 .cpp)
 
 | Category | Files |
 |----------|-------|
 | **Core Pipeline** | `Processor.h/cpp`, `IncomingQueues.h/cpp`, `OutgoingQueues.h/cpp`, `QueuesManager.h/cpp` |
-| **State Machine** | `StateMachine.h/cpp`, `OrderStateMachineImpl.h/cpp`, `OrderStateEvents.h`, `StateMachineDef.h` |
+| **State Machine** | `StateMachine.h/cpp`, `StateMachineDef.h`, `OrderStateMachineImpl.h/cpp`, `OrderStates.h/cpp`, `OrderStateEvents.h` |
 | **Order Matching** | `OrderMatcher.h/cpp`, `OrderBookImpl.h/cpp` |
-| **Transactions** | `TransactionDef.h`, `TransactionMgr.h/cpp`, `TransactionScope.h/cpp`, `TrOperations.h` |
-| **Storage** | `FileStorage.h/cpp`, `FileStorageDef.h`, `OrderStorage.h/cpp`, `StorageRecordDispatcher.h/cpp` |
-| **Data Models** | `DataModelDef.h`, `TypesDef.h`, `QueuesDef.h` |
-| **Concurrency** | `TaskManager.h/cpp`, `NLinkedTree.h/cpp`, `InterLockCache.h`, `TransactionScopePool.h` |
-| **Low-Latency Utilities** | `CacheAlignedAtomic.h`, `CpuAffinity.h`, `HugePages.h` |
-| **Codecs** | `OrderCodec.h`, `InstrumentCodec.h`, `AccountCodec.h`, `ClearingCodec.h`, `RawDataCodec.h`, `StringTCodec.h` |
-| **Utilities** | `Logger.h/cpp`, `DeferedEvents.h`, `Singleton.h` |
+| **Transactions** | `TransactionDef.h`, `TransactionMgr.h/cpp`, `TransactionScope.h/cpp`, `TransactionScopePool.h`, `TrOperations.h/cpp`, `NLinkedTree.h/cpp` |
+| **Storage** | `FileStorage.h/cpp`, `FileStorageDef.h`, `OrderStorage.h/cpp`, `StorageRecordDispatcher.h/cpp`, `LMDBStorage.h/cpp` |
+| **Data Models** | `DataModelDef.h/cpp`, `TypesDef.h`, `QueuesDef.h`, `EventDef.h`, `TasksDef.h` |
+| **Codecs** | `OrderCodec.h/cpp`, `InstrumentCodec.h/cpp`, `AccountCodec.h/cpp`, `ClearingCodec.h/cpp`, `RawDataCodec.h/cpp`, `StringTCodec.h/cpp` |
+| **Concurrency** | `TaskManager.h/cpp`, `InterLockCache.h/cpp`, `AllocateCache.h/cpp` |
+| **Low-Latency** | `TransactionScopePool.h`, `CacheAlignedAtomic.h`, `CpuAffinity.h`, `HugePages.h`, `NumaAllocator.h` |
+| **Subscriptions** | `SubscrManager.h/cpp`, `SubscriptionLayerImpl.h/cpp`, `SubscriptionLayerDef.h`, `SubscriptionDef.h`, `FilterImpl.h/cpp`, `EntryFilter.h/cpp`, `OrderFilter.h/cpp` |
+| **Events** | `EventManager.h/cpp`, `DeferedEvents.h`, `CancelOrderDeferedEvent.cpp`, `ExecutionDeferedEvent.cpp`, `MatchOrderDeferedEvent.cpp` |
+| **PostgreSQL** | `PGWriteBehind.h/cpp`, `PGRequestBuilder.h/cpp`, `PGWriteRequest.h`, `PGEnumStrings.h` (optional) |
+| **Utilities** | `Logger.h/cpp`, `IdTGenerator.h/cpp`, `ExchUtils.h/cpp`, `Singleton.h`, `WideDataStorage.h/cpp`, `WideDataLazyRef.h` |
 
-### 10.2 Test Files
+### 10.2 Test Files (45 total)
 
 | Category | Files |
 |----------|-------|
-| **Google Test (24)** | `CodecsTest.cpp`, `DeferedEventsTest.cpp`, `FiltersTest.cpp`, `FileStorageTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `InterlockCacheTest.cpp`, `NLinkTreeTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp` |
-| **Legacy Tests (10)** | `testCodecs.cpp`, `testFileStorage.cpp`, `testIncomingQueues.cpp`, `testIntegral.cpp`, `testNLinkTree.cpp`, `testOrderBook.cpp`, `testProcessor.cpp`, `testStateMachine.cpp`, `testStates.cpp`, `testStorageRecordDispatcher.cpp` |
+| **Google Test (33)** | `CacheAlignedAtomicTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `EventBenchmarkTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `InterlockCacheTest.cpp`, `LMDBStorageTest.cpp`, `NLinkTreeTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 
-### 10.3 Benchmark Files
+### 10.3 Benchmark Files (7 total)
 
 | File | Purpose |
 |------|---------|
@@ -1276,6 +1313,9 @@ COP (Concurrent Order Processor)
 | `OrderMatchingBench.cpp` | Order matching performance |
 | `StateMachineBench.cpp` | State transition performance |
 | `InterlockCacheBench.cpp` | Lock-free cache performance |
+| `TransactionScopePoolBench.cpp` | Lock-free object pool allocation |
+| `NumaAllocatorBench.cpp` | NUMA-aware allocation performance |
+| `OrderParamsLayoutBench.cpp` | Field layout optimization |
 
 ---
 
@@ -1285,6 +1325,7 @@ COP (Concurrent Order Processor)
 |---------|------|--------|---------|
 | 1.0 | January 2026 | Generated | Initial architecture document |
 | 1.1 | January 2026 | Generated | Added ultra low-latency optimizations: TransactionScopePool, CacheAlignedAtomic, CpuAffinity, HugePages |
+| 1.2 | February 2026 | Generated | Updated file counts (101 src, 45 test, 7 bench), added LMDBStorage, NumaAllocator, PG write-behind, expanded namespace listing, updated test/benchmark appendix |
 
 ---
 

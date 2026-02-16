@@ -11,7 +11,9 @@ A high-performance, concurrent order processing library written in C++23. Provid
 - **State Machine:** 14 order states with 47+ transitions managed via Boost Meta State Machine (MSM)
 - **Order Matching:** Price-time priority matching engine with order book
 - **Concurrent Design:** Lock-free queues, reader-writer locks, concurrent hash maps, wait-free caching
-- **Persistence:** File-based storage with versioning and codecs
+- **Persistence:** File-based storage with versioning and codecs, LMDB key-value backend
+- **WebSocket Server:** Production-ready WebSocket application with JSON serialization
+- **NUMA Awareness:** NUMA-local memory allocation and CPU pinning for multi-socket systems
 
 ## Requirements
 
@@ -26,10 +28,12 @@ A high-performance, concurrent order processing library written in C++23. Provid
 | oneTBB | 2021.x+ | Concurrent containers, mutex, task scheduling |
 | spdlog | 1.x+ | Fast logging |
 | Boost | 1.70+ | Headers only (MPL for Meta State Machine) |
+| LMDB | Latest | Persistent key-value storage backend |
+| numactl | Latest | NUMA-aware memory allocation |
 
 Install on CentOS 10:
 ```bash
-sudo dnf install tbb-devel spdlog-devel boost-devel cmake gcc-c++
+sudo dnf install tbb-devel spdlog-devel boost-devel cmake gcc-c++ lmdb-devel numactl-devel
 ```
 
 ## Building
@@ -48,12 +52,16 @@ cmake --build . -j$(nproc)
 |--------|---------|-------------|
 | `BUILD_TESTS` | ON | Build unit tests with Google Test |
 | `BUILD_BENCHMARKS` | ON | Build benchmarks with Google Benchmark |
+| `BUILD_APP` | ON | Build WebSocket server and seed data utility |
+| `BUILD_PG` | OFF | Build PostgreSQL write-behind layer (requires libpqxx) |
 
 ### Build Outputs
 
 - **Library:** `build/liborderEngine.a`
 - **Tests:** `build/orderProcessorTest`
 - **Benchmarks:** `build/orderProcessorBench`
+- **Server:** `build/orderProcessorServer` (WebSocket server, if `BUILD_APP=ON`)
+- **Seed Data:** `build/seedData` (test data generator, if `BUILD_APP=ON`)
 
 ## Running Tests
 
@@ -103,6 +111,9 @@ Benchmarks measure complete operation cycles including state machine initializat
 - Cache line alignment (`alignas(64)`) prevents false sharing
 - Relaxed memory ordering for statistics counters
 - Exponential backoff with `_mm_pause()` on CAS contention
+- NUMA-aware memory allocation for multi-socket locality
+- CPU thread pinning via `CpuAffinity` utilities
+- Huge page support for TLB efficiency
 
 ## Architecture
 
@@ -126,6 +137,8 @@ IncomingQueues → Processor → OrderStateMachine → OrderMatcher/OrderStorage
 | **TransactionScopePool** | Lock-free object pool for zero-allocation hot path |
 | **TaskManager** | oneTBB-based parallel task scheduling |
 | **InterLockCache** | Wait-free object caching |
+| **LMDBStorage** | LMDB-backed persistent key-value storage |
+| **NumaAllocator** | NUMA-aware memory allocation for multi-socket systems |
 
 ### Concurrency Features
 
@@ -138,28 +151,46 @@ IncomingQueues → Processor → OrderStateMachine → OrderMatcher/OrderStorage
 | **InterLockCache** | CAS-based circular buffer | Wait-free memory pooling |
 | **TransactionScopePool** | Lock-free ring buffer with CAS | Zero-allocation transaction processing |
 | **CacheAlignedAtomic** | `alignas(64)` wrapper | Prevents false sharing on contended atomics |
+| **NumaAllocator** | `mbind()` + STL-compatible allocator | NUMA-local allocation reduces cross-socket latency |
 
 ## Project Structure
 
 ```
 OrderProcessor/
-├── src/                    # Library source files
-│   ├── Processor.cpp       # Main event processor
-│   ├── StateMachine.cpp    # Order state machine
-│   ├── OrderMatcher.cpp    # Matching engine
-│   ├── OrderBookImpl.cpp   # Order book implementation
-│   ├── TransactionMgr.cpp  # Transaction management
+├── src/                    # Library source (54 headers, 47 implementations)
+│   ├── Processor.cpp/h     # Central event coordinator
+│   ├── StateMachine.cpp/h  # Boost MSM order state machine
+│   ├── OrderMatcher.cpp/h  # Price-time priority matching engine
+│   ├── OrderBookImpl.cpp/h # Order book (buy/sell sides)
+│   ├── TransactionMgr.cpp/h # ACID transaction management
 │   ├── TransactionScopePool.h  # Lock-free object pool
-│   ├── CacheAlignedAtomic.h    # Cache-aligned atomic wrapper
-│   ├── CpuAffinity.h       # CPU pinning utilities
+│   ├── LMDBStorage.cpp/h   # LMDB persistent key-value backend
+│   ├── NumaAllocator.h     # NUMA-aware memory allocation
+│   ├── CacheAlignedAtomic.h # Cache-aligned atomic wrapper
+│   ├── CpuAffinity.h       # CPU thread pinning utilities
 │   ├── HugePages.h         # Huge page allocation utilities
-│   ├── FileStorage.cpp     # Persistence layer
-│   └── ...
-├── test/                   # Google Test unit tests
-├── bench/                  # Google Benchmark performance tests
+│   ├── FileStorage.cpp/h   # Versioned file persistence layer
+│   ├── PGWriteBehind.cpp/h # PostgreSQL write-behind (optional)
+│   └── ...                 # Codecs, filters, subscriptions, utilities
+├── test/                   # Google Test unit tests (33 test files, 463 tests)
+│   └── mocks/              # Mock objects for testing
+├── bench/                  # Google Benchmark performance tests (7 suites)
+├── app/                    # WebSocket server application
+│   ├── main.cpp            # Server entry point
+│   ├── WsServer.cpp/h      # WebSocket server
+│   ├── WsSession.cpp/h     # Per-client session management
+│   ├── JsonSerializer.cpp/h # JSON encoding/decoding
+│   └── seed_data.cpp       # Test data generator
+├── docker/                 # Docker deployment
+│   ├── docker-compose.yml  # Multi-service orchestration
+│   ├── Dockerfile.oms-server   # C++ server image
+│   └── Dockerfile.oms-frontend # React frontend image
 ├── docs/                   # Architecture documentation
-├── CMakeLists.txt          # Build configuration
-└── CLAUDE.md               # Developer documentation
+│   └── ARCHITECTURE.md     # Comprehensive architecture document
+├── data/                   # LMDB persistence data files
+├── CMakeLists.txt          # Root build configuration
+├── AUDIT_REPORT.md         # Comprehensive code audit report
+└── README.md               # This file
 ```
 
 ## Migration History
