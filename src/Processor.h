@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include <list>
+#include <vector>
 #include <memory>
 #include "QueuesDef.h"
 #include "StateMachineDef.h"
@@ -122,7 +122,7 @@ namespace Proc{
 
 		OrderMatcher matcher_;
 
-		typedef std::list<DeferedEventBase *> DeferedEventsT;
+		typedef std::vector<DeferedEventBase *> DeferedEventsT;
 		DeferedEventsT events_;
 
 		/// Pool for TransactionScope objects to eliminate heap allocations

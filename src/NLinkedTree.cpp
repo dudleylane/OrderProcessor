@@ -12,6 +12,7 @@
 
 #include <stdexcept>
 #include <cassert>
+#include <iterator>
 #include "NLinkedTree.h"
 #include "Logger.h"
 #include "ExchUtils.h"
@@ -467,9 +468,13 @@ bool NLinkTree::next(K *key, V *value)
 			node = *(root_.children_.begin());
 		}else{
 			bool found = false;
-			for(TreeNodesListT::const_iterator it = root_.children_.begin(); 
+			for(TreeNodesListT::const_iterator it = root_.children_.begin();
 				it != root_.children_.end(); ++it){
 				assert(nullptr != *it);
+				// Prefetch next list node's target to reduce cache misses
+				auto peek = std::next(it);
+				if(peek != root_.children_.end())
+					__builtin_prefetch(*peek, 0, 1);
 				found = (*it == current_);
 				if(found){
 					++it;

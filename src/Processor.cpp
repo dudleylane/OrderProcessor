@@ -28,6 +28,16 @@ using namespace COP::OrdState;
 using namespace COP::Store;
 using COP::ACID::PooledTransactionScope;
 
+namespace {
+/// RAII guard to set/clear TransactionScope::s_activeScope for arena allocation.
+struct ScopeArenaGuard {
+	explicit ScopeArenaGuard(TransactionScope* s) { TransactionScope::s_activeScope = s; }
+	~ScopeArenaGuard() { TransactionScope::s_activeScope = nullptr; }
+	ScopeArenaGuard(const ScopeArenaGuard&) = delete;
+	ScopeArenaGuard& operator=(const ScopeArenaGuard&) = delete;
+};
+}
+
 Processor::Processor(void): generator_(nullptr), orderStorage_(nullptr), orderBook_(nullptr),
 	inQueues_(nullptr), outQueues_(nullptr), testStateMachine_(false),
 	testStateMachineCheckResult_(false),
@@ -76,13 +86,15 @@ bool Processor::process()
 
 void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 {
-	if(nullptr == evnt.order_)
+	if(nullptr == evnt.order_) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(OrderEvent): order pointer is null!");
-	if(!events_.empty())
+	if(!events_.empty()) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(OrderEvent): events queue is not empty!");
+	[[assume(evnt.order_ != nullptr)]];
 
 	// prepare scope
 	PooledTransactionScope scope(scopePool_.get());
+	ScopeArenaGuard arenaGuard(scope.get());
 
 	// restore event to process
 	onOrderReceived evnt2Proc(evnt.order_);
@@ -112,15 +124,17 @@ void Processor::onEvent(const std::string &/*source*/, const OrderEvent &evnt)
 
 void Processor::onEvent(const std::string &/*source*/, const OrderCancelEvent &evnt)
 {
-	if(!evnt.id_.isValid())
+	if(!evnt.id_.isValid()) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(OrderCancelEvent): order id is invalid!");
 
 	PooledTransactionScope scope(scopePool_.get());
+	ScopeArenaGuard arenaGuard(scope.get());
 
 	// locate the order to cancel
 	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-	if(nullptr == ord)
+	if(nullptr == ord) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(OrderCancelEvent): unable to locate order!");
+	[[assume(ord != nullptr)]];
 
 	// write lock on the order for state machine processing
 	oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
@@ -154,10 +168,11 @@ void Processor::onEvent(const std::string &/*source*/, const OrderCancelEvent &e
 
 void Processor::onEvent(const std::string &/*source*/, const OrderReplaceEvent &evnt)
 {
-	if(!evnt.id_.isValid())
+	if(!evnt.id_.isValid()) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(OrderReplaceEvent): order id is invalid!");
 
 	PooledTransactionScope scope(scopePool_.get());
+	ScopeArenaGuard arenaGuard(scope.get());
 
 	if(nullptr != evnt.replacementOrder_) {
 		// New replacement order submission - process via state machine
@@ -179,7 +194,7 @@ void Processor::onEvent(const std::string &/*source*/, const OrderReplaceEvent &
 	} else {
 		// Notify existing order about replace received (similar to ProcessEvent::ON_REPLACE_RECEVIED)
 		OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-		if(nullptr == ord)
+		if(nullptr == ord) [[unlikely]]
 			throw std::runtime_error("Processor::onEvent(OrderReplaceEvent): unable to locate order!");
 
 		// write lock on the order for state machine processing
@@ -210,16 +225,17 @@ void Processor::onEvent(const std::string &/*source*/, const OrderReplaceEvent &
 
 void Processor::onEvent(const std::string &/*source*/, const COP::Queues::OrderChangeStateEvent &evnt)
 {
-	if(!evnt.id_.isValid())
+	if(!evnt.id_.isValid()) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): order id is invalid!");
-	if(evnt.changeType_ == OrderChangeStateEvent::INVALID_CHANGE)
+	if(evnt.changeType_ == OrderChangeStateEvent::INVALID_CHANGE) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): invalid change type!");
 
 	PooledTransactionScope scope(scopePool_.get());
+	ScopeArenaGuard arenaGuard(scope.get());
 
 	// locate the order
 	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-	if(nullptr == ord)
+	if(nullptr == ord) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): unable to locate order!");
 
 	// write lock on the order for state machine processing
@@ -284,10 +300,11 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 {
 	assert(events_.empty());
 	PooledTransactionScope scope(scopePool_.get());
+	ScopeArenaGuard arenaGuard(scope.get());
 
 	// Locate the order — all cases use the same id
 	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-	if(nullptr == ord)
+	if(nullptr == ord) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(ProcessEvent): unable to locate order!");
 
 	// write lock on the order for state machine processing
@@ -356,16 +373,17 @@ void Processor::onEvent(const std::string &/*source*/, const ProcessEvent &evnt)
 
 void Processor::onEvent(const std::string &/*source*/, const TimerEvent &evnt)
 {
-	if(!evnt.id_.isValid())
+	if(!evnt.id_.isValid()) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(TimerEvent): order id is invalid!");
-	if(evnt.timerType_ == TimerEvent::INVALID_TIMER)
+	if(evnt.timerType_ == TimerEvent::INVALID_TIMER) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(TimerEvent): invalid timer type!");
 
 	PooledTransactionScope scope(scopePool_.get());
+	ScopeArenaGuard arenaGuard(scope.get());
 
 	// locate the order
 	OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-	if(nullptr == ord)
+	if(nullptr == ord) [[unlikely]]
 		throw std::runtime_error("Processor::onEvent(TimerEvent): unable to locate order!");
 
 	// write lock on the order for state machine processing
@@ -443,20 +461,18 @@ void Processor::removeDeferedEventsFrom(size_t startIndex)
 		return;
 	}
 
-	DeferedEventsT::iterator it = events_.begin();
-	std::advance(it, startIndex);
-
 	// Delete events from startIndex to end
-	for (DeferedEventsT::iterator delIt = it; delIt != events_.end(); ++delIt) {
-		delete *delIt;
+	for (size_t i = startIndex; i < events_.size(); ++i) {
+		delete events_[i];
 	}
-	events_.erase(it, events_.end());
+	events_.erase(events_.begin() + static_cast<std::ptrdiff_t>(startIndex), events_.end());
 }
 
 void Processor::onEvent(DeferedEventBase *evnt)
 {
 	Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
 	PooledTransactionScope scope(scopePool_.get());
+	ScopeArenaGuard arenaGuard(scope.get());
 
 	evnt->execute(this, cntxt, scope.get());
 
@@ -536,7 +552,7 @@ void Processor::process(const ACID::TransactionId &id, ACID::Transaction *tr)
 
 	bool success = tr->executeTransaction(cntxt);
 
-	if (success) {
+	if (success) [[likely]] {
 		processDeferedEvent();
 	} else {
 		clearDeferedEvents();

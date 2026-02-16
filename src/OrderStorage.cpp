@@ -62,7 +62,7 @@ OrderEntry *OrderDataStorage::locateByClOrderId(const RawDataEntry &clOrderId)co
 	// Shared read lock - allows concurrent lookups
 	oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
 	OrdersByClientIDT::const_iterator it = ordersByClId_.find(clOrderId);
-	if(ordersByClId_.end() == it)
+	if(ordersByClId_.end() == it) [[unlikely]]
 		return nullptr;
 	return it->second;
 }
@@ -72,7 +72,7 @@ OrderEntry *OrderDataStorage::locateByOrderId(const IdT &orderId)const
 	// Shared read lock - allows concurrent lookups
 	oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
 	OrdersByIDT::const_iterator it = ordersById_.find(orderId);
-	if(ordersById_.end() == it)
+	if(ordersById_.end() == it) [[unlikely]]
 		return nullptr;
 	return it->second;
 }

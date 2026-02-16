@@ -53,16 +53,16 @@ namespace COP{
 			IdT id_;
 			ObjectType type_;
 
-			ObjectInTransaction():type_(invalid_ObjectType), id_(){}
-			ObjectInTransaction(const ObjectType &type, const IdT &id):type_(type), id_(id){}
+			constexpr ObjectInTransaction():type_(invalid_ObjectType), id_(){}
+			constexpr ObjectInTransaction(const ObjectType &type, const IdT &id):type_(type), id_(id){}
 		};
-		inline bool operator< (const ObjectInTransaction &left, const ObjectInTransaction &right)	{
+		constexpr bool operator< (const ObjectInTransaction &left, const ObjectInTransaction &right)	{
 			if(left.type_ == right.type_)
 				return left.id_ < right.id_;
 			return left.type_ < right.type_;
 		}
 
-		inline bool operator== (const ObjectInTransaction &left, const ObjectInTransaction &right){
+		constexpr bool operator== (const ObjectInTransaction &left, const ObjectInTransaction &right){
 			return (left.type_ == right.type_)&& (left.id_ == right.id_);
 		}
 
@@ -118,15 +118,21 @@ namespace COP{
 		class Operation{
 		public:
 			explicit Operation(OperationType type, const IdT &id): type_(type), id_(id), relatedId_(){}
-			explicit Operation(OperationType type, const IdT &id, const IdT &relId): 
+			explicit Operation(OperationType type, const IdT &id, const IdT &relId):
 						type_(type), id_(id), relatedId_(relId){}
 			virtual ~Operation(){}
 			virtual void execute(const Context &cnxt) = 0;
 			virtual void rollback(const Context &cnxt) = 0;
 
-			OperationType type()const{return type_;}
-			const IdT &getObjectId()const{return id_;}
-			const IdT &getRelatedId()const{return relatedId_;}
+			OperationType type()const noexcept{return type_;}
+			const IdT &getObjectId()const noexcept{return id_;}
+			const IdT &getRelatedId()const noexcept{return relatedId_;}
+
+			/// Arena-aware allocation: when a TransactionScope arena is active,
+			/// allocations are served from the arena's bump allocator (zero heap cost).
+			/// Falls back to global operator new when no arena is active or arena is full.
+			static void* operator new(size_t size);
+			static void operator delete(void* ptr, size_t size) noexcept;
 		protected:
 			OperationType type_;
 			IdT id_;

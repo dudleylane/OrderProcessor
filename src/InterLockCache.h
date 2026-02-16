@@ -109,7 +109,7 @@ namespace aux{
 			while(cur->next_ != free){
 				T *expected = nullptr;
 				// Try to store val in current null node
-				if(cur->val_.compare_exchange_strong(expected, val, std::memory_order_release, std::memory_order_relaxed)){
+				if(cur->val_.compare_exchange_weak(expected, val, std::memory_order_release, std::memory_order_relaxed)){
 					// Successfully stored, now advance nextNull_
 					nextNull_.compare_exchange_strong(cur, cur->next_, std::memory_order_release, std::memory_order_relaxed);
 					return;
@@ -149,6 +149,10 @@ namespace aux{
 
 	template<typename T>
 	InterLockCache<T> *InterLockCache<T>::instance_ = nullptr;
+
+	// Compile-time validation: ensure atomic members don't share cache lines
+	static_assert(alignof(InterLockCache<int>) >= 64,
+	              "InterLockCache atomics must be cache-line aligned to prevent false sharing");
 
 	template<typename V>
 	class CacheAutoPtr{

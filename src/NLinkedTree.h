@@ -16,6 +16,7 @@
 #include <deque>
 #include <set>
 #include <map>
+#include <flat_map>
 #include <list>
 
 #include "AllocateCache.h"
@@ -72,12 +73,12 @@ namespace aux{
 		NTreeNode *node_;
 
 	};
-	typedef std::map<K, KParam *> KParamsT;
+	typedef std::flat_map<K, KParam *> KParamsT;
 
 	struct OParam{
 		KSetT usedIn_;
 	};
-	typedef std::map<O, OParam *> OParamsT;
+	typedef std::flat_map<O, OParam *> OParamsT;
 	
 
 	class NLinkTree{

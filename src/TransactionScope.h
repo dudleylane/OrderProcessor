@@ -14,7 +14,6 @@
 
 #include <string>
 #include <memory>
-#include <deque>
 #include <vector>
 #include "TransactionDef.h"
 
@@ -26,6 +25,10 @@ namespace COP{
 class TransactionScope final : public Scope, public Transaction
 {
 public:
+	/// Arena size: enough for ~12 typical operations (largest is ~160 bytes).
+	/// Falls back to heap for larger transactions.
+	static constexpr size_t ARENA_SIZE = 2048;
+
 	TransactionScope(void);
 	~TransactionScope(void);
 
@@ -41,6 +44,24 @@ public:
 	 * Used by the pool to transfer data from a pooled scope to a heap-allocated one.
 	 */
 	void swap(TransactionScope& other) noexcept;
+
+	/**
+	 * Allocate memory from the embedded arena (bump allocator).
+	 * Returns nullptr if arena is full — caller should fall back to heap.
+	 */
+	void* arenaAllocate(size_t size, size_t align) noexcept;
+
+	/**
+	 * Check if a pointer was allocated from this scope's arena.
+	 */
+	bool isFromArena(const void* ptr) const noexcept;
+
+	/**
+	 * Thread-local pointer to the currently active TransactionScope.
+	 * Set by Processor before state machine processing so that
+	 * Operation::operator new can allocate from the arena.
+	 */
+	static thread_local TransactionScope* s_activeScope;
 
 public:
 	/// reimplemented from Scope
@@ -58,9 +79,12 @@ public:
 	virtual bool executeTransaction(const Context &cnxt);
 
 private:
+	/// Destroy an operation: calls destructor, frees memory only if heap-allocated.
+	void destroyOperation(Operation* op) noexcept;
+
 	std::string invalidReason_;
 
-	typedef std::deque<Operation *> OperationsT;
+	typedef std::vector<Operation *> OperationsT;
 	OperationsT operations_;
 
 	// Stage boundaries - each entry is the starting index of a stage in operations_
@@ -68,10 +92,19 @@ private:
 	StageBoundariesT stageBoundaries_;
 
 	TransactionId id_;
+
+	// Bump allocator arena for Operation objects — avoids heap allocation on hot path
+	alignas(std::max_align_t) char arenaBuffer_[ARENA_SIZE];
+	size_t arenaOffset_;
+
 private:
 	TransactionScope(const TransactionScope&);
 	const TransactionScope& operator=(const TransactionScope&);
 };
+
+// Compile-time validation for TransactionScope layout
+static_assert(TransactionScope::ARENA_SIZE >= 1024,
+              "Arena must be large enough for multiple Operation objects");
 
 	}
 }

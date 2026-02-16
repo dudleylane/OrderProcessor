@@ -12,31 +12,60 @@
 
 #include <stdexcept>
 #include <utility>  // For std::swap
+#include <cstdint>
+#include <cstring>  // For ::memcpy
 #include "TransactionScope.h"
 #include "TrOperations.h"
 
 using namespace std;
 using namespace COP::ACID;
 
-TransactionScope::TransactionScope(void)
+// Thread-local active scope for arena allocation
+thread_local TransactionScope* TransactionScope::s_activeScope = nullptr;
+
+// Operation arena-aware allocation
+void* Operation::operator new(size_t size) {
+	if (auto* scope = TransactionScope::s_activeScope) {
+		if (void* mem = scope->arenaAllocate(size, alignof(std::max_align_t))) {
+			return mem;
+		}
+	}
+	return ::operator new(size);
+}
+
+void Operation::operator delete(void* ptr, size_t /*size*/) noexcept {
+	if (!ptr) return;
+	// Check the thread-local active scope first (covers exception-unwind during state machine processing)
+	if (auto* scope = TransactionScope::s_activeScope) {
+		if (scope->isFromArena(ptr)) {
+			return;  // Arena memory — reclaimed on scope reset
+		}
+	}
+	// Heap-allocated — free normally
+	::operator delete(ptr);
+}
+
+TransactionScope::TransactionScope(void): arenaOffset_(0)
 {
 }
 
 TransactionScope::~TransactionScope(void)
 {
 	for(size_t pos = 0; pos < operations_.size(); ++pos){
-		delete operations_[pos];
+		destroyOperation(operations_[pos]);
 	}
 }
 
 void TransactionScope::reset()
 {
-	// Delete all operations but keep the container capacity
+	// Destroy all operations — arena-allocated are just destructed, heap-allocated are freed
 	for(size_t pos = 0; pos < operations_.size(); ++pos){
-		delete operations_[pos];
+		destroyOperation(operations_[pos]);
 	}
 	operations_.clear();
-	// Note: std::deque doesn't have shrink_to_fit guarantee but clear() is efficient
+
+	// Reset the arena bump pointer
+	arenaOffset_ = 0;
 
 	// Clear stage boundaries, preserving vector capacity
 	stageBoundaries_.clear();
@@ -48,13 +77,49 @@ void TransactionScope::reset()
 	invalidReason_.clear();
 }
 
+void* TransactionScope::arenaAllocate(size_t size, size_t align) noexcept {
+	size_t padding = (align - (arenaOffset_ % align)) % align;
+	size_t newOffset = arenaOffset_ + padding + size;
+	if (newOffset > ARENA_SIZE) {
+		return nullptr;  // Arena full — caller falls back to heap
+	}
+	void* ptr = arenaBuffer_ + arenaOffset_ + padding;
+	arenaOffset_ = newOffset;
+	return ptr;
+}
+
+bool TransactionScope::isFromArena(const void* ptr) const noexcept {
+	auto p = reinterpret_cast<uintptr_t>(ptr);
+	auto base = reinterpret_cast<uintptr_t>(arenaBuffer_);
+	return p >= base && p < base + ARENA_SIZE;
+}
+
+void TransactionScope::destroyOperation(Operation* op) noexcept {
+	if (!op) return;
+	op->~Operation();  // Always call destructor
+	if (!isFromArena(op)) {
+		::operator delete(static_cast<void*>(op));  // Free heap memory
+	}
+	// Arena memory is freed in bulk on reset()
+}
+
 void TransactionScope::swap(TransactionScope& other) noexcept
 {
 	// Swap all member variables efficiently
+	// Note: arena buffers are NOT swapped — operations allocated from one
+	// scope's arena must stay with that scope. The swap only transfers
+	// the operations vector and metadata. Since the detach-based pool
+	// release no longer uses swap, this is safe.
 	invalidReason_.swap(other.invalidReason_);
 	operations_.swap(other.operations_);
 	stageBoundaries_.swap(other.stageBoundaries_);
 	std::swap(id_, other.id_);
+	std::swap(arenaOffset_, other.arenaOffset_);
+	// Swap arena buffers so operations still point to valid memory
+	char tmpBuf[ARENA_SIZE];
+	::memcpy(tmpBuf, arenaBuffer_, ARENA_SIZE);
+	::memcpy(arenaBuffer_, other.arenaBuffer_, ARENA_SIZE);
+	::memcpy(other.arenaBuffer_, tmpBuf, ARENA_SIZE);
 }
 
 const TransactionId &TransactionScope::transactionId()const
@@ -72,8 +137,7 @@ void TransactionScope::removeLastOperation()
 	if(operations_.empty())
 		return;
 
-	// Delete the last operation and remove it from the deque
-	delete operations_.back();
+	destroyOperation(operations_.back());
 	operations_.pop_back();
 
 	// If the last operation was at a stage boundary, remove that boundary too
@@ -98,9 +162,9 @@ void TransactionScope::removeStage(const size_t &stageId)
 	// Get the starting index of this stage
 	size_t stageStart = stageBoundaries_[stageId];
 
-	// Delete all operations from stageStart to the end
+	// Destroy all operations from stageStart to the end
 	for(size_t i = stageStart; i < operations_.size(); ++i) {
-		delete operations_[i];
+		destroyOperation(operations_[i]);
 	}
 
 	// Remove operations from stageStart onwards
@@ -156,7 +220,7 @@ void TransactionScope::getRelatedObjects(ObjectsInTransactionT *obj)const
 
 bool TransactionScope::executeTransaction(const Context &cnxt)
 {
-	if(operations_.empty())
+	if(operations_.empty()) [[unlikely]]
 		return true;
 
 	size_t pos = 0;

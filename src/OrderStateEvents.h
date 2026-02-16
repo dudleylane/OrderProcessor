@@ -8,6 +8,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include "TypesDef.h"
 
 namespace COP{
@@ -95,12 +96,12 @@ namespace OrdState{
 		{}
 		explicit onExternalOrderRejected(OrderEntry *order): order_(order)
 		{}
-		onExternalOrderRejected(const OrderStateEvent &evnt, OrderEntry *order, const std::string &reason): 
+		onExternalOrderRejected(const OrderStateEvent &evnt, OrderEntry *order, std::string_view reason):
 			OrderStateEvent(evnt), order_(order), reason_(reason)
-		{}			
+		{}
 
-		OrderEntry *order_;	
-		std::string reason_;
+		OrderEntry *order_;
+		std::string_view reason_;
 	};
 
 	struct onRecvRplOrderRejected: public OrderStateEvent
@@ -109,23 +110,23 @@ namespace OrdState{
 		{}
 		explicit onRecvRplOrderRejected(OrderEntry *order): order_(order)
 		{}			
-		onRecvRplOrderRejected(const OrderStateEvent &evnt, OrderEntry *order, const std::string &reason): 
+		onRecvRplOrderRejected(const OrderStateEvent &evnt, OrderEntry *order, std::string_view reason):
 			OrderStateEvent(evnt), order_(order), reason_(reason)
-		{}			
+		{}
 
-		OrderEntry *order_;	
+		OrderEntry *order_;
 
-		std::string reason_;
+		std::string_view reason_;
 	};
 	struct onRplOrderRejected: public OrderStateEvent
 	{
 		onRplOrderRejected()
 		{}
-		onRplOrderRejected(const OrderStateEvent &evnt, const std::string &reason): 
+		onRplOrderRejected(const OrderStateEvent &evnt, std::string_view reason):
 			OrderStateEvent(evnt), reason_(reason)
-		{}			
+		{}
 
-		std::string reason_;	
+		std::string_view reason_;
 	};
 	struct onTradeExecution: public OrderStateEvent
 	{
@@ -159,11 +160,11 @@ namespace OrdState{
 		explicit onOrderRejected(const OrderStateEvent &evnt): 
 			OrderStateEvent(evnt)
 		{}
-		onOrderRejected(const OrderStateEvent &evnt, const std::string &reason): 
+		onOrderRejected(const OrderStateEvent &evnt, std::string_view reason):
 			OrderStateEvent(evnt), reason_(reason)
 		{}
 
-		std::string reason_;
+		std::string_view reason_;
 	};
 
 	struct onRecvOrderRejected: public OrderStateEvent
@@ -172,12 +173,12 @@ namespace OrdState{
 		{}
 		explicit onRecvOrderRejected(OrderEntry *order): order_(order)
 		{}		
-		onRecvOrderRejected(const OrderStateEvent &evnt, OrderEntry *order, const std::string &reason): 
+		onRecvOrderRejected(const OrderStateEvent &evnt, OrderEntry *order, std::string_view reason):
 			OrderStateEvent(evnt), order_(order), reason_(reason)
 		{}
 
-		OrderEntry *order_;	
-		std::string reason_;
+		OrderEntry *order_;
+		std::string_view reason_;
 	};
 
 	struct onReplaceRejected: public OrderStateEvent

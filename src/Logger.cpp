@@ -17,8 +17,9 @@
 #include <chrono>
 #include <thread>
 #include <cstring>
-#include <sstream>
+#include <format>
 #include <spdlog/spdlog.h>
+#include <spdlog/async.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
@@ -49,9 +50,7 @@ namespace{
 	}
 
 	std::string getThreadId(){
-		std::ostringstream ss;
-		ss << std::this_thread::get_id();
-		return ss.str();
+		return std::format("{}", std::hash<std::thread::id>{}(std::this_thread::get_id()));
 	}
 }
 
@@ -76,10 +75,14 @@ namespace aux{
 		LoggerImpl(){
 			loggingMask_.store(ALL_ENABLED_FLAG);
 			try {
-				logger_ = spdlog::basic_logger_mt("exchange", "exchange.log");
+				// Use async logging to avoid blocking the hot path.
+				// Queue size 8192 slots, single background thread.
+				spdlog::init_thread_pool(8192, 1);
+				logger_ = spdlog::basic_logger_mt<spdlog::async_factory>(
+					"exchange", "exchange.log");
 				logger_->set_pattern("%v");
-				logger_->flush_on(spdlog::level::info);
-			} catch (const spdlog::spdlog_ex& ex) {
+				logger_->flush_on(spdlog::level::warn);
+			} catch (const spdlog::spdlog_ex&) {
 				// Fallback to stdout if file logging fails
 				logger_ = spdlog::stdout_color_mt("exchange");
 				logger_->set_pattern("%v");
@@ -119,8 +122,7 @@ namespace aux{
 				return;
 
 			oneapi::tbb::mutex::scoped_lock lock(lock_);
-			std::string record = getTimestamp() + prefix + getThreadId() + "] " + msg;
-			logger_->info(record);
+			logger_->info("{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg);
 		}
 
 		void logMessage(const char *msg, char flag, const std::string &prefix){
@@ -128,8 +130,7 @@ namespace aux{
 				return;
 
 			oneapi::tbb::mutex::scoped_lock lock(lock_);
-			std::string record = getTimestamp() + prefix + getThreadId() + "] " + msg;
-			logger_->info(record);
+			logger_->info("{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg);
 		}
 
 		void logMessage(int val, char flag, const std::string &prefix){
@@ -137,8 +138,7 @@ namespace aux{
 				return;
 
 			oneapi::tbb::mutex::scoped_lock lock(lock_);
-			std::string record = getTimestamp() + prefix + getThreadId() + "] " + std::to_string(val);
-			logger_->info(record);
+			logger_->info("{}{}{}] {}", getTimestamp(), prefix, getThreadId(), val);
 		}
 
 		void logMessage(LogMessage &msg, char flag, const std::string &prefix){
@@ -148,8 +148,7 @@ namespace aux{
 			msg.prepareMessage();
 
 			oneapi::tbb::mutex::scoped_lock lock(lock_);
-			std::string record = getTimestamp() + prefix + getThreadId() + "] " + msg.getMessage();
-			logger_->info(record);
+			logger_->info("{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg.getMessage());
 		}
 
 	};

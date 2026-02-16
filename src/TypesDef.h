@@ -28,29 +28,29 @@ namespace COP{
 		u64 id_;
 		u32 date_;
 
-		IdT(): id_(0), date_(0){}
+		constexpr IdT(): id_(0), date_(0){}
 		IdT(const u64 &id, const u32 &date);
 
-		inline bool isValid()const{return (0 != date_)&&(0 != id_);}
+		constexpr bool isValid()const{return (0 != date_)&&(0 != id_);}
 		void reset();
-		inline void clear(){reset();}
+		constexpr void clear(){id_ = 0; date_ = 0;}
 		void toString(std::string &msg)const;
 		void serialize(std::string &msg)const;
 		char *serialize(char *buf)const;
 		const char *restore(const char *buf, size_t size);
 	};
-	inline bool operator < (const IdT &lft, const IdT &rght){
+	constexpr bool operator < (const IdT &lft, const IdT &rght){
 		if (lft.id_ == rght.id_)
 			return lft.date_ < rght.date_;
 		else
 			return lft.id_ < rght.id_;
 	}
 
-	inline bool operator == (const IdT &lft, const IdT &rght){
+	constexpr bool operator == (const IdT &lft, const IdT &rght){
 		return (lft.id_ == rght.id_)&&(lft.date_ == rght.date_);
 	}
 
-	inline bool operator != (const IdT &lft, const IdT &rght){
+	constexpr bool operator != (const IdT &lft, const IdT &rght){
 		return !operator==(lft, rght);
 	}
 
@@ -58,12 +58,12 @@ namespace COP{
 
 	typedef double PriceT;
 	struct PriceTAscend {
-		bool operator()(const PriceT& left, const PriceT& right) const {
+		constexpr bool operator()(const PriceT& left, const PriceT& right) const {
 			return left < right;
 		}
 	};
 	struct PriceTDescend {
-		bool operator()(const PriceT& left, const PriceT& right) const {
+		constexpr bool operator()(const PriceT& left, const PriceT& right) const {
 			return left > right;
 		}
 	};

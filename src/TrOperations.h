@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <string_view>
 #include "TransactionDef.h"
 #include "DataModelDef.h"
 #include "OrderStateEvents.h"
@@ -49,7 +50,7 @@ namespace COP{
 
 		class CreateRejectExecReportTrOperation final : public Operation{
 		public:
-			CreateRejectExecReportTrOperation(const std::string &reason, OrderStatus status, const OrderEntry &order);
+			CreateRejectExecReportTrOperation(std::string_view reason, OrderStatus status, const OrderEntry &order);
 			~CreateRejectExecReportTrOperation();
 
 			void execute(const Context &cnxt) override;

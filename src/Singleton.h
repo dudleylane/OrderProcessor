@@ -14,35 +14,33 @@
 #include <stdexcept>
 
 #include <cassert>
-#include <exception>
+#include <memory>
 
 namespace aux{
 
 template<typename T>
 struct Singleton
 {
-    static T *instance_;
+    static std::unique_ptr<T> instance_;
 
 	static void create()
 	{
-		assert(nullptr == instance_);
-		if(nullptr != instance_)
+		assert(!instance_);
+		if(instance_) [[unlikely]]
 			throw std::runtime_error("Singleton initialised twice!");
-		instance_ = new T;
+		instance_ = std::make_unique<T>();
 	}
-	static void destroy(){
-		delete instance_;
-		instance_ = nullptr;
+	static void destroy() noexcept {
+		instance_.reset();
 	}
-	static T *instance(){
-		assert(nullptr != instance_);
-		if(nullptr == instance_)
-			throw std::runtime_error("Singleton was not initialised!");
-		return instance_;
+	static T *instance() noexcept {
+		assert(instance_);
+		[[assume(instance_ != nullptr)]];
+		return instance_.get();
 	}
 };
 
 template<typename T>
-T *Singleton<T>::instance_ = nullptr;
+std::unique_ptr<T> Singleton<T>::instance_ = nullptr;
 
-} 
+}

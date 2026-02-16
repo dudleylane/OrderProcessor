@@ -348,7 +348,7 @@ void CreateCorrectExecReportTrOperation::execute(const Context &cnxt)
 void CreateCorrectExecReportTrOperation::rollback(const Context &)
 {}
 
-CreateRejectExecReportTrOperation::CreateRejectExecReportTrOperation(const std::string &reason, 
+CreateRejectExecReportTrOperation::CreateRejectExecReportTrOperation(std::string_view reason,
 													OrderStatus status, const OrderEntry &order):
 Operation(CREATE_REJECT_EXECREPORT_TROPERATION, order.orderId_), status_(status), reason_(reason)
 {}
