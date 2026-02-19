@@ -1,10 +1,10 @@
 /**
  * Concurrent Order Processor library - Google Test
  *
- * Author: Sergey Mikhailik
+ * Authors: dudleylane, Claude
  * Test Migration: 2026
  *
- * Copyright (C) 2009-2026 Sergey Mikhailik
+ * Copyright (C) 2026 dudleylane
  *
  * Distributed under the GNU General Public License (GPL).
  *

@@ -3,10 +3,10 @@
  *
  * Migrated from legacy testEventBenchmark.cpp
  *
- * Author: Sergey Mikhailik
+ * Authors: dudleylane, Claude
  * Test Implementation: 2026
  *
- * Copyright (C) 2009-2026 Sergey Mikhailik
+ * Copyright (C) 2026 dudleylane
  *
  * Distributed under the GNU General Public License (GPL).
  */

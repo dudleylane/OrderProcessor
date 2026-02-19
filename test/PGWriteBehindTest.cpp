@@ -1,7 +1,7 @@
 /**
  Concurrent Order Processor library - PGWriteBehind Integration Tests
 
- Copyright (C) 2009-2026 Sergey Mikhailik
+ Copyright (C) 2026 dudleylane
 
  Distributed under the GNU General Public License (GPL).
 
