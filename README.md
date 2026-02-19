@@ -2,7 +2,8 @@
 
 A high-performance, concurrent order processing library written in C++23. Provides ACID-compliant transaction processing, state machine-based order lifecycle management, and order matching against an in-memory order book.
 
-**Author:** Sergey Mikhailik
+**Original Author:** Sergey Mikhailik
+**Modernization & Extensions:** dudleylane, Claude
 **License:** GNU General Public License (GPL)
 
 ## Features
