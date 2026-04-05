@@ -4,7 +4,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 
 **Original Author:** Sergey Mikhailik
 **Modernization & Extensions:** dudleylane, Claude
-**License:** GNU General Public License v3 (GPL-3.0)
+**License:** GNU General Public License v3 (AGPL-3.0)
 
 ## Features
 
@@ -407,4 +407,4 @@ This project was migrated from:
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE) for full terms.
+This project is licensed under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE) for full terms.

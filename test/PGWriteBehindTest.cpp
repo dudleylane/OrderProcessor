@@ -3,7 +3,7 @@
 
  Copyright (C) 2026 dudleylane
 
- Distributed under the GNU General Public License (GPL).
+ Distributed under the GNU Affero General Public License (AGPL).
 
  These tests require a live PostgreSQL instance.
  Set the PG_CONNECTION_STRING environment variable to enable.

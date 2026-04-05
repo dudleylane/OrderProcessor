@@ -5,7 +5,7 @@
 
  Copyright (C) 2026 dudleylane
 
- Distributed under the GNU General Public License (GPL).
+ Distributed under the GNU Affero General Public License (AGPL).
 
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
