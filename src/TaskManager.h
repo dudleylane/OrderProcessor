@@ -75,6 +75,18 @@ public:
 	void taskProcessedTr();
 	void taskFinishedTr();
 
+	// Read-only accessors for monitoring (relaxed ordering — statistics only)
+	int eventsCreated() const noexcept { return created_.load(std::memory_order_relaxed); }
+	int eventsProcessed() const noexcept { return processed_.load(std::memory_order_relaxed); }
+	int eventsFinished() const noexcept { return finished_.load(std::memory_order_relaxed); }
+	int transactionsCreated() const noexcept { return createdTr_.load(std::memory_order_relaxed); }
+	int transactionsProcessed() const noexcept { return processedTr_.load(std::memory_order_relaxed); }
+	int transactionsFinished() const noexcept { return finishedTr_.load(std::memory_order_relaxed); }
+	int availableEventProcessors() const noexcept { return lastAvailableEvntProcessor_.load(std::memory_order_relaxed); }
+	int totalEventProcessors() const noexcept { return totalAvailableEvntProcessor_.load(std::memory_order_relaxed); }
+	int availableTransactProcessors() const noexcept { return lastAvailableTransactProcessor_.load(std::memory_order_relaxed); }
+	int totalTransactProcessors() const noexcept { return totalAvailableTransactProcessor_.load(std::memory_order_relaxed); }
+
 private:
 	mutable oneapi::tbb::mutex lock_;
 	mutable oneapi::tbb::mutex transactLock_;

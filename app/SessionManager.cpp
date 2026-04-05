@@ -28,6 +28,11 @@ void SessionManager::broadcast(const std::string& json) {
     }
 }
 
+size_t SessionManager::sessionCount() const {
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    return sessions_.size();
+}
+
 void SessionManager::broadcastBookUpdate(const std::string& symbol, const std::string& json) {
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
     for (auto& session : sessions_) {

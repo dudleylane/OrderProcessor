@@ -192,6 +192,31 @@ std::string App::serializeError(const std::string& message) {
     return j.dump();
 }
 
+std::string App::serializeMetricsUpdate(const SystemMetrics& m) {
+    json j;
+    j["type"] = "metrics_update";
+    json data;
+    data["eventsCreated"] = m.eventsCreated;
+    data["eventsProcessed"] = m.eventsProcessed;
+    data["eventsFinished"] = m.eventsFinished;
+    data["transactionsCreated"] = m.transactionsCreated;
+    data["transactionsProcessed"] = m.transactionsProcessed;
+    data["transactionsFinished"] = m.transactionsFinished;
+    data["availableEventProcessors"] = m.availableEventProcessors;
+    data["totalEventProcessors"] = m.totalEventProcessors;
+    data["availableTransactProcessors"] = m.availableTransactProcessors;
+    data["totalTransactProcessors"] = m.totalTransactProcessors;
+    data["queueDepth"] = m.queueDepth;
+    data["poolSize"] = m.poolSize;
+    data["poolCacheMisses"] = m.poolCacheMisses;
+    data["poolArenaSize"] = m.poolArenaSize;
+    data["activeSessions"] = m.activeSessions;
+    data["activeOrders"] = m.activeOrders;
+    data["timestamp"] = m.timestamp;
+    j["data"] = data;
+    return j.dump();
+}
+
 ParsedClientMessage App::parseClientMessage(const std::string& jsonStr) {
     ParsedClientMessage msg;
     try {

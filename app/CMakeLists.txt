@@ -4,4 +4,5 @@ target_sources(orderProcessorServer PRIVATE
     WsSession.cpp
     JsonSerializer.cpp
     WsOutQueues.cpp
-    SessionManager.cpp)
+    SessionManager.cpp
+    MetricsPublisher.cpp)

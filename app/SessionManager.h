@@ -15,6 +15,7 @@ public:
     void removeSession(std::shared_ptr<WsSession> session);
     void broadcast(const std::string& json);
     void broadcastBookUpdate(const std::string& symbol, const std::string& json);
+    size_t sessionCount() const;
 
 private:
     mutable oneapi::tbb::spin_rw_mutex rwLock_;

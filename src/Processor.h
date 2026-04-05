@@ -79,6 +79,8 @@ namespace Proc{
 		virtual size_t deferedEventCount() const;
 		virtual void removeDeferedEventsFrom(size_t startIndex);
 
+		const ACID::TransactionScopePool* scopePool() const noexcept { return scopePool_.get(); }
+
 	public:
 		/// reimplemented from TransactionProcessor
 		virtual void process(const ACID::TransactionId &id, ACID::Transaction *tr);

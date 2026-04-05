@@ -162,3 +162,24 @@ export interface Position {
   tradeCount: number;
   lastTradeTime: number;
 }
+
+/** System metrics from C++ MetricsPublisher */
+export interface SystemMetrics {
+  eventsCreated: number;
+  eventsProcessed: number;
+  eventsFinished: number;
+  transactionsCreated: number;
+  transactionsProcessed: number;
+  transactionsFinished: number;
+  availableEventProcessors: number;
+  totalEventProcessors: number;
+  availableTransactProcessors: number;
+  totalTransactProcessors: number;
+  queueDepth: number;
+  poolSize: number;
+  poolCacheMisses: number;
+  poolArenaSize: number;
+  activeSessions: number;
+  activeOrders: number;
+  timestamp: number;
+}

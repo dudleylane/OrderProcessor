@@ -9,12 +9,14 @@ import type {
   NewOrderRequest,
   CancelOrderRequest,
   ReplaceOrderRequest,
+  SystemMetrics,
 } from '../types';
 import type { ServerMessage, ClientMessage } from '../types/websocket';
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws';
 const RECONNECT_DELAY = 3000;
 const MAX_EXECUTIONS = 1000;
+const MAX_METRICS_HISTORY = 300; // 5 minutes at 1/sec
 
 // --- State & Reducer ---
 
@@ -25,6 +27,7 @@ export interface OmsState {
   orders: Map<string, Order>;
   executions: Execution[];
   bookData: Map<string, OrderBookSnapshot>;
+  metricsHistory: SystemMetrics[];
 }
 
 type OmsAction =
@@ -35,7 +38,8 @@ type OmsAction =
   | { type: 'ORDER_SNAPSHOT'; data: Order[] }
   | { type: 'ORDER_UPDATE'; data: Order }
   | { type: 'EXECUTION_REPORT'; data: ExecutionReport }
-  | { type: 'BOOK_UPDATE'; data: OrderBookSnapshot };
+  | { type: 'BOOK_UPDATE'; data: OrderBookSnapshot }
+  | { type: 'METRICS_UPDATE'; data: SystemMetrics };
 
 function omsReducer(state: OmsState, action: OmsAction): OmsState {
   switch (action.type) {
@@ -69,6 +73,11 @@ function omsReducer(state: OmsState, action: OmsAction): OmsState {
       bookData.set(action.data.symbol, action.data);
       return { ...state, bookData };
     }
+    case 'METRICS_UPDATE': {
+      const metricsHistory = [...state.metricsHistory, action.data]
+        .slice(-MAX_METRICS_HISTORY);
+      return { ...state, metricsHistory };
+    }
     default:
       return state;
   }
@@ -81,6 +90,7 @@ const INITIAL_STATE: OmsState = {
   orders: new Map(),
   executions: [],
   bookData: new Map(),
+  metricsHistory: [],
 };
 
 // --- Hook ---
@@ -151,6 +161,9 @@ export function useOmsWebSocket(): OmsState & OmsActions {
             break;
           case 'book_update':
             dispatch({ type: 'BOOK_UPDATE', data: msg.data });
+            break;
+          case 'metrics_update':
+            dispatch({ type: 'METRICS_UPDATE', data: msg.data });
             break;
           case 'cancel_reject':
             console.warn('Cancel rejected:', msg.data.reason);

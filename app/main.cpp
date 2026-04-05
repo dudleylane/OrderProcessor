@@ -23,6 +23,7 @@
 #include "SessionManager.h"
 #include "WsServer.h"
 #include "WsOutQueues.h"
+#include "MetricsPublisher.h"
 #include "CpuAffinity.h"
 #include "HugePages.h"
 
@@ -201,6 +202,16 @@ int main(int argc, char* argv[]) {
         orderBook.get());
     server->run();
 
+    // 10b. Create MetricsPublisher for system monitoring
+    auto metricsPublisher = std::make_shared<App::MetricsPublisher>(
+        ioc,
+        sessionMgr.get(),
+        taskMgr.get(),
+        inQueues.get(),
+        Store::OrderStorage::instance(),
+        static_cast<Proc::Processor*>(evntProcessors[0])->scopePool());
+    metricsPublisher->start();
+
     // 11. Signal handling for graceful shutdown
     boost::asio::signal_set signals(ioc, SIGINT, SIGTERM);
     signals.async_wait([&](boost::system::error_code const&, int) {
@@ -217,6 +228,8 @@ int main(int argc, char* argv[]) {
     // 13. Graceful shutdown
     aux::ExchLogger::instance()->note("Shutting down...");
 
+    metricsPublisher->stop();
+    metricsPublisher.reset();
     server.reset();
 
     transactMgr->stop();

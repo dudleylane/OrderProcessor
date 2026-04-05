@@ -4,6 +4,7 @@ import type {
   OrderBookSnapshot,
   Instrument,
   Account,
+  SystemMetrics,
 } from './index';
 
 /** Server → Client messages (discriminated union on `type`) */
@@ -17,6 +18,7 @@ export type ServerMessage =
   | { type: 'account_list'; data: Account[] }
   | { type: 'cancel_reject'; data: { orderId: number; reason: string } }
   | { type: 'business_reject'; data: { refId: number; reason: string } }
+  | { type: 'metrics_update'; data: SystemMetrics }
   | { type: 'error'; message: string };
 
 /** Client → Server messages */
