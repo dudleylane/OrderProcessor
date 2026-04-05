@@ -123,6 +123,17 @@ if(BUILD_BENCHMARKS)
             benchmark::benchmark
             benchmark::benchmark_main
     )
+
+    add_custom_target(benchmark-regression
+        COMMAND ${CMAKE_SOURCE_DIR}/scripts/benchmark-regression.sh
+            --no-build
+            --build-dir ${CMAKE_BINARY_DIR}
+            --baseline ${CMAKE_SOURCE_DIR}/benchmark_baseline.json
+        DEPENDS orderProcessorBench
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Running benchmark regression tests against stored baseline..."
+        USES_TERMINAL
+    )
 endif()
 
 if(BUILD_APP)
