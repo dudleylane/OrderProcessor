@@ -16,7 +16,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **Subscription Filtering:** Selective event delivery per client via SubscrManager
 
 ### Low-Latency Infrastructure
-- **Zero-Allocation Hot Path:** 5-tier memory hierarchy — stack, arena (2KB bump), CAS pool (1024 slots), TBB scalable allocator, heap fallback
+- **Zero-Allocation Hot Path:** 5-tier memory hierarchy — stack, arena (<!-- DOC_CHECK:arena_size -->2048<!-- /DOC_CHECK -->-byte bump), CAS pool (<!-- DOC_CHECK:pool_size -->1024<!-- /DOC_CHECK --> slots), TBB scalable allocator, heap fallback
 - **Lock-Free Pool:** TransactionScopePool with exponential backoff CAS and cache miss tracking
 - **CPU Affinity:** Thread-to-core pinning with SCHED_FIFO real-time scheduling
 - **NUMA-Aware Allocation:** `mbind()` via NumaAllocator for multi-socket locality
@@ -25,7 +25,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **Branch Prediction:** `[[likely]]`, `[[unlikely]]`, `[[assume]]` (C++23) throughout hot path
 
 ### OMS Frontend (React + TypeScript)
-- **Order Entry:** Full form with symbol, side (6 types), order type (Market/Limit/Stop/StopLimit), time-in-force (7 types), capacity, currency
+- **Order Entry:** Full form with symbol, side (<!-- DOC_CHECK:side_count -->6<!-- /DOC_CHECK --> types), order type (<!-- DOC_CHECK:order_type_count -->4<!-- /DOC_CHECK --> types: Market/Limit/Stop/StopLimit), time-in-force (<!-- DOC_CHECK:tif_count -->7<!-- /DOC_CHECK --> types), capacity, currency
 - **Order Blotter:** Live table with inline Cancel and Replace actions
 - **Execution Blotter:** Trades, rejects, corrections, cancels with CSV export
 - **Order Book Panel:** 8-level bid/ask depth with staleness indicator and per-instrument subscription
@@ -305,7 +305,7 @@ The server communicates with clients via JSON messages over WebSocket. All messa
 
 **SystemMetrics** — 17 fields: event/transaction counters (created/processed/finished), processor availability, `queueDepth`, `poolSize`, `poolCacheMisses`, `poolArenaSize`, `activeSessions`, `activeOrders`, `timestamp`.
 
-**Enums** — `Side` (BUY, SELL, BUY_MINUS, SELL_PLUS, SELL_SHORT, CROSS), `OrderType` (MARKET, LIMIT, STOP, STOPLIMIT), `TimeInForce` (DAY, GTD, GTC, FOK, IOC, OPG, ATCLOSE), `OrderStatus` (12 statuses), `ExecType` (13 types), `Currency` (USD, EUR), `Capacity` (6 types).
+**Enums** — `Side` (BUY, SELL, BUY_MINUS, SELL_PLUS, SELL_SHORT, CROSS), `OrderType` (MARKET, LIMIT, STOP, STOPLIMIT), `TimeInForce` (DAY, GTD, GTC, FOK, IOC, OPG, ATCLOSE), `OrderStatus` (<!-- DOC_CHECK:order_status_count -->12<!-- /DOC_CHECK --> statuses), `ExecType` (<!-- DOC_CHECK:exec_type_count -->13<!-- /DOC_CHECK --> types), `Currency` (USD, EUR), `Capacity` (<!-- DOC_CHECK:capacity_count -->6<!-- /DOC_CHECK --> types).
 
 ---
 

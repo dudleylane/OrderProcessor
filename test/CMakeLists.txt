@@ -55,6 +55,9 @@ target_sources(orderProcessorTest
         # PostgreSQL write-behind tests (unit tests always, integration gated by env var)
         PGEnumStringsTest.cpp
         PGRequestBuilderTest.cpp
+
+        # Doc-code consistency enforcement
+        DocConsistencyTest.cpp
 )
 
 target_include_directories(orderProcessorTest
