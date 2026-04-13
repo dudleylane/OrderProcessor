@@ -38,7 +38,7 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
 	assert(nullptr != version);
 
 	*id = val.orderId_;
-	*version = 0;
+	*version = (FXSWAP_ORDERTYPE == val.ordType_) ? 1u : 0u;
 
 	string strbuf;
 	buf->reserve(buf->size() + BUFFER_SIZE);
@@ -160,6 +160,16 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
 
 
 	val.stateMachinePersistance_.serialize(*buf);
+
+	// Version 1: append FX Swap fields
+	if(FXSWAP_ORDERTYPE == val.ordType_){
+		buf->append(1, '.');
+		memcpy(typebuf, &(val.farPrice_), sizeof(val.farPrice_));
+		buf->append(typebuf, sizeof(val.farPrice_));
+		buf->append(1, '.');
+		memcpy(typebuf, &(val.farSettlDate_), sizeof(val.farSettlDate_));
+		buf->append(typebuf, sizeof(val.farSettlDate_));
+	}
 }
 
 char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version)
@@ -169,7 +179,7 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
 	assert(nullptr != version);
 
 	*id = val.orderId_;
-	*version = 0;
+	*version = (FXSWAP_ORDERTYPE == val.ordType_) ? 1u : 0u;
 
 	char *p = buf;
 	p = val.instrument_.getId().serialize(p);
@@ -289,10 +299,21 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
 
 
 	p = val.stateMachinePersistance_.serialize(p);
+
+	// Version 1: append FX Swap fields
+	if(FXSWAP_ORDERTYPE == val.ordType_){
+		*p = '.';++p;
+		memcpy(p, &(val.farPrice_), sizeof(val.farPrice_));
+		p += sizeof(val.farPrice_);
+		*p = '.';++p;
+		memcpy(p, &(val.farSettlDate_), sizeof(val.farSettlDate_));
+		p += sizeof(val.farSettlDate_);
+	}
+
 	return p;
 }
 
-OrderEntry *OrderCodec::decode(const IdT& id, u32 /*version*/, const char *buf, size_t size)
+OrderEntry *OrderCodec::decode(const IdT& id, u32 version, const char *buf, size_t size)
 {
 	assert(nullptr != buf);
 	assert(0 < size);
@@ -523,6 +544,22 @@ OrderEntry *OrderCodec::decode(const IdT& id, u32 /*version*/, const char *buf, 
 	++p;
 
 	p = val->stateMachinePersistance_.restore(p, size - (p - buf));
+
+	// Version 1: decode FX Swap fields
+	if(version >= 1 && (p - buf) < static_cast<std::ptrdiff_t>(size) && '.' == *p){
+		++p;
+		if(size < static_cast<size_t>(p - buf) + sizeof(val->farPrice_))
+			throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode farPrice_!");
+		memcpy(&(val->farPrice_), p, sizeof(val->farPrice_));
+		p += sizeof(val->farPrice_);
+		if('.' != *p)
+			throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after farPrice_!");
+		++p;
+		if(size < static_cast<size_t>(p - buf) + sizeof(val->farSettlDate_))
+			throw std::runtime_error("Invalid format of the encoded OrderEntry - size less than required, unable decode farSettlDate_!");
+		memcpy(&(val->farSettlDate_), p, sizeof(val->farSettlDate_));
+		p += sizeof(val->farSettlDate_);
+	}
 
 	return val.release();
 }

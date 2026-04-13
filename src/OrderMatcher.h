@@ -33,6 +33,7 @@ namespace Proc{
 		void init(DeferedEventContainer *cont);
 		void match(OrderEntry *order, const ACID::Context &ctxt);
 	private:
+		void matchSwap(OrderEntry *order, const ACID::Context &ctxt);
 		std::unique_ptr<OrdState::OrderState> stateMachine_;
 		DeferedEventContainer *defered_;
 	};

@@ -31,6 +31,7 @@ inline std::string_view toJsonString(OrderType t) {
     if (t == LIMIT_ORDERTYPE)     return "LIMIT";
     if (t == STOP_ORDERTYPE)      return "STOP";
     if (t == STOPLIMIT_ORDERTYPE) return "STOPLIMIT";
+    if (t == FXSWAP_ORDERTYPE)   return "FXSWAP";
     return "INVALID";
 }
 
@@ -39,6 +40,7 @@ inline OrderType orderTypeFromJson(std::string_view sv) {
     if (sv == "LIMIT")     return LIMIT_ORDERTYPE;
     if (sv == "STOP")      return STOP_ORDERTYPE;
     if (sv == "STOPLIMIT") return STOPLIMIT_ORDERTYPE;
+    if (sv == "FXSWAP")    return FXSWAP_ORDERTYPE;
     return INVALID_ORDERTYPE;
 }
 
@@ -67,12 +69,24 @@ inline TimeInForce tifFromJson(std::string_view sv) {
 inline std::string_view toJsonString(Currency c) {
     if (c == USD_CURRENCY) return "USD";
     if (c == EUR_CURRENCY) return "EUR";
+    if (c == GBP_CURRENCY) return "GBP";
+    if (c == JPY_CURRENCY) return "JPY";
+    if (c == CHF_CURRENCY) return "CHF";
+    if (c == AUD_CURRENCY) return "AUD";
+    if (c == CAD_CURRENCY) return "CAD";
+    if (c == NZD_CURRENCY) return "NZD";
     return "INVALID";
 }
 
 inline Currency currencyFromJson(std::string_view sv) {
     if (sv == "USD") return USD_CURRENCY;
     if (sv == "EUR") return EUR_CURRENCY;
+    if (sv == "GBP") return GBP_CURRENCY;
+    if (sv == "JPY") return JPY_CURRENCY;
+    if (sv == "CHF") return CHF_CURRENCY;
+    if (sv == "AUD") return AUD_CURRENCY;
+    if (sv == "CAD") return CAD_CURRENCY;
+    if (sv == "NZD") return NZD_CURRENCY;
     return INVALID_CURRENCY;
 }
 

@@ -61,6 +61,20 @@ struct ParsedNewOrder {
     Capacity capacity;
 };
 
+struct ParsedSwapOrder {
+    std::string symbol;
+    Side side;          // near-leg side (far leg is opposite)
+    double nearPrice;
+    double farPrice;
+    u64 settlDate;
+    u64 farSettlDate;
+    unsigned int orderQty;
+    std::string account;
+    Currency currency;
+    Capacity capacity;
+    TimeInForce tif;
+};
+
 struct ParsedCancelOrder {
     u64 orderId;
     std::string clOrderId;
@@ -82,6 +96,7 @@ struct ParsedClientMessage {
     std::string symbol;
     // Parsed data (only one is valid depending on type)
     ParsedNewOrder newOrder;
+    ParsedSwapOrder swapOrder;
     ParsedCancelOrder cancelOrder;
     ParsedReplaceOrder replaceOrder;
 };

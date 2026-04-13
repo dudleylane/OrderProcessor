@@ -139,6 +139,7 @@ OrderParams::OrderParams(const SourceIdT &dest, const SourceIdT &instrument,
 	creationTime_(0), lastUpdateTime_(0), expireTime_(0), settlDate_(0),
 	settlType_(INVALID_SETTLTYPE), capacity_(INVALID_CAPACITY), currency_(INVALID_CURRENCY),
 	minQty_(0), dayOrderQty_(0), dayCumQty_(0),
+	farPrice_(0.0), farSettlDate_(0),
 	instrument_(instrument), account_(account), clearing_(clearing), destination_(dest),
 	execInstruct_(),
 	clOrderId_(clOrderId), origClOrderId_(origClOrderID),
@@ -156,6 +157,7 @@ OrderParams::OrderParams(const OrderParams &ord):
 	expireTime_(ord.expireTime_), settlDate_(ord.settlDate_),
 	settlType_(ord.settlType_), capacity_(ord.capacity_), currency_(ord.currency_),
 	minQty_(ord.minQty_), dayOrderQty_(ord.dayOrderQty_), dayCumQty_(ord.dayCumQty_),
+	farPrice_(ord.farPrice_), farSettlDate_(ord.farSettlDate_),
 	instrument_(ord.instrument_), account_(ord.account_), clearing_(ord.clearing_),
 	destination_(ord.destination_), execInstruct_(ord.execInstruct_),
 	clOrderId_(ord.clOrderId_), origClOrderId_(ord.origClOrderId_),
@@ -231,6 +233,8 @@ bool OrderEntry::compare(const OrderEntry &val)const
 		(val.orderId_ == orderId_)&&
 		(val.origOrderId_ == origOrderId_)&&
 		(val.executions_.getId() == executions_.getId())&&
+		(val.farPrice_ == farPrice_)&&
+		(val.farSettlDate_ == farSettlDate_)&&
 		(stateMachinePersistance_.compare(val.stateMachinePersistance_));
 }
 
@@ -303,6 +307,16 @@ bool OrderEntry::isValid(std::string *invalid)const
 			*invalid = "Invalid value of the order currency!";
 			return false;
 		}
+		if(FXSWAP_ORDERTYPE == ordType_){
+			if(farPrice_ <= 0.0){
+				*invalid = "FX Swap order requires a positive far leg price!";
+				return false;
+			}
+			if(0 == farSettlDate_ || farSettlDate_ <= settlDate_){
+				*invalid = "FX Swap far settlement date must be after near settlement date!";
+				return false;
+			}
+		}
 		return true;
 	}catch(const std::exception &ex){
 		*invalid = ex.what();
@@ -325,19 +339,33 @@ bool InstrumentEntry::isValid(std::string *invalid)const
 	try{
 		if(symbol_.empty()){
 			*invalid = "Invalid value of the instrument's symbol!";
-			return false;		
+			return false;
 		}
 		if(securityId_.empty()){
 			*invalid = "Invalid value of the instrument's securityId!";
-			return false;		
+			return false;
 		}
 		if(securityIdSource_.empty()){
 			*invalid = "Invalid value of the instrument's securityIdSource!";
-			return false;		
+			return false;
 		}
 		if(!id_.isValid()){
 			*invalid = "Invalid value of the instrument's id!";
-			return false;		
+			return false;
+		}
+		if(isFxPair()){
+			if(INVALID_CURRENCY == baseCurrency_){
+				*invalid = "FX instrument requires a valid base currency!";
+				return false;
+			}
+			if(INVALID_CURRENCY == termCurrency_){
+				*invalid = "FX instrument requires a valid term currency!";
+				return false;
+			}
+			if(baseCurrency_ == termCurrency_){
+				*invalid = "FX instrument base and term currencies must differ!";
+				return false;
+			}
 		}
 		return true;
 	}catch(const std::exception &ex){
@@ -398,13 +426,14 @@ bool ClearingEntry::isValid(std::string *invalid)const
 	return false;
 }
 
-ExecParams::ExecParams(): 
-	type_(INVALID_EXECTYPE), transactTime_(0), orderId_(), execId_(), orderStatus_(INVALID_ORDSTATUS)
+ExecParams::ExecParams():
+	type_(INVALID_EXECTYPE), transactTime_(0), orderId_(), execId_(), orderStatus_(INVALID_ORDSTATUS),
+	execLegType_(SINGLE_LEG)
 {}
 
 ExecParams::ExecParams(const ExecParams &param):
-	type_(param.type_), transactTime_(param.transactTime_), orderId_(param.orderId_), execId_(param.execId_), 
-	orderStatus_(param.orderStatus_)
+	type_(param.type_), transactTime_(param.transactTime_), orderId_(param.orderId_), execId_(param.execId_),
+	orderStatus_(param.orderStatus_), execLegType_(param.execLegType_)
 {}
 
 ExecTradeParams::ExecTradeParams(): 

@@ -88,5 +88,25 @@ namespace Proc{
 		virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
 	};
 
+	struct SwapExecutionDeferedEvent: public DeferedEventBase{
+		TradeParams nearTrade_;    // contra near-leg trade params
+		TradeParams farTrade_;     // contra far-leg trade params
+		OrderEntry *baseOrder_;    // aggressor swap order
+
+		SwapExecutionDeferedEvent();
+		explicit SwapExecutionDeferedEvent(OrderEntry *ord);
+
+		virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+	};
+
+	struct MatchSwapOrderDeferedEvent: public DeferedEventBase{
+		OrderEntry *order_;
+
+		MatchSwapOrderDeferedEvent();
+		explicit MatchSwapOrderDeferedEvent(OrderEntry *ord);
+
+		virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+	};
+
 }
 }

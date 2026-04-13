@@ -25,7 +25,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **Branch Prediction:** `[[likely]]`, `[[unlikely]]`, `[[assume]]` (C++23) throughout hot path
 
 ### OMS Frontend (React + TypeScript)
-- **Order Entry:** Full form with symbol, side (<!-- DOC_CHECK:side_count -->6<!-- /DOC_CHECK --> types), order type (<!-- DOC_CHECK:order_type_count -->4<!-- /DOC_CHECK --> types: Market/Limit/Stop/StopLimit), time-in-force (<!-- DOC_CHECK:tif_count -->7<!-- /DOC_CHECK --> types), capacity, currency
+- **Order Entry:** Full form with symbol, side (<!-- DOC_CHECK:side_count -->6<!-- /DOC_CHECK --> types), order type (<!-- DOC_CHECK:order_type_count -->5<!-- /DOC_CHECK --> types: Market/Limit/Stop/StopLimit/FxSwap), time-in-force (<!-- DOC_CHECK:tif_count -->7<!-- /DOC_CHECK --> types), capacity, currency
 - **Order Blotter:** Live table with inline Cancel and Replace actions
 - **Execution Blotter:** Trades, rejects, corrections, cancels with CSV export
 - **Order Book Panel:** 8-level bid/ask depth with staleness indicator and per-instrument subscription

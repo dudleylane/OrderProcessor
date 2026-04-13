@@ -18,6 +18,7 @@ target_sources(orderEngine
         LMDBStorage.cpp
         Logger.cpp
         MatchOrderDeferedEvent.cpp
+        MatchSwapOrderDeferedEvent.cpp
         NLinkedTree.cpp
         OrderBookImpl.cpp
         OrderCodec.cpp
@@ -32,6 +33,7 @@ target_sources(orderEngine
         RawDataCodec.cpp
         StateMachine.cpp
         StorageRecordDispatcher.cpp
+        SwapExecutionDeferedEvent.cpp
         StringTCodec.cpp
         SubscriptionLayerImpl.cpp
         SubscrManager.cpp

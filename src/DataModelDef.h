@@ -23,6 +23,25 @@ namespace COP{
 	struct ExecTradeParams;
 	struct TradeExecEntry;
 
+	enum Currency{
+		INVALID_CURRENCY = 0,
+		USD_CURRENCY,
+		EUR_CURRENCY,
+		GBP_CURRENCY,
+		JPY_CURRENCY,
+		CHF_CURRENCY,
+		AUD_CURRENCY,
+		CAD_CURRENCY,
+		NZD_CURRENCY
+	};
+
+	enum InstrumentType{
+		INVALID_INSTRUMENTTYPE = 0,
+		EQUITY_INSTRUMENTTYPE,
+		FX_SPOT_INSTRUMENTTYPE,
+		FX_SWAP_INSTRUMENTTYPE
+	};
+
 	// instrument's parameters, should be extended in future
 	struct InstrumentEntry{
 		StringT symbol_;
@@ -30,7 +49,15 @@ namespace COP{
 		StringT securityIdSource_;
 		IdT id_;
 
+		InstrumentType instrumentType_;
+		Currency baseCurrency_;    // e.g., EUR in EUR/USD
+		Currency termCurrency_;    // e.g., USD in EUR/USD
+
 		bool isValid(std::string *invalid)const;
+		bool isFxPair()const{
+			return FX_SPOT_INSTRUMENTTYPE == instrumentType_ ||
+				FX_SWAP_INSTRUMENTTYPE == instrumentType_;
+		}
 	};
 
 	class GroupInstrumentsBySymbol: public std::less<InstrumentEntry>{
@@ -65,7 +92,8 @@ namespace COP{
 		MARKET_ORDERTYPE,
 		LIMIT_ORDERTYPE,
 		STOP_ORDERTYPE,
-		STOPLIMIT_ORDERTYPE
+		STOPLIMIT_ORDERTYPE,
+		FXSWAP_ORDERTYPE
 	};
 
 	enum ExecType{
@@ -83,12 +111,6 @@ namespace COP{
 		RESTATED_EXECTYPE,
 		PEND_CANCEL_EXECTYPE,
 		PEND_REPLACE_EXECTYPE
-	};
-
-	enum Currency{
-		INVALID_CURRENCY = 0,
-		USD_CURRENCY,
-		EUR_CURRENCY
 	};
 
 	enum Capacity{
@@ -218,6 +240,10 @@ namespace COP{
 
 		OrdState::OrderStatePersistence stateMachinePersistance_;
 
+		// --- FX Swap fields (warm — checked during swap processing only) ---
+		PriceT farPrice_;          // forward price for far leg (0.0 if not swap)
+		DateTimeT farSettlDate_;   // far leg settlement date (0 if not swap)
+
 		// --- Cold fields (lazy-loaded, rarely accessed after init) ---
 		WideDataLazyRef<InstrumentEntry> instrument_;//136
 		WideDataLazyRef<AccountEntry> account_;//112
@@ -294,6 +320,12 @@ namespace COP{
 	/// used when execution created by internal system instead of market
 	const std::string INTERNAL_EXECUTION = "Internal";
 
+	enum ExecLegType : uint8_t {
+		SINGLE_LEG = 0,
+		NEAR_LEG,
+		FAR_LEG
+	};
+
 	// general parameters of the executions, will be stored in persistent storage
 	struct ExecParams{
 		// type of the execution
@@ -308,6 +340,8 @@ namespace COP{
 		OrderStatus orderStatus_;
 		// market name, where order was executed. If internal, than equal to INTERNAL_EXECUTION
 		StringT market_;
+		// which leg this execution belongs to (SINGLE_LEG for non-swap orders)
+		ExecLegType execLegType_;
 
 		ExecParams();
 		ExecParams(const ExecParams &param);

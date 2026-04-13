@@ -36,6 +36,8 @@ namespace COP{
 		class CreateTradeExecReportTrOperation final : public Operation{
 		public:
 			CreateTradeExecReportTrOperation(const TradeExecEntry *trade, OrderStatus status, const OrderEntry &order);
+			CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx, Currency currency,
+				OrderStatus status, ExecLegType legType, const OrderEntry &order);
 			~CreateTradeExecReportTrOperation();
 
 			void execute(const Context &cnxt) override;
@@ -46,6 +48,7 @@ namespace COP{
 			DateTimeT tradeDate_;
 			Currency currency_;
 			OrderStatus status_;
+			ExecLegType execLegType_;
 		};
 
 		class CreateRejectExecReportTrOperation final : public Operation{

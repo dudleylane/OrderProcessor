@@ -148,6 +148,66 @@ void WsSession::handleMessage(const std::string& msgStr) {
         Queues::OrderEvent evt(order);
         inQueues_->push("WebSocket", evt);
 
+    } else if (msg.type == "new_swap_order") {
+        auto& so = msg.swapOrder;
+
+        SourceIdT instrId = wideData_->findInstrumentBySymbol(so.symbol);
+        if (!instrId.isValid()) {
+            send(serializeError("Unknown instrument: " + so.symbol));
+            return;
+        }
+
+        SourceIdT acctId;
+        if (!so.account.empty()) {
+            acctId = wideData_->findAccountByName(so.account);
+            if (!acctId.isValid()) {
+                send(serializeError("Unknown account: " + so.account));
+                return;
+            }
+        }
+
+        std::string clOrdStr = "WS-" + std::to_string(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+        auto* clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(),
+                                          static_cast<u32>(clOrdStr.size()));
+        SourceIdT clOrdId = Store::WideDataStorage::instance()->add(clOrdRaw);
+
+        SourceIdT emptyId;
+        SourceIdT clearingId;
+
+        auto* execList = new ExecutionsT();
+        SourceIdT execListId = Store::WideDataStorage::instance()->add(execList);
+
+        auto* srcStrPtr = new StringT("WebSocket");
+        SourceIdT srcId = Store::WideDataStorage::instance()->add(srcStrPtr);
+
+        auto* destStr = new StringT("Internal");
+        SourceIdT destId = Store::WideDataStorage::instance()->add(destStr);
+
+        auto* order = new OrderEntry(srcId, destId, clOrdId, emptyId,
+                                     instrId, acctId, clearingId, execListId);
+        order->side_ = so.side;
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->price_ = so.nearPrice;
+        order->farPrice_ = so.farPrice;
+        order->orderQty_ = so.orderQty;
+        order->leavesQty_ = so.orderQty;
+        order->tif_ = so.tif;
+        order->currency_ = so.currency;
+        order->capacity_ = so.capacity;
+        order->settlDate_ = so.settlDate;
+        order->farSettlDate_ = so.farSettlDate;
+        order->settlType_ = _2_SETTLTYPE;
+        order->status_ = RECEIVEDNEW_ORDSTATUS;
+        order->creationTime_ = static_cast<DateTimeT>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+        order->lastUpdateTime_ = order->creationTime_;
+
+        Queues::OrderEvent evt(order);
+        inQueues_->push("WebSocket", evt);
+
     } else if (msg.type == "cancel_order") {
         IdT orderId(msg.cancelOrder.orderId, 1);
         Queues::OrderCancelEvent evt(orderId, "Canceled by user");

@@ -264,9 +264,9 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
 void CreateExecReportTrOperation::rollback(const Context &)
 {}
 
-CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(const TradeExecEntry *trade, 
+CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(const TradeExecEntry *trade,
 													OrderStatus status, const OrderEntry &order):
-Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), status_(status)
+Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), status_(status), execLegType_(SINGLE_LEG)
 {
 	assert(nullptr != trade);
 	lastQty_ = trade->lastQty_;
@@ -275,13 +275,24 @@ Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), status_(status)
 	currency_ = trade->currency_;
 }
 
+CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx,
+													Currency currency, OrderStatus status,
+													ExecLegType legType, const OrderEntry &order):
+Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), status_(status), execLegType_(legType)
+{
+	lastQty_ = lastQty;
+	lastPx_ = lastPx;
+	tradeDate_ = 1;
+	currency_ = currency;
+}
+
 CreateTradeExecReportTrOperation::~CreateTradeExecReportTrOperation()
 {}
 
 void CreateTradeExecReportTrOperation::execute(const Context &cnxt)
 {
 	assert(nullptr != cnxt.outQueues_);
-	/// locate source of the order, 
+	/// locate source of the order,
 	/// prepare ExecReport and send to the source of the order
 	TradeExecEntry execReport;
 
@@ -289,6 +300,7 @@ void CreateTradeExecReportTrOperation::execute(const Context &cnxt)
 	execReport.lastPx_ = lastPx_;
 	execReport.currency_ = currency_;
 	execReport.tradeDate_ = tradeDate_;
+	execReport.execLegType_ = execLegType_;
 
 	execReport.orderId_ = getObjectId();
 	execReport.type_ = TRADE_EXECTYPE;

@@ -117,6 +117,12 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
 			throw std::runtime_error("There is no market for this instrument!");
 	}
 
+	// FX Swap: validate far-leg fields are set (isValid already checked, but assert here)
+	if(FXSWAP_ORDERTYPE == (*orderData)->ordType_){
+		assert((*orderData)->farPrice_ > 0.0);
+		assert((*orderData)->farSettlDate_ > (*orderData)->settlDate_);
+	}
+
 	std::unique_ptr<Operation> op(new MatchOrderTrOperation((*orderData)));
 	evnt.transaction_->addOperation(op);
 
@@ -256,6 +262,11 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onReplace cons
 		assert(nullptr != evnt.orderBook_);
 		if(!evnt.orderBook_->find(FindAnyOpositeOrder(orderData)).isValid())
 			throw std::runtime_error("There is no market for this instrument!");
+	}
+
+	if(FXSWAP_ORDERTYPE == orderData->ordType_){
+		assert(orderData->farPrice_ > 0.0);
+		assert(orderData->farSettlDate_ > orderData->settlDate_);
 	}
 
 	assert(evnt.origOrderId_.isValid());

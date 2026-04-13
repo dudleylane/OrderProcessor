@@ -56,6 +56,9 @@ target_sources(orderProcessorTest
         PGEnumStringsTest.cpp
         PGRequestBuilderTest.cpp
 
+        # FX Swap tests
+        FxSwapTest.cpp
+
         # Doc-code consistency enforcement
         DocConsistencyTest.cpp
 )

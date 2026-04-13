@@ -159,7 +159,7 @@ TEST_F(DocConsistencyTest, SideCount) {
 }
 
 TEST_F(DocConsistencyTest, OrderTypeCount) {
-    expectDocEq("order_type_count", static_cast<int>(COP::STOPLIMIT_ORDERTYPE));
+    expectDocEq("order_type_count", static_cast<int>(COP::FXSWAP_ORDERTYPE));
 }
 
 TEST_F(DocConsistencyTest, TimeInForceCount) {

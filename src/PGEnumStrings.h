@@ -34,6 +34,7 @@ constexpr const char* toSQL(OrderType v) {
         case LIMIT_ORDERTYPE:     return "LIMIT";
         case STOP_ORDERTYPE:      return "STOP";
         case STOPLIMIT_ORDERTYPE: return "STOPLIMIT";
+        case FXSWAP_ORDERTYPE:    return "FX_SWAP";
         default:                  return nullptr;
     }
 }
@@ -85,7 +86,31 @@ constexpr const char* toSQL(Currency v) {
     switch (v) {
         case USD_CURRENCY: return "USD";
         case EUR_CURRENCY: return "EUR";
+        case GBP_CURRENCY: return "GBP";
+        case JPY_CURRENCY: return "JPY";
+        case CHF_CURRENCY: return "CHF";
+        case AUD_CURRENCY: return "AUD";
+        case CAD_CURRENCY: return "CAD";
+        case NZD_CURRENCY: return "NZD";
         default:           return nullptr;
+    }
+}
+
+constexpr const char* toSQL(InstrumentType v) {
+    switch (v) {
+        case EQUITY_INSTRUMENTTYPE:  return "EQUITY";
+        case FX_SPOT_INSTRUMENTTYPE: return "FX_SPOT";
+        case FX_SWAP_INSTRUMENTTYPE: return "FX_SWAP";
+        default:                     return nullptr;
+    }
+}
+
+constexpr const char* toSQL(ExecLegType v) {
+    switch (v) {
+        case SINGLE_LEG: return "SINGLE";
+        case NEAR_LEG:   return "NEAR";
+        case FAR_LEG:    return "FAR";
+        default:         return nullptr;
     }
 }
 
