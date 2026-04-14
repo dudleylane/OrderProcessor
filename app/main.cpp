@@ -27,6 +27,19 @@
 #include "CpuAffinity.h"
 #include "HugePages.h"
 
+#ifdef BUILD_FIX
+#define FIX_CONFIG23_H
+#include <flat_map>
+#include <flat_set>
+#include <quickfix/ThreadedSocketAcceptor.h>
+#include <quickfix/FileStore.h>
+#include <quickfix/FileLog.h>
+#include <quickfix/SessionSettings.h>
+#include "FixGateway.h"
+#include "FixOutQueues.h"
+#include "MultiOutQueues.h"
+#endif
+
 using namespace COP;
 
 namespace {
@@ -37,6 +50,7 @@ struct Config {
     int workers = 0;
     int cpuAffinityStart = -1;  // -1 = disabled, >= 0 = pin starting from this core
     bool hugePages = false;
+    std::string fixCfg;          // path to QuickFIX settings file (empty = FIX disabled)
 };
 
 Config parseArgs(int argc, char* argv[]) {
@@ -53,6 +67,8 @@ Config parseArgs(int argc, char* argv[]) {
             cfg.cpuAffinityStart = std::stoi(argv[++i]);
         else if (arg == "--huge-pages")
             cfg.hugePages = true;
+        else if (arg == "--fix-cfg" && i + 1 < argc)
+            cfg.fixCfg = argv[++i];
     }
     return cfg;
 }
@@ -144,6 +160,30 @@ int main(int argc, char* argv[]) {
         Store::OrderStorage::instance(),
         orderBook.get());
 
+    // 6b. Create FIX gateway (if configured)
+#ifdef BUILD_FIX
+    std::unique_ptr<App::FixGateway> fixGateway;
+    std::unique_ptr<App::FixOutQueues> fixOutQueues;
+    std::unique_ptr<App::MultiOutQueues> multiOutQueues;
+
+    if (!cfg.fixCfg.empty()) {
+        fixGateway = std::make_unique<App::FixGateway>(
+            inQueues.get(),
+            Store::WideDataStorage::instance(),
+            Store::OrderStorage::instance());
+
+        fixOutQueues = std::make_unique<App::FixOutQueues>(
+            fixGateway.get(),
+            Store::OrderStorage::instance());
+
+        multiOutQueues = std::make_unique<App::MultiOutQueues>();
+        multiOutQueues->addDelegate(wsOutQueues.get());
+        multiOutQueues->addDelegate(fixOutQueues.get());
+
+        aux::ExchLogger::instance()->note("FIX gateway configured: " + cfg.fixCfg);
+    }
+#endif
+
     // 7. Create TransactionManager
     auto transactMgr = std::make_unique<ACID::TransactionMgr>();
     ACID::TransactionMgrParams tmParams(IdTGenerator::instance());
@@ -157,13 +197,18 @@ int main(int argc, char* argv[]) {
     Queues::InQueueProcessorsPoolT evntProcessors;
     ACID::ProcessorPoolT transactProcessors;
 
+    Queues::OutQueues* outQueuesPtr = wsOutQueues.get();
+#ifdef BUILD_FIX
+    if (multiOutQueues) outQueuesPtr = multiOutQueues.get();
+#endif
+
     for (int i = 0; i < numProcessors; ++i) {
         Proc::ProcessorParams params(
             IdTGenerator::instance(),
             Store::OrderStorage::instance(),
             orderBook.get(),
             inQueues.get(),
-            wsOutQueues.get(),
+            outQueuesPtr,
             inQueues.get(),
             transactMgr.get());
 
@@ -202,7 +247,27 @@ int main(int argc, char* argv[]) {
         orderBook.get());
     server->run();
 
-    // 10b. Create MetricsPublisher for system monitoring
+    // 10b. Start FIX acceptor (if configured)
+#ifdef BUILD_FIX
+    std::unique_ptr<FIX::ThreadedSocketAcceptor> fixAcceptor;
+    std::unique_ptr<FIX::FileStoreFactory> fixStoreFactory;
+    std::unique_ptr<FIX::FileLogFactory> fixLogFactory;
+    std::unique_ptr<FIX::SessionSettings> fixSettings;
+
+    if (fixGateway) {
+        fixSettings = std::make_unique<FIX::SessionSettings>(cfg.fixCfg);
+        fixStoreFactory = std::make_unique<FIX::FileStoreFactory>(*fixSettings);
+        fixLogFactory = std::make_unique<FIX::FileLogFactory>(*fixSettings);
+
+        fixAcceptor = std::make_unique<FIX::ThreadedSocketAcceptor>(
+            *fixGateway, *fixStoreFactory, *fixSettings, *fixLogFactory);
+        fixAcceptor->start();
+
+        aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSocketAcceptor)");
+    }
+#endif
+
+    // 10c. Create MetricsPublisher for system monitoring
     auto metricsPublisher = std::make_shared<App::MetricsPublisher>(
         ioc,
         sessionMgr.get(),
@@ -228,6 +293,17 @@ int main(int argc, char* argv[]) {
     // 13. Graceful shutdown
     aux::ExchLogger::instance()->note("Shutting down...");
 
+#ifdef BUILD_FIX
+    if (fixAcceptor) {
+        fixAcceptor->stop();
+        fixAcceptor.reset();
+        fixSettings.reset();
+        fixLogFactory.reset();
+        fixStoreFactory.reset();
+        aux::ExchLogger::instance()->note("FIX gateway stopped");
+    }
+#endif
+
     metricsPublisher->stop();
     metricsPublisher.reset();
     server.reset();
@@ -243,6 +319,11 @@ int main(int argc, char* argv[]) {
     taskMgr.reset();
 
     transactMgr.reset();
+#ifdef BUILD_FIX
+    fixOutQueues.reset();
+    multiOutQueues.reset();
+    fixGateway.reset();
+#endif
     wsOutQueues.reset();
     inQueues.reset();
     sessionMgr.reset();

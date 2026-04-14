@@ -70,6 +70,16 @@ target_include_directories(orderProcessorTest
         ${CMAKE_SOURCE_DIR}/src
 )
 
+if(BUILD_FIX)
+    target_sources(orderProcessorTest PRIVATE
+        FixGatewayTest.cpp
+        FixEndToEndTest.cpp
+        FixFullPipelineTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/FixGateway.cpp
+        ${CMAKE_SOURCE_DIR}/app/FixOutQueues.cpp
+        ${CMAKE_SOURCE_DIR}/app/MultiOutQueues.cpp)
+endif()
+
 if(BUILD_PG)
     target_sources(orderProcessorTest PRIVATE
         PGWriteBehindTest.cpp

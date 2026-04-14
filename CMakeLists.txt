@@ -15,6 +15,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(BUILD_TESTS "Build unit tests" ON)
 option(BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(BUILD_APP "Build production WebSocket server" ON)
+option(BUILD_FIX "Build with QuickFIX/C++ FIX gateway (requires quickfix)" OFF)
 
 # Compiler flags
 add_compile_options(-msse2 -fexceptions)
@@ -101,6 +102,12 @@ if(BUILD_TESTS)
             GTest::gmock
     )
 
+    if(BUILD_FIX)
+        target_link_libraries(orderProcessorTest PRIVATE ${QUICKFIX_LIB})
+        target_compile_definitions(orderProcessorTest PRIVATE BUILD_FIX)
+        target_include_directories(orderProcessorTest PRIVATE /usr/local/include ${CMAKE_SOURCE_DIR}/app)
+    endif()
+
     include(GoogleTest)
     gtest_discover_tests(orderProcessorTest)
 endif()
@@ -146,6 +153,13 @@ if(BUILD_APP)
     add_subdirectory(app)
     target_link_libraries(orderProcessorServer PRIVATE
         orderEngine nlohmann_json::nlohmann_json pthread)
+
+    if(BUILD_FIX)
+        find_library(QUICKFIX_LIB quickfix REQUIRED)
+        target_link_libraries(orderProcessorServer PRIVATE ${QUICKFIX_LIB})
+        target_compile_definitions(orderProcessorServer PRIVATE BUILD_FIX)
+        target_include_directories(orderProcessorServer PRIVATE /usr/local/include)
+    endif()
 
     add_executable(seedData app/seed_data.cpp)
     target_link_libraries(seedData PRIVATE orderEngine pthread)

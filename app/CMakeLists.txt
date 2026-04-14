@@ -6,3 +6,10 @@ target_sources(orderProcessorServer PRIVATE
     WsOutQueues.cpp
     SessionManager.cpp
     MetricsPublisher.cpp)
+
+if(BUILD_FIX)
+    target_sources(orderProcessorServer PRIVATE
+        FixGateway.cpp
+        FixOutQueues.cpp
+        MultiOutQueues.cpp)
+endif()
