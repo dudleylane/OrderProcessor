@@ -37,6 +37,15 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **Memory Admin Tab:** TransactionScopePool health indicator, cache miss rate trending, arena details
 - **Alert System:** Client-side rule engine with configurable thresholds, severity levels, localStorage persistence
 
+### FIX Protocol Gateway (Optional)
+- **FIX 4.4 Support:** Institutional clients connect via standard FIX protocol (`BUILD_FIX=ON`)
+- **QuickFIX/C++ Engine:** ThreadedSocketAcceptor with thread-per-session isolation
+- **Inbound:** NewOrderSingle (35=D), OrderCancelRequest (35=F), OrderCancelReplaceRequest (35=G)
+- **Outbound:** ExecutionReport (35=8), OrderCancelReject (35=9)
+- **Gateway Pattern:** Thin adapter — FIX messages translate to internal events at the boundary; core engine is protocol-agnostic
+- **MultiOutQueues:** Fan-out adapter routes execution reports to both WebSocket and FIX sessions simultaneously
+- **8 FX Currencies:** USD, EUR, GBP, JPY, CHF, AUD, CAD, NZD
+
 ### Persistence
 - **LMDB Storage:** Memory-mapped key-value store with versioned records
 - **PostgreSQL Write-Behind:** Optional async persistence via PGWriteBehind (requires `BUILD_PG=ON`)
@@ -63,10 +72,14 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 | Boost | 1.70+ | Headers only (MPL for Meta State Machine) |
 | LMDB | Latest | Persistent key-value storage backend |
 | numactl | Latest | NUMA-aware memory allocation |
+| QuickFIX | 1.17.0-hft | FIX protocol engine (optional, `BUILD_FIX=ON`) |
 
 Install on CentOS 10:
 ```bash
+# Core dependencies
 sudo dnf install tbb-devel spdlog-devel boost-devel cmake gcc-c++ lmdb-devel numactl-devel
+
+# Optional: QuickFIX for FIX protocol support (see docs/QUICKFIX_DEPENDENCY.md)
 ```
 
 ---
@@ -89,6 +102,7 @@ cmake --build . -j$(nproc)
 | `BUILD_BENCHMARKS` | ON | Build benchmarks with Google Benchmark |
 | `BUILD_APP` | ON | Build WebSocket server and seed data utility |
 | `BUILD_PG` | OFF | Build PostgreSQL write-behind layer (requires libpqxx) |
+| `BUILD_FIX` | OFF | Build FIX 4.4 protocol gateway (requires QuickFIX/C++) |
 
 ### Build Outputs
 
@@ -108,6 +122,11 @@ cmake --build . -j$(nproc)
 ./build/orderProcessorServer --port 8080 --data-dir ./data
 ```
 
+With FIX gateway enabled (requires `BUILD_FIX=ON`):
+```bash
+./build/orderProcessorServer --port 8080 --data-dir ./data --fix-cfg config/fix.cfg
+```
+
 Server options:
 
 | Flag | Default | Description |
@@ -117,6 +136,7 @@ Server options:
 | `--workers` | 0 | Worker thread count (0 = auto) |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
 | `--huge-pages` | off | Enable huge page allocation |
+| `--fix-cfg` | *(none)* | Path to QuickFIX settings file (enables FIX gateway) |
 
 ### Docker Compose (Full Stack)
 
