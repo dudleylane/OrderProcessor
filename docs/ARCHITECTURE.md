@@ -64,7 +64,20 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           EXTERNAL SYSTEMS                                   │
-│                    (FIX Gateway, REST API, Market Data)                     │
+│           ┌──────────────┐                    ┌──────────────┐               │
+│           │  FIX Clients  │                    │  WS Clients   │               │
+│           │  (FIX 4.4)   │                    │  (JSON/WS)   │               │
+│           └──────┬───────┘                    └──────┬───────┘               │
+│                  │                                    │                       │
+│           ┌──────▼───────┐                    ┌──────▼───────┐               │
+│           │  FixGateway   │                    │  WsServer     │               │
+│           │  (QuickFIX)  │                    │  (Beast)      │               │
+│           └──────┬───────┘                    └──────┬───────┘               │
+│                  └─────────────┬──────────────────────┘                       │
+│                                │                                              │
+│                    ┌───────────▼──────────┐                                  │
+│                    │   MultiOutQueues      │ (fan-out on outbound)            │
+│                    └──────────────────────┘                                  │
 └──────────────────────────────┬──────────────────────────────────────────────┘
                                │
                                ▼
@@ -160,6 +173,7 @@ COP (Concurrent Order Processor)
 ├── SL          → Subscription layer (SubscriptionLayerImpl)
 ├── EventMgr    → Event management (EventManager, EventDispatcher)
 ├── PG          → PostgreSQL write-behind (PGWriteBehind, PGRequestBuilder) [optional]
+├── App         → WebSocket server + FIX gateway (WsServer, FixGateway, MultiOutQueues) [optional]
 ├── Tasks       → Task scheduling (TaskManager, oneTBB integration)
 ├── Impl        → Internal implementation details
 └── aux         → Utility functions and helpers
@@ -421,6 +435,80 @@ COP (Concurrent Order Processor)
 | `OrderMatcherTest.cpp` | `OrderMatcherTest.*` | Order matching unit tests |
 | `IntegrationTest.cpp` | `IntegrationTest.*` | Order matching in full flow |
 | `OrderMatchingBench.cpp` | `BM_OrderMatching*` | Matching performance |
+
+---
+
+### 3.6 FIX Gateway (Optional, `BUILD_FIX=ON`)
+
+**Location:** `app/FixGateway.h`, `app/FixGateway.cpp`, `app/FixOutQueues.cpp`, `app/MultiOutQueues.cpp`
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    FIX Protocol Layer                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────┐       │
+│  │              FixGateway                               │       │
+│  │  Implements: FIX::Application + FIX44::MessageCracker │       │
+│  │                                                       │       │
+│  │  INBOUND:                                             │       │
+│  │    NewOrderSingle (35=D)  → OrderEvent                │       │
+│  │    OrderCancelRequest (35=F) → OrderCancelEvent       │       │
+│  │    OrderCancelReplaceRequest (35=G) → OrderReplaceEvent│      │
+│  │                    ↓                                   │       │
+│  │           IncomingQueues::push()                       │       │
+│  │                                                       │       │
+│  │  OUTBOUND:                                            │       │
+│  │    ExecutionEntry → FIX44::ExecutionReport (35=8)     │       │
+│  │    CancelReject   → FIX44::OrderCancelReject (35=9)   │       │
+│  │                    ↓                                   │       │
+│  │           Session::sendToTarget()                      │       │
+│  └──────────────────────────────────────────────────────┘       │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────┐       │
+│  │              MultiOutQueues                            │       │
+│  │  Implements: OutQueues                                 │       │
+│  │                                                       │       │
+│  │  Processor::outQueues_ → push() → WsOutQueues         │       │
+│  │                                 → FixOutQueues         │       │
+│  │                                                       │       │
+│  │  Each delegate silently ignores events not targeting   │       │
+│  │  its protocol (WsOutQueues broadcasts to WS sessions,  │       │
+│  │  FixOutQueues routes to FIX session by source string)  │       │
+│  └──────────────────────────────────────────────────────┘       │
+│                                                                  │
+│  Session Routing:                                                │
+│    source_ = "FIX:SENDER->TARGET" on each order                │
+│    sessionMap_ maps source string → FIX::SessionID              │
+│    Populated on onLogon(), cleared on onLogout()                │
+│                                                                  │
+│  Threading: ThreadedSocketAcceptor (thread-per-session)         │
+│    FixGateway is thread-safe:                                    │
+│      • IncomingQueues::push() — lock-free tbb::concurrent_queue │
+│      • WideDataStorage reads — spin_rw_mutex (shared)           │
+│      • Session::sendToTarget() — internally synchronized        │
+│      • sessionMap_ — protected by spin_rw_mutex                 │
+│                                                                  │
+│  GCC 15 Note: #define FIX_CONFIG23_H before QuickFIX includes   │
+│    to avoid std::flat_map conflict with Config23.h polyfill     │
+├─────────────────────────────────────────────────────────────────┤
+│ FIX↔COP Enum Mapping:                                           │
+│   Side:  '1'↔BUY  '2'↔SELL  '5'↔SELL_SHORT  '6'↔CROSS        │
+│   OrdType: '1'↔MARKET  '2'↔LIMIT  '3'↔STOP  '4'↔STOPLIMIT    │
+│   TIF:  '0'↔DAY  '1'↔GTC  '3'↔IOC  '4'↔FOK  '2'↔OPG         │
+│   Currency: "USD","EUR","GBP","JPY","CHF","AUD","CAD","NZD"     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Associated Test Cases:**
+
+| Test File | Test Case | Description |
+|-----------|-----------|-------------|
+| `FixFullPipelineTest.cpp` | `FixFullPipelineTest.EveryComponentTouched` | Single test verifying all 15 components |
+| `FixEndToEndTest.cpp` | `FixEndToEndTest.*` | Full order lifecycle via FIX (6 tests) |
+| `FixGatewayTest.cpp` | `FixEnumTest.*` | Enum conversion round-trips (7 tests) |
+| `FixGatewayTest.cpp` | `FixGatewayInboundTest.*` | FIX message translation (7 tests) |
+| `FixGatewayTest.cpp` | `MultiOutQueuesTest.*` | Fan-out adapter (4 tests) |
 
 ---
 
