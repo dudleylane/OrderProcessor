@@ -131,6 +131,12 @@ if(BUILD_BENCHMARKS)
             benchmark::benchmark_main
     )
 
+    if(BUILD_FIX)
+        target_link_libraries(orderProcessorBench PRIVATE ${QUICKFIX_LIB})
+        target_compile_definitions(orderProcessorBench PRIVATE BUILD_FIX)
+        target_include_directories(orderProcessorBench PRIVATE /usr/local/include)
+    endif()
+
     add_custom_target(benchmark-regression
         COMMAND ${CMAKE_SOURCE_DIR}/scripts/benchmark-regression.sh
             --no-build
