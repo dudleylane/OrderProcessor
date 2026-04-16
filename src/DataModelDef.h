@@ -49,9 +49,9 @@ namespace COP{
 		StringT securityIdSource_;
 		IdT id_;
 
-		InstrumentType instrumentType_;
-		Currency baseCurrency_;    // e.g., EUR in EUR/USD
-		Currency termCurrency_;    // e.g., USD in EUR/USD
+		InstrumentType instrumentType_ = INVALID_INSTRUMENTTYPE;
+		Currency baseCurrency_ = INVALID_CURRENCY;
+		Currency termCurrency_ = INVALID_CURRENCY;
 
 		bool isValid(std::string *invalid)const;
 		bool isFxPair()const{

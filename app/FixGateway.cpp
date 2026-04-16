@@ -153,6 +153,16 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle& msg, const FIX::SessionI
             std::chrono::system_clock::now().time_since_epoch()).count());
     order->lastUpdateTime_ = order->creationTime_;
 
+    // FX Swap: extract far-leg fields from user-defined tags (6500=farPrice, 6501=farSettlDate)
+    if (FXSWAP_ORDERTYPE == order->ordType_) {
+        if (msg.isSetField(6500))
+            order->farPrice_ = std::stod(msg.getField(6500));
+        if (msg.isSetField(6501))
+            order->farSettlDate_ = static_cast<DateTimeT>(std::stoull(msg.getField(6501)));
+        if (msg.isSetField(64))  // SettlDate (standard tag) → near leg
+            order->settlDate_ = static_cast<DateTimeT>(std::stoull(msg.getField(64)));
+    }
+
     Queues::OrderEvent evt(order);
     inQueues_->push(sourceStr, evt);
 }
@@ -303,6 +313,7 @@ OrderType FixGateway::toOrdType(char fixOrdType) {
         case FIX::OrdType_LIMIT:            return LIMIT_ORDERTYPE;
         case FIX::OrdType_STOP:             return STOP_ORDERTYPE;
         case FIX::OrdType_STOP_LIMIT:       return STOPLIMIT_ORDERTYPE;
+        case FIX::OrdType_FOREX_SWAP:       return FXSWAP_ORDERTYPE;
         default:                            return INVALID_ORDERTYPE;
     }
 }

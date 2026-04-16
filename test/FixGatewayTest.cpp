@@ -63,6 +63,7 @@ TEST_F(FixEnumTest, OrdTypeConversion) {
     EXPECT_EQ(LIMIT_ORDERTYPE,     FixGateway::toOrdType(FIX::OrdType_LIMIT));
     EXPECT_EQ(STOP_ORDERTYPE,      FixGateway::toOrdType(FIX::OrdType_STOP));
     EXPECT_EQ(STOPLIMIT_ORDERTYPE, FixGateway::toOrdType(FIX::OrdType_STOP_LIMIT));
+    EXPECT_EQ(FXSWAP_ORDERTYPE,    FixGateway::toOrdType(FIX::OrdType_FOREX_SWAP));
     EXPECT_EQ(INVALID_ORDERTYPE,   FixGateway::toOrdType('Z'));
 }
 
