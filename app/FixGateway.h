@@ -2,24 +2,23 @@
 
 #ifdef BUILD_FIX
 
-// GCC 15 provides std::flat_map natively. QuickFIX's Config23.h tries to inject
-// boost::container::flat_map into std:: which conflicts. Skip Config23.h entirely
-// by pre-defining its include guard, then include the real headers.
-#define FIX_CONFIG23_H
-#include <flat_map>
-#include <flat_set>
-
+// QuickFIX's Config23.h polyfills std::flat_map as boost::container::flat_map
+// on GCC. This header MUST be included BEFORE any header that includes
+// <flat_map> (e.g. NLinkedTree.h via TransactionMgr.h). NLinkedTree.h
+// conditionally skips #include <flat_map> when the polyfill is active.
+#include <quickfix/Application.h>
 #include <unordered_map>
 #include <oneapi/tbb/spin_rw_mutex.h>
-#include <quickfix/Application.h>
 #include <quickfix/MessageCracker.h>
 #include <quickfix/SessionID.h>
 #include <quickfix/Session.h>
 #include <quickfix/fix44/NewOrderSingle.h>
+#include <quickfix/fix44/NewOrderMultileg.h>
 #include <quickfix/fix44/OrderCancelRequest.h>
 #include <quickfix/fix44/OrderCancelReplaceRequest.h>
 #include <quickfix/fix44/ExecutionReport.h>
 #include <quickfix/fix44/OrderCancelReject.h>
+#include <quickfix/fix44/BusinessMessageReject.h>
 #include "QueuesDef.h"
 #include "DataModelDef.h"
 
@@ -51,12 +50,14 @@ public:
 
     // MessageCracker overrides (inbound)
     void onMessage(const FIX44::NewOrderSingle&, const FIX::SessionID&);
+    void onMessage(const FIX44::NewOrderMultileg&, const FIX::SessionID&);
     void onMessage(const FIX44::OrderCancelRequest&, const FIX::SessionID&);
     void onMessage(const FIX44::OrderCancelReplaceRequest&, const FIX::SessionID&);
 
     // Outbound — called by FixOutQueues
     void sendExecutionReport(const ExecutionEntry* exec, const OrderEntry& order);
     void sendCancelReject(const IdT& orderId, const std::string& clOrdId);
+    void sendBusinessReject(const IdT& refOrderId, const std::string& reason);
 
     // Session lookup
     bool hasFixSession(const std::string& source) const;

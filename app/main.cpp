@@ -28,15 +28,7 @@
 #include "HugePages.h"
 
 #ifdef BUILD_FIX
-#define FIX_CONFIG23_H
-#include <flat_map>
-#include <flat_set>
-#include <quickfix/ThreadedSocketAcceptor.h>
-#include <quickfix/FileStore.h>
-#include <quickfix/FileLog.h>
-#include <quickfix/SessionSettings.h>
-#include "FixGateway.h"
-#include "FixOutQueues.h"
+#include "FixServer.h"
 #include "MultiOutQueues.h"
 #endif
 
@@ -162,23 +154,19 @@ int main(int argc, char* argv[]) {
 
     // 6b. Create FIX gateway (if configured)
 #ifdef BUILD_FIX
-    std::unique_ptr<App::FixGateway> fixGateway;
-    std::unique_ptr<App::FixOutQueues> fixOutQueues;
+    std::unique_ptr<App::FixServer> fixServer;
     std::unique_ptr<App::MultiOutQueues> multiOutQueues;
 
     if (!cfg.fixCfg.empty()) {
-        fixGateway = std::make_unique<App::FixGateway>(
+        fixServer = std::make_unique<App::FixServer>(
             inQueues.get(),
             Store::WideDataStorage::instance(),
-            Store::OrderStorage::instance());
-
-        fixOutQueues = std::make_unique<App::FixOutQueues>(
-            fixGateway.get(),
-            Store::OrderStorage::instance());
+            Store::OrderStorage::instance(),
+            SourceIdT());  // default clearing ID
 
         multiOutQueues = std::make_unique<App::MultiOutQueues>();
         multiOutQueues->addDelegate(wsOutQueues.get());
-        multiOutQueues->addDelegate(fixOutQueues.get());
+        multiOutQueues->addDelegate(fixServer->outQueues());
 
         aux::ExchLogger::instance()->note("FIX gateway configured: " + cfg.fixCfg);
     }
@@ -249,21 +237,8 @@ int main(int argc, char* argv[]) {
 
     // 10b. Start FIX acceptor (if configured)
 #ifdef BUILD_FIX
-    std::unique_ptr<FIX::ThreadedSocketAcceptor> fixAcceptor;
-    std::unique_ptr<FIX::FileStoreFactory> fixStoreFactory;
-    std::unique_ptr<FIX::FileLogFactory> fixLogFactory;
-    std::unique_ptr<FIX::SessionSettings> fixSettings;
-
-    if (fixGateway) {
-        fixSettings = std::make_unique<FIX::SessionSettings>(cfg.fixCfg);
-        fixStoreFactory = std::make_unique<FIX::FileStoreFactory>(*fixSettings);
-        fixLogFactory = std::make_unique<FIX::FileLogFactory>(*fixSettings);
-
-        fixAcceptor = std::make_unique<FIX::ThreadedSocketAcceptor>(
-            *fixGateway, *fixStoreFactory, *fixSettings, *fixLogFactory);
-        fixAcceptor->start();
-
-        aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSocketAcceptor)");
+    if (fixServer) {
+        fixServer->start(cfg.fixCfg);
     }
 #endif
 
@@ -294,14 +269,7 @@ int main(int argc, char* argv[]) {
     aux::ExchLogger::instance()->note("Shutting down...");
 
 #ifdef BUILD_FIX
-    if (fixAcceptor) {
-        fixAcceptor->stop();
-        fixAcceptor.reset();
-        fixSettings.reset();
-        fixLogFactory.reset();
-        fixStoreFactory.reset();
-        aux::ExchLogger::instance()->note("FIX gateway stopped");
-    }
+    if (fixServer) fixServer->stop();
 #endif
 
     metricsPublisher->stop();
@@ -320,9 +288,8 @@ int main(int argc, char* argv[]) {
 
     transactMgr.reset();
 #ifdef BUILD_FIX
-    fixOutQueues.reset();
     multiOutQueues.reset();
-    fixGateway.reset();
+    fixServer.reset();
 #endif
     wsOutQueues.reset();
     inQueues.reset();

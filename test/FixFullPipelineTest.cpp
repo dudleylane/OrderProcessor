@@ -12,18 +12,17 @@
 
 #ifdef BUILD_FIX
 
+// QuickFIX headers MUST come before any <flat_map> include (see FixGateway.h)
+#include <quickfix/fix44/NewOrderSingle.h>
+#include <quickfix/FixValues.h>
+#include <quickfix/FixFields.h>
+#include "FixGateway.h"
+#include "MultiOutQueues.h"
+
 #include <gtest/gtest.h>
 #include <atomic>
 #include <deque>
 #include <mutex>
-
-#define FIX_CONFIG23_H
-#include <flat_map>
-#include <flat_set>
-
-#include <quickfix/fix44/NewOrderSingle.h>
-#include <quickfix/FixValues.h>
-#include <quickfix/FixFields.h>
 
 #include "DataModelDef.h"
 #include "WideDataStorage.h"
@@ -39,8 +38,6 @@
 #include "SubscrManager.h"
 #include "OrderCodec.h"
 
-#include "FixGateway.h"
-#include "MultiOutQueues.h"
 #include "TestAux.h"
 
 using namespace COP;

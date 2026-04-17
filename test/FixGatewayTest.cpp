@@ -7,24 +7,22 @@
 
 #ifdef BUILD_FIX
 
-#include <gtest/gtest.h>
-#include <gmock/gmock.h>
-
-#define FIX_CONFIG23_H
-#include <flat_map>
-#include <flat_set>
-
+// QuickFIX headers MUST come before any <flat_map> include (see FixGateway.h)
 #include <quickfix/fix44/NewOrderSingle.h>
+#include <quickfix/fix44/NewOrderMultileg.h>
 #include <quickfix/fix44/OrderCancelRequest.h>
 #include <quickfix/fix44/OrderCancelReplaceRequest.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
+#include "FixGateway.h"
+#include "MultiOutQueues.h"
+
+#include <gtest/gtest.h>
+#include <gmock/gmock.h>
 
 #include "TestFixtures.h"
 #include "TestAux.h"
 #include "MockQueues.h"
-#include "FixGateway.h"
-#include "MultiOutQueues.h"
 
 using namespace COP;
 using namespace COP::App;
@@ -274,6 +272,96 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_PushesToQueue) {
     EXPECT_EQ(200u, capturedReplacement->leavesQty_);
 
     delete capturedReplacement;
+}
+
+// =============================================================================
+// NewOrderMultileg — FX Swap via standard FIX
+// =============================================================================
+
+TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_PushesToQueue) {
+    OrderEntry* capturedOrder = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent&>()))
+        .WillOnce(Invoke([&](const std::string& source, const OrderEvent& evt) {
+            EXPECT_TRUE(source.find("FIX:") != std::string::npos);
+            capturedOrder = evt.order_;
+        }));
+
+    FIX::UtcTimeStamp now;
+    FIX44::NewOrderMultileg msg;
+    msg.set(FIX::ClOrdID("SWAP-001"));
+    msg.set(FIX::Side(FIX::Side_BUY));  // near-leg side
+    msg.set(FIX::TransactTime(now));
+    msg.set(FIX::OrdType(FIX::OrdType_FOREX_SWAP));
+    msg.set(FIX::Symbol("aaa"));
+    msg.set(FIX::OrderQty(1000000));
+    msg.set(FIX::Currency("USD"));
+
+    // Near leg: BUY at 1.2650, settl T+2
+    FIX44::NewOrderMultileg::NoLegs nearLeg;
+    nearLeg.set(FIX::LegSymbol("aaa"));
+    nearLeg.set(FIX::LegSide(FIX::Side_BUY));
+    nearLeg.set(FIX::LegPrice(1.2650));
+    nearLeg.set(FIX::LegSettlDate("1000"));
+    msg.addGroup(nearLeg);
+
+    // Far leg: SELL at 1.2680, settl T+92
+    FIX44::NewOrderMultileg::NoLegs farLeg;
+    farLeg.set(FIX::LegSymbol("aaa"));
+    farLeg.set(FIX::LegSide(FIX::Side_SELL));
+    farLeg.set(FIX::LegPrice(1.2680));
+    farLeg.set(FIX::LegSettlDate("2000"));
+    msg.addGroup(farLeg);
+
+    gateway_->onMessage(msg, TEST_SID);
+
+    ASSERT_NE(nullptr, capturedOrder);
+    EXPECT_EQ(FXSWAP_ORDERTYPE, capturedOrder->ordType_);
+    EXPECT_EQ(BUY_SIDE, capturedOrder->side_);
+    EXPECT_DOUBLE_EQ(1.2650, capturedOrder->price_);     // near (matches root side)
+    EXPECT_DOUBLE_EQ(1.2680, capturedOrder->farPrice_);  // far (opposite side)
+    EXPECT_EQ(1000u, capturedOrder->settlDate_);
+    EXPECT_EQ(2000u, capturedOrder->farSettlDate_);
+    EXPECT_EQ(1000000u, capturedOrder->orderQty_);
+
+    delete capturedOrder;
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderMultileg_NonSwapOrdType_Rejected) {
+    // NewOrderMultileg with non-FXSwap OrdType should be rejected (no push)
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent&>())).Times(0);
+
+    FIX::UtcTimeStamp now;
+    FIX44::NewOrderMultileg msg;
+    msg.set(FIX::ClOrdID("MLEG-BAD"));
+    msg.set(FIX::Side(FIX::Side_BUY));
+    msg.set(FIX::TransactTime(now));
+    msg.set(FIX::OrdType(FIX::OrdType_LIMIT));  // not FX Swap
+    msg.set(FIX::Symbol("aaa"));
+    msg.set(FIX::OrderQty(100));
+
+    gateway_->onMessage(msg, TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderMultileg_TooFewLegs_Rejected) {
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent&>())).Times(0);
+
+    FIX::UtcTimeStamp now;
+    FIX44::NewOrderMultileg msg;
+    msg.set(FIX::ClOrdID("MLEG-1"));
+    msg.set(FIX::Side(FIX::Side_BUY));
+    msg.set(FIX::TransactTime(now));
+    msg.set(FIX::OrdType(FIX::OrdType_FOREX_SWAP));
+    msg.set(FIX::Symbol("aaa"));
+    msg.set(FIX::OrderQty(100));
+
+    // Only one leg — should be rejected
+    FIX44::NewOrderMultileg::NoLegs oneLeg;
+    oneLeg.set(FIX::LegSymbol("aaa"));
+    oneLeg.set(FIX::LegSide(FIX::Side_BUY));
+    oneLeg.set(FIX::LegPrice(1.2650));
+    msg.addGroup(oneLeg);
+
+    gateway_->onMessage(msg, TEST_SID);
 }
 
 // =============================================================================

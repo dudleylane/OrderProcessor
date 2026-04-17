@@ -9,6 +9,7 @@ target_sources(orderProcessorServer PRIVATE
 
 if(BUILD_FIX)
     target_sources(orderProcessorServer PRIVATE
+        FixServer.cpp
         FixGateway.cpp
         FixOutQueues.cpp
         MultiOutQueues.cpp)

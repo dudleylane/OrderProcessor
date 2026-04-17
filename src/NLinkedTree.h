@@ -16,7 +16,13 @@
 #include <deque>
 #include <set>
 #include <map>
+// When QuickFIX is active (BUILD_FIX), Config23.h polyfills std::flat_map
+// as boost::container::flat_map (to avoid GCC 15 bugs). In that case
+// #include <flat_map> would conflict. QUICKFIX_HAS_FLAT_CONTAINERS is
+// defined by Config23.h when the polyfill is installed.
+#ifndef QUICKFIX_HAS_FLAT_CONTAINERS
 #include <flat_map>
+#endif
 #include <list>
 
 #include "AllocateCache.h"

@@ -6,6 +6,7 @@
 #include "IdTGenerator.h"
 #include "Logger.h"
 
+#include <vector>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
 
@@ -167,6 +168,168 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle& msg, const FIX::SessionI
     inQueues_->push(sourceStr, evt);
 }
 
+// =============================================================================
+// NewOrderMultileg (35=AB) — standards-compliant FX Swap entry
+//
+// Expected structure for FX Swap:
+//   - Root fields: ClOrdID, Side (near-leg side), OrdType=FXSwap('G'), OrderQty
+//   - NoLegs=2 repeating group:
+//       Leg 1 (near): LegSymbol, LegPrice (spot), LegSettlDate (T+2),
+//                     LegSide matches root Side
+//       Leg 2 (far):  LegSymbol, LegPrice (forward), LegSettlDate (T+N),
+//                     LegSide opposite to root Side
+// =============================================================================
+void FixGateway::onMessage(const FIX44::NewOrderMultileg& msg, const FIX::SessionID& sid) {
+    FIX::ClOrdID clOrdId;       msg.get(clOrdId);
+    FIX::Side side;             msg.get(side);
+    FIX::OrdType ordType;       msg.get(ordType);
+    FIX::OrderQty orderQty;     msg.get(orderQty);
+
+    // Only handle FX Swap multileg orders
+    if (FXSWAP_ORDERTYPE != toOrdType(ordType.getValue())) {
+        aux::ExchLogger::instance()->error(
+            "FIX Multileg: only FX Swap (OrdType=G) supported, got: " +
+            std::string(1, ordType.getValue()));
+        sendBusinessReject(IdT(), "NewOrderMultileg: only FX Swap supported");
+        return;
+    }
+
+    FIX::Symbol rootSymbol;
+    std::string symStr;
+    if (msg.isSet(rootSymbol)) {
+        msg.get(rootSymbol);
+        symStr = rootSymbol.getString();
+    }
+
+    // Extract legs — use groupCount() rather than isSet(NoLegs) because
+    // addGroup() sets up the count implicitly and isSet() can throw on
+    // partial/invalid count fields.
+    size_t legCount = msg.groupCount(FIX::FIELD::NoLegs);
+    if (legCount < 2) {
+        aux::ExchLogger::instance()->error("FIX Multileg: FX Swap requires 2 legs, got " +
+            std::to_string(legCount));
+        sendBusinessReject(IdT(), "NewOrderMultileg: NoLegs < 2");
+        return;
+    }
+
+    double nearPrice = 0.0, farPrice = 0.0;
+    DateTimeT nearSettlDate = 0, farSettlDate = 0;
+    std::string legSymbol;
+
+    FIX44::NewOrderMultileg::NoLegs legGroup;
+    for (int i = 1; i <= 2; ++i) {
+        msg.getGroup(i, legGroup);
+
+        FIX::LegSymbol lsym;
+        if (legGroup.isSet(lsym)) {
+            legGroup.get(lsym);
+            if (legSymbol.empty()) legSymbol = lsym.getString();
+        }
+
+        FIX::LegPrice lpx;
+        double lpxVal = 0.0;
+        if (legGroup.isSet(lpx)) {
+            legGroup.get(lpx);
+            lpxVal = lpx.getValue();
+        }
+
+        FIX::LegSettlDate lsd;
+        DateTimeT lsdVal = 0;
+        if (legGroup.isSet(lsd)) {
+            legGroup.get(lsd);
+            lsdVal = static_cast<DateTimeT>(std::stoull(lsd.getString()));
+        }
+
+        FIX::LegSide lside;
+        char legSideVal = '0';
+        if (legGroup.isSet(lside)) {
+            legGroup.get(lside);
+            legSideVal = lside.getValue();
+        }
+
+        // Near leg matches root side; far leg is opposite
+        if (legSideVal == side.getValue()) {
+            nearPrice = lpxVal;
+            nearSettlDate = lsdVal;
+        } else {
+            farPrice = lpxVal;
+            farSettlDate = lsdVal;
+        }
+    }
+
+    // Prefer root Symbol, fall back to LegSymbol
+    if (symStr.empty()) symStr = legSymbol;
+
+    SourceIdT instrId = wideData_->findInstrumentBySymbol(symStr);
+    if (!instrId.isValid()) {
+        aux::ExchLogger::instance()->error("FIX Multileg: Unknown instrument: " + symStr);
+        sendBusinessReject(IdT(), "Unknown instrument: " + symStr);
+        return;
+    }
+
+    FIX::Account account;
+    std::string acctStr;
+    if (msg.isSet(account)) {
+        msg.get(account);
+        acctStr = account.getString();
+    }
+    SourceIdT acctId;
+    if (!acctStr.empty()) acctId = wideData_->findAccountByName(acctStr);
+
+    FIX::Currency currency;
+    std::string ccyStr = "USD";
+    if (msg.isSet(currency)) {
+        msg.get(currency);
+        ccyStr = currency.getString();
+    }
+
+    FIX::TimeInForce tif;
+    char tifVal = FIX::TimeInForce_GOOD_TILL_CANCEL;
+    if (msg.isSet(tif)) { msg.get(tif); tifVal = tif.getValue(); }
+
+    // Build OrderEntry — same pattern as NewOrderSingle
+    std::string clOrdStr = clOrdId.getString();
+    auto* clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(),
+                                      static_cast<u32>(clOrdStr.size()));
+    SourceIdT clOrdSrcId = WideDataStorage::instance()->add(clOrdRaw);
+
+    SourceIdT emptyId;
+    SourceIdT clearingId = defaultClearingId_;
+
+    auto* execList = new ExecutionsT();
+    SourceIdT execListId = WideDataStorage::instance()->add(execList);
+
+    std::string sourceStr = makeSourceString(sid);
+    auto* srcStrPtr = new StringT(sourceStr);
+    SourceIdT srcId = WideDataStorage::instance()->add(srcStrPtr);
+
+    auto* destStr = new StringT("Internal");
+    SourceIdT destId = WideDataStorage::instance()->add(destStr);
+
+    auto* order = new OrderEntry(srcId, destId, clOrdSrcId, emptyId,
+                                 instrId, acctId, clearingId, execListId);
+    order->side_ = toSide(side.getValue());
+    order->ordType_ = FXSWAP_ORDERTYPE;
+    order->price_ = nearPrice;
+    order->farPrice_ = farPrice;
+    order->settlDate_ = nearSettlDate;
+    order->farSettlDate_ = farSettlDate;
+    order->orderQty_ = static_cast<QuantityT>(orderQty.getValue());
+    order->leavesQty_ = order->orderQty_;
+    order->tif_ = toTif(tifVal);
+    order->currency_ = toCurrency(ccyStr);
+    order->capacity_ = AGENCY_CAPACITY;
+    order->settlType_ = _2_SETTLTYPE;
+    order->status_ = RECEIVEDNEW_ORDSTATUS;
+    order->creationTime_ = static_cast<DateTimeT>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+    order->lastUpdateTime_ = order->creationTime_;
+
+    Queues::OrderEvent evt(order);
+    inQueues_->push(sourceStr, evt);
+}
+
 void FixGateway::onMessage(const FIX44::OrderCancelRequest& msg, const FIX::SessionID& sid) {
     FIX::OrigClOrdID origClOrdId; msg.get(origClOrdId);
 
@@ -266,6 +429,49 @@ void FixGateway::sendExecutionReport(const ExecutionEntry* exec, const OrderEntr
         report.set(FIX::LastPx(trade->lastPx_));
     }
 
+    // FX Swap leg: populate NoLegs group with leg-specific fields, set
+    // TradeLinkID so clients can correlate near+far reports for the same swap.
+    if (exec->execLegType_ != SINGLE_LEG) {
+        FIX44::ExecutionReport::NoLegs legGroup;
+
+        legGroup.set(FIX::LegSymbol(order.instrument_.get().symbol_));
+
+        // Near leg trades at root side; far leg trades at opposite side
+        char legFixSide;
+        DateTimeT legSettl;
+        if (exec->execLegType_ == NEAR_LEG) {
+            legFixSide = fromSide(order.side_);
+            legSettl = order.settlDate_;
+        } else { // FAR_LEG
+            legFixSide = (order.side_ == BUY_SIDE) ? FIX::Side_SELL : FIX::Side_BUY;
+            legSettl = order.farSettlDate_;
+        }
+        legGroup.set(FIX::LegSide(legFixSide));
+
+        if (exec->type_ == TRADE_EXECTYPE) {
+            auto* trade = static_cast<const TradeExecEntry*>(exec);
+            legGroup.set(FIX::LegLastPx(trade->lastPx_));
+            // LegLastQty (tag 1418) has no typed class in QuickFIX's FIX 4.4 headers,
+            // use untyped setField instead
+            legGroup.setField(1418, std::to_string(trade->lastQty_));
+        }
+
+        // LegSettlDate is LocalMktDate (YYYYMMDD string in FIX)
+        // We store DateTimeT (ms epoch); pass as string for simplicity
+        if (legSettl > 0) {
+            legGroup.set(FIX::LegSettlDate(std::to_string(legSettl)));
+        }
+
+        report.addGroup(legGroup);
+
+        // Correlation: "<orderId>-<transactTime>" pairs near+far from same match.
+        // Clients join on TradeLinkID (tag 820) to reconstruct the swap fill.
+        // TradeLinkID has no typed class in FIX 4.4 headers; use untyped setField.
+        report.setField(820,
+            std::to_string(order.orderId_.id_) + "-" +
+            std::to_string(exec->transactTime_));
+    }
+
     FIX::Session::sendToTarget(report, sid);
 }
 
@@ -291,6 +497,37 @@ void FixGateway::sendCancelReject(const IdT& orderId, const std::string& clOrdId
         FIX::CxlRejResponseTo(FIX::CxlRejResponseTo_ORDER_CANCEL_REQUEST));
 
     FIX::Session::sendToTarget(reject, sid);
+}
+
+void FixGateway::sendBusinessReject(const IdT& refOrderId, const std::string& reason) {
+    // Determine which FIX session to notify. If refOrderId is valid,
+    // route to the originating session; otherwise, broadcast to all sessions.
+    std::vector<FIX::SessionID> targets;
+
+    if (refOrderId.isValid()) {
+        OrderEntry* order = orderStorage_->locateByOrderId(refOrderId);
+        if (order) {
+            std::string source = order->source_.get();
+            oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, false);
+            auto it = sessionMap_.find(source);
+            if (it != sessionMap_.end()) targets.push_back(it->second);
+        }
+    } else {
+        // No order reference — send to every live FIX session
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, false);
+        for (const auto& kv : sessionMap_) targets.push_back(kv.second);
+    }
+
+    for (const auto& sid : targets) {
+        FIX44::BusinessMessageReject reject;
+        reject.set(FIX::RefMsgType("D"));  // NewOrderSingle/NewOrderMultileg
+        reject.set(FIX::BusinessRejectReason(FIX::BusinessRejectReason_OTHER));
+        reject.set(FIX::Text(reason));
+        if (refOrderId.isValid()) {
+            reject.set(FIX::BusinessRejectRefID(std::to_string(refOrderId.id_)));
+        }
+        FIX::Session::sendToTarget(reject, sid);
+    }
 }
 
 // =============================================================================
