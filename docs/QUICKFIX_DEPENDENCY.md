@@ -100,17 +100,25 @@ cmake --build build -j$(nproc)
 
 ## GCC 15 / C++23 Compatibility
 
-QuickFIX's `Config23.h` injects `boost::container::flat_map` into `namespace std` as a polyfill. GCC 15 already provides `std::flat_map` natively, causing a redefinition conflict. The OrderProcessor works around this by pre-defining the include guard before including QuickFIX headers:
+QuickFIX's `Config23.h` injects `boost::container::flat_map` into `namespace std` as a polyfill (to work around GCC 15's `std::flat_map` bugs). GCC 15 also provides native `std::flat_map` via `<flat_map>`. Having both in the same translation unit causes a redefinition conflict.
+
+The OrderProcessor resolves this with two mechanisms:
+
+**1. PIMPL isolation (`app/FixServer.h` / `app/FixServer.cpp`):**
+
+`FixServer` wraps `FixGateway` + `ThreadedSocketAcceptor` behind an opaque `Impl` pointer. Only `FixServer.cpp` includes QuickFIX headers (and gets the boost polyfill). `main.cpp` and all other translation units include only `FixServer.h`, which has no QuickFIX dependencies — so they use GCC 15's native `std::flat_map` without conflict.
+
+**2. Conditional guard in `src/NLinkedTree.h`:**
 
 ```cpp
-// In FixGateway.h and main.cpp:
-#define FIX_CONFIG23_H    // skip QuickFIX's polyfill
-#include <flat_map>       // use GCC 15's native std::flat_map
-#include <flat_set>
-#include <quickfix/ThreadedSocketAcceptor.h>  // now safe
+#ifndef QUICKFIX_HAS_FLAT_CONTAINERS
+#include <flat_map>
+#endif
 ```
 
-This workaround is localized to the two files that include QuickFIX headers. It does not affect any other part of the codebase.
+`QUICKFIX_HAS_FLAT_CONTAINERS` is defined by QuickFIX's `Config23.h` when the boost polyfill is active. Translation units that include QuickFIX headers (test files, bench files) get the polyfill first, then `NLinkedTree.h` skips `#include <flat_map>` to avoid the class/alias conflict. Translation units without QuickFIX (`BUILD_FIX=OFF`, or core engine files) include `<flat_map>` normally.
+
+**Rule:** Any file that includes QuickFIX headers must include them **before** any header that transitively includes `NLinkedTree.h` (e.g., `TransactionMgr.h`).
 
 ## FIX Protocol Version
 

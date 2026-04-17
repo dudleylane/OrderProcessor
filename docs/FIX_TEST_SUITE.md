@@ -2,7 +2,7 @@
 
 Test coverage for the QuickFIX/C++ FIX gateway integration and FX Swap order support. All tests require `BUILD_FIX=ON` (except FX Swap tests which are always built).
 
-**Total: 37 tests across 7 test suites**
+**Total: 40 tests across 7 test suites**
 
 ```bash
 # Run all FIX/FX tests
@@ -103,6 +103,9 @@ Tests FIX message parsing and OrderEntry construction using `MockInQueues` to ca
 | `NewOrderSingle_UnknownSymbol_NoPush` | Unknown symbol → no event pushed, error logged |
 | `CancelRequest_PushesToQueue` | OrderCancelRequest → OrderCancelEvent with correct orderId |
 | `ReplaceRequest_PushesToQueue` | OrderCancelReplaceRequest → OrderReplaceEvent with new price/qty |
+| `NewOrderMultileg_FxSwap_PushesToQueue` | 2-leg multileg → FXSWAP OrderEntry with near/far prices+dates |
+| `NewOrderMultileg_NonSwapOrdType_Rejected` | Non-FXSWAP OrdType in multileg → rejected, no push |
+| `NewOrderMultileg_TooFewLegs_Rejected` | Single leg multileg → rejected, no push |
 | `SessionMapPopulatedOnLogon` | `onLogon()` adds session, `onLogout()` removes it |
 | `MakeSourceString_Format` | Source string format: `"FIX:SENDER->TARGET"` |
 
