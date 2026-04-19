@@ -2,10 +2,6 @@
 
 #ifdef BUILD_FIX
 
-// QuickFIX's Config23.h polyfills std::flat_map as boost::container::flat_map
-// on GCC. This header MUST be included BEFORE any header that includes
-// <flat_map> (e.g. NLinkedTree.h via TransactionMgr.h). NLinkedTree.h
-// conditionally skips #include <flat_map> when the polyfill is active.
 #include <quickfix/Application.h>
 #include <unordered_map>
 #include <oneapi/tbb/spin_rw_mutex.h>
@@ -19,8 +15,13 @@
 #include <quickfix/fix44/ExecutionReport.h>
 #include <quickfix/fix44/OrderCancelReject.h>
 #include <quickfix/fix44/BusinessMessageReject.h>
+#include <quickfix/Group.h>
 #include "QueuesDef.h"
 #include "DataModelDef.h"
+
+// Catch QuickFIX ABI breaks at compile time (GroupArena added m_arena to FieldMap).
+static_assert(sizeof(FIX::Group) == 128,
+    "FIX::Group size changed — ABI break. Clean rebuild required.");
 
 namespace COP {
 

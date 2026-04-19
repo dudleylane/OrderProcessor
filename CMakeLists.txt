@@ -16,6 +16,9 @@ option(BUILD_TESTS "Build unit tests" ON)
 option(BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(BUILD_APP "Build production WebSocket server" ON)
 option(BUILD_FIX "Build with QuickFIX/C++ FIX gateway (requires quickfix)" OFF)
+if(BUILD_FIX)
+    find_library(QUICKFIX_LIB quickfix REQUIRED)
+endif()
 
 # Compiler flags
 add_compile_options(-msse2 -fexceptions)
@@ -161,7 +164,6 @@ if(BUILD_APP)
         orderEngine nlohmann_json::nlohmann_json pthread)
 
     if(BUILD_FIX)
-        find_library(QUICKFIX_LIB quickfix REQUIRED)
         target_link_libraries(orderProcessorServer PRIVATE ${QUICKFIX_LIB})
         target_compile_definitions(orderProcessorServer PRIVATE BUILD_FIX)
         target_include_directories(orderProcessorServer PRIVATE /usr/local/include)

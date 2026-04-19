@@ -421,7 +421,7 @@ void FixGateway::sendExecutionReport(const ExecutionEntry* exec, const OrderEntr
         report.set(FIX::ClOrdID(std::string(clOrd.data_, clOrd.length_)));
 
     report.set(FIX::Symbol(order.instrument_.get().symbol_));
-    report.set(FIX::TransactTime(FIX::UtcTimeStamp()));
+    report.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
 
     if (exec->type_ == TRADE_EXECTYPE) {
         auto* trade = static_cast<const TradeExecEntry*>(exec);
