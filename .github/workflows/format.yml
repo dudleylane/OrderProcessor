@@ -1,0 +1,31 @@
+name: Format Check
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [master]
+
+jobs:
+  clang-format:
+    name: clang-format dry-run
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/centos/centos:stream10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-tools
+        # CentOS Stream 10 ships clang-tools-extra (which provides
+        # clang-format) at LLVM 22.x — same major as the dev
+        # environment, so format output stays in sync without pinning.
+        shell: bash
+        run: |
+          dnf install -y clang-tools-extra git
+
+      - name: Verify .clang-format conformance
+        shell: bash
+        run: |
+          find src test app bench \
+               \( -name '*.h' -o -name '*.cpp' \) -print0 \
+            | xargs -0 clang-format --dry-run -Werror

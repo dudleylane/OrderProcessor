@@ -1,0 +1,95 @@
+name: Sanitizers
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [master]
+
+jobs:
+  sanitizer:
+    name: ${{ matrix.sanitizer }}${{ matrix.allow_failure && ' (advisory)' || '' }}
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/centos/centos:stream10
+    continue-on-error: ${{ matrix.allow_failure }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ASan and TSan are mutually exclusive (per CLAUDE.md
+        # §Sanitizer Builds); UBSan composes with ASan.  Bundling
+        # ASan+UBSan into one job halves the matrix runtime versus
+        # running them separately.  TSan gets its own job.
+        #
+        # OrderProcessor has no first-class CMake sanitizer flag (yet),
+        # so flags are passed via CMAKE_CXX_FLAGS — exactly the recipe
+        # documented in CLAUDE.md.
+        include:
+          - sanitizer: asan_ubsan
+            cxxflags: "-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+            ldflags: "-fsanitize=address,undefined"
+            allow_failure: false
+          - sanitizer: tsan
+            cxxflags: "-fsanitize=thread -fno-omit-frame-pointer -g"
+            ldflags: "-fsanitize=thread"
+            allow_failure: false
+    env:
+      PATH: /opt/rh/gcc-toolset-15/root/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      LD_LIBRARY_PATH: /opt/rh/gcc-toolset-15/root/usr/lib64
+      CC: /opt/rh/gcc-toolset-15/root/usr/bin/gcc
+      CXX: /opt/rh/gcc-toolset-15/root/usr/bin/g++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools (dnf)
+        # gcc-toolset-15 plus the -lib*-devel packages give the
+        # sanitizer runtimes that CMake's find_package(Threads)
+        # try_compile needs once sanitizer flags are in
+        # CMAKE_CXX_FLAGS — without them, try_compile silently fails.
+        shell: bash
+        run: |
+          dnf install -y dnf-plugins-core epel-release
+          dnf config-manager --set-enabled crb
+          dnf install -y \
+            gcc-toolset-15 gcc-toolset-15-libatomic-devel \
+            gcc-toolset-15-libasan-devel \
+            gcc-toolset-15-libubsan-devel \
+            gcc-toolset-15-libtsan-devel \
+            cmake ninja-build pkgconfig git \
+            tbb-devel spdlog-devel boost-devel \
+            lmdb-devel numactl-devel
+
+      - name: Configure
+        # Debug build keeps assertions on so invariant violations fire
+        # under sanitizers.  CMAKE_EXE_LINKER_FLAGS and
+        # CMAKE_SHARED_LINKER_FLAGS get the runtime libs onto the link
+        # line — required for TSan in particular, which needs
+        # libtsan.so present.
+        shell: bash
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTS=ON \
+            -DBUILD_BENCHMARKS=OFF \
+            -DBUILD_APP=ON \
+            -DBUILD_PG=OFF \
+            -DBUILD_FIX=OFF \
+            -DCMAKE_CXX_FLAGS="${{ matrix.cxxflags }}" \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.ldflags }}" \
+            -DCMAKE_SHARED_LINKER_FLAGS="${{ matrix.ldflags }}"
+
+      - name: Build
+        shell: bash
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Test
+        # Sanitizers slow tests significantly; -j1 also avoids the
+        # LMDBStorageTest parallel-isolation flake that would
+        # otherwise mask real sanitizer output.  --timeout 600
+        # accommodates the 5-15x slowdown.
+        shell: bash
+        env:
+          ASAN_OPTIONS: "abort_on_error=1:halt_on_error=1:detect_leaks=1"
+          UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+          TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1"
+        run: ctest --test-dir build --output-on-failure --timeout 600 -j1
