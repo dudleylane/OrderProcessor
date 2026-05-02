@@ -16,22 +16,25 @@
 #include "OutgoingQueues.h"
 #include "IncomingQueues.h"
 
-namespace COP{
-namespace Queues{
+namespace COP
+{
+namespace Queues
+{
 
-	class QueuesManager
-	{
-	public:
-		QueuesManager(void);
-		~QueuesManager(void);
+class QueuesManager
+{
+public:
+    QueuesManager(void);
+    ~QueuesManager(void);
 
-	public:
-		InQueues *getInQueues();
-		OutQueues *getOutQueues();
-	private:
-		OutgoingQueues outQueues_;
-		IncomingQueues inQueues_;
-	};
+public:
+    InQueues *getInQueues();
+    OutQueues *getOutQueues();
 
-}
-}
+private:
+    OutgoingQueues outQueues_;
+    IncomingQueues inQueues_;
+};
+
+} // namespace Queues
+} // namespace COP

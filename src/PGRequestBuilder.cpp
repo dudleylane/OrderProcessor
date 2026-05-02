@@ -14,67 +14,72 @@
 #include "PGEnumStrings.h"
 #include "WideDataLazyRef.h"
 
-namespace COP::PG {
+namespace COP::PG
+{
 
-namespace {
-    const char* safeStr(const char* s) { return s ? s : ""; }
+namespace
+{
+const char *safeStr(const char *s)
+{
+    return s ? s : "";
+}
+} // namespace
+
+InstrumentWrite PGRequestBuilder::fromInstrument(const InstrumentEntry &val)
+{
+    return InstrumentWrite{ val.symbol_, val.securityId_, val.securityIdSource_ };
 }
 
-InstrumentWrite PGRequestBuilder::fromInstrument(const InstrumentEntry& val) {
-    return InstrumentWrite{
-        val.symbol_,
-        val.securityId_,
-        val.securityIdSource_
-    };
+AccountWrite PGRequestBuilder::fromAccount(const AccountEntry &val)
+{
+    return AccountWrite{ val.account_, val.firm_, safeStr(toSQL(val.type_)) };
 }
 
-AccountWrite PGRequestBuilder::fromAccount(const AccountEntry& val) {
-    return AccountWrite{
-        val.account_,
-        val.firm_,
-        safeStr(toSQL(val.type_))
-    };
+ClearingWrite PGRequestBuilder::fromClearing(const ClearingEntry &val)
+{
+    return ClearingWrite{ val.firm_ };
 }
 
-ClearingWrite PGRequestBuilder::fromClearing(const ClearingEntry& val) {
-    return ClearingWrite{
-        val.firm_
-    };
-}
-
-OrderWrite PGRequestBuilder::fromOrder(const OrderEntry& val) {
+OrderWrite PGRequestBuilder::fromOrder(const OrderEntry &val)
+{
     OrderWrite w;
 
     w.orderId = val.orderId_.id_;
     w.orderDate = val.orderId_.date_;
 
     // Resolve lazy references
-    const auto& instrument = val.instrument_.get();
+    const auto &instrument = val.instrument_.get();
     w.instrumentSymbol = instrument.symbol_;
 
-    const auto& account = val.account_.get();
+    const auto &account = val.account_.get();
     w.accountName = account.account_;
 
-    const auto& clearing = val.clearing_.get();
+    const auto &clearing = val.clearing_.get();
     w.clearingFirm = clearing.firm_;
 
-    const auto& dest = val.destination_.get();
+    const auto &dest = val.destination_.get();
     w.destination = dest;
 
-    const auto& source = val.source_.get();
+    const auto &source = val.source_.get();
     w.source = source;
 
     // Resolve RawDataEntry references for client order IDs
-    if (val.clOrderId_.getId().isValid()) {
-        const auto& clOrdId = val.clOrderId_.get();
+    if (val.clOrderId_.getId().isValid())
+    {
+        const auto &clOrdId = val.clOrderId_.get();
         if (clOrdId.data_ && clOrdId.length_ > 0)
+        {
             w.clOrderId = std::string(clOrdId.data_, clOrdId.length_);
+        }
     }
 
-    if (val.origClOrderId_.getId().isValid()) {
-        const auto& origClOrdId = val.origClOrderId_.get();
+    if (val.origClOrderId_.getId().isValid())
+    {
+        const auto &origClOrdId = val.origClOrderId_.get();
         if (origClOrdId.data_ && origClOrdId.length_ > 0)
+        {
             w.origClOrderId = std::string(origClOrdId.data_, origClOrdId.length_);
+        }
     }
 
     // Map enums to PG strings

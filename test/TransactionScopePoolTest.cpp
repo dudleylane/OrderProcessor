@@ -16,22 +16,25 @@
 
 using namespace COP::ACID;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Basic Pool Tests
 // =============================================================================
 
-class TransactionScopePoolTest : public ::testing::Test {
+class TransactionScopePoolTest : public ::testing::Test
+{
 protected:
     static constexpr size_t SMALL_POOL = 8;
 };
 
-TEST_F(TransactionScopePoolTest, AcquireReturnsValidScope) {
+TEST_F(TransactionScopePoolTest, AcquireReturnsValidScope)
+{
     TransactionScopePool pool(SMALL_POOL);
     size_t idx = TransactionScopePool::INVALID_INDEX;
 
-    TransactionScope* scope = pool.acquire(idx);
+    TransactionScope *scope = pool.acquire(idx);
 
     ASSERT_NE(nullptr, scope);
     EXPECT_NE(TransactionScopePool::INVALID_INDEX, idx);
@@ -39,17 +42,22 @@ TEST_F(TransactionScopePoolTest, AcquireReturnsValidScope) {
     pool.releaseByIndex(idx);
 }
 
-TEST_F(TransactionScopePoolTest, AcquireReleaseCycle) {
+TEST_F(TransactionScopePoolTest, AcquireReleaseCycle)
+{
     TransactionScopePool pool(SMALL_POOL);
 
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < 100; ++i)
+    {
         size_t idx;
-        TransactionScope* scope = pool.acquire(idx);
+        TransactionScope *scope = pool.acquire(idx);
         ASSERT_NE(nullptr, scope);
 
-        if (idx != TransactionScopePool::INVALID_INDEX) {
+        if (idx != TransactionScopePool::INVALID_INDEX)
+        {
             pool.releaseByIndex(idx);
-        } else {
+        }
+        else
+        {
             delete scope;
         }
     }
@@ -57,7 +65,8 @@ TEST_F(TransactionScopePoolTest, AcquireReleaseCycle) {
     EXPECT_EQ(0u, pool.cacheMisses());
 }
 
-TEST_F(TransactionScopePoolTest, PoolSizeReported) {
+TEST_F(TransactionScopePoolTest, PoolSizeReported)
+{
     TransactionScopePool pool(SMALL_POOL);
     EXPECT_EQ(SMALL_POOL, pool.poolSize());
 }
@@ -66,22 +75,24 @@ TEST_F(TransactionScopePoolTest, PoolSizeReported) {
 // Exhaustion and Heap Fallback
 // =============================================================================
 
-TEST_F(TransactionScopePoolTest, ExhaustionFallsBackToHeap) {
+TEST_F(TransactionScopePoolTest, ExhaustionFallsBackToHeap)
+{
     TransactionScopePool pool(4);
 
-    std::vector<std::pair<TransactionScope*, size_t>> acquired;
+    std::vector<std::pair<TransactionScope *, size_t>> acquired;
 
     // Acquire all 4 pool slots
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 4; ++i)
+    {
         size_t idx;
-        TransactionScope* scope = pool.acquire(idx);
+        TransactionScope *scope = pool.acquire(idx);
         ASSERT_NE(nullptr, scope);
-        acquired.push_back({scope, idx});
+        acquired.push_back({ scope, idx });
     }
 
     // Next acquire should fall back to heap
     size_t idx;
-    TransactionScope* heapScope = pool.acquire(idx);
+    TransactionScope *heapScope = pool.acquire(idx);
     ASSERT_NE(nullptr, heapScope);
     EXPECT_EQ(TransactionScopePool::INVALID_INDEX, idx);
     EXPECT_GE(pool.cacheMisses(), 1u);
@@ -89,22 +100,26 @@ TEST_F(TransactionScopePoolTest, ExhaustionFallsBackToHeap) {
     delete heapScope;
 
     // Release pool slots
-    for (auto& [scope, i] : acquired) {
+    for (auto &[scope, i] : acquired)
+    {
         if (i != TransactionScopePool::INVALID_INDEX)
+        {
             pool.releaseByIndex(i);
+        }
     }
 }
 
-TEST_F(TransactionScopePoolTest, CacheMissCounterIncrementsOnExhaustion) {
+TEST_F(TransactionScopePoolTest, CacheMissCounterIncrementsOnExhaustion)
+{
     TransactionScopePool pool(2);
 
     size_t idx1, idx2, idx3;
-    auto* s1 = pool.acquire(idx1);
-    auto* s2 = pool.acquire(idx2);
+    auto *s1 = pool.acquire(idx1);
+    auto *s2 = pool.acquire(idx2);
 
     EXPECT_EQ(0u, pool.cacheMisses());
 
-    auto* s3 = pool.acquire(idx3);
+    auto *s3 = pool.acquire(idx3);
     EXPECT_GE(pool.cacheMisses(), 1u);
 
     delete s3; // heap allocated
@@ -116,23 +131,26 @@ TEST_F(TransactionScopePoolTest, CacheMissCounterIncrementsOnExhaustion) {
 // Detach Mechanism
 // =============================================================================
 
-TEST_F(TransactionScopePoolTest, DetachReturnsScope) {
+TEST_F(TransactionScopePoolTest, DetachReturnsScope)
+{
     TransactionScopePool pool(SMALL_POOL);
     size_t idx;
 
-    TransactionScope* scope = pool.acquire(idx);
+    TransactionScope *scope = pool.acquire(idx);
     ASSERT_NE(TransactionScopePool::INVALID_INDEX, idx);
 
-    TransactionScope* detached = pool.detach(idx);
+    TransactionScope *detached = pool.detach(idx);
     EXPECT_EQ(scope, detached);
 
     // Pool slot is now empty; next acquire should still work
     size_t idx2;
-    TransactionScope* scope2 = pool.acquire(idx2);
+    TransactionScope *scope2 = pool.acquire(idx2);
     ASSERT_NE(nullptr, scope2);
 
     if (idx2 != TransactionScopePool::INVALID_INDEX)
+    {
         pool.releaseByIndex(idx2);
+    }
 
     delete detached;
 }
@@ -141,7 +159,8 @@ TEST_F(TransactionScopePoolTest, DetachReturnsScope) {
 // PooledTransactionScope RAII
 // =============================================================================
 
-TEST_F(TransactionScopePoolTest, PooledScopeAutoReleasesOnDestruction) {
+TEST_F(TransactionScopePoolTest, PooledScopeAutoReleasesOnDestruction)
+{
     TransactionScopePool pool(2);
 
     // Acquire both slots via RAII scopes, then let them destruct
@@ -154,7 +173,7 @@ TEST_F(TransactionScopePoolTest, PooledScopeAutoReleasesOnDestruction) {
 
     // Both slots should be returned — acquire should not miss
     size_t idx;
-    auto* scope = pool.acquire(idx);
+    auto *scope = pool.acquire(idx);
     ASSERT_NE(nullptr, scope);
     EXPECT_NE(TransactionScopePool::INVALID_INDEX, idx);
     pool.releaseByIndex(idx);
@@ -162,10 +181,11 @@ TEST_F(TransactionScopePoolTest, PooledScopeAutoReleasesOnDestruction) {
     EXPECT_EQ(0u, pool.cacheMisses());
 }
 
-TEST_F(TransactionScopePoolTest, PooledScopeReleaseTransfersOwnership) {
+TEST_F(TransactionScopePoolTest, PooledScopeReleaseTransfersOwnership)
+{
     TransactionScopePool pool(SMALL_POOL);
 
-    TransactionScope* released;
+    TransactionScope *released;
     {
         PooledTransactionScope ps(&pool);
         released = ps.release();
@@ -176,16 +196,18 @@ TEST_F(TransactionScopePoolTest, PooledScopeReleaseTransfersOwnership) {
     delete released;
 }
 
-TEST_F(TransactionScopePoolTest, PooledScopeWithNullPool) {
+TEST_F(TransactionScopePoolTest, PooledScopeWithNullPool)
+{
     PooledTransactionScope ps(nullptr);
     ASSERT_NE(nullptr, ps.get());
 
-    TransactionScope* released = ps.release();
+    TransactionScope *released = ps.release();
     ASSERT_NE(nullptr, released);
     delete released;
 }
 
-TEST_F(TransactionScopePoolTest, PooledScopeOperatorArrow) {
+TEST_F(TransactionScopePoolTest, PooledScopeOperatorArrow)
+{
     TransactionScopePool pool(SMALL_POOL);
     PooledTransactionScope ps(&pool);
 
@@ -199,79 +221,102 @@ TEST_F(TransactionScopePoolTest, PooledScopeOperatorArrow) {
 // Allocation Modes
 // =============================================================================
 
-TEST_F(TransactionScopePoolTest, DefaultAllocMode) {
+TEST_F(TransactionScopePoolTest, DefaultAllocMode)
+{
     TransactionScopePool pool(SMALL_POOL, TransactionScopePool::ALLOC_DEFAULT);
 
     size_t idx;
-    auto* scope = pool.acquire(idx);
+    auto *scope = pool.acquire(idx);
     ASSERT_NE(nullptr, scope);
 
     if (idx != TransactionScopePool::INVALID_INDEX)
+    {
         pool.releaseByIndex(idx);
+    }
     else
+    {
         delete scope;
+    }
 }
 
-TEST_F(TransactionScopePoolTest, HugePagesAllocMode) {
+TEST_F(TransactionScopePoolTest, HugePagesAllocMode)
+{
     // HugePages may not be available — pool should fall back gracefully
     TransactionScopePool pool(SMALL_POOL, TransactionScopePool::ALLOC_HUGE_PAGES);
 
     size_t idx;
-    auto* scope = pool.acquire(idx);
+    auto *scope = pool.acquire(idx);
     ASSERT_NE(nullptr, scope);
 
     if (idx != TransactionScopePool::INVALID_INDEX)
+    {
         pool.releaseByIndex(idx);
+    }
     else
+    {
         delete scope;
+    }
 }
 
-TEST_F(TransactionScopePoolTest, NumaLocalAllocMode) {
+TEST_F(TransactionScopePoolTest, NumaLocalAllocMode)
+{
     // NUMA may not be available — pool should fall back gracefully
     TransactionScopePool pool(SMALL_POOL, TransactionScopePool::ALLOC_NUMA_LOCAL);
 
     size_t idx;
-    auto* scope = pool.acquire(idx);
+    auto *scope = pool.acquire(idx);
     ASSERT_NE(nullptr, scope);
 
     if (idx != TransactionScopePool::INVALID_INDEX)
+    {
         pool.releaseByIndex(idx);
+    }
     else
+    {
         delete scope;
+    }
 }
 
 // =============================================================================
 // Concurrent Acquire/Release
 // =============================================================================
 
-TEST_F(TransactionScopePoolTest, ConcurrentAcquireRelease) {
+TEST_F(TransactionScopePoolTest, ConcurrentAcquireRelease)
+{
     constexpr size_t POOL_SIZE = 64;
     constexpr int THREADS = 4;
     constexpr int OPS_PER_THREAD = 200;
 
     TransactionScopePool pool(POOL_SIZE);
-    std::atomic<int> successCount{0};
+    std::atomic<int> successCount{ 0 };
 
-    auto worker = [&]() {
-        for (int i = 0; i < OPS_PER_THREAD; ++i) {
+    auto worker = [&]()
+    {
+        for (int i = 0; i < OPS_PER_THREAD; ++i)
+        {
             size_t idx;
-            TransactionScope* scope = pool.acquire(idx);
+            TransactionScope *scope = pool.acquire(idx);
             ASSERT_NE(nullptr, scope);
             successCount.fetch_add(1, std::memory_order_relaxed);
 
-            if (idx != TransactionScopePool::INVALID_INDEX) {
+            if (idx != TransactionScopePool::INVALID_INDEX)
+            {
                 pool.releaseByIndex(idx);
-            } else {
+            }
+            else
+            {
                 delete scope;
             }
         }
     };
 
     std::vector<std::thread> threads;
-    for (int i = 0; i < THREADS; ++i) {
+    for (int i = 0; i < THREADS; ++i)
+    {
         threads.emplace_back(worker);
     }
-    for (auto& t : threads) {
+    for (auto &t : threads)
+    {
         t.join();
     }
 

@@ -4,27 +4,34 @@
 
 #include "QueuesDef.h"
 
-namespace COP {
+namespace COP
+{
 
-namespace Store { class OrderDataStorage; }
+namespace Store
+{
+class OrderDataStorage;
+}
 
-namespace App {
+namespace App
+{
 
 class FixGateway;
 
-class FixOutQueues : public Queues::OutQueues {
+class FixOutQueues : public Queues::OutQueues
+{
 public:
-    FixOutQueues(FixGateway* gateway, Store::OrderDataStorage* orderStorage);
+    FixOutQueues(FixGateway *gateway, Store::OrderDataStorage *orderStorage);
 
-    void push(const Queues::ExecReportEvent& evnt, const std::string& target) override;
-    void push(const Queues::CancelRejectEvent& evnt, const std::string& target) override;
-    void push(const Queues::BusinessRejectEvent& evnt, const std::string& target) override;
+    void push(const Queues::ExecReportEvent &evnt, const std::string &target) override;
+    void push(const Queues::CancelRejectEvent &evnt, const std::string &target) override;
+    void push(const Queues::BusinessRejectEvent &evnt, const std::string &target) override;
 
 private:
-    FixGateway* gateway_;
-    Store::OrderDataStorage* orderStorage_;
+    FixGateway *gateway_;
+    Store::OrderDataStorage *orderStorage_;
 };
 
-}} // namespace COP::App
+} // namespace App
+} // namespace COP
 
 #endif // BUILD_FIX

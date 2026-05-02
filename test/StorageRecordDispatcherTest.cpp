@@ -36,74 +36,89 @@ using namespace COP::Codec;
 using namespace COP::Store;
 using namespace test;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Data Storage Restore Implementation
 // =============================================================================
 
-class TestDataStorageRestore : public DataStorageRestore {
+class TestDataStorageRestore : public DataStorageRestore
+{
 public:
-    ~TestDataStorageRestore() override {
-        for (auto* instr : instruments_) {
+    ~TestDataStorageRestore() override
+    {
+        for (auto *instr : instruments_)
+        {
             delete instr;
         }
-        for (auto* acc : accounts_) {
+        for (auto *acc : accounts_)
+        {
             delete acc;
         }
-        for (auto& str : strings_) {
+        for (auto &str : strings_)
+        {
             delete str.str_;
         }
-        for (auto* raw : rawDatas_) {
+        for (auto *raw : rawDatas_)
+        {
             delete raw->data_;
             delete raw;
         }
-        for (auto* clr : clearings_) {
+        for (auto *clr : clearings_)
+        {
             delete clr;
         }
     }
 
-    void restore(InstrumentEntry* val) override {
+    void restore(InstrumentEntry *val) override
+    {
         ASSERT_NE(nullptr, val);
         instruments_.push_back(val);
     }
 
-    void restore(const IdT& id, StringT* val) override {
+    void restore(const IdT &id, StringT *val) override
+    {
         ASSERT_NE(nullptr, val);
         strings_.push_back(IdString(val, id));
     }
 
-    void restore(RawDataEntry* val) override {
+    void restore(RawDataEntry *val) override
+    {
         ASSERT_NE(nullptr, val);
         rawDatas_.push_back(val);
     }
 
-    void restore(AccountEntry* val) override {
+    void restore(AccountEntry *val) override
+    {
         ASSERT_NE(nullptr, val);
         accounts_.push_back(val);
     }
 
-    void restore(ClearingEntry* val) override {
+    void restore(ClearingEntry *val) override
+    {
         ASSERT_NE(nullptr, val);
         clearings_.push_back(val);
     }
 
-    void restore(ExecutionsT* val) override {
+    void restore(ExecutionsT *val) override
+    {
         // Not used in tests
     }
 
 public:
-    std::deque<InstrumentEntry*> instruments_;
-    std::deque<AccountEntry*> accounts_;
-    std::deque<ClearingEntry*> clearings_;
-    std::deque<RawDataEntry*> rawDatas_;
+    std::deque<InstrumentEntry *> instruments_;
+    std::deque<AccountEntry *> accounts_;
+    std::deque<ClearingEntry *> clearings_;
+    std::deque<RawDataEntry *> rawDatas_;
 
-    struct IdString {
-        StringT* str_;
+    struct IdString
+    {
+        StringT *str_;
         IdT id_;
 
         IdString() : str_(nullptr), id_() {}
-        IdString(StringT* v, const IdT& id) : str_(v), id_(id) {}
+        IdString(StringT *v, const IdT &id) : str_(v), id_(id) {}
     };
     std::deque<IdString> strings_;
 };
@@ -112,43 +127,49 @@ public:
 // Test Order Book Implementation
 // =============================================================================
 
-class TestOrderBook : public OrderBook {
+class TestOrderBook : public OrderBook
+{
 public:
     ~TestOrderBook() override = default;
 
-    void add(const OrderEntry& /*order*/) override {}
+    void add(const OrderEntry & /*order*/) override {}
 
-    void remove(const OrderEntry& /*order*/) override {}
+    void remove(const OrderEntry & /*order*/) override {}
 
-    IdT find(const OrderFunctor& /*functor*/) const override {
+    IdT find(const OrderFunctor & /*functor*/) const override
+    {
         return IdT();
     }
 
-    void findAll(const OrderFunctor& /*functor*/, OrdersT* /*result*/) const override {}
+    void findAll(const OrderFunctor & /*functor*/, OrdersT * /*result*/) const override {}
 
-    IdT getTop(const SourceIdT& /*instrument*/, const Side& /*side*/) const override {
+    IdT getTop(const SourceIdT & /*instrument*/, const Side & /*side*/) const override
+    {
         return IdT();
     }
 
-    void restore(const OrderEntry& order) override {
-        orders_.push_back(&order);  // Just for testing
+    void restore(const OrderEntry &order) override
+    {
+        orders_.push_back(&order); // Just for testing
     }
 
-    std::deque<const OrderEntry*> orders_;
+    std::deque<const OrderEntry *> orders_;
 };
 
 // =============================================================================
 // Test File Saver Implementation
 // =============================================================================
 
-class TestFileSaver : public FileSaver {
+class TestFileSaver : public FileSaver
+{
 public:
     TestFileSaver() = default;
     ~TestFileSaver() override = default;
 
-    void load(const std::string& /*fileName*/, FileStorageObserver* /*observer*/) override {}
+    void load(const std::string & /*fileName*/, FileStorageObserver * /*observer*/) override {}
 
-    IdT save(const char* buf, size_t size) override {
+    IdT save(const char *buf, size_t size) override
+    {
         EXPECT_NE(nullptr, buf);
         EXPECT_GT(size, 0u);
         IdT id;
@@ -156,29 +177,33 @@ public:
         return id;
     }
 
-    void save(const IdT& id, const char* buf, size_t size) override {
+    void save(const IdT &id, const char *buf, size_t size) override
+    {
         EXPECT_NE(nullptr, buf);
         EXPECT_GT(size, 0u);
         records_.insert(RecordsT::value_type(id, Record(std::string(buf, size))));
     }
 
-    u32 update(const IdT& /*id*/, const char* /*buf*/, size_t /*size*/) override {
+    u32 update(const IdT & /*id*/, const char * /*buf*/, size_t /*size*/) override
+    {
         return 0;
     }
 
-    u32 replace(const IdT& /*id*/, u32 /*version*/, const char* /*buf*/, size_t /*size*/) override {
+    u32 replace(const IdT & /*id*/, u32 /*version*/, const char * /*buf*/, size_t /*size*/) override
+    {
         return 0;
     }
 
-    void erase(const IdT& /*id*/, u32 /*version*/) override {}
+    void erase(const IdT & /*id*/, u32 /*version*/) override {}
 
-    void erase(const IdT& /*id*/) override {}
+    void erase(const IdT & /*id*/) override {}
 
-    struct Record {
+    struct Record
+    {
         std::string record_;
 
         Record() : record_() {}
-        Record(const std::string& rec) : record_(rec) {}
+        Record(const std::string &rec) : record_(rec) {}
     };
     typedef std::map<IdT, Record> RecordsT;
     RecordsT records_;
@@ -188,7 +213,8 @@ public:
 // Test Helpers
 // =============================================================================
 
-SourceIdT addTestRawData(const std::string& name) {
+SourceIdT addTestRawData(const std::string &name)
+{
     auto raw = new RawDataEntry();
     raw->type_ = STRING_RAWDATATYPE;
     auto val = new char[name.size()];
@@ -198,13 +224,12 @@ SourceIdT addTestRawData(const std::string& name) {
     return WideDataStorage::instance()->add(raw);
 }
 
-OrderEntry* createTestOrder() {
+OrderEntry *createTestOrder()
+{
     SourceIdT instrId = addInstrument("instrument", "instrId", "instrSrc");
     SourceIdT clOrderId = addTestRawData("clOrderId_");
-    auto val = new OrderEntry(
-        SourceIdT(1, 1), SourceIdT(2, 2), clOrderId,
-        SourceIdT(4, 4), instrId, SourceIdT(6, 6),
-        SourceIdT(7, 7), SourceIdT(8, 8));
+    auto val = new OrderEntry(SourceIdT(1, 1), SourceIdT(2, 2), clOrderId, SourceIdT(4, 4), instrId, SourceIdT(6, 6),
+                              SourceIdT(7, 7), SourceIdT(8, 8));
 
     val->creationTime_ = 1111;
     val->lastUpdateTime_ = 1112;
@@ -236,7 +261,8 @@ OrderEntry* createTestOrder() {
     return val;
 }
 
-std::string createRecordTypePrefix(int recordType) {
+std::string createRecordTypePrefix(int recordType)
+{
     std::string buf;
     char typebuf[36];
     std::memcpy(typebuf, &recordType, sizeof(int));
@@ -248,9 +274,11 @@ std::string createRecordTypePrefix(int recordType) {
 // Test Fixture
 // =============================================================================
 
-class StorageRecordDispatcherTest : public ::testing::Test {
+class StorageRecordDispatcherTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         WideDataStorage::create();
         restore_ = std::make_unique<TestDataStorageRestore>();
         orderBook_ = std::make_unique<TestOrderBook>();
@@ -259,7 +287,8 @@ protected:
         dispatcher_ = std::make_unique<StorageRecordDispatcher>();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         dispatcher_.reset();
         orderStorage_.reset();
         saver_.reset();
@@ -280,12 +309,14 @@ protected:
 // Initialization Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, EmptyInitialization) {
+TEST_F(StorageRecordDispatcherTest, EmptyInitialization)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
     SUCCEED();
 }
 
-TEST_F(StorageRecordDispatcherTest, InitWithStartLoadFinishLoad) {
+TEST_F(StorageRecordDispatcherTest, InitWithStartLoadFinishLoad)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
     dispatcher_->startLoad();
     dispatcher_->finishLoad();
@@ -296,7 +327,8 @@ TEST_F(StorageRecordDispatcherTest, InitWithStartLoadFinishLoad) {
 // Load Instrument Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, LoadInstrumentRecord) {
+TEST_F(StorageRecordDispatcherTest, LoadInstrumentRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
     dispatcher_->startLoad();
 
@@ -328,7 +360,8 @@ TEST_F(StorageRecordDispatcherTest, LoadInstrumentRecord) {
 // Load String Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, LoadStringRecord) {
+TEST_F(StorageRecordDispatcherTest, LoadStringRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
     dispatcher_->startLoad();
 
@@ -353,7 +386,8 @@ TEST_F(StorageRecordDispatcherTest, LoadStringRecord) {
 // Load Account Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, LoadAccountRecord) {
+TEST_F(StorageRecordDispatcherTest, LoadAccountRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
     dispatcher_->startLoad();
 
@@ -385,7 +419,8 @@ TEST_F(StorageRecordDispatcherTest, LoadAccountRecord) {
 // Load Clearing Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, LoadClearingRecord) {
+TEST_F(StorageRecordDispatcherTest, LoadClearingRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
     dispatcher_->startLoad();
 
@@ -413,7 +448,8 @@ TEST_F(StorageRecordDispatcherTest, LoadClearingRecord) {
 // Load RawData Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, LoadRawDataRecord) {
+TEST_F(StorageRecordDispatcherTest, LoadRawDataRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
     dispatcher_->startLoad();
 
@@ -446,7 +482,8 @@ TEST_F(StorageRecordDispatcherTest, LoadRawDataRecord) {
 // Load Order Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, LoadOrderRecord) {
+TEST_F(StorageRecordDispatcherTest, LoadOrderRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
     dispatcher_->startLoad();
 
@@ -472,7 +509,8 @@ TEST_F(StorageRecordDispatcherTest, LoadOrderRecord) {
 // Load Multiple Record Types Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, LoadMultipleRecordTypes) {
+TEST_F(StorageRecordDispatcherTest, LoadMultipleRecordTypes)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
     dispatcher_->startLoad();
 
@@ -559,7 +597,8 @@ TEST_F(StorageRecordDispatcherTest, LoadMultipleRecordTypes) {
 // Save Instrument Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, SaveInstrumentRecord) {
+TEST_F(StorageRecordDispatcherTest, SaveInstrumentRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
 
     InstrumentEntry val;
@@ -585,7 +624,8 @@ TEST_F(StorageRecordDispatcherTest, SaveInstrumentRecord) {
 // Save String Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, SaveStringRecord) {
+TEST_F(StorageRecordDispatcherTest, SaveStringRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
 
     StringT val = "string_";
@@ -605,7 +645,8 @@ TEST_F(StorageRecordDispatcherTest, SaveStringRecord) {
 // Save Account Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, SaveAccountRecord) {
+TEST_F(StorageRecordDispatcherTest, SaveAccountRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
 
     AccountEntry val;
@@ -630,7 +671,8 @@ TEST_F(StorageRecordDispatcherTest, SaveAccountRecord) {
 // Save Clearing Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, SaveClearingRecord) {
+TEST_F(StorageRecordDispatcherTest, SaveClearingRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
 
     ClearingEntry val;
@@ -653,7 +695,8 @@ TEST_F(StorageRecordDispatcherTest, SaveClearingRecord) {
 // Save RawData Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, SaveRawDataRecord) {
+TEST_F(StorageRecordDispatcherTest, SaveRawDataRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
 
     RawDataEntry val;
@@ -679,7 +722,8 @@ TEST_F(StorageRecordDispatcherTest, SaveRawDataRecord) {
 // Save Order Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, SaveOrderRecord) {
+TEST_F(StorageRecordDispatcherTest, SaveOrderRecord)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
 
     std::unique_ptr<OrderEntry> val(createTestOrder());
@@ -701,7 +745,8 @@ TEST_F(StorageRecordDispatcherTest, SaveOrderRecord) {
 // Save Multiple Record Types Tests
 // =============================================================================
 
-TEST_F(StorageRecordDispatcherTest, SaveMultipleRecordTypes) {
+TEST_F(StorageRecordDispatcherTest, SaveMultipleRecordTypes)
+{
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
 
     // Save Instrument

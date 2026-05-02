@@ -15,19 +15,21 @@
 #include "TypesDef.h"
 #include "DataModelDef.h"
 
-namespace COP{
-	namespace Codec{
+namespace COP
+{
+namespace Codec
+{
 
 class AccountCodec
 {
 public:
-	AccountCodec(void);
-	~AccountCodec(void);
+    AccountCodec(void);
+    ~AccountCodec(void);
 
 public:
-	static void encode(const AccountEntry &val, std::string *buf, IdT *id, u32 *version);
-	static void decode(const IdT& id, u32 version, const char *buf, size_t size, AccountEntry *val);
+    static void encode(const AccountEntry &val, std::string *buf, IdT *id, u32 *version);
+    static void decode(const IdT &id, u32 version, const char *buf, size_t size, AccountEntry *val);
 };
 
-	}
-}
+} // namespace Codec
+} // namespace COP

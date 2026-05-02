@@ -25,103 +25,137 @@
 #include "CacheAlignedAtomic.h"
 #include "CpuAffinity.h"
 
-namespace COP{
-
-	namespace Tasks{
-
-		struct TaskManagerParams{
-			ACID::TransactionManager *transactMgr_;
-			ACID::ProcessorPoolT transactProcessors_;
-			Queues::InQueueProcessorsPoolT evntProcessors_;
-			Queues::InQueuesContainer *inQueues_;
-
-			int cpuAffinityStart_ = -1;
-
-		TaskManagerParams(): transactMgr_(nullptr), transactProcessors_(), evntProcessors_(), inQueues_(nullptr){}
-		};
-
-class TaskManager: public ExecTaskManager, public ACID::TransactionObserver, public Queues::InQueuesObserver
+namespace COP
 {
-public:
-	explicit TaskManager(const TaskManagerParams &params);
-	~TaskManager(void);
 
-	static void init(int workerAmount = 0);
-	static void destroy();
+namespace Tasks
+{
 
-	/// method waits until all incoming events and transactions finished processing 
-	/// returns false, if events and transactions not finished during waitIntervalSeconds
-	/// waitIntervalSeconds = -1, means infinite
-	bool waitUntilTransactionsFinished(int waitIntervalSeconds)const;
+struct TaskManagerParams
+{
+    ACID::TransactionManager *transactMgr_;
+    ACID::ProcessorPoolT transactProcessors_;
+    Queues::InQueueProcessorsPoolT evntProcessors_;
+    Queues::InQueuesContainer *inQueues_;
 
-	bool finishTransaction(const ACID::TransactionId &id, ACID::Transaction *tr, ACID::TransactionProcessor *proc);
-	void finishEvent(Queues::InQueueProcessor *proc);
-public:
-	/// reimplemented from ExecTaskManager
-	virtual void addTask(const ACID::TransactionId &id);
-public:
-	/// reimplemented from TransactionObserver
-	virtual void onReadyToExecute();
+    int cpuAffinityStart_ = -1;
 
-public:
-	/// reimplemented from InQueuesObserver
-	virtual void onNewEvent();
-
-public:
-	void taskCreated();
-	void taskProcessed();
-	void taskFinished();
-	void taskCreatedTr();
-	void taskProcessedTr();
-	void taskFinishedTr();
-
-	// Read-only accessors for monitoring (relaxed ordering — statistics only)
-	int eventsCreated() const noexcept { return created_.load(std::memory_order_relaxed); }
-	int eventsProcessed() const noexcept { return processed_.load(std::memory_order_relaxed); }
-	int eventsFinished() const noexcept { return finished_.load(std::memory_order_relaxed); }
-	int transactionsCreated() const noexcept { return createdTr_.load(std::memory_order_relaxed); }
-	int transactionsProcessed() const noexcept { return processedTr_.load(std::memory_order_relaxed); }
-	int transactionsFinished() const noexcept { return finishedTr_.load(std::memory_order_relaxed); }
-	int availableEventProcessors() const noexcept { return lastAvailableEvntProcessor_.load(std::memory_order_relaxed); }
-	int totalEventProcessors() const noexcept { return totalAvailableEvntProcessor_.load(std::memory_order_relaxed); }
-	int availableTransactProcessors() const noexcept { return lastAvailableTransactProcessor_.load(std::memory_order_relaxed); }
-	int totalTransactProcessors() const noexcept { return totalAvailableTransactProcessor_.load(std::memory_order_relaxed); }
-
-private:
-	mutable oneapi::tbb::mutex lock_;
-	mutable oneapi::tbb::mutex transactLock_;
-	mutable oneapi::tbb::mutex eventLock_;
-
-	static std::unique_ptr<oneapi::tbb::global_control> scheduler_;
-	static oneapi::tbb::task_group taskGroup_;
-
-	ACID::TransactionManager *transactMgr_;
-	ACID::TransactionIterator *transactIt_;
-
-	int cpuAffinityStart_;
-
-	Queues::InQueuesContainer *inQueues_;
-
-	ACID::ProcessorPoolT transactProcessors_;
-	// Cache-aligned to prevent false sharing between threads
-	CacheAlignedAtomic<int> lastAvailableTransactProcessor_;
-	CacheAlignedAtomic<int> totalAvailableTransactProcessor_;
-
-	Queues::InQueueProcessorsPoolT evntProcessors_;
-	// Cache-aligned to prevent false sharing between threads
-	CacheAlignedAtomic<int> lastAvailableEvntProcessor_;
-	CacheAlignedAtomic<int> totalAvailableEvntProcessor_;
-
-	// Statistics counters - cache aligned for independent access
-	CacheAlignedAtomic<int> created_;
-	CacheAlignedAtomic<int> processed_;
-	CacheAlignedAtomic<int> finished_;
-
-	CacheAlignedAtomic<int> createdTr_;
-	CacheAlignedAtomic<int> processedTr_;
-	CacheAlignedAtomic<int> finishedTr_;
-
+    TaskManagerParams() : transactMgr_(nullptr), transactProcessors_(), evntProcessors_(), inQueues_(nullptr) {}
 };
 
-	}
-}
+class TaskManager : public ExecTaskManager, public ACID::TransactionObserver, public Queues::InQueuesObserver
+{
+public:
+    explicit TaskManager(const TaskManagerParams &params);
+    ~TaskManager(void);
+
+    static void init(int workerAmount = 0);
+    static void destroy();
+
+    /// method waits until all incoming events and transactions finished processing
+    /// returns false, if events and transactions not finished during waitIntervalSeconds
+    /// waitIntervalSeconds = -1, means infinite
+    bool waitUntilTransactionsFinished(int waitIntervalSeconds) const;
+
+    bool finishTransaction(const ACID::TransactionId &id, ACID::Transaction *tr, ACID::TransactionProcessor *proc);
+    void finishEvent(Queues::InQueueProcessor *proc);
+
+public:
+    /// reimplemented from ExecTaskManager
+    virtual void addTask(const ACID::TransactionId &id);
+
+public:
+    /// reimplemented from TransactionObserver
+    virtual void onReadyToExecute();
+
+public:
+    /// reimplemented from InQueuesObserver
+    virtual void onNewEvent();
+
+public:
+    void taskCreated();
+    void taskProcessed();
+    void taskFinished();
+    void taskCreatedTr();
+    void taskProcessedTr();
+    void taskFinishedTr();
+
+    // Read-only accessors for monitoring (relaxed ordering — statistics only)
+    int eventsCreated() const noexcept
+    {
+        return created_.load(std::memory_order_relaxed);
+    }
+    int eventsProcessed() const noexcept
+    {
+        return processed_.load(std::memory_order_relaxed);
+    }
+    int eventsFinished() const noexcept
+    {
+        return finished_.load(std::memory_order_relaxed);
+    }
+    int transactionsCreated() const noexcept
+    {
+        return createdTr_.load(std::memory_order_relaxed);
+    }
+    int transactionsProcessed() const noexcept
+    {
+        return processedTr_.load(std::memory_order_relaxed);
+    }
+    int transactionsFinished() const noexcept
+    {
+        return finishedTr_.load(std::memory_order_relaxed);
+    }
+    int availableEventProcessors() const noexcept
+    {
+        return lastAvailableEvntProcessor_.load(std::memory_order_relaxed);
+    }
+    int totalEventProcessors() const noexcept
+    {
+        return totalAvailableEvntProcessor_.load(std::memory_order_relaxed);
+    }
+    int availableTransactProcessors() const noexcept
+    {
+        return lastAvailableTransactProcessor_.load(std::memory_order_relaxed);
+    }
+    int totalTransactProcessors() const noexcept
+    {
+        return totalAvailableTransactProcessor_.load(std::memory_order_relaxed);
+    }
+
+private:
+    mutable oneapi::tbb::mutex lock_;
+    mutable oneapi::tbb::mutex transactLock_;
+    mutable oneapi::tbb::mutex eventLock_;
+
+    static std::unique_ptr<oneapi::tbb::global_control> scheduler_;
+    static oneapi::tbb::task_group taskGroup_;
+
+    ACID::TransactionManager *transactMgr_;
+    ACID::TransactionIterator *transactIt_;
+
+    int cpuAffinityStart_;
+
+    Queues::InQueuesContainer *inQueues_;
+
+    ACID::ProcessorPoolT transactProcessors_;
+    // Cache-aligned to prevent false sharing between threads
+    CacheAlignedAtomic<int> lastAvailableTransactProcessor_;
+    CacheAlignedAtomic<int> totalAvailableTransactProcessor_;
+
+    Queues::InQueueProcessorsPoolT evntProcessors_;
+    // Cache-aligned to prevent false sharing between threads
+    CacheAlignedAtomic<int> lastAvailableEvntProcessor_;
+    CacheAlignedAtomic<int> totalAvailableEvntProcessor_;
+
+    // Statistics counters - cache aligned for independent access
+    CacheAlignedAtomic<int> created_;
+    CacheAlignedAtomic<int> processed_;
+    CacheAlignedAtomic<int> finished_;
+
+    CacheAlignedAtomic<int> createdTr_;
+    CacheAlignedAtomic<int> processedTr_;
+    CacheAlignedAtomic<int> finishedTr_;
+};
+
+} // namespace Tasks
+} // namespace COP

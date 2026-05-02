@@ -5,27 +5,31 @@
 #include "DataModelDef.h"
 #include "OrderBookImpl.h"
 
-namespace COP {
+namespace COP
+{
 
-namespace Store {
-    class WideParamsDataStorage;
-    class OrderDataStorage;
-}
+namespace Store
+{
+class WideParamsDataStorage;
+class OrderDataStorage;
+} // namespace Store
 
-namespace App {
+namespace App
+{
 
 std::string serializeConnected();
-std::string serializeInstrumentList(const Store::WideParamsDataStorage* wds);
-std::string serializeAccountList(const Store::WideParamsDataStorage* wds);
-std::string serializeOrderSnapshot(const Store::OrderDataStorage* storage);
-std::string serializeOrderUpdate(const OrderEntry& order);
-std::string serializeExecReport(const ExecutionEntry* exec);
-std::string serializeBookUpdate(const std::string& symbol, const BookSnapshot& snap);
-std::string serializeCancelReject(u64 orderId, const std::string& reason);
-std::string serializeBusinessReject(u64 refId, const std::string& reason);
-std::string serializeError(const std::string& message);
+std::string serializeInstrumentList(const Store::WideParamsDataStorage *wds);
+std::string serializeAccountList(const Store::WideParamsDataStorage *wds);
+std::string serializeOrderSnapshot(const Store::OrderDataStorage *storage);
+std::string serializeOrderUpdate(const OrderEntry &order);
+std::string serializeExecReport(const ExecutionEntry *exec);
+std::string serializeBookUpdate(const std::string &symbol, const BookSnapshot &snap);
+std::string serializeCancelReject(u64 orderId, const std::string &reason);
+std::string serializeBusinessReject(u64 refId, const std::string &reason);
+std::string serializeError(const std::string &message);
 
-struct SystemMetrics {
+struct SystemMetrics
+{
     int32_t eventsCreated;
     int32_t eventsProcessed;
     int32_t eventsFinished;
@@ -45,9 +49,10 @@ struct SystemMetrics {
     u64 timestamp;
 };
 
-std::string serializeMetricsUpdate(const SystemMetrics& metrics);
+std::string serializeMetricsUpdate(const SystemMetrics &metrics);
 
-struct ParsedNewOrder {
+struct ParsedNewOrder
+{
     std::string symbol;
     Side side;
     OrderType ordType;
@@ -61,9 +66,10 @@ struct ParsedNewOrder {
     Capacity capacity;
 };
 
-struct ParsedSwapOrder {
+struct ParsedSwapOrder
+{
     std::string symbol;
-    Side side;          // near-leg side (far leg is opposite)
+    Side side; // near-leg side (far leg is opposite)
     double nearPrice;
     double farPrice;
     u64 settlDate;
@@ -75,12 +81,14 @@ struct ParsedSwapOrder {
     TimeInForce tif;
 };
 
-struct ParsedCancelOrder {
+struct ParsedCancelOrder
+{
     u64 orderId;
     std::string clOrderId;
 };
 
-struct ParsedReplaceOrder {
+struct ParsedReplaceOrder
+{
     u64 orderId;
     double price;
     unsigned int orderQty;
@@ -90,7 +98,8 @@ struct ParsedReplaceOrder {
     bool hasTif;
 };
 
-struct ParsedClientMessage {
+struct ParsedClientMessage
+{
     std::string type;
     // For subscribe/unsubscribe
     std::string symbol;
@@ -101,6 +110,7 @@ struct ParsedClientMessage {
     ParsedReplaceOrder replaceOrder;
 };
 
-ParsedClientMessage parseClientMessage(const std::string& json);
+ParsedClientMessage parseClientMessage(const std::string &json);
 
-}}
+} // namespace App
+} // namespace COP

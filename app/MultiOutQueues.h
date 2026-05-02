@@ -5,21 +5,25 @@
 #include <vector>
 #include "QueuesDef.h"
 
-namespace COP{
-namespace App{
+namespace COP
+{
+namespace App
+{
 
-class MultiOutQueues : public Queues::OutQueues {
+class MultiOutQueues : public Queues::OutQueues
+{
 public:
-    void addDelegate(Queues::OutQueues* delegate);
+    void addDelegate(Queues::OutQueues *delegate);
 
-    void push(const Queues::ExecReportEvent& evnt, const std::string& target) override;
-    void push(const Queues::CancelRejectEvent& evnt, const std::string& target) override;
-    void push(const Queues::BusinessRejectEvent& evnt, const std::string& target) override;
+    void push(const Queues::ExecReportEvent &evnt, const std::string &target) override;
+    void push(const Queues::CancelRejectEvent &evnt, const std::string &target) override;
+    void push(const Queues::BusinessRejectEvent &evnt, const std::string &target) override;
 
 private:
-    std::vector<Queues::OutQueues*> delegates_;
+    std::vector<Queues::OutQueues *> delegates_;
 };
 
-}} // namespace COP::App
+} // namespace App
+} // namespace COP
 
 #endif // BUILD_FIX

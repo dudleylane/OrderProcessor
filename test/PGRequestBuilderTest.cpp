@@ -15,9 +15,12 @@
 using namespace COP;
 using namespace COP::PG;
 
-class PGRequestBuilderTest : public test::SingletonFixture {};
+class PGRequestBuilderTest : public test::SingletonFixture
+{
+};
 
-TEST_F(PGRequestBuilderTest, FromInstrument) {
+TEST_F(PGRequestBuilderTest, FromInstrument)
+{
     InstrumentEntry instr;
     instr.symbol_ = "AAPL";
     instr.securityId_ = "037833100";
@@ -30,7 +33,8 @@ TEST_F(PGRequestBuilderTest, FromInstrument) {
     EXPECT_EQ("CUSIP", w.securityIdSource);
 }
 
-TEST_F(PGRequestBuilderTest, FromAccount) {
+TEST_F(PGRequestBuilderTest, FromAccount)
+{
     AccountEntry acct;
     acct.account_ = "ACCT001";
     acct.firm_ = "FirmA";
@@ -43,7 +47,8 @@ TEST_F(PGRequestBuilderTest, FromAccount) {
     EXPECT_EQ("PRINCIPAL", w.type);
 }
 
-TEST_F(PGRequestBuilderTest, FromAccountAgency) {
+TEST_F(PGRequestBuilderTest, FromAccountAgency)
+{
     AccountEntry acct;
     acct.account_ = "ACCT002";
     acct.firm_ = "FirmB";
@@ -54,7 +59,8 @@ TEST_F(PGRequestBuilderTest, FromAccountAgency) {
     EXPECT_EQ("AGENCY", w.type);
 }
 
-TEST_F(PGRequestBuilderTest, FromClearing) {
+TEST_F(PGRequestBuilderTest, FromClearing)
+{
     ClearingEntry clr;
     clr.firm_ = "CLRFirm";
 
@@ -63,7 +69,8 @@ TEST_F(PGRequestBuilderTest, FromClearing) {
     EXPECT_EQ("CLRFirm", w.firm);
 }
 
-TEST_F(PGRequestBuilderTest, FromOrder) {
+TEST_F(PGRequestBuilderTest, FromOrder)
+{
     auto order = test::createCorrectOrder();
 
     // Assign a known order ID
@@ -107,7 +114,8 @@ TEST_F(PGRequestBuilderTest, FromOrder) {
     EXPECT_EQ(225u, w.settlDate);
 }
 
-TEST_F(PGRequestBuilderTest, FromOrderCheckAllQuantities) {
+TEST_F(PGRequestBuilderTest, FromOrderCheckAllQuantities)
+{
     auto order = test::createCorrectOrder();
     order->orderId_ = IdT(99, 20260101);
     order->minQty_ = 5;

@@ -12,23 +12,26 @@
 
 #pragma once
 
-namespace COP{
-	struct OrderEntry;
+namespace COP
+{
+struct OrderEntry;
 
-namespace OrdState{
+namespace OrdState
+{
 
-	struct OrderStatePersistence{
-		OrderEntry *orderData_;
-		int stateZone1Id_;	
-		int stateZone2Id_;
+struct OrderStatePersistence
+{
+    OrderEntry *orderData_;
+    int stateZone1Id_;
+    int stateZone2Id_;
 
-		OrderStatePersistence(): orderData_(nullptr), stateZone1Id_(-1), stateZone2Id_(-1){}
+    OrderStatePersistence() : orderData_(nullptr), stateZone1Id_(-1), stateZone2Id_(-1) {}
 
-		void serialize(std::string &msg)const;
-		char *serialize(char *msg)const;
-		const char *restore(const char *buf, size_t size);
-		bool compare(const OrderStatePersistence &val)const;
-	};
+    void serialize(std::string &msg) const;
+    char *serialize(char *msg) const;
+    const char *restore(const char *buf, size_t size);
+    bool compare(const OrderStatePersistence &val) const;
+};
 
-}
-}
+} // namespace OrdState
+} // namespace COP

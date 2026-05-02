@@ -25,13 +25,16 @@ using namespace COP::Queues;
 // QueuesManager Test Fixture
 // =============================================================================
 
-class QueuesManagerTest : public ::testing::Test {
+class QueuesManagerTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         // Note: ExchLogger is created globally by TestMain.cpp
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         // Note: ExchLogger is destroyed globally by TestMain.cpp
     }
 };
@@ -40,22 +43,23 @@ protected:
 // Construction Tests
 // =============================================================================
 
-TEST_F(QueuesManagerTest, ConstructionSucceeds) {
-    EXPECT_NO_THROW({
-        QueuesManager manager;
-    });
+TEST_F(QueuesManagerTest, ConstructionSucceeds)
+{
+    EXPECT_NO_THROW({ QueuesManager manager; });
 }
 
-TEST_F(QueuesManagerTest, GetInQueuesReturnsNonNull) {
+TEST_F(QueuesManagerTest, GetInQueuesReturnsNonNull)
+{
     QueuesManager manager;
-    InQueues* inQueues = manager.getInQueues();
+    InQueues *inQueues = manager.getInQueues();
 
     ASSERT_NE(inQueues, nullptr);
 }
 
-TEST_F(QueuesManagerTest, GetOutQueuesReturnsNonNull) {
+TEST_F(QueuesManagerTest, GetOutQueuesReturnsNonNull)
+{
     QueuesManager manager;
-    OutQueues* outQueues = manager.getOutQueues();
+    OutQueues *outQueues = manager.getOutQueues();
 
     ASSERT_NE(outQueues, nullptr);
 }
@@ -64,33 +68,36 @@ TEST_F(QueuesManagerTest, GetOutQueuesReturnsNonNull) {
 // Pointer Consistency Tests
 // =============================================================================
 
-TEST_F(QueuesManagerTest, GetInQueuesReturnsConsistentPointer) {
+TEST_F(QueuesManagerTest, GetInQueuesReturnsConsistentPointer)
+{
     QueuesManager manager;
 
-    InQueues* inQueues1 = manager.getInQueues();
-    InQueues* inQueues2 = manager.getInQueues();
-    InQueues* inQueues3 = manager.getInQueues();
+    InQueues *inQueues1 = manager.getInQueues();
+    InQueues *inQueues2 = manager.getInQueues();
+    InQueues *inQueues3 = manager.getInQueues();
 
     EXPECT_EQ(inQueues1, inQueues2);
     EXPECT_EQ(inQueues2, inQueues3);
 }
 
-TEST_F(QueuesManagerTest, GetOutQueuesReturnsConsistentPointer) {
+TEST_F(QueuesManagerTest, GetOutQueuesReturnsConsistentPointer)
+{
     QueuesManager manager;
 
-    OutQueues* outQueues1 = manager.getOutQueues();
-    OutQueues* outQueues2 = manager.getOutQueues();
-    OutQueues* outQueues3 = manager.getOutQueues();
+    OutQueues *outQueues1 = manager.getOutQueues();
+    OutQueues *outQueues2 = manager.getOutQueues();
+    OutQueues *outQueues3 = manager.getOutQueues();
 
     EXPECT_EQ(outQueues1, outQueues2);
     EXPECT_EQ(outQueues2, outQueues3);
 }
 
-TEST_F(QueuesManagerTest, InAndOutQueuesAreDifferent) {
+TEST_F(QueuesManagerTest, InAndOutQueuesAreDifferent)
+{
     QueuesManager manager;
 
-    void* inQueues = static_cast<void*>(manager.getInQueues());
-    void* outQueues = static_cast<void*>(manager.getOutQueues());
+    void *inQueues = static_cast<void *>(manager.getInQueues());
+    void *outQueues = static_cast<void *>(manager.getOutQueues());
 
     EXPECT_NE(inQueues, outQueues);
 }
@@ -99,12 +106,13 @@ TEST_F(QueuesManagerTest, InAndOutQueuesAreDifferent) {
 // Queue Independence Tests
 // =============================================================================
 
-TEST_F(QueuesManagerTest, MultipleManagersHaveIndependentQueues) {
+TEST_F(QueuesManagerTest, MultipleManagersHaveIndependentQueues)
+{
     QueuesManager manager1;
     QueuesManager manager2;
 
-    InQueues* inQueues1 = manager1.getInQueues();
-    InQueues* inQueues2 = manager2.getInQueues();
+    InQueues *inQueues1 = manager1.getInQueues();
+    InQueues *inQueues2 = manager2.getInQueues();
 
     EXPECT_NE(inQueues1, inQueues2);
 }
@@ -113,9 +121,10 @@ TEST_F(QueuesManagerTest, MultipleManagersHaveIndependentQueues) {
 // IncomingQueues Integration Tests
 // =============================================================================
 
-TEST_F(QueuesManagerTest, CanPushToInQueues) {
+TEST_F(QueuesManagerTest, CanPushToInQueues)
+{
     QueuesManager manager;
-    InQueues* inQueues = manager.getInQueues();
+    InQueues *inQueues = manager.getInQueues();
 
     EXPECT_NO_THROW({
         TimerEvent event;
@@ -123,9 +132,10 @@ TEST_F(QueuesManagerTest, CanPushToInQueues) {
     });
 }
 
-TEST_F(QueuesManagerTest, CanPushMultipleEventTypesToInQueues) {
+TEST_F(QueuesManagerTest, CanPushMultipleEventTypesToInQueues)
+{
     QueuesManager manager;
-    InQueues* inQueues = manager.getInQueues();
+    InQueues *inQueues = manager.getInQueues();
 
     // Timer event
     TimerEvent timerEvent;
@@ -140,9 +150,10 @@ TEST_F(QueuesManagerTest, CanPushMultipleEventTypesToInQueues) {
     EXPECT_NO_THROW(inQueues->push("source3", replaceEvent));
 }
 
-TEST_F(QueuesManagerTest, InQueueCanPushAndPop) {
+TEST_F(QueuesManagerTest, InQueueCanPushAndPop)
+{
     QueuesManager manager;
-    InQueues* inQueues = manager.getInQueues();
+    InQueues *inQueues = manager.getInQueues();
 
     TimerEvent event;
     inQueues->push("source", event);
@@ -155,9 +166,10 @@ TEST_F(QueuesManagerTest, InQueueCanPushAndPop) {
 // OutgoingQueues Integration Tests
 // =============================================================================
 
-TEST_F(QueuesManagerTest, CanPushToOutQueues) {
+TEST_F(QueuesManagerTest, CanPushToOutQueues)
+{
     QueuesManager manager;
-    OutQueues* outQueues = manager.getOutQueues();
+    OutQueues *outQueues = manager.getOutQueues();
 
     EXPECT_NO_THROW({
         CancelRejectEvent event;
@@ -165,9 +177,10 @@ TEST_F(QueuesManagerTest, CanPushToOutQueues) {
     });
 }
 
-TEST_F(QueuesManagerTest, CanPushMultipleEventTypesToOutQueues) {
+TEST_F(QueuesManagerTest, CanPushMultipleEventTypesToOutQueues)
+{
     QueuesManager manager;
-    OutQueues* outQueues = manager.getOutQueues();
+    OutQueues *outQueues = manager.getOutQueues();
 
     // Cancel reject event
     CancelRejectEvent cancelReject;
@@ -182,11 +195,12 @@ TEST_F(QueuesManagerTest, CanPushMultipleEventTypesToOutQueues) {
 // Lifecycle Tests
 // =============================================================================
 
-TEST_F(QueuesManagerTest, QueuesValidThroughoutLifetime) {
+TEST_F(QueuesManagerTest, QueuesValidThroughoutLifetime)
+{
     auto manager = std::make_unique<QueuesManager>();
 
-    InQueues* inQueues = manager->getInQueues();
-    OutQueues* outQueues = manager->getOutQueues();
+    InQueues *inQueues = manager->getInQueues();
+    OutQueues *outQueues = manager->getOutQueues();
 
     // Push to queues
     TimerEvent timerEvent;
@@ -204,7 +218,8 @@ TEST_F(QueuesManagerTest, QueuesValidThroughoutLifetime) {
     EXPECT_EQ(manager->getOutQueues(), outQueues);
 }
 
-TEST_F(QueuesManagerTest, DestructionDoesNotCrash) {
+TEST_F(QueuesManagerTest, DestructionDoesNotCrash)
+{
     {
         QueuesManager manager;
 
@@ -224,19 +239,22 @@ TEST_F(QueuesManagerTest, DestructionDoesNotCrash) {
 // Edge Cases
 // =============================================================================
 
-TEST_F(QueuesManagerTest, EmptyQueueOperations) {
+TEST_F(QueuesManagerTest, EmptyQueueOperations)
+{
     QueuesManager manager;
 
     // Fresh queues should be valid
     EXPECT_NE(manager.getInQueues(), nullptr);
 }
 
-TEST_F(QueuesManagerTest, ManySequentialPushes) {
+TEST_F(QueuesManagerTest, ManySequentialPushes)
+{
     QueuesManager manager;
-    InQueues* inQueues = manager.getInQueues();
+    InQueues *inQueues = manager.getInQueues();
 
     const int numPushes = 1000;
-    for (int i = 0; i < numPushes; ++i) {
+    for (int i = 0; i < numPushes; ++i)
+    {
         TimerEvent event;
         inQueues->push("source", event);
     }

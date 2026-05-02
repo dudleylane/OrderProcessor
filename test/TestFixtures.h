@@ -21,7 +21,8 @@
 #include "SubscrManager.h"
 #include "TestAux.h"
 
-namespace test {
+namespace test
+{
 
 // =============================================================================
 // Base Test Fixture - Singleton Management
@@ -32,14 +33,17 @@ namespace test {
  * Handles creation/destruction of WideDataStorage, IdTGenerator, and Logger.
  * Use this as a base for tests that need the singleton infrastructure.
  */
-class SingletonFixture : public ::testing::Test {
+class SingletonFixture : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         COP::Store::WideDataStorage::create();
         COP::IdTGenerator::create();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         COP::IdTGenerator::destroy();
         COP::Store::WideDataStorage::destroy();
     }
@@ -53,14 +57,17 @@ protected:
  * Fixture that includes OrderStorage in addition to base singletons.
  * Use this for tests that store/retrieve orders.
  */
-class OrderStorageFixture : public SingletonFixture {
+class OrderStorageFixture : public SingletonFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         SingletonFixture::SetUp();
         COP::Store::OrderStorage::create();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         COP::Store::OrderStorage::destroy();
         SingletonFixture::TearDown();
     }
@@ -73,14 +80,17 @@ protected:
 /**
  * Fixture that includes SubscriptionMgr for event subscription tests.
  */
-class SubscriptionFixture : public OrderStorageFixture {
+class SubscriptionFixture : public OrderStorageFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         OrderStorageFixture::SetUp();
         COP::SubscrMgr::SubscriptionMgr::create();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         COP::SubscrMgr::SubscriptionMgr::destroy();
         OrderStorageFixture::TearDown();
     }
@@ -94,9 +104,11 @@ protected:
  * Fixture that provides an initialized OrderBook with test instruments.
  * Automatically creates instruments "aaa" and "bbb" and initializes the order book.
  */
-class OrderBookFixture : public OrderStorageFixture {
+class OrderBookFixture : public OrderStorageFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         OrderStorageFixture::SetUp();
 
         instrumentId1_ = test::addInstrument("aaa");
@@ -109,7 +121,8 @@ protected:
         orderBook_->init(instruments_, &orderSaver_);
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         orderBook_.reset();
         OrderStorageFixture::TearDown();
     }
@@ -130,9 +143,11 @@ protected:
  * Full fixture for processor/integration tests.
  * Includes all singletons and order book infrastructure.
  */
-class ProcessorFixture : public SubscriptionFixture {
+class ProcessorFixture : public SubscriptionFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         SubscriptionFixture::SetUp();
 
         instrumentId1_ = test::addInstrument("aaa");
@@ -145,7 +160,8 @@ protected:
         orderBook_->init(instruments_, &orderSaver_);
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         orderBook_.reset();
         SubscriptionFixture::TearDown();
     }
@@ -165,14 +181,14 @@ protected:
 /**
  * Macro to verify an operation was enqueued in a TestTransactionContext
  */
-#define EXPECT_OPERATION_ENQUEUED(context, operation_type) \
+#define EXPECT_OPERATION_ENQUEUED(context, operation_type)     \
     EXPECT_TRUE((context).isOperationEnqueued(operation_type)) \
         << "Expected operation " << #operation_type << " to be enqueued"
 
 /**
  * Macro to verify an operation was NOT enqueued
  */
-#define EXPECT_OPERATION_NOT_ENQUEUED(context, operation_type) \
+#define EXPECT_OPERATION_NOT_ENQUEUED(context, operation_type)  \
     EXPECT_FALSE((context).isOperationEnqueued(operation_type)) \
         << "Expected operation " << #operation_type << " to NOT be enqueued"
 
@@ -180,14 +196,11 @@ protected:
  * Macro to verify order status
  */
 #define EXPECT_ORDER_STATUS(order, expected_status) \
-    EXPECT_EQ((expected_status), (order)->status_) \
-        << "Order status mismatch"
+    EXPECT_EQ((expected_status), (order)->status_) << "Order status mismatch"
 
 /**
  * Macro to verify order side
  */
-#define EXPECT_ORDER_SIDE(order, expected_side) \
-    EXPECT_EQ((expected_side), (order)->side_) \
-        << "Order side mismatch"
+#define EXPECT_ORDER_SIDE(order, expected_side) EXPECT_EQ((expected_side), (order)->side_) << "Order side mismatch"
 
 } // namespace test

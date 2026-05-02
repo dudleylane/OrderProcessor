@@ -34,29 +34,35 @@ using namespace COP::Queues;
 using namespace COP::Proc;
 using namespace test;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Output Queue - Captures outgoing events
 // =============================================================================
 
-class TestOutQueues : public OutQueues {
+class TestOutQueues : public OutQueues
+{
 public:
     TestOutQueues() : execReportCount_(0), cancelRejectCount_(0), businessRejectCount_(0) {}
 
-    void push(const ExecReportEvent &, const std::string &) override {
+    void push(const ExecReportEvent &, const std::string &) override
+    {
         ++execReportCount_;
     }
 
-    void push(const CancelRejectEvent &, const std::string &) override {
+    void push(const CancelRejectEvent &, const std::string &) override
+    {
         ++cancelRejectCount_;
     }
 
-    void push(const BusinessRejectEvent &, const std::string &) override {
+    void push(const BusinessRejectEvent &, const std::string &) override
+    {
         ++businessRejectCount_;
     }
 
-    int totalEvents() const {
+    int totalEvents() const
+    {
         return execReportCount_.load() + cancelRejectCount_.load() + businessRejectCount_.load();
     }
 
@@ -69,9 +75,11 @@ public:
 // Task Manager Test Fixture
 // =============================================================================
 
-class TaskManagerTest : public ProcessorFixture {
+class TaskManagerTest : public ProcessorFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         ProcessorFixture::SetUp();
 
         inQueues_ = std::make_unique<IncomingQueues>();
@@ -83,18 +91,15 @@ protected:
         transMgr_->init(transParams);
 
         // Initialize processor parameters
-        procParams_ = std::make_unique<ProcessorParams>(
-            IdTGenerator::instance(),
-            OrderStorage::instance(),
-            orderBook_.get(),
-            inQueues_.get(),
-            outQueues_.get(),
-            inQueues_.get(),
-            transMgr_.get());
+        procParams_ =
+            std::make_unique<ProcessorParams>(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(),
+                                              inQueues_.get(), outQueues_.get(), inQueues_.get(), transMgr_.get());
     }
 
-    void TearDown() override {
-        if (transMgr_) {
+    void TearDown() override
+    {
+        if (transMgr_)
+        {
             transMgr_->stop();
         }
         procParams_.reset();
@@ -106,18 +111,21 @@ protected:
     }
 
     // Helper to create a task manager with specified number of processors
-    std::unique_ptr<TaskManager> createTaskManager(int eventProcessors, int transactionProcessors) {
+    std::unique_ptr<TaskManager> createTaskManager(int eventProcessors, int transactionProcessors)
+    {
         TaskManagerParams params;
         params.transactMgr_ = transMgr_.get();
         params.inQueues_ = inQueues_.get();
 
-        for (int i = 0; i < eventProcessors; ++i) {
+        for (int i = 0; i < eventProcessors; ++i)
+        {
             auto proc = std::make_unique<Processor>();
             proc->init(*procParams_);
             params.evntProcessors_.push_back(proc.release());
         }
 
-        for (int i = 0; i < transactionProcessors; ++i) {
+        for (int i = 0; i < transactionProcessors; ++i)
+        {
             auto proc = std::make_unique<Processor>();
             proc->init(*procParams_);
             params.transactProcessors_.push_back(proc.release());
@@ -137,12 +145,14 @@ protected:
 // Basic Task Manager Tests
 // =============================================================================
 
-TEST_F(TaskManagerTest, CreateWithSingleProcessor) {
+TEST_F(TaskManagerTest, CreateWithSingleProcessor)
+{
     auto manager = createTaskManager(1, 1);
     ASSERT_NE(nullptr, manager);
 }
 
-TEST_F(TaskManagerTest, CreateWithMultipleProcessors) {
+TEST_F(TaskManagerTest, CreateWithMultipleProcessors)
+{
     auto manager = createTaskManager(3, 3);
     ASSERT_NE(nullptr, manager);
 }
@@ -151,7 +161,8 @@ TEST_F(TaskManagerTest, CreateWithMultipleProcessors) {
 // Single Order Processing Tests
 // =============================================================================
 
-TEST_F(TaskManagerTest, ProcessSingleOrder) {
+TEST_F(TaskManagerTest, ProcessSingleOrder)
+{
     auto manager = createTaskManager(1, 1);
 
     auto order = createCorrectOrder(instrumentId1_);
@@ -166,11 +177,13 @@ TEST_F(TaskManagerTest, ProcessSingleOrder) {
     EXPECT_GE(outQueues_->execReportCount_.load(), 1);
 }
 
-TEST_F(TaskManagerTest, ProcessMultipleOrders) {
+TEST_F(TaskManagerTest, ProcessMultipleOrders)
+{
     auto manager = createTaskManager(2, 2);
 
     const int numOrders = 10;
-    for (int i = 0; i < numOrders; ++i) {
+    for (int i = 0; i < numOrders; ++i)
+    {
         auto order = createCorrectOrder(instrumentId1_);
         assignClOrderId(order.get());
         inQueues_->push("test", OrderEvent(order.release()));
@@ -187,7 +200,8 @@ TEST_F(TaskManagerTest, ProcessMultipleOrders) {
 // Buy/Sell Matching Tests
 // =============================================================================
 
-TEST_F(TaskManagerTest, MatchBuyAndSellOrders) {
+TEST_F(TaskManagerTest, MatchBuyAndSellOrders)
+{
     auto manager = createTaskManager(3, 3);
 
     // Create a sell order
@@ -217,27 +231,33 @@ TEST_F(TaskManagerTest, MatchBuyAndSellOrders) {
 // Concurrent Processing Tests
 // =============================================================================
 
-TEST_F(TaskManagerTest, ConcurrentOrderSubmission) {
+TEST_F(TaskManagerTest, ConcurrentOrderSubmission)
+{
     auto manager = createTaskManager(3, 3);
 
     const int numOrders = 100;
-    std::atomic<int> ordersSubmitted{0};
+    std::atomic<int> ordersSubmitted{ 0 };
 
     // Submit orders from multiple threads
     std::vector<std::thread> threads;
-    for (int t = 0; t < 4; ++t) {
-        threads.emplace_back([this, &ordersSubmitted, numOrders]() {
-            for (int i = 0; i < numOrders / 4; ++i) {
-                auto order = createCorrectOrder(instrumentId1_);
-                assignClOrderId(order.get());
-                inQueues_->push("test", OrderEvent(order.release()));
-                ++ordersSubmitted;
-            }
-        });
+    for (int t = 0; t < 4; ++t)
+    {
+        threads.emplace_back(
+            [this, &ordersSubmitted, numOrders]()
+            {
+                for (int i = 0; i < numOrders / 4; ++i)
+                {
+                    auto order = createCorrectOrder(instrumentId1_);
+                    assignClOrderId(order.get());
+                    inQueues_->push("test", OrderEvent(order.release()));
+                    ++ordersSubmitted;
+                }
+            });
     }
 
     // Wait for all threads to finish submitting
-    for (auto& thread : threads) {
+    for (auto &thread : threads)
+    {
         thread.join();
     }
 
@@ -254,7 +274,8 @@ TEST_F(TaskManagerTest, ConcurrentOrderSubmission) {
 // Timeout Tests
 // =============================================================================
 
-TEST_F(TaskManagerTest, WaitUntilTransactionsFinishedWithEmptyQueue) {
+TEST_F(TaskManagerTest, WaitUntilTransactionsFinishedWithEmptyQueue)
+{
     auto manager = createTaskManager(1, 1);
 
     // With no transactions, should return immediately
@@ -265,11 +286,13 @@ TEST_F(TaskManagerTest, WaitUntilTransactionsFinishedWithEmptyQueue) {
 // Stress Tests
 // =============================================================================
 
-TEST_F(TaskManagerTest, HandleHighVolume) {
+TEST_F(TaskManagerTest, HandleHighVolume)
+{
     auto manager = createTaskManager(3, 3);
 
     const int numOrders = 500;
-    for (int i = 0; i < numOrders; ++i) {
+    for (int i = 0; i < numOrders; ++i)
+    {
         auto order = createCorrectOrder(instrumentId1_);
         assignClOrderId(order.get());
         inQueues_->push("test", OrderEvent(order.release()));
@@ -286,12 +309,14 @@ TEST_F(TaskManagerTest, HandleHighVolume) {
 // Mixed Order Types Tests
 // =============================================================================
 
-TEST_F(TaskManagerTest, ProcessMixedBuySellOrders) {
+TEST_F(TaskManagerTest, ProcessMixedBuySellOrders)
+{
     auto manager = createTaskManager(3, 3);
 
     const int numPairs = 50;
 
-    for (int i = 0; i < numPairs; ++i) {
+    for (int i = 0; i < numPairs; ++i)
+    {
         // Submit a buy order
         auto buyOrder = createCorrectOrder(instrumentId1_);
         assignClOrderId(buyOrder.get());

@@ -15,19 +15,21 @@
 #include "TypesDef.h"
 #include "DataModelDef.h"
 
-namespace COP{
-	namespace Codec{
+namespace COP
+{
+namespace Codec
+{
 
 class InstrumentCodec
 {
 public:
-	InstrumentCodec(void);
-	~InstrumentCodec(void);
+    InstrumentCodec(void);
+    ~InstrumentCodec(void);
 
 public:
-	static void encode(const InstrumentEntry &instr, std::string *buf, IdT *id, u32 *version);
-	static void decode(const IdT& id, u32 version, const char *buf, size_t size, InstrumentEntry *instr);
+    static void encode(const InstrumentEntry &instr, std::string *buf, IdT *id, u32 *version);
+    static void decode(const IdT &id, u32 version, const char *buf, size_t size, InstrumentEntry *instr);
 };
 
-	}
-}
+} // namespace Codec
+} // namespace COP

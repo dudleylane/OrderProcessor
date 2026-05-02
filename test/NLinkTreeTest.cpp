@@ -19,15 +19,19 @@
 using namespace aux;
 using namespace COP::ACID;
 
-namespace {
+namespace
+{
 
-class NLinkTreeTest : public ::testing::Test {
+class NLinkTreeTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         tree_ = std::make_unique<NLinkTree>();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         tree_.reset();
     }
 
@@ -38,28 +42,32 @@ protected:
 // Basic Add/Remove
 // =============================================================================
 
-TEST_F(NLinkTreeTest, AddSingleNode) {
+TEST_F(NLinkTreeTest, AddSingleNode)
+{
     int readyToExecute = 0;
     DependObjs deps;
-    Transaction* tr = nullptr;
+    Transaction *tr = nullptr;
     COP::IdT key(1, 20260119);
 
     bool result = tree_->add(key, tr, deps, &readyToExecute);
     EXPECT_TRUE(result);
 }
 
-TEST_F(NLinkTreeTest, ClearTree) {
+TEST_F(NLinkTreeTest, ClearTree)
+{
     tree_->clear();
     SUCCEED();
 }
 
-TEST_F(NLinkTreeTest, AddMultipleIndependentNodes) {
+TEST_F(NLinkTreeTest, AddMultipleIndependentNodes)
+{
     int readyToExecute = 0;
     DependObjs deps;
-    Transaction* tr = nullptr;
+    Transaction *tr = nullptr;
     int totalReady = 0;
 
-    for (int i = 1; i <= 10; ++i) {
+    for (int i = 1; i <= 10; ++i)
+    {
         COP::IdT key(i, 20260119);
         bool result = tree_->add(key, tr, deps, &readyToExecute);
         EXPECT_TRUE(result);
@@ -70,10 +78,11 @@ TEST_F(NLinkTreeTest, AddMultipleIndependentNodes) {
     EXPECT_EQ(10, totalReady);
 }
 
-TEST_F(NLinkTreeTest, AddAndRemoveSingle) {
+TEST_F(NLinkTreeTest, AddAndRemoveSingle)
+{
     int readyToExecute = 0;
     DependObjs deps;
-    Transaction* tr = nullptr;
+    Transaction *tr = nullptr;
     COP::IdT key(1, 20260119);
 
     tree_->add(key, tr, deps, &readyToExecute);
@@ -83,7 +92,8 @@ TEST_F(NLinkTreeTest, AddAndRemoveSingle) {
     EXPECT_TRUE(removed);
 }
 
-TEST_F(NLinkTreeTest, RemoveNonExistentKey) {
+TEST_F(NLinkTreeTest, RemoveNonExistentKey)
+{
     int readyToExecute = 0;
     COP::IdT key(999, 20260119);
 
@@ -95,9 +105,10 @@ TEST_F(NLinkTreeTest, RemoveNonExistentKey) {
 // Dependency Tracking (flat_map-backed)
 // =============================================================================
 
-TEST_F(NLinkTreeTest, AddWithDependency) {
+TEST_F(NLinkTreeTest, AddWithDependency)
+{
     int readyToExecute = 0;
-    Transaction* tr = nullptr;
+    Transaction *tr = nullptr;
 
     // Add node A (independent)
     COP::IdT keyA(1, 20260119);
@@ -115,9 +126,10 @@ TEST_F(NLinkTreeTest, AddWithDependency) {
     // B should not add to readyToExecute since it depends on A
 }
 
-TEST_F(NLinkTreeTest, RemovingDependencyUnblocksChild) {
+TEST_F(NLinkTreeTest, RemovingDependencyUnblocksChild)
+{
     int readyToExecute = 0;
-    Transaction* tr = nullptr;
+    Transaction *tr = nullptr;
 
     // Add A
     COP::IdT keyA(1, 20260119);
@@ -142,9 +154,10 @@ TEST_F(NLinkTreeTest, RemovingDependencyUnblocksChild) {
 // Parent/Child Queries
 // =============================================================================
 
-TEST_F(NLinkTreeTest, GetParentsOfRoot) {
+TEST_F(NLinkTreeTest, GetParentsOfRoot)
+{
     int readyToExecute = 0;
-    Transaction* tr = nullptr;
+    Transaction *tr = nullptr;
     COP::IdT key(1, 20260119);
     DependObjs deps;
 
@@ -156,9 +169,10 @@ TEST_F(NLinkTreeTest, GetParentsOfRoot) {
     EXPECT_TRUE(parents.empty());
 }
 
-TEST_F(NLinkTreeTest, GetChildrenOfLeaf) {
+TEST_F(NLinkTreeTest, GetChildrenOfLeaf)
+{
     int readyToExecute = 0;
-    Transaction* tr = nullptr;
+    Transaction *tr = nullptr;
     COP::IdT key(1, 20260119);
     DependObjs deps;
 
@@ -170,14 +184,16 @@ TEST_F(NLinkTreeTest, GetChildrenOfLeaf) {
     EXPECT_TRUE(children.empty());
 }
 
-TEST_F(NLinkTreeTest, GetParentsOfNonExistent) {
+TEST_F(NLinkTreeTest, GetParentsOfNonExistent)
+{
     COP::IdT key(999, 20260119);
     KSetT parents;
     bool found = tree_->getParents(key, &parents);
     EXPECT_FALSE(found);
 }
 
-TEST_F(NLinkTreeTest, GetChildrenOfNonExistent) {
+TEST_F(NLinkTreeTest, GetChildrenOfNonExistent)
+{
     COP::IdT key(999, 20260119);
     KSetT children;
     bool found = tree_->getChildren(key, &children);
@@ -188,20 +204,23 @@ TEST_F(NLinkTreeTest, GetChildrenOfNonExistent) {
 // Traversal
 // =============================================================================
 
-TEST_F(NLinkTreeTest, TraverseEmptyTree) {
+TEST_F(NLinkTreeTest, TraverseEmptyTree)
+{
     K key;
     V value;
     bool hasNext = tree_->next(&key, &value);
     EXPECT_FALSE(hasNext);
 }
 
-TEST_F(NLinkTreeTest, CurrentOnEmptyTree) {
+TEST_F(NLinkTreeTest, CurrentOnEmptyTree)
+{
     EXPECT_FALSE(tree_->isCurrentValid());
 }
 
-TEST_F(NLinkTreeTest, TraverseSingleNode) {
+TEST_F(NLinkTreeTest, TraverseSingleNode)
+{
     int readyToExecute = 0;
-    Transaction* tr = nullptr;
+    Transaction *tr = nullptr;
     COP::IdT key(1, 20260119);
     DependObjs deps;
 
@@ -210,7 +229,8 @@ TEST_F(NLinkTreeTest, TraverseSingleNode) {
     K outKey;
     V outValue;
     bool hasNext = tree_->next(&outKey, &outValue);
-    if (hasNext) {
+    if (hasNext)
+    {
         EXPECT_EQ(key, outKey);
     }
 }
@@ -219,13 +239,15 @@ TEST_F(NLinkTreeTest, TraverseSingleNode) {
 // Clear and Reuse
 // =============================================================================
 
-TEST_F(NLinkTreeTest, ClearAndReuseTree) {
+TEST_F(NLinkTreeTest, ClearAndReuseTree)
+{
     int readyToExecute = 0;
-    Transaction* tr = nullptr;
+    Transaction *tr = nullptr;
     DependObjs deps;
 
     // Add several nodes
-    for (int i = 1; i <= 5; ++i) {
+    for (int i = 1; i <= 5; ++i)
+    {
         COP::IdT key(i, 20260119);
         tree_->add(key, tr, deps, &readyToExecute);
     }
@@ -240,7 +262,8 @@ TEST_F(NLinkTreeTest, ClearAndReuseTree) {
 
     // Add new nodes after clear
     int totalReady = 0;
-    for (int i = 10; i <= 12; ++i) {
+    for (int i = 10; i <= 12; ++i)
+    {
         readyToExecute = 0;
         COP::IdT key(i, 20260119);
         tree_->add(key, tr, deps, &readyToExecute);
@@ -249,18 +272,22 @@ TEST_F(NLinkTreeTest, ClearAndReuseTree) {
     EXPECT_EQ(3, totalReady);
 }
 
-TEST_F(NLinkTreeTest, AddRemoveStressTest) {
+TEST_F(NLinkTreeTest, AddRemoveStressTest)
+{
     int readyToExecute = 0;
-    Transaction* tr = nullptr;
+    Transaction *tr = nullptr;
     DependObjs deps;
 
     // Add and remove many nodes to exercise flat_map growth and shrink
-    for (int round = 0; round < 10; ++round) {
-        for (int i = 1; i <= 20; ++i) {
+    for (int round = 0; round < 10; ++round)
+    {
+        for (int i = 1; i <= 20; ++i)
+        {
             COP::IdT key(round * 100 + i, 20260119);
             tree_->add(key, tr, deps, &readyToExecute);
         }
-        for (int i = 1; i <= 20; ++i) {
+        for (int i = 1; i <= 20; ++i)
+        {
             int removedReady = 0;
             COP::IdT key(round * 100 + i, 20260119);
             tree_->remove(key, &removedReady);

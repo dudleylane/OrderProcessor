@@ -10,10 +10,9 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
-
 #include <stdexcept>
-#include <immintrin.h>  // For _mm_pause()
-#include <algorithm>    // For std::min
+#include <immintrin.h> // For _mm_pause()
+#include <algorithm>   // For std::min
 #include "WideDataStorage.h"
 #include "CacheAlignedAtomic.h"
 #include "DataModelDef.h"
@@ -22,138 +21,164 @@
 using namespace COP;
 using namespace COP::Store;
 
-namespace {
-    /**
+namespace
+{
+/**
      * CAS loop with exponential backoff using _mm_pause() to reduce
      * contention and improve performance under high load.
      *
      * Updates 'counter' to 'newVal' if current value is less than newVal.
      */
-    inline void casUpdateWithBackoff(CacheAlignedAtomic<u64>& counter, u64 newVal) {
-        u64 current = counter.load(std::memory_order_acquire);
-        int backoff = 1;
-        while (current < newVal &&
-               !counter.compare_exchange_weak(current, newVal,
-                   std::memory_order_release, std::memory_order_acquire)) {
-            // Exponential backoff with _mm_pause() to reduce cache line bouncing
-            for (int i = 0; i < backoff; ++i) {
-                _mm_pause();
-            }
-            backoff = std::min(backoff * 2, 64);
+inline void casUpdateWithBackoff(CacheAlignedAtomic<u64> &counter, u64 newVal)
+{
+    u64 current = counter.load(std::memory_order_acquire);
+    int backoff = 1;
+    while (current < newVal &&
+           !counter.compare_exchange_weak(current, newVal, std::memory_order_release, std::memory_order_acquire))
+    {
+        // Exponential backoff with _mm_pause() to reduce cache line bouncing
+        for (int i = 0; i < backoff; ++i)
+        {
+            _mm_pause();
         }
+        backoff = std::min(backoff * 2, 64);
     }
 }
+} // namespace
 
-WideParamsDataStorage::WideParamsDataStorage(void): subscrCounter_(1), storage_(nullptr)
+WideParamsDataStorage::WideParamsDataStorage(void) : subscrCounter_(1), storage_(nullptr)
 {
-
-	aux::ExchLogger::instance()->note("WideParamsDataStorage created");
+    aux::ExchLogger::instance()->note("WideParamsDataStorage created");
 }
 
 WideParamsDataStorage::~WideParamsDataStorage(void)
 {
-	InstrumentsT tmpInstr;
-	StringsT tmpStr;
-	RawDataT tmpRaw;
-	AccountsT tmpAcct;
-	ClearingsT tmpClr;
-	ExecutionListsT tmpExec;
-	{
-		// Exclusive lock for destruction
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		std::swap(tmpInstr, instruments_);
-		std::swap(tmpStr, strings_);
-		std::swap(tmpRaw, rawDatas_);
-		std::swap(tmpAcct, accounts_);
-		std::swap(tmpClr, clearings_);
-		std::swap(tmpExec, executions_);
-	}
-	for(auto it = tmpInstr.begin(); it != tmpInstr.end(); ++it)
-		delete it->second;
-	for(auto it = tmpStr.begin(); it != tmpStr.end(); ++it)
-		delete it->second;
-	for(auto it = tmpRaw.begin(); it != tmpRaw.end(); ++it)
-		delete it->second;
-	for(auto it = tmpAcct.begin(); it != tmpAcct.end(); ++it)
-		delete it->second;
-	for(auto it = tmpClr.begin(); it != tmpClr.end(); ++it)
-		delete it->second;
-	for(auto it = tmpExec.begin(); it != tmpExec.end(); ++it)
-		delete it->second;
+    InstrumentsT tmpInstr;
+    StringsT tmpStr;
+    RawDataT tmpRaw;
+    AccountsT tmpAcct;
+    ClearingsT tmpClr;
+    ExecutionListsT tmpExec;
+    {
+        // Exclusive lock for destruction
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        std::swap(tmpInstr, instruments_);
+        std::swap(tmpStr, strings_);
+        std::swap(tmpRaw, rawDatas_);
+        std::swap(tmpAcct, accounts_);
+        std::swap(tmpClr, clearings_);
+        std::swap(tmpExec, executions_);
+    }
+    for (auto it = tmpInstr.begin(); it != tmpInstr.end(); ++it)
+    {
+        delete it->second;
+    }
+    for (auto it = tmpStr.begin(); it != tmpStr.end(); ++it)
+    {
+        delete it->second;
+    }
+    for (auto it = tmpRaw.begin(); it != tmpRaw.end(); ++it)
+    {
+        delete it->second;
+    }
+    for (auto it = tmpAcct.begin(); it != tmpAcct.end(); ++it)
+    {
+        delete it->second;
+    }
+    for (auto it = tmpClr.begin(); it != tmpClr.end(); ++it)
+    {
+        delete it->second;
+    }
+    for (auto it = tmpExec.begin(); it != tmpExec.end(); ++it)
+    {
+        delete it->second;
+    }
 
-	aux::ExchLogger::instance()->note("WideParamsDataStorage destroyed");
+    aux::ExchLogger::instance()->note("WideParamsDataStorage destroyed");
 }
 
 void WideParamsDataStorage::bindStorage(DataSaver *storage)
 {
-	assert(nullptr == storage_);
-	assert(nullptr != storage);
+    assert(nullptr == storage_);
+    assert(nullptr != storage);
 
-	storage_ = storage;
+    storage_ = storage;
 }
 
 // ============================================================================
 // Read operations - use shared (read) locks for concurrent access
 // ============================================================================
 
-void WideParamsDataStorage::get(const SourceIdT &id, StringT *val)const
+void WideParamsDataStorage::get(const SourceIdT &id, StringT *val) const
 {
-	// Shared read lock - allows concurrent readers
-	oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
-	StringsT::const_iterator it = strings_.find(id);
-	if(strings_.end() == it)
-		throw std::runtime_error("WideParamsDataStorage::get(StringT): string not found!");
-	*val = *(const_cast<StringT *>(it->second));
+    // Shared read lock - allows concurrent readers
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    StringsT::const_iterator it = strings_.find(id);
+    if (strings_.end() == it)
+    {
+        throw std::runtime_error("WideParamsDataStorage::get(StringT): string not found!");
+    }
+    *val = *(const_cast<StringT *>(it->second));
 }
 
-void WideParamsDataStorage::get(const SourceIdT &id, RawDataEntry *val)const
+void WideParamsDataStorage::get(const SourceIdT &id, RawDataEntry *val) const
 {
-	// Shared read lock - allows concurrent readers
-	oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
-	RawDataT::const_iterator it = rawDatas_.find(id);
-	if(rawDatas_.end() == it)
-		throw std::runtime_error("WideParamsDataStorage::get(RawDataEntry): rawData not found!");
-	*val = *(const_cast<RawDataEntry *>(it->second));
+    // Shared read lock - allows concurrent readers
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    RawDataT::const_iterator it = rawDatas_.find(id);
+    if (rawDatas_.end() == it)
+    {
+        throw std::runtime_error("WideParamsDataStorage::get(RawDataEntry): rawData not found!");
+    }
+    *val = *(const_cast<RawDataEntry *>(it->second));
 }
 
-void WideParamsDataStorage::get(const SourceIdT &id, InstrumentEntry *val)const
+void WideParamsDataStorage::get(const SourceIdT &id, InstrumentEntry *val) const
 {
-	// Shared read lock - allows concurrent readers
-	oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
-	InstrumentsT::const_iterator it = instruments_.find(id);
-	if(instruments_.end() == it)
-		throw std::runtime_error("WideParamsDataStorage::get(InstrumentEntry): instrument not found!");
-	*val = *(const_cast<InstrumentEntry *>(it->second));
+    // Shared read lock - allows concurrent readers
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    InstrumentsT::const_iterator it = instruments_.find(id);
+    if (instruments_.end() == it)
+    {
+        throw std::runtime_error("WideParamsDataStorage::get(InstrumentEntry): instrument not found!");
+    }
+    *val = *(const_cast<InstrumentEntry *>(it->second));
 }
 
-void WideParamsDataStorage::get(const SourceIdT &id, AccountEntry *val)const
+void WideParamsDataStorage::get(const SourceIdT &id, AccountEntry *val) const
 {
-	// Shared read lock - allows concurrent readers
-	oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
-	AccountsT::const_iterator it = accounts_.find(id);
-	if(accounts_.end() == it)
-		throw std::runtime_error("WideParamsDataStorage::get(AccountEntry): account not found!");
-	*val = *(const_cast<AccountEntry *>(it->second));
+    // Shared read lock - allows concurrent readers
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    AccountsT::const_iterator it = accounts_.find(id);
+    if (accounts_.end() == it)
+    {
+        throw std::runtime_error("WideParamsDataStorage::get(AccountEntry): account not found!");
+    }
+    *val = *(const_cast<AccountEntry *>(it->second));
 }
 
-void WideParamsDataStorage::get(const SourceIdT &id, ClearingEntry *val)const
+void WideParamsDataStorage::get(const SourceIdT &id, ClearingEntry *val) const
 {
-	// Shared read lock - allows concurrent readers
-	oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
-	ClearingsT::const_iterator it = clearings_.find(id);
-	if(clearings_.end() == it)
-		throw std::runtime_error("WideParamsDataStorage::get(ClearingEntry): clearing not found!");
-	*val = *(const_cast<ClearingEntry *>(it->second));
+    // Shared read lock - allows concurrent readers
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    ClearingsT::const_iterator it = clearings_.find(id);
+    if (clearings_.end() == it)
+    {
+        throw std::runtime_error("WideParamsDataStorage::get(ClearingEntry): clearing not found!");
+    }
+    *val = *(const_cast<ClearingEntry *>(it->second));
 }
 
-void WideParamsDataStorage::get(const SourceIdT &id, ExecutionsT **val)const
+void WideParamsDataStorage::get(const SourceIdT &id, ExecutionsT **val) const
 {
-	// Shared read lock - allows concurrent readers
-	oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
-	ExecutionListsT::const_iterator it = executions_.find(id);
-	if(executions_.end() == it)
-		throw std::runtime_error("WideParamsDataStorage::get(ExecutionsT): execution list not found!");
-	*val = (const_cast<ExecutionsT *>(it->second));
+    // Shared read lock - allows concurrent readers
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    ExecutionListsT::const_iterator it = executions_.find(id);
+    if (executions_.end() == it)
+    {
+        throw std::runtime_error("WideParamsDataStorage::get(ExecutionsT): execution list not found!");
+    }
+    *val = (const_cast<ExecutionsT *>(it->second));
 }
 
 // ============================================================================
@@ -162,86 +187,98 @@ void WideParamsDataStorage::get(const SourceIdT &id, ExecutionsT **val)const
 
 SourceIdT WideParamsDataStorage::add(InstrumentEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
-	{
-		// Exclusive write lock
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		instruments_.insert(InstrumentsT::value_type(id, val));
-		val->id_ = id;
-		instrumentsBySymbol_[val->symbol_] = id;
-	}
-	if(nullptr != storage_)
-		storage_->save(*val);
-	return id;
+    SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        instruments_.insert(InstrumentsT::value_type(id, val));
+        val->id_ = id;
+        instrumentsBySymbol_[val->symbol_] = id;
+    }
+    if (nullptr != storage_)
+    {
+        storage_->save(*val);
+    }
+    return id;
 }
 
 SourceIdT WideParamsDataStorage::add(StringT *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 0);
-	{
-		// Exclusive write lock
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		strings_.insert(StringsT::value_type(id, val));
-	}
-	if(nullptr != storage_)
-		storage_->save(id, *val);
-	return id;
+    SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 0);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        strings_.insert(StringsT::value_type(id, val));
+    }
+    if (nullptr != storage_)
+    {
+        storage_->save(id, *val);
+    }
+    return id;
 }
 
 SourceIdT WideParamsDataStorage::add(RawDataEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
-	{
-		// Exclusive write lock
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		rawDatas_.insert(RawDataT::value_type(id, val));
-		val->id_ = id;
-	}
-	if(nullptr != storage_)
-		storage_->save(*val);
-	return id;
+    SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        rawDatas_.insert(RawDataT::value_type(id, val));
+        val->id_ = id;
+    }
+    if (nullptr != storage_)
+    {
+        storage_->save(*val);
+    }
+    return id;
 }
 
 SourceIdT WideParamsDataStorage::add(AccountEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
-	{
-		// Exclusive write lock
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		accounts_.insert(AccountsT::value_type(id, val));
-		val->id_ = id;
-		accountsByName_[val->account_] = id;
-	}
-	if(nullptr != storage_)
-		storage_->save(*val);
-	return id;
+    SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        accounts_.insert(AccountsT::value_type(id, val));
+        val->id_ = id;
+        accountsByName_[val->account_] = id;
+    }
+    if (nullptr != storage_)
+    {
+        storage_->save(*val);
+    }
+    return id;
 }
 
 SourceIdT WideParamsDataStorage::add(ClearingEntry *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
-	{
-		// Exclusive write lock
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		clearings_.insert(ClearingsT::value_type(id, val));
-		val->id_ = id;
-	}
-	if(nullptr != storage_)
-		storage_->save(*val);
-	return id;
+    SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        clearings_.insert(ClearingsT::value_type(id, val));
+        val->id_ = id;
+    }
+    if (nullptr != storage_)
+    {
+        storage_->save(*val);
+    }
+    return id;
 }
 
 SourceIdT WideParamsDataStorage::add(ExecutionsT *val)
 {
-	SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
-	{
-		// Exclusive write lock
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		executions_.insert(ExecutionListsT::value_type(id, val));
-	}
-	if(nullptr != storage_)
-		storage_->save(*val);
-	return id;
+    SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        executions_.insert(ExecutionListsT::value_type(id, val));
+    }
+    if (nullptr != storage_)
+    {
+        storage_->save(*val);
+    }
+    return id;
 }
 
 // ============================================================================
@@ -250,62 +287,62 @@ SourceIdT WideParamsDataStorage::add(ExecutionsT *val)
 
 void WideParamsDataStorage::restore(InstrumentEntry *val)
 {
-	// Atomically update subscrCounter_ with exponential backoff
-	casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
-	{
-		// Exclusive write lock
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		instruments_.insert(InstrumentsT::value_type(val->id_, val));
-		instrumentsBySymbol_[val->symbol_] = val->id_;
-	}
+    // Atomically update subscrCounter_ with exponential backoff
+    casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        instruments_.insert(InstrumentsT::value_type(val->id_, val));
+        instrumentsBySymbol_[val->symbol_] = val->id_;
+    }
 }
 
-void WideParamsDataStorage::restore(const IdT& id, StringT *val)
+void WideParamsDataStorage::restore(const IdT &id, StringT *val)
 {
-	// Atomically update subscrCounter_ with exponential backoff
-	casUpdateWithBackoff(subscrCounter_, id.id_ + 1);
-	{
-		// Exclusive write lock
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		strings_.insert(StringsT::value_type(id, val));
-	}
+    // Atomically update subscrCounter_ with exponential backoff
+    casUpdateWithBackoff(subscrCounter_, id.id_ + 1);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        strings_.insert(StringsT::value_type(id, val));
+    }
 }
 
 void WideParamsDataStorage::restore(RawDataEntry *val)
 {
-	// Atomically update subscrCounter_ with exponential backoff
-	casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
-	{
-		// Exclusive write lock
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		rawDatas_.insert(RawDataT::value_type(val->id_, val));
-	}
+    // Atomically update subscrCounter_ with exponential backoff
+    casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        rawDatas_.insert(RawDataT::value_type(val->id_, val));
+    }
 }
 
 void WideParamsDataStorage::restore(AccountEntry *val)
 {
-	// Atomically update subscrCounter_ with exponential backoff
-	casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
-	{
-		// Exclusive write lock
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		accounts_.insert(AccountsT::value_type(val->id_, val));
-		accountsByName_[val->account_] = val->id_;
-	}
+    // Atomically update subscrCounter_ with exponential backoff
+    casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        accounts_.insert(AccountsT::value_type(val->id_, val));
+        accountsByName_[val->account_] = val->id_;
+    }
 }
 
 void WideParamsDataStorage::restore(ClearingEntry *val)
 {
-	// Atomically update subscrCounter_ with exponential backoff
-	casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
-	{
-		// Exclusive write lock
-		oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-		clearings_.insert(ClearingsT::value_type(val->id_, val));
-	}
+    // Atomically update subscrCounter_ with exponential backoff
+    casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        clearings_.insert(ClearingsT::value_type(val->id_, val));
+    }
 }
 
 void WideParamsDataStorage::restore(ExecutionsT * /*val*/)
 {
-	///todo: implement
+    ///todo: implement
 }

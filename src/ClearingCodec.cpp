@@ -16,8 +16,9 @@
 using namespace COP;
 using namespace COP::Codec;
 
-namespace{
-	const int BUFFER_SIZE = 128;
+namespace
+{
+const int BUFFER_SIZE = 128;
 }
 
 /*	
@@ -29,32 +30,28 @@ namespace{
 	};
 */
 
-ClearingCodec::ClearingCodec(void)
-{
-}
+ClearingCodec::ClearingCodec(void) {}
 
-ClearingCodec::~ClearingCodec(void)
-{
-}
+ClearingCodec::~ClearingCodec(void) {}
 
 void ClearingCodec::encode(const ClearingEntry &val, std::string *buf, IdT *id, u32 *version)
 {
-	assert(nullptr != buf);
-	assert(nullptr != id);
-	assert(nullptr != version);
+    assert(nullptr != buf);
+    assert(nullptr != id);
+    assert(nullptr != version);
 
-	*id = val.id_;
-	*version = 0;
-	buf->reserve(BUFFER_SIZE);
-	StringTCodec::serialize(val.firm_, buf);
+    *id = val.id_;
+    *version = 0;
+    buf->reserve(BUFFER_SIZE);
+    StringTCodec::serialize(val.firm_, buf);
 }
 
-void ClearingCodec::decode(const IdT& id, u32 /*version*/, const char *buf, size_t size, ClearingEntry *val)
+void ClearingCodec::decode(const IdT &id, u32 /*version*/, const char *buf, size_t size, ClearingEntry *val)
 {
-	assert(nullptr != buf);
-	assert(nullptr != val);
-	assert(0 < size);
+    assert(nullptr != buf);
+    assert(nullptr != val);
+    assert(0 < size);
 
-	val->id_ = id;
-	/*const char *p = */StringTCodec::restore(buf, size, &(val->firm_));
+    val->id_ = id;
+    /*const char *p = */ StringTCodec::restore(buf, size, &(val->firm_));
 }

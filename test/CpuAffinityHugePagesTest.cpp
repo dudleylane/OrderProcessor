@@ -16,37 +16,43 @@
 
 using namespace COP;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // CpuAffinity Tests
 // =============================================================================
 
-TEST(CpuAffinityTest, GetAvailableCoresReturnsPositive) {
+TEST(CpuAffinityTest, GetAvailableCoresReturnsPositive)
+{
     int cores = CpuAffinity::getAvailableCores();
     EXPECT_GT(cores, 0);
 }
 
-TEST(CpuAffinityTest, GetThreadAffinityReturnsCores) {
+TEST(CpuAffinityTest, GetThreadAffinityReturnsCores)
+{
     std::vector<int> coreIds;
     bool success = CpuAffinity::getThreadAffinity(coreIds);
     EXPECT_TRUE(success);
     EXPECT_GT(coreIds.size(), 0u);
 
     // All core IDs should be non-negative
-    for (int id : coreIds) {
+    for (int id : coreIds)
+    {
         EXPECT_GE(id, 0);
     }
 }
 
-TEST(CpuAffinityTest, PinAndResetRoundTrip) {
+TEST(CpuAffinityTest, PinAndResetRoundTrip)
+{
     // Save original affinity
     std::vector<int> original;
     CpuAffinity::getThreadAffinity(original);
 
     // Pin to core 0
     bool pinned = CpuAffinity::pinThreadToCore(0);
-    if (pinned) {
+    if (pinned)
+    {
         std::vector<int> afterPin;
         CpuAffinity::getThreadAffinity(afterPin);
         ASSERT_EQ(1u, afterPin.size());
@@ -56,22 +62,26 @@ TEST(CpuAffinityTest, PinAndResetRoundTrip) {
 
     // Reset to all cores
     bool reset = CpuAffinity::resetAffinity();
-    if (reset) {
+    if (reset)
+    {
         std::vector<int> afterReset;
         CpuAffinity::getThreadAffinity(afterReset);
         EXPECT_GE(afterReset.size(), 1u);
     }
 }
 
-TEST(CpuAffinityTest, PinToMultipleCores) {
-    std::vector<int> cores = {0};
-    if (CpuAffinity::getAvailableCores() > 1) {
+TEST(CpuAffinityTest, PinToMultipleCores)
+{
+    std::vector<int> cores = { 0 };
+    if (CpuAffinity::getAvailableCores() > 1)
+    {
         cores.push_back(1);
     }
 
     bool success = CpuAffinity::pinThreadToCores(cores);
     // May fail without privileges
-    if (success) {
+    if (success)
+    {
         std::vector<int> actual;
         CpuAffinity::getThreadAffinity(actual);
         EXPECT_EQ(cores.size(), actual.size());
@@ -84,7 +94,8 @@ TEST(CpuAffinityTest, PinToMultipleCores) {
 // ScopedCpuAffinity RAII Tests
 // =============================================================================
 
-TEST(ScopedCpuAffinityTest, RestoresAffinityOnDestruction) {
+TEST(ScopedCpuAffinityTest, RestoresAffinityOnDestruction)
+{
     std::vector<int> before;
     CpuAffinity::getThreadAffinity(before);
 
@@ -100,7 +111,8 @@ TEST(ScopedCpuAffinityTest, RestoresAffinityOnDestruction) {
     EXPECT_EQ(before.size(), after.size());
 }
 
-TEST(ScopedCpuAffinityTest, ManualRestore) {
+TEST(ScopedCpuAffinityTest, ManualRestore)
+{
     std::vector<int> before;
     CpuAffinity::getThreadAffinity(before);
 
@@ -116,16 +128,18 @@ TEST(ScopedCpuAffinityTest, ManualRestore) {
 // HugePages Tests
 // =============================================================================
 
-TEST(HugePagesTest, RoundUpToHugePage) {
+TEST(HugePagesTest, RoundUpToHugePage)
+{
     EXPECT_EQ(HugePages::HUGE_PAGE_SIZE, HugePages::roundUpToHugePage(1));
     EXPECT_EQ(HugePages::HUGE_PAGE_SIZE, HugePages::roundUpToHugePage(HugePages::HUGE_PAGE_SIZE));
     EXPECT_EQ(2 * HugePages::HUGE_PAGE_SIZE, HugePages::roundUpToHugePage(HugePages::HUGE_PAGE_SIZE + 1));
     EXPECT_EQ(HugePages::HUGE_PAGE_SIZE, HugePages::roundUpToHugePage(4096));
 }
 
-TEST(HugePagesTest, AllocateWithFallback) {
+TEST(HugePagesTest, AllocateWithFallback)
+{
     // Should always succeed — falls back to regular pages if huge pages unavailable
-    void* ptr = HugePages::allocate(4096, true);
+    void *ptr = HugePages::allocate(4096, true);
     ASSERT_NE(nullptr, ptr);
 
     std::memset(ptr, 0xAB, 4096);
@@ -133,32 +147,37 @@ TEST(HugePagesTest, AllocateWithFallback) {
     HugePages::deallocate(ptr, 4096);
 }
 
-TEST(HugePagesTest, DeallocateNullIsSafe) {
+TEST(HugePagesTest, DeallocateNullIsSafe)
+{
     HugePages::deallocate(nullptr, 4096);
     SUCCEED();
 }
 
-TEST(HugePagesTest, GetConfiguredCountReturnsValidValue) {
+TEST(HugePagesTest, GetConfiguredCountReturnsValidValue)
+{
     int count = HugePages::getConfiguredCount();
     // Returns -1 on error, or >= 0 for the actual count
     EXPECT_GE(count, -1);
 }
 
-TEST(HugePagesTest, GetFreeCountReturnsValidValue) {
+TEST(HugePagesTest, GetFreeCountReturnsValidValue)
+{
     int count = HugePages::getFreeCount();
     EXPECT_GE(count, -1);
 }
 
-TEST(HugePagesTest, IsAvailableDoesNotCrash) {
+TEST(HugePagesTest, IsAvailableDoesNotCrash)
+{
     // Just verify it doesn't crash — result depends on system config
     bool available = HugePages::isAvailable();
     (void)available;
     SUCCEED();
 }
 
-TEST(HugePagesTest, AllocateLargeRegion) {
+TEST(HugePagesTest, AllocateLargeRegion)
+{
     const size_t size = 4 * 1024 * 1024; // 4MB
-    void* ptr = HugePages::allocate(size, true);
+    void *ptr = HugePages::allocate(size, true);
     ASSERT_NE(nullptr, ptr);
 
     // Touch all pages
@@ -167,10 +186,12 @@ TEST(HugePagesTest, AllocateLargeRegion) {
     HugePages::deallocate(ptr, size);
 }
 
-TEST(HugePagesTest, AllocateWithoutFallback) {
+TEST(HugePagesTest, AllocateWithoutFallback)
+{
     // Without fallback, may return nullptr if huge pages aren't configured
-    void* ptr = HugePages::allocate(4096, false);
-    if (ptr) {
+    void *ptr = HugePages::allocate(4096, false);
+    if (ptr)
+    {
         HugePages::deallocate(ptr, 4096);
     }
     // Either way, should not crash

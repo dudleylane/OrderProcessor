@@ -20,36 +20,48 @@ using namespace COP;
 using namespace COP::Queues;
 using namespace test;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Observer - captures events for verification
 // =============================================================================
 
-class TestInQueueObserver : public InQueueProcessor {
+class TestInQueueObserver : public InQueueProcessor
+{
 public:
-    bool process() override { return false; }
-
-    void onEvent(const std::string &source, const OrderEvent &evnt) override {
-        orders_.push_back({source, evnt});
-    }
-    void onEvent(const std::string &source, const OrderCancelEvent &evnt) override {
-        orderCancels_.push_back({source, evnt});
-    }
-    void onEvent(const std::string &source, const OrderReplaceEvent &evnt) override {
-        orderReplaces_.push_back({source, evnt});
-    }
-    void onEvent(const std::string &source, const OrderChangeStateEvent &evnt) override {
-        orderStates_.push_back({source, evnt});
-    }
-    void onEvent(const std::string &source, const ProcessEvent &evnt) override {
-        processes_.push_back({source, evnt});
-    }
-    void onEvent(const std::string &source, const TimerEvent &evnt) override {
-        timers_.push_back({source, evnt});
+    bool process() override
+    {
+        return false;
     }
 
-    void clearAll() {
+    void onEvent(const std::string &source, const OrderEvent &evnt) override
+    {
+        orders_.push_back({ source, evnt });
+    }
+    void onEvent(const std::string &source, const OrderCancelEvent &evnt) override
+    {
+        orderCancels_.push_back({ source, evnt });
+    }
+    void onEvent(const std::string &source, const OrderReplaceEvent &evnt) override
+    {
+        orderReplaces_.push_back({ source, evnt });
+    }
+    void onEvent(const std::string &source, const OrderChangeStateEvent &evnt) override
+    {
+        orderStates_.push_back({ source, evnt });
+    }
+    void onEvent(const std::string &source, const ProcessEvent &evnt) override
+    {
+        processes_.push_back({ source, evnt });
+    }
+    void onEvent(const std::string &source, const TimerEvent &evnt) override
+    {
+        timers_.push_back({ source, evnt });
+    }
+
+    void clearAll()
+    {
         orders_.clear();
         orderCancels_.clear();
         orderReplaces_.clear();
@@ -70,14 +82,17 @@ public:
 // Test Fixture
 // =============================================================================
 
-class IncomingQueuesTest : public ::testing::Test {
+class IncomingQueuesTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         observer_ = std::make_unique<TestInQueueObserver>();
         queues_ = std::make_unique<IncomingQueues>();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         queues_.reset();
         observer_.reset();
     }
@@ -91,15 +106,18 @@ protected:
 // Basic Queue Operations Tests
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, EmptyQueueHasSizeZero) {
+TEST_F(IncomingQueuesTest, EmptyQueueHasSizeZero)
+{
     EXPECT_EQ(0u, queues_->size());
 }
 
-TEST_F(IncomingQueuesTest, TopOnEmptyQueueReturnsFalse) {
+TEST_F(IncomingQueuesTest, TopOnEmptyQueueReturnsFalse)
+{
     EXPECT_FALSE(queues_->top(observer_.get()));
 }
 
-TEST_F(IncomingQueuesTest, PopOnEmptyQueueNoThrow) {
+TEST_F(IncomingQueuesTest, PopOnEmptyQueueNoThrow)
+{
     queues_->pop();
     SUCCEED();
 }
@@ -108,14 +126,16 @@ TEST_F(IncomingQueuesTest, PopOnEmptyQueueNoThrow) {
 // Push OrderEvent Tests
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, PushOrderEventIncrementsSize) {
+TEST_F(IncomingQueuesTest, PushOrderEventIncrementsSize)
+{
     OrderEvent ord;
     ord.id_ = IdT(1, 1);
     queues_->push("source1", ord);
     EXPECT_EQ(1u, queues_->size());
 }
 
-TEST_F(IncomingQueuesTest, TopDeliverOrderEvent) {
+TEST_F(IncomingQueuesTest, TopDeliverOrderEvent)
+{
     OrderEvent ord;
     ord.id_ = IdT(1, 1);
     queues_->push("source1", ord);
@@ -130,7 +150,8 @@ TEST_F(IncomingQueuesTest, TopDeliverOrderEvent) {
 // Push Cancel Event Tests
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, PushCancelEventIncrementsSize) {
+TEST_F(IncomingQueuesTest, PushCancelEventIncrementsSize)
+{
     OrderCancelEvent cncl;
     cncl.id_ = IdT(1, 2);
     queues_->push("source2", cncl);
@@ -141,7 +162,8 @@ TEST_F(IncomingQueuesTest, PushCancelEventIncrementsSize) {
 // Push Replace Event Tests
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, PushReplaceEventIncrementsSize) {
+TEST_F(IncomingQueuesTest, PushReplaceEventIncrementsSize)
+{
     OrderReplaceEvent rpl;
     rpl.id_ = IdT(1, 3);
     queues_->push("source3", rpl);
@@ -152,7 +174,8 @@ TEST_F(IncomingQueuesTest, PushReplaceEventIncrementsSize) {
 // Push ChangeState Event Tests
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, PushChangeStateEventIncrementsSize) {
+TEST_F(IncomingQueuesTest, PushChangeStateEventIncrementsSize)
+{
     OrderChangeStateEvent st;
     st.id_ = IdT(1, 4);
     queues_->push("source4", st);
@@ -163,7 +186,8 @@ TEST_F(IncomingQueuesTest, PushChangeStateEventIncrementsSize) {
 // Push Process Event Tests
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, PushProcessEventIncrementsSize) {
+TEST_F(IncomingQueuesTest, PushProcessEventIncrementsSize)
+{
     ProcessEvent pr;
     pr.id_ = IdT(1, 5);
     queues_->push("source5", pr);
@@ -174,7 +198,8 @@ TEST_F(IncomingQueuesTest, PushProcessEventIncrementsSize) {
 // Push Timer Event Tests
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, PushTimerEventIncrementsSize) {
+TEST_F(IncomingQueuesTest, PushTimerEventIncrementsSize)
+{
     TimerEvent tr;
     tr.id_ = IdT(1, 6);
     queues_->push("source6", tr);
@@ -185,11 +210,15 @@ TEST_F(IncomingQueuesTest, PushTimerEventIncrementsSize) {
 // FIFO Order Tests
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, EventsAreDeliveredInFIFOOrder) {
+TEST_F(IncomingQueuesTest, EventsAreDeliveredInFIFOOrder)
+{
     // Push multiple events
-    OrderEvent ord1; ord1.id_ = IdT(1, 1);
-    OrderEvent ord2; ord2.id_ = IdT(2, 1);
-    OrderCancelEvent cncl1; cncl1.id_ = IdT(1, 2);
+    OrderEvent ord1;
+    ord1.id_ = IdT(1, 1);
+    OrderEvent ord2;
+    ord2.id_ = IdT(2, 1);
+    OrderCancelEvent cncl1;
+    cncl1.id_ = IdT(1, 2);
 
     queues_->push("1", ord1);
     queues_->push("2", cncl1);
@@ -204,7 +233,8 @@ TEST_F(IncomingQueuesTest, EventsAreDeliveredInFIFOOrder) {
     EXPECT_EQ(IdT(1, 1), observer_->orders_.front().second.id_);
 }
 
-TEST_F(IncomingQueuesTest, PopDecrementsSize) {
+TEST_F(IncomingQueuesTest, PopDecrementsSize)
+{
     OrderEvent ord;
     ord.id_ = IdT(1, 1);
     queues_->push("source", ord);
@@ -218,14 +248,21 @@ TEST_F(IncomingQueuesTest, PopDecrementsSize) {
 // Complete Event Type Sequence Test
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, AllEventTypesDeliveredInOrder) {
+TEST_F(IncomingQueuesTest, AllEventTypesDeliveredInOrder)
+{
     // Create and push all event types
-    OrderEvent ord1; ord1.id_ = IdT(1, 1);
-    OrderCancelEvent cncl1; cncl1.id_ = IdT(1, 2);
-    OrderReplaceEvent rpl1; rpl1.id_ = IdT(1, 3);
-    OrderChangeStateEvent st1; st1.id_ = IdT(1, 4);
-    ProcessEvent pr1; pr1.id_ = IdT(1, 5);
-    TimerEvent tr1; tr1.id_ = IdT(1, 6);
+    OrderEvent ord1;
+    ord1.id_ = IdT(1, 1);
+    OrderCancelEvent cncl1;
+    cncl1.id_ = IdT(1, 2);
+    OrderReplaceEvent rpl1;
+    rpl1.id_ = IdT(1, 3);
+    OrderChangeStateEvent st1;
+    st1.id_ = IdT(1, 4);
+    ProcessEvent pr1;
+    pr1.id_ = IdT(1, 5);
+    TimerEvent tr1;
+    tr1.id_ = IdT(1, 6);
 
     queues_->push("1", ord1);
     queues_->push("2", cncl1);
@@ -297,9 +334,12 @@ TEST_F(IncomingQueuesTest, AllEventTypesDeliveredInOrder) {
 // Multiple Events of Same Type Test
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, MultipleOrderEventsDeliveredInOrder) {
-    OrderEvent ord1; ord1.id_ = IdT(1, 1);
-    OrderEvent ord2; ord2.id_ = IdT(2, 1);
+TEST_F(IncomingQueuesTest, MultipleOrderEventsDeliveredInOrder)
+{
+    OrderEvent ord1;
+    ord1.id_ = IdT(1, 1);
+    OrderEvent ord2;
+    ord2.id_ = IdT(2, 1);
 
     queues_->push("source1", ord1);
     queues_->push("source2", ord2);
@@ -319,10 +359,12 @@ TEST_F(IncomingQueuesTest, MultipleOrderEventsDeliveredInOrder) {
 // Large Queue Test
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, HandlesLargeNumberOfEvents) {
+TEST_F(IncomingQueuesTest, HandlesLargeNumberOfEvents)
+{
     const size_t numEvents = 1000;
 
-    for (size_t i = 0; i < numEvents; ++i) {
+    for (size_t i = 0; i < numEvents; ++i)
+    {
         OrderEvent ord;
         ord.id_ = IdT(1, static_cast<u64>(i));
         queues_->push("source", ord);
@@ -331,7 +373,8 @@ TEST_F(IncomingQueuesTest, HandlesLargeNumberOfEvents) {
     EXPECT_EQ(numEvents, static_cast<size_t>(queues_->size()));
 
     // Verify all can be popped
-    for (size_t i = 0; i < numEvents; ++i) {
+    for (size_t i = 0; i < numEvents; ++i)
+    {
         EXPECT_TRUE(queues_->top(observer_.get()));
         observer_->clearAll();
         queues_->pop();
@@ -344,7 +387,8 @@ TEST_F(IncomingQueuesTest, HandlesLargeNumberOfEvents) {
 // Top Is Idempotent Test
 // =============================================================================
 
-TEST_F(IncomingQueuesTest, TopIsIdempotentWithoutPop) {
+TEST_F(IncomingQueuesTest, TopIsIdempotentWithoutPop)
+{
     OrderEvent ord;
     ord.id_ = IdT(1, 1);
     queues_->push("source", ord);

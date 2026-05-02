@@ -16,18 +16,20 @@
 #include "Singleton.h"
 #include <atomic>
 
-namespace COP{
+namespace COP
+{
 
 class IdTValueGenerator
 {
 public:
-	IdTValueGenerator(void);
-	~IdTValueGenerator(void);
+    IdTValueGenerator(void);
+    ~IdTValueGenerator(void);
 
-	IdT getId();
+    IdT getId();
+
 private:
-	std::atomic<u64> counter_;
+    std::atomic<u64> counter_;
 };
 
 typedef aux::Singleton<IdTValueGenerator> IdTGenerator;
-}
+} // namespace COP

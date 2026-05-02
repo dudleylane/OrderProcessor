@@ -16,25 +16,30 @@
 #include <variant>
 #include "TypesDef.h"
 
-namespace COP::PG {
+namespace COP::PG
+{
 
-struct InstrumentWrite {
+struct InstrumentWrite
+{
     std::string symbol;
     std::string securityId;
     std::string securityIdSource;
 };
 
-struct AccountWrite {
+struct AccountWrite
+{
     std::string account;
     std::string firm;
-    std::string type;  // PG enum string
+    std::string type; // PG enum string
 };
 
-struct ClearingWrite {
+struct ClearingWrite
+{
     std::string firm;
 };
 
-struct OrderWrite {
+struct OrderWrite
+{
     u64 orderId;
     u32 orderDate;
     std::string clOrderId;
@@ -45,13 +50,13 @@ struct OrderWrite {
     std::string accountName;
     std::string clearingFirm;
 
-    std::string side;       // PG enum string
-    std::string ordType;    // PG enum string
-    std::string status;     // PG enum string
-    std::string tif;        // PG enum string
-    std::string capacity;   // PG enum string
-    std::string currency;   // PG enum string
-    std::string settlType;  // PG enum string
+    std::string side;      // PG enum string
+    std::string ordType;   // PG enum string
+    std::string status;    // PG enum string
+    std::string tif;       // PG enum string
+    std::string capacity;  // PG enum string
+    std::string currency;  // PG enum string
+    std::string settlType; // PG enum string
 
     double price;
     double stopPx;

@@ -16,7 +16,8 @@
 #include <cstddef>
 #include <concepts>
 
-namespace COP {
+namespace COP
+{
 
 /**
  * Cache line size constant for x86-64 processors.
@@ -33,50 +34,59 @@ constexpr std::size_t CACHE_LINE_SIZE = 64;
  *   counter.value.fetch_add(1, std::memory_order_relaxed);
  */
 /// Requires T to be trivially copyable — a prerequisite for std::atomic<T>.
-template<typename T>
+template <typename T>
     requires std::is_trivially_copyable_v<T>
-struct alignas(CACHE_LINE_SIZE) CacheAlignedAtomic {
+struct alignas(CACHE_LINE_SIZE) CacheAlignedAtomic
+{
     std::atomic<T> value;
 
     CacheAlignedAtomic() : value{} {}
-    explicit CacheAlignedAtomic(T initial) : value{initial} {}
+    explicit CacheAlignedAtomic(T initial) : value{ initial } {}
 
     // Convenience operators — default to relaxed ordering.
     // Callers requiring stronger ordering must pass it explicitly.
-    T load(std::memory_order order = std::memory_order_relaxed) const noexcept {
+    T load(std::memory_order order = std::memory_order_relaxed) const noexcept
+    {
         return value.load(order);
     }
 
-    void store(T desired, std::memory_order order = std::memory_order_relaxed) noexcept {
+    void store(T desired, std::memory_order order = std::memory_order_relaxed) noexcept
+    {
         value.store(desired, order);
     }
 
-    T fetch_add(T arg, std::memory_order order = std::memory_order_relaxed) noexcept {
+    T fetch_add(T arg, std::memory_order order = std::memory_order_relaxed) noexcept
+    {
         return value.fetch_add(arg, order);
     }
 
-    T fetch_sub(T arg, std::memory_order order = std::memory_order_relaxed) noexcept {
+    T fetch_sub(T arg, std::memory_order order = std::memory_order_relaxed) noexcept
+    {
         return value.fetch_sub(arg, order);
     }
 
-    T exchange(T desired, std::memory_order order = std::memory_order_relaxed) noexcept {
+    T exchange(T desired, std::memory_order order = std::memory_order_relaxed) noexcept
+    {
         return value.exchange(desired, order);
     }
 
-    bool compare_exchange_weak(T& expected, T desired,
-                               std::memory_order success = std::memory_order_relaxed,
-                               std::memory_order failure = std::memory_order_relaxed) noexcept {
+    bool compare_exchange_weak(T &expected, T desired, std::memory_order success = std::memory_order_relaxed,
+                               std::memory_order failure = std::memory_order_relaxed) noexcept
+    {
         return value.compare_exchange_weak(expected, desired, success, failure);
     }
 
-    bool compare_exchange_strong(T& expected, T desired,
-                                 std::memory_order success = std::memory_order_relaxed,
-                                 std::memory_order failure = std::memory_order_relaxed) noexcept {
+    bool compare_exchange_strong(T &expected, T desired, std::memory_order success = std::memory_order_relaxed,
+                                 std::memory_order failure = std::memory_order_relaxed) noexcept
+    {
         return value.compare_exchange_strong(expected, desired, success, failure);
     }
 
     // Implicit conversion — uses relaxed ordering for consistency with other defaults
-    operator T() const noexcept { return value.load(std::memory_order_relaxed); }
+    operator T() const noexcept
+    {
+        return value.load(std::memory_order_relaxed);
+    }
 };
 
 // Compile-time validation: ensure CacheAlignedAtomic actually has cache-line alignment

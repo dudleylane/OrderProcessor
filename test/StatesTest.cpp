@@ -37,9 +37,11 @@ using test::OrderStateWrapper;
 // Test Helpers
 // =============================================================================
 
-namespace {
+namespace
+{
 
-std::unique_ptr<OrderEntry> createCorrectOrder() {
+std::unique_ptr<OrderEntry> createCorrectOrder()
+{
     SourceIdT srcId, destId, accountId, clearingId, instrument, clOrdId, origClOrderID, execList;
 
     srcId = WideDataStorage::instance()->add(new StringT("CLNT"));
@@ -88,7 +90,8 @@ std::unique_ptr<OrderEntry> createCorrectOrder() {
     return ptr;
 }
 
-std::unique_ptr<OrderEntry> createReplOrder() {
+std::unique_ptr<OrderEntry> createReplOrder()
+{
     SourceIdT srcId, destId, accountId, clearingId, instrument, clOrdId, origClOrderID, execList;
 
     srcId = WideDataStorage::instance()->add(new StringT("CLNT1"));
@@ -141,20 +144,25 @@ std::unique_ptr<OrderEntry> createReplOrder() {
 
 static int clOrderIdCounter = 0;
 
-void assignClOrderId(OrderEntry* order) {
+void assignClOrderId(OrderEntry *order)
+{
     char buf[64];
     snprintf(buf, sizeof(buf), "TestClOrderId_%d", ++clOrderIdCounter);
     std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, buf, static_cast<u32>(strlen(buf))));
     order->clOrderId_ = WideDataStorage::instance()->add(clOrd.release());
 }
 
-void assignClOrderIdWithValue(OrderEntry* order, const std::string& val) {
-    std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
+void assignClOrderIdWithValue(OrderEntry *order, const std::string &val)
+{
+    std::unique_ptr<RawDataEntry> clOrd(
+        new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
     order->clOrderId_ = WideDataStorage::instance()->add(clOrd.release());
 }
 
-void assignOrigClOrderId(OrderEntry* order, const std::string& val) {
-    std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
+void assignOrigClOrderId(OrderEntry *order, const std::string &val)
+{
+    std::unique_ptr<RawDataEntry> clOrd(
+        new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
     order->origClOrderId_ = WideDataStorage::instance()->add(clOrd.release());
 }
 
@@ -164,9 +172,11 @@ void assignOrigClOrderId(OrderEntry* order, const std::string& val) {
 // States Test Fixture
 // =============================================================================
 
-class StatesTest : public ::testing::Test {
+class StatesTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         // Note: ExchLogger is created globally by TestMain.cpp
         WideDataStorage::create();
         SubscriptionMgr::create();
@@ -175,7 +185,8 @@ protected:
         clOrderIdCounter = 0;
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         OrderStorage::destroy();
         IdTGenerator::destroy();
         SubscriptionMgr::destroy();
@@ -188,7 +199,8 @@ protected:
 // RcvdNew to New - onOrderReceived Tests
 // =============================================================================
 
-TEST_F(StatesTest, RcvdNew2New_OnOrderReceived_NewOrderProcessed) {
+TEST_F(StatesTest, RcvdNew2New_OnOrderReceived_NewOrderProcessed)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -197,7 +209,7 @@ TEST_F(StatesTest, RcvdNew2New_OnOrderReceived_NewOrderProcessed) {
     p.checkStates("Rcvd_New", "NoCnlReplace");
     EXPECT_EQ(0u, order->orderId_.id_);
     EXPECT_EQ(0u, order->orderId_.date_);
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     EXPECT_EQ(nullptr, ord);
 
     onOrderReceived recvevnt;
@@ -220,7 +232,8 @@ TEST_F(StatesTest, RcvdNew2New_OnOrderReceived_NewOrderProcessed) {
     EXPECT_EQ(NEW_ORDSTATUS, ord->status_);
 }
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_DuplicateClOrdId) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_DuplicateClOrdId)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -241,7 +254,7 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_DuplicateClOrdId) {
 
     p.start();
     p.checkStates("Rcvd_New", "NoCnlReplace");
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
 
     onOrderReceived recvevnt;
@@ -257,12 +270,13 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_DuplicateClOrdId) {
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 }
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_InvalidSide) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_InvalidSide)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
     assignClOrderId(order.get());
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     EXPECT_EQ(nullptr, ord);
 
     p.start();
@@ -282,7 +296,8 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_InvalidSide) {
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 }
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_EmptyClOrderId) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_EmptyClOrderId)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -309,7 +324,8 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_EmptyClOrderId) {
 // RcvdNew to Rejected - onRecvOrderRejected Tests
 // =============================================================================
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnRecvOrderRejected_NewOrderProcessed) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnRecvOrderRejected_NewOrderProcessed)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -317,7 +333,7 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnRecvOrderRejected_NewOrderProcessed) {
 
     p.start();
     p.checkStates("Rcvd_New", "NoCnlReplace");
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     EXPECT_EQ(nullptr, ord);
 
     onRecvOrderRejected evnt;
@@ -336,7 +352,8 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnRecvOrderRejected_NewOrderProcessed) {
     EXPECT_EQ(REJECTED_ORDSTATUS, ord->status_);
 }
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnRecvOrderRejected_EmptyClOrderId) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnRecvOrderRejected_EmptyClOrderId)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -359,7 +376,8 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnRecvOrderRejected_EmptyClOrderId) {
     EXPECT_EQ(REJECTED_ORDSTATUS, evnt.order_->status_);
 }
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnRecvOrderRejected_InvalidValues) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnRecvOrderRejected_InvalidValues)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -386,7 +404,8 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnRecvOrderRejected_InvalidValues) {
 // RcvdNew to PendReplace - onRplOrderReceived Tests
 // =============================================================================
 
-TEST_F(StatesTest, RcvdNew2PendReplace_OnRplOrderReceived_CorrectOrderProcessed) {
+TEST_F(StatesTest, RcvdNew2PendReplace_OnRplOrderReceived_CorrectOrderProcessed)
+{
     // First create an order to be replaced
     {
         TestTransactionContext setupTrCntxt;
@@ -408,7 +427,7 @@ TEST_F(StatesTest, RcvdNew2PendReplace_OnRplOrderReceived_CorrectOrderProcessed)
     p.start();
     p.checkStates("Rcvd_New", "NoCnlReplace");
     EXPECT_FALSE(order->orderId_.isValid());
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     EXPECT_EQ(nullptr, ord);
 
     onRplOrderReceived evnt;
@@ -427,7 +446,8 @@ TEST_F(StatesTest, RcvdNew2PendReplace_OnRplOrderReceived_CorrectOrderProcessed)
     EXPECT_EQ(PENDINGREPLACE_ORDSTATUS, ord->status_);
 }
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnRplOrderReceived_EmptyOrigClOrderId) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnRplOrderReceived_EmptyOrigClOrderId)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createReplOrder());
@@ -449,7 +469,8 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnRplOrderReceived_EmptyOrigClOrderId) {
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 }
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnRplOrderReceived_UnknownOrigClOrderId) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnRplOrderReceived_UnknownOrigClOrderId)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createReplOrder());
@@ -475,7 +496,8 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnRplOrderReceived_UnknownOrigClOrderId) {
 // RcvdNew to Rejected - onRecvRplOrderRejected Tests
 // =============================================================================
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnRecvRplOrderRejected_CorrectOrderProcessed) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnRecvRplOrderRejected_CorrectOrderProcessed)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createReplOrder());
@@ -483,7 +505,7 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnRecvRplOrderRejected_CorrectOrderProcessed
 
     p.start();
     p.checkStates("Rcvd_New", "NoCnlReplace");
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     EXPECT_EQ(nullptr, ord);
 
     onRecvRplOrderRejected evnt;
@@ -506,7 +528,8 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnRecvRplOrderRejected_CorrectOrderProcessed
 // RcvdNew to Rejected - onExternalOrderRejected Tests
 // =============================================================================
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrderRejected_CorrectOrderProcessed) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrderRejected_CorrectOrderProcessed)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -514,7 +537,7 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrderRejected_CorrectOrderProcesse
 
     p.start();
     p.checkStates("Rcvd_New", "NoCnlReplace");
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     EXPECT_EQ(nullptr, ord);
 
     onExternalOrderRejected evnt;
@@ -533,7 +556,8 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrderRejected_CorrectOrderProcesse
     EXPECT_EQ(REJECTED_ORDSTATUS, ord->status_);
 }
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrderRejected_InvalidSide) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrderRejected_InvalidSide)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -560,7 +584,8 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrderRejected_InvalidSide) {
 // RcvdNew to New - onExternalOrder Tests
 // =============================================================================
 
-TEST_F(StatesTest, RcvdNew2New_OnExternalOrder_CorrectOrderProcessed) {
+TEST_F(StatesTest, RcvdNew2New_OnExternalOrder_CorrectOrderProcessed)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -569,7 +594,7 @@ TEST_F(StatesTest, RcvdNew2New_OnExternalOrder_CorrectOrderProcessed) {
     p.start();
     p.checkStates("Rcvd_New", "NoCnlReplace");
     EXPECT_FALSE(order->orderId_.isValid());
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     EXPECT_EQ(nullptr, ord);
 
     onExternalOrder evnt;
@@ -589,7 +614,8 @@ TEST_F(StatesTest, RcvdNew2New_OnExternalOrder_CorrectOrderProcessed) {
     EXPECT_EQ(NEW_ORDSTATUS, ord->status_);
 }
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrder_InvalidSide) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrder_InvalidSide)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -611,7 +637,8 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrder_InvalidSide) {
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 }
 
-TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrder_EmptyClOrderId) {
+TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrder_EmptyClOrderId)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());

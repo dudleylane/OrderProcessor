@@ -49,9 +49,11 @@ using test::DummyOrderSaver;
 // Test Helpers
 // =============================================================================
 
-namespace {
+namespace
+{
 
-std::unique_ptr<OrderEntry> createCorrectOrder(SourceIdT instr) {
+std::unique_ptr<OrderEntry> createCorrectOrder(SourceIdT instr)
+{
     SourceIdT srcId, destId, accountId, clearingId, clOrdId, origClOrderID, execList;
 
     srcId = WideDataStorage::instance()->add(new StringT("CLNT"));
@@ -97,35 +99,47 @@ std::unique_ptr<OrderEntry> createCorrectOrder(SourceIdT instr) {
 
 static int clOrderIdCounter = 0;
 
-void assignClOrderId(OrderEntry* order) {
+void assignClOrderId(OrderEntry *order)
+{
     char buf[64];
     snprintf(buf, sizeof(buf), "TestClOrderId_%d", ++clOrderIdCounter);
     std::string val(buf);
-    std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
+    std::unique_ptr<RawDataEntry> clOrd(
+        new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
     order->clOrderId_ = WideDataStorage::instance()->add(clOrd.release());
 }
 
-class TestInQueueObserver : public InQueueProcessor {
+class TestInQueueObserver : public InQueueProcessor
+{
 public:
-    bool process() override { return false; }
+    bool process() override
+    {
+        return false;
+    }
 
-    void onEvent(const std::string& source, const OrderEvent& evnt) override {
-        orders_.push_back({source, evnt});
+    void onEvent(const std::string &source, const OrderEvent &evnt) override
+    {
+        orders_.push_back({ source, evnt });
     }
-    void onEvent(const std::string& source, const OrderCancelEvent& evnt) override {
-        orderCancels_.push_back({source, evnt});
+    void onEvent(const std::string &source, const OrderCancelEvent &evnt) override
+    {
+        orderCancels_.push_back({ source, evnt });
     }
-    void onEvent(const std::string& source, const OrderReplaceEvent& evnt) override {
-        orderReplaces_.push_back({source, evnt});
+    void onEvent(const std::string &source, const OrderReplaceEvent &evnt) override
+    {
+        orderReplaces_.push_back({ source, evnt });
     }
-    void onEvent(const std::string& source, const OrderChangeStateEvent& evnt) override {
-        orderStates_.push_back({source, evnt});
+    void onEvent(const std::string &source, const OrderChangeStateEvent &evnt) override
+    {
+        orderStates_.push_back({ source, evnt });
     }
-    void onEvent(const std::string& source, const ProcessEvent& evnt) override {
-        processes_.push_back({source, evnt});
+    void onEvent(const std::string &source, const ProcessEvent &evnt) override
+    {
+        processes_.push_back({ source, evnt });
     }
-    void onEvent(const std::string& source, const TimerEvent& evnt) override {
-        timers_.push_back({source, evnt});
+    void onEvent(const std::string &source, const TimerEvent &evnt) override
+    {
+        timers_.push_back({ source, evnt });
     }
 
     std::deque<std::pair<std::string, OrderEvent>> orders_;
@@ -136,7 +150,8 @@ public:
     std::deque<std::pair<std::string, TimerEvent>> timers_;
 };
 
-SourceIdT addInstrument(const std::string& name) {
+SourceIdT addInstrument(const std::string &name)
+{
     std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
     instr->symbol_ = name;
     instr->securityId_ = "AAA";
@@ -144,19 +159,23 @@ SourceIdT addInstrument(const std::string& name) {
     return WideDataStorage::instance()->add(instr.release());
 }
 
-class TestOutQueues : public Queues::OutQueues {
+class TestOutQueues : public Queues::OutQueues
+{
 public:
     TestOutQueues() : events_(0) {}
 
-    void push(const ExecReportEvent&, const std::string&) override {
+    void push(const ExecReportEvent &, const std::string &) override
+    {
         events_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    void push(const CancelRejectEvent&, const std::string&) override {
+    void push(const CancelRejectEvent &, const std::string &) override
+    {
         events_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    void push(const BusinessRejectEvent&, const std::string&) override {
+    void push(const BusinessRejectEvent &, const std::string &) override
+    {
         events_.fetch_add(1, std::memory_order_relaxed);
     }
 
@@ -169,9 +188,11 @@ public:
 // Integration Test Fixture
 // =============================================================================
 
-class IntegrationTest : public ::testing::Test {
+class IntegrationTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         // Note: ExchLogger is created globally by TestMain.cpp
         WideDataStorage::create();
         SubscriptionMgr::create();
@@ -180,7 +201,8 @@ protected:
         clOrderIdCounter = 0;
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         OrderStorage::destroy();
         IdTGenerator::destroy();
         SubscriptionMgr::destroy();
@@ -193,7 +215,8 @@ protected:
 // Market Order Tests
 // =============================================================================
 
-TEST_F(IntegrationTest, MarketOrderNotMatched) {
+TEST_F(IntegrationTest, MarketOrderNotMatched)
+{
     aux::ExchLogger::instance()->setDebugOn(true);
     aux::ExchLogger::instance()->setNoteOn(true);
 
@@ -216,8 +239,8 @@ TEST_F(IntegrationTest, MarketOrderNotMatched) {
 
     TaskManagerParams tmparams;
     {
-        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues,
-            &outQueues, &inQueues, &transMgr);
+        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues, &outQueues,
+                               &inQueues, &transMgr);
         std::unique_ptr<Processor> proc(new Processor());
         proc->init(params);
         tmparams.evntProcessors_.push_back(proc.release());
@@ -242,7 +265,7 @@ TEST_F(IntegrationTest, MarketOrderNotMatched) {
 
     // Wait until order accepted or rejected
     manager.waitUntilTransactionsFinished(5);
-    OrderEntry* order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
+    OrderEntry *order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
     ASSERT_NE(nullptr, order);
     EXPECT_EQ(NEW_ORDSTATUS, order->status_);
 
@@ -267,7 +290,8 @@ TEST_F(IntegrationTest, MarketOrderNotMatched) {
 // Order Book Tests
 // =============================================================================
 
-TEST_F(IntegrationTest, LimitOrderAccepted) {
+TEST_F(IntegrationTest, LimitOrderAccepted)
+{
     aux::ExchLogger::instance()->setDebugOn(false);
     aux::ExchLogger::instance()->setNoteOn(false);
 
@@ -287,8 +311,8 @@ TEST_F(IntegrationTest, LimitOrderAccepted) {
 
     TaskManagerParams tmparams;
     {
-        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues,
-            &outQueues, &inQueues, &transMgr);
+        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues, &outQueues,
+                               &inQueues, &transMgr);
         std::unique_ptr<Processor> proc(new Processor());
         proc->init(params);
         tmparams.evntProcessors_.push_back(proc.release());
@@ -316,7 +340,7 @@ TEST_F(IntegrationTest, LimitOrderAccepted) {
     // Wait for processing
     manager.waitUntilTransactionsFinished(5);
 
-    OrderEntry* order = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    OrderEntry *order = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, order);
     EXPECT_EQ(NEW_ORDSTATUS, order->status_);
     EXPECT_EQ(100, order->orderQty_);
@@ -326,7 +350,8 @@ TEST_F(IntegrationTest, LimitOrderAccepted) {
     transMgr.stop();
 }
 
-TEST_F(IntegrationTest, MatchingBuyAndSellOrders) {
+TEST_F(IntegrationTest, MatchingBuyAndSellOrders)
+{
     aux::ExchLogger::instance()->setDebugOn(false);
     aux::ExchLogger::instance()->setNoteOn(false);
 
@@ -346,8 +371,8 @@ TEST_F(IntegrationTest, MatchingBuyAndSellOrders) {
 
     TaskManagerParams tmparams;
     {
-        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues,
-            &outQueues, &inQueues, &transMgr);
+        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues, &outQueues,
+                               &inQueues, &transMgr);
         std::unique_ptr<Processor> proc(new Processor());
         proc->init(params);
         tmparams.evntProcessors_.push_back(proc.release());
@@ -375,7 +400,7 @@ TEST_F(IntegrationTest, MatchingBuyAndSellOrders) {
     manager.waitUntilTransactionsFinished(5);
 
     // Verify sell order is on the book
-    OrderEntry* sellOrder = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
+    OrderEntry *sellOrder = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
     ASSERT_NE(nullptr, sellOrder);
     EXPECT_EQ(NEW_ORDSTATUS, sellOrder->status_);
 
@@ -394,7 +419,7 @@ TEST_F(IntegrationTest, MatchingBuyAndSellOrders) {
 
     // Both orders should be filled
     sellOrder = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
-    OrderEntry* buyOrder = OrderStorage::instance()->locateByClOrderId(buyClOrdId);
+    OrderEntry *buyOrder = OrderStorage::instance()->locateByClOrderId(buyClOrdId);
 
     ASSERT_NE(nullptr, sellOrder);
     ASSERT_NE(nullptr, buyOrder);
@@ -414,7 +439,8 @@ TEST_F(IntegrationTest, MatchingBuyAndSellOrders) {
 // Multiple Instrument Tests
 // =============================================================================
 
-TEST_F(IntegrationTest, MultipleInstruments) {
+TEST_F(IntegrationTest, MultipleInstruments)
+{
     aux::ExchLogger::instance()->setDebugOn(false);
     aux::ExchLogger::instance()->setNoteOn(false);
 
@@ -436,8 +462,8 @@ TEST_F(IntegrationTest, MultipleInstruments) {
 
     TaskManagerParams tmparams;
     {
-        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues,
-            &outQueues, &inQueues, &transMgr);
+        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues, &outQueues,
+                               &inQueues, &transMgr);
         std::unique_ptr<Processor> proc(new Processor());
         proc->init(params);
         tmparams.evntProcessors_.push_back(proc.release());
@@ -476,8 +502,8 @@ TEST_F(IntegrationTest, MultipleInstruments) {
     manager.waitUntilTransactionsFinished(5);
 
     // Both orders should be on the book
-    OrderEntry* order1 = OrderStorage::instance()->locateByClOrderId(clOrdId1);
-    OrderEntry* order2 = OrderStorage::instance()->locateByClOrderId(clOrdId2);
+    OrderEntry *order1 = OrderStorage::instance()->locateByClOrderId(clOrdId1);
+    OrderEntry *order2 = OrderStorage::instance()->locateByClOrderId(clOrdId2);
 
     ASSERT_NE(nullptr, order1);
     ASSERT_NE(nullptr, order2);
@@ -491,7 +517,8 @@ TEST_F(IntegrationTest, MultipleInstruments) {
 // Queue Processing Tests
 // =============================================================================
 
-TEST_F(IntegrationTest, QueueProcessesMultipleOrders) {
+TEST_F(IntegrationTest, QueueProcessesMultipleOrders)
+{
     aux::ExchLogger::instance()->setDebugOn(false);
     aux::ExchLogger::instance()->setNoteOn(false);
 
@@ -511,8 +538,8 @@ TEST_F(IntegrationTest, QueueProcessesMultipleOrders) {
 
     TaskManagerParams tmparams;
     {
-        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues,
-            &outQueues, &inQueues, &transMgr);
+        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues, &outQueues,
+                               &inQueues, &transMgr);
         std::unique_ptr<Processor> proc(new Processor());
         proc->init(params);
         tmparams.evntProcessors_.push_back(proc.release());
@@ -530,7 +557,8 @@ TEST_F(IntegrationTest, QueueProcessesMultipleOrders) {
     std::vector<RawDataEntry> clOrdIds;
 
     // Submit multiple orders
-    for (int i = 0; i < numOrders; ++i) {
+    for (int i = 0; i < numOrders; ++i)
+    {
         std::unique_ptr<OrderEntry> ord(createCorrectOrder(instrId));
         assignClOrderId(ord.get());
         ord->ordType_ = LIMIT_ORDERTYPE;
@@ -545,8 +573,9 @@ TEST_F(IntegrationTest, QueueProcessesMultipleOrders) {
     manager.waitUntilTransactionsFinished(10);
 
     // Verify all orders were processed
-    for (const auto& clOrdId : clOrdIds) {
-        OrderEntry* order = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    for (const auto &clOrdId : clOrdIds)
+    {
+        OrderEntry *order = OrderStorage::instance()->locateByClOrderId(clOrdId);
         ASSERT_NE(nullptr, order);
         // Orders should be either NEW, FILLED, or PARTFILL depending on matching
         EXPECT_NE(RECEIVEDNEW_ORDSTATUS, order->status_);

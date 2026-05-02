@@ -45,7 +45,8 @@
 #include "TransactionScope.h"
 #include "TransactionScopePool.h"
 
-namespace {
+namespace
+{
 
 // ----------------------------------------------------------------------------
 // DOC_CHECK marker parser
@@ -53,10 +54,12 @@ namespace {
 
 using DocMap = std::map<std::string, std::string>;
 
-DocMap parseDocCheckMarkers(const std::filesystem::path& filePath) {
+DocMap parseDocCheckMarkers(const std::filesystem::path &filePath)
+{
     DocMap result;
     std::ifstream f(filePath);
-    if (!f) {
+    if (!f)
+    {
         ADD_FAILURE() << "Could not open documentation file: " << filePath;
         return result;
     }
@@ -66,18 +69,18 @@ DocMap parseDocCheckMarkers(const std::filesystem::path& filePath) {
 
     // Match: <!-- DOC_CHECK:name -->VALUE<!-- /DOC_CHECK -->
     // Name = [A-Za-z0-9_]+, value = anything except markers (non-greedy)
-    static const std::regex marker(
-        R"(<!--\s*DOC_CHECK:([A-Za-z0-9_]+)\s*-->(.*?)<!--\s*/DOC_CHECK\s*-->)",
-        std::regex::ECMAScript);
+    static const std::regex marker(R"(<!--\s*DOC_CHECK:([A-Za-z0-9_]+)\s*-->(.*?)<!--\s*/DOC_CHECK\s*-->)",
+                                   std::regex::ECMAScript);
 
     auto begin = std::sregex_iterator(content.begin(), content.end(), marker);
     auto end = std::sregex_iterator();
-    for (auto it = begin; it != end; ++it) {
+    for (auto it = begin; it != end; ++it)
+    {
         const std::string name = (*it)[1].str();
         const std::string value = (*it)[2].str();
-        if (result.count(name)) {
-            ADD_FAILURE() << "Duplicate DOC_CHECK marker '" << name
-                          << "' in " << filePath;
+        if (result.count(name))
+        {
+            ADD_FAILURE() << "Duplicate DOC_CHECK marker '" << name << "' in " << filePath;
             continue;
         }
         result[name] = value;
@@ -87,18 +90,22 @@ DocMap parseDocCheckMarkers(const std::filesystem::path& filePath) {
 
 // Locate the project root by walking up from the test binary directory until
 // we find README.md (this works regardless of where ctest invokes the binary).
-std::filesystem::path projectRoot() {
+std::filesystem::path projectRoot()
+{
     auto p = std::filesystem::current_path();
-    for (int i = 0; i < 8; ++i) {
-        if (std::filesystem::exists(p / "README.md") &&
-            std::filesystem::exists(p / "CMakeLists.txt")) {
+    for (int i = 0; i < 8; ++i)
+    {
+        if (std::filesystem::exists(p / "README.md") && std::filesystem::exists(p / "CMakeLists.txt"))
+        {
             return p;
         }
-        if (!p.has_parent_path()) break;
+        if (!p.has_parent_path())
+        {
+            break;
+        }
         p = p.parent_path();
     }
-    ADD_FAILURE() << "Could not locate project root from "
-                  << std::filesystem::current_path();
+    ADD_FAILURE() << "Could not locate project root from " << std::filesystem::current_path();
     return std::filesystem::current_path();
 }
 
@@ -106,28 +113,28 @@ std::filesystem::path projectRoot() {
 // Test fixture: parses README.md once and exposes the marker map
 // ----------------------------------------------------------------------------
 
-class DocConsistencyTest : public ::testing::Test {
+class DocConsistencyTest : public ::testing::Test
+{
 protected:
     static DocMap docs_;
 
-    static void SetUpTestSuite() {
+    static void SetUpTestSuite()
+    {
         const auto root = projectRoot();
         docs_ = parseDocCheckMarkers(root / "README.md");
     }
 
     // Helper: assert a documented value equals an actual code value.
-    template <typename T>
-    void expectDocEq(const std::string& marker, T actual) {
-        ASSERT_TRUE(docs_.count(marker))
-            << "Missing DOC_CHECK marker '" << marker << "' in README.md. "
-            << "Either add the marker to the doc or remove the assertion.";
+    template <typename T> void expectDocEq(const std::string &marker, T actual)
+    {
+        ASSERT_TRUE(docs_.count(marker)) << "Missing DOC_CHECK marker '" << marker << "' in README.md. "
+                                         << "Either add the marker to the doc or remove the assertion.";
         std::ostringstream oss;
         oss << actual;
-        EXPECT_EQ(docs_[marker], oss.str())
-            << "DOC_CHECK marker '" << marker << "': "
-            << "doc says \"" << docs_[marker] << "\", "
-            << "code says \"" << oss.str() << "\". "
-            << "Update README.md or the code to make them agree.";
+        EXPECT_EQ(docs_[marker], oss.str()) << "DOC_CHECK marker '" << marker << "': "
+                                            << "doc says \"" << docs_[marker] << "\", "
+                                            << "code says \"" << oss.str() << "\". "
+                                            << "Update README.md or the code to make them agree.";
     }
 };
 
@@ -137,45 +144,53 @@ DocMap DocConsistencyTest::docs_;
 // Marker assertions
 // ----------------------------------------------------------------------------
 
-TEST_F(DocConsistencyTest, ParserFoundMarkers) {
-    EXPECT_FALSE(docs_.empty())
-        << "No DOC_CHECK markers found in README.md. The parser may be broken "
-        << "or all markers may have been removed.";
+TEST_F(DocConsistencyTest, ParserFoundMarkers)
+{
+    EXPECT_FALSE(docs_.empty()) << "No DOC_CHECK markers found in README.md. The parser may be broken "
+                                << "or all markers may have been removed.";
 }
 
-TEST_F(DocConsistencyTest, PoolSize) {
+TEST_F(DocConsistencyTest, PoolSize)
+{
     expectDocEq("pool_size", COP::ACID::TransactionScopePool::DEFAULT_POOL_SIZE);
 }
 
-TEST_F(DocConsistencyTest, ArenaSize) {
+TEST_F(DocConsistencyTest, ArenaSize)
+{
     expectDocEq("arena_size", COP::ACID::TransactionScope::ARENA_SIZE);
 }
 
 // Enum cardinality: each enum starts with INVALID_X = 0, so the cardinality
 // (excluding INVALID) equals the integer value of the last enum entry.
 
-TEST_F(DocConsistencyTest, SideCount) {
+TEST_F(DocConsistencyTest, SideCount)
+{
     expectDocEq("side_count", static_cast<int>(COP::CROSS_SIDE));
 }
 
-TEST_F(DocConsistencyTest, OrderTypeCount) {
+TEST_F(DocConsistencyTest, OrderTypeCount)
+{
     expectDocEq("order_type_count", static_cast<int>(COP::FXSWAP_ORDERTYPE));
 }
 
-TEST_F(DocConsistencyTest, TimeInForceCount) {
+TEST_F(DocConsistencyTest, TimeInForceCount)
+{
     expectDocEq("tif_count", static_cast<int>(COP::ATCLOSE_TIF));
 }
 
-TEST_F(DocConsistencyTest, CapacityCount) {
+TEST_F(DocConsistencyTest, CapacityCount)
+{
     expectDocEq("capacity_count", static_cast<int>(COP::AGENT_FOR_ANOTHER_MEMBER_CAPACITY));
 }
 
-TEST_F(DocConsistencyTest, OrderStatusCount) {
+TEST_F(DocConsistencyTest, OrderStatusCount)
+{
     expectDocEq("order_status_count", static_cast<int>(COP::CANCELED_ORDSTATUS));
 }
 
-TEST_F(DocConsistencyTest, ExecTypeCount) {
+TEST_F(DocConsistencyTest, ExecTypeCount)
+{
     expectDocEq("exec_type_count", static_cast<int>(COP::PEND_REPLACE_EXECTYPE));
 }
 
-}  // namespace
+} // namespace

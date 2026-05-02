@@ -18,416 +18,442 @@
 #include "WideDataLazyRef.h"
 #include "StateMachineDef.h"
 
-namespace COP{
+namespace COP
+{
 
-	struct ExecTradeParams;
-	struct TradeExecEntry;
+struct ExecTradeParams;
+struct TradeExecEntry;
 
-	enum Currency{
-		INVALID_CURRENCY = 0,
-		USD_CURRENCY,
-		EUR_CURRENCY,
-		GBP_CURRENCY,
-		JPY_CURRENCY,
-		CHF_CURRENCY,
-		AUD_CURRENCY,
-		CAD_CURRENCY,
-		NZD_CURRENCY
-	};
+enum Currency
+{
+    INVALID_CURRENCY = 0,
+    USD_CURRENCY,
+    EUR_CURRENCY,
+    GBP_CURRENCY,
+    JPY_CURRENCY,
+    CHF_CURRENCY,
+    AUD_CURRENCY,
+    CAD_CURRENCY,
+    NZD_CURRENCY
+};
 
-	enum InstrumentType{
-		INVALID_INSTRUMENTTYPE = 0,
-		EQUITY_INSTRUMENTTYPE,
-		FX_SPOT_INSTRUMENTTYPE,
-		FX_SWAP_INSTRUMENTTYPE
-	};
+enum InstrumentType
+{
+    INVALID_INSTRUMENTTYPE = 0,
+    EQUITY_INSTRUMENTTYPE,
+    FX_SPOT_INSTRUMENTTYPE,
+    FX_SWAP_INSTRUMENTTYPE
+};
 
-	// instrument's parameters, should be extended in future
-	struct InstrumentEntry{
-		StringT symbol_;
-		StringT securityId_;
-		StringT securityIdSource_;
-		IdT id_;
+// instrument's parameters, should be extended in future
+struct InstrumentEntry
+{
+    StringT symbol_;
+    StringT securityId_;
+    StringT securityIdSource_;
+    IdT id_;
 
-		InstrumentType instrumentType_ = INVALID_INSTRUMENTTYPE;
-		Currency baseCurrency_ = INVALID_CURRENCY;
-		Currency termCurrency_ = INVALID_CURRENCY;
+    InstrumentType instrumentType_ = INVALID_INSTRUMENTTYPE;
+    Currency baseCurrency_ = INVALID_CURRENCY;
+    Currency termCurrency_ = INVALID_CURRENCY;
 
-		bool isValid(std::string *invalid)const;
-		bool isFxPair()const{
-			return FX_SPOT_INSTRUMENTTYPE == instrumentType_ ||
-				FX_SWAP_INSTRUMENTTYPE == instrumentType_;
-		}
-	};
+    bool isValid(std::string *invalid) const;
+    bool isFxPair() const
+    {
+        return FX_SPOT_INSTRUMENTTYPE == instrumentType_ || FX_SWAP_INSTRUMENTTYPE == instrumentType_;
+    }
+};
 
-	class GroupInstrumentsBySymbol: public std::less<InstrumentEntry>{
-	public:
-		bool operator()(const InstrumentEntry &lft, const InstrumentEntry &rght)const;
-	};
-	
-	enum AccountType{
-		INVALID_ACCOUNTTYPE = 0,
-		PRINCIPAL_ACCOUNTTYPE,
-		AGENCY_ACCOUNTTYPE 
-	};
+class GroupInstrumentsBySymbol : public std::less<InstrumentEntry>
+{
+public:
+    bool operator()(const InstrumentEntry &lft, const InstrumentEntry &rght) const;
+};
 
-	struct AccountEntry{
-		StringT account_;
-		StringT firm_;
-		IdT id_;
-		AccountType type_;
+enum AccountType
+{
+    INVALID_ACCOUNTTYPE = 0,
+    PRINCIPAL_ACCOUNTTYPE,
+    AGENCY_ACCOUNTTYPE
+};
 
-		bool isValid(std::string *invalid)const;
-	};
+struct AccountEntry
+{
+    StringT account_;
+    StringT firm_;
+    IdT id_;
+    AccountType type_;
 
-	struct ClearingEntry{
-		StringT firm_;
-		IdT id_;
+    bool isValid(std::string *invalid) const;
+};
 
-		bool isValid(std::string *invalid)const;
-	};
+struct ClearingEntry
+{
+    StringT firm_;
+    IdT id_;
 
-	enum OrderType{
-		INVALID_ORDERTYPE = 0,
-		MARKET_ORDERTYPE,
-		LIMIT_ORDERTYPE,
-		STOP_ORDERTYPE,
-		STOPLIMIT_ORDERTYPE,
-		FXSWAP_ORDERTYPE
-	};
+    bool isValid(std::string *invalid) const;
+};
 
-	enum ExecType{
-		INVALID_EXECTYPE = 0,
-		NEW_EXECTYPE,
-		TRADE_EXECTYPE,
-		DFD_EXECTYPE,
-		CORRECT_EXECTYPE,
-		CANCEL_EXECTYPE,
-		REJECT_EXECTYPE,
-		REPLACE_EXECTYPE,
-		EXPIRED_EXECTYPE,
-		SUSPENDED_EXECTYPE,
-		STATUS_EXECTYPE,
-		RESTATED_EXECTYPE,
-		PEND_CANCEL_EXECTYPE,
-		PEND_REPLACE_EXECTYPE
-	};
+enum OrderType
+{
+    INVALID_ORDERTYPE = 0,
+    MARKET_ORDERTYPE,
+    LIMIT_ORDERTYPE,
+    STOP_ORDERTYPE,
+    STOPLIMIT_ORDERTYPE,
+    FXSWAP_ORDERTYPE
+};
 
-	enum Capacity{
-		INVALID_CAPACITY = 0,
-		AGENCY_CAPACITY,
-		PRINCIPAL_CAPACITY,
-		PROPRIETARY_CAPACITY,
-		INDIVIDUAL_CAPACITY,
-		RISKLESS_PRINCIPAL_CAPACITY,
-		AGENT_FOR_ANOTHER_MEMBER_CAPACITY
-	};
+enum ExecType
+{
+    INVALID_EXECTYPE = 0,
+    NEW_EXECTYPE,
+    TRADE_EXECTYPE,
+    DFD_EXECTYPE,
+    CORRECT_EXECTYPE,
+    CANCEL_EXECTYPE,
+    REJECT_EXECTYPE,
+    REPLACE_EXECTYPE,
+    EXPIRED_EXECTYPE,
+    SUSPENDED_EXECTYPE,
+    STATUS_EXECTYPE,
+    RESTATED_EXECTYPE,
+    PEND_CANCEL_EXECTYPE,
+    PEND_REPLACE_EXECTYPE
+};
 
-	enum TimeInForce{
-		INVALID_TIF = 0,
-		DAY_TIF,
-		GTD_TIF,
-		GTC_TIF,
-		FOK_TIF,
-		IOC_TIF,
-		OPG_TIF,
-		ATCLOSE_TIF
-	};
+enum Capacity
+{
+    INVALID_CAPACITY = 0,
+    AGENCY_CAPACITY,
+    PRINCIPAL_CAPACITY,
+    PROPRIETARY_CAPACITY,
+    INDIVIDUAL_CAPACITY,
+    RISKLESS_PRINCIPAL_CAPACITY,
+    AGENT_FOR_ANOTHER_MEMBER_CAPACITY
+};
 
-	enum Side{
-		INVALID_SIDE = 0,
-		BUY_SIDE,
-		SELL_SIDE,
-		BUY_MINUS_SIDE,
-		SELL_PLUS_SIDE,
-		SELL_SHORT_SIDE,
-		CROSS_SIDE
-	};
+enum TimeInForce
+{
+    INVALID_TIF = 0,
+    DAY_TIF,
+    GTD_TIF,
+    GTC_TIF,
+    FOK_TIF,
+    IOC_TIF,
+    OPG_TIF,
+    ATCLOSE_TIF
+};
 
-	enum SettlTypeBase{
-		INVALID_SETTLTYPE = 0,
-		_0_SETTLTYPE,
-		_1_SETTLTYPE,
-		_2_SETTLTYPE,
-		_3_SETTLTYPE,
-		_4_SETTLTYPE,
-		_5_SETTLTYPE,
-		_6_SETTLTYPE,
-		_7_SETTLTYPE,
-		_8_SETTLTYPE,
-		_9_SETTLTYPE,
-		_B_SETTLTYPE,
-		_C_SETTLTYPE,
-		TENOR_SETTLTYPE
-	};
+enum Side
+{
+    INVALID_SIDE = 0,
+    BUY_SIDE,
+    SELL_SIDE,
+    BUY_MINUS_SIDE,
+    SELL_PLUS_SIDE,
+    SELL_SHORT_SIDE,
+    CROSS_SIDE
+};
 
-	enum OrderStatus{
-		INVALID_ORDSTATUS = 0,
-		RECEIVEDNEW_ORDSTATUS,
-		REJECTED_ORDSTATUS,
-		PENDINGNEW_ORDSTATUS,
-		PENDINGREPLACE_ORDSTATUS,
-		NEW_ORDSTATUS,
-		PARTFILL_ORDSTATUS,
-		FILLED_ORDSTATUS,
-		EXPIRED_ORDSTATUS,
-		DFD_ORDSTATUS,
-		SUSPENDED_ORDSTATUS,
-		REPLACED_ORDSTATUS,
-		CANCELED_ORDSTATUS
-	};
+enum SettlTypeBase
+{
+    INVALID_SETTLTYPE = 0,
+    _0_SETTLTYPE,
+    _1_SETTLTYPE,
+    _2_SETTLTYPE,
+    _3_SETTLTYPE,
+    _4_SETTLTYPE,
+    _5_SETTLTYPE,
+    _6_SETTLTYPE,
+    _7_SETTLTYPE,
+    _8_SETTLTYPE,
+    _9_SETTLTYPE,
+    _B_SETTLTYPE,
+    _C_SETTLTYPE,
+    TENOR_SETTLTYPE
+};
 
-	enum Instructions{
-		INVALID_INSTRUCTION = 0,
-		STAY_ON_OFFER_SIDE_INSTRUCTION,
-		NOT_HELD_INSTRUCTION,
-		WORK_INSTRUCTION,
-		GO_ALONG_INSTRUCTION,
-		_INSTRUCTION // ToDo
-	};
+enum OrderStatus
+{
+    INVALID_ORDSTATUS = 0,
+    RECEIVEDNEW_ORDSTATUS,
+    REJECTED_ORDSTATUS,
+    PENDINGNEW_ORDSTATUS,
+    PENDINGREPLACE_ORDSTATUS,
+    NEW_ORDSTATUS,
+    PARTFILL_ORDSTATUS,
+    FILLED_ORDSTATUS,
+    EXPIRED_ORDSTATUS,
+    DFD_ORDSTATUS,
+    SUSPENDED_ORDSTATUS,
+    REPLACED_ORDSTATUS,
+    CANCELED_ORDSTATUS
+};
 
-	typedef std::set<Instructions> InstructionSetT;
+enum Instructions
+{
+    INVALID_INSTRUCTION = 0,
+    STAY_ON_OFFER_SIDE_INSTRUCTION,
+    NOT_HELD_INSTRUCTION,
+    WORK_INSTRUCTION,
+    GO_ALONG_INSTRUCTION,
+    _INSTRUCTION // ToDo
+};
 
-	// Order's parameters, will be stored in persistent storage.
-	//
-	// Field layout is organized for cache locality:
-	//   Hot fields first  — accessed on every order operation (matching, trading)
-	//   Warm fields next  — accessed during processing but not inner loops
-	//   Cold fields last  — lazy-loaded reference data, rarely touched after init
-	struct OrderParams{
-	public:
-		explicit OrderParams(const SourceIdT &dest, const SourceIdT &instrument,
-				const SourceIdT &account, const SourceIdT &clearing,
-				const SourceIdT &source, const SourceIdT &clOrderId,
-				const SourceIdT &origClOrderID, const SourceIdT &executions);
-		OrderParams(const OrderParams &ord);
-		~OrderParams();
+typedef std::set<Instructions> InstructionSetT;
 
-		// --- Hot path fields (first cache lines) ---
-		/// Per-order mutex protecting all fields after locateByOrderId().
-		/// Deadlock convention: when locking two orders simultaneously,
-		/// always lock the order with the smaller orderId_ first.
-		mutable oneapi::tbb::spin_rw_mutex entryMutex_;
+// Order's parameters, will be stored in persistent storage.
+//
+// Field layout is organized for cache locality:
+//   Hot fields first  — accessed on every order operation (matching, trading)
+//   Warm fields next  — accessed during processing but not inner loops
+//   Cold fields last  — lazy-loaded reference data, rarely touched after init
+struct OrderParams
+{
+public:
+    explicit OrderParams(const SourceIdT &dest, const SourceIdT &instrument, const SourceIdT &account,
+                         const SourceIdT &clearing, const SourceIdT &source, const SourceIdT &clOrderId,
+                         const SourceIdT &origClOrderID, const SourceIdT &executions);
+    OrderParams(const OrderParams &ord);
+    ~OrderParams();
 
-		IdT orderId_;
-		IdT origOrderId_;
+    // --- Hot path fields (first cache lines) ---
+    /// Per-order mutex protecting all fields after locateByOrderId().
+    /// Deadlock convention: when locking two orders simultaneously,
+    /// always lock the order with the smaller orderId_ first.
+    mutable oneapi::tbb::spin_rw_mutex entryMutex_;
 
-		PriceT price_; //8
-		OrderStatus status_;
-		Side side_;
-		OrderType ordType_;
-		QuantityT leavesQty_;
-		QuantityT cumQty_;
-		QuantityT orderQty_;
-		TimeInForce tif_;
+    IdT orderId_;
+    IdT origOrderId_;
 
-		// --- Warm fields (accessed during processing) ---
-		PriceT stopPx_;
-		PriceT avgPx_;
-		PriceT dayAvgPx_;
+    PriceT price_; //8
+    OrderStatus status_;
+    Side side_;
+    OrderType ordType_;
+    QuantityT leavesQty_;
+    QuantityT cumQty_;
+    QuantityT orderQty_;
+    TimeInForce tif_;
 
-		DateTimeT creationTime_; //8
-		DateTimeT lastUpdateTime_;
-		DateTimeT expireTime_;
-		DateTimeT settlDate_;
+    // --- Warm fields (accessed during processing) ---
+    PriceT stopPx_;
+    PriceT avgPx_;
+    PriceT dayAvgPx_;
 
-		SettlTypeBase settlType_;
-		Capacity capacity_;
-		Currency currency_;
-		QuantityT minQty_; //4
-		QuantityT dayOrderQty_;
-		QuantityT dayCumQty_;
+    DateTimeT creationTime_; //8
+    DateTimeT lastUpdateTime_;
+    DateTimeT expireTime_;
+    DateTimeT settlDate_;
 
-		OrdState::OrderStatePersistence stateMachinePersistance_;
+    SettlTypeBase settlType_;
+    Capacity capacity_;
+    Currency currency_;
+    QuantityT minQty_; //4
+    QuantityT dayOrderQty_;
+    QuantityT dayCumQty_;
 
-		// --- FX Swap fields (warm — checked during swap processing only) ---
-		PriceT farPrice_;          // forward price for far leg (0.0 if not swap)
-		DateTimeT farSettlDate_;   // far leg settlement date (0 if not swap)
+    OrdState::OrderStatePersistence stateMachinePersistance_;
 
-		// --- Cold fields (lazy-loaded, rarely accessed after init) ---
-		WideDataLazyRef<InstrumentEntry> instrument_;//136
-		WideDataLazyRef<AccountEntry> account_;//112
-		WideDataLazyRef<ClearingEntry> clearing_;//72
-		WideDataLazyRef<StringT> destination_; //~32 + 24
-		InstructionSetT execInstruct_; //28
+    // --- FX Swap fields (warm — checked during swap processing only) ---
+    PriceT farPrice_;        // forward price for far leg (0.0 if not swap)
+    DateTimeT farSettlDate_; // far leg settlement date (0 if not swap)
 
-		WideDataLazyRef<RawDataEntry> clOrderId_; //56
-		WideDataLazyRef<RawDataEntry> origClOrderId_;
-		WideDataLazyRef<StringT> source_;
+    // --- Cold fields (lazy-loaded, rarely accessed after init) ---
+    WideDataLazyRef<InstrumentEntry> instrument_; //136
+    WideDataLazyRef<AccountEntry> account_;       //112
+    WideDataLazyRef<ClearingEntry> clearing_;     //72
+    WideDataLazyRef<StringT> destination_;        //~32 + 24
+    InstructionSetT execInstruct_;                //28
 
-		WideDataLazyRef<ExecutionsT *> executions_;
+    WideDataLazyRef<RawDataEntry> clOrderId_; //56
+    WideDataLazyRef<RawDataEntry> origClOrderId_;
+    WideDataLazyRef<StringT> source_;
 
-		void applyTrade(const TradeExecEntry *trade);
-		void addExecution(const IdT &execId);
-	private:
-		const OrderParams& operator =(const OrderParams &);
-	};
+    WideDataLazyRef<ExecutionsT *> executions_;
 
-	struct OrderEntry: public OrderParams{ 
-	public:
-		OrderEntry(const SourceIdT &source, const SourceIdT &dest,
-						const SourceIdT &clOrderId, const SourceIdT &origClOrderID,
-						const SourceIdT &instrument, const SourceIdT &account, const SourceIdT &clearing, 
-						const SourceIdT &executions);
-		OrderEntry(const OrderEntry &ord);
-		~OrderEntry();
+    void applyTrade(const TradeExecEntry *trade);
+    void addExecution(const IdT &execId);
 
-		//Todo: change string reason to error code
-		bool isValid(std::string *invalid)const; // verifies that order is correct
-		bool isReplaceValid(std::string *invalid)const;// verifies that order could be replaced
+private:
+    const OrderParams &operator=(const OrderParams &);
+};
 
-		OrdState::OrderStatePersistence stateMachinePersistance()const;
-		void setStateMachinePersistance(const OrdState::OrderStatePersistence &persist);
+struct OrderEntry : public OrderParams
+{
+public:
+    OrderEntry(const SourceIdT &source, const SourceIdT &dest, const SourceIdT &clOrderId,
+               const SourceIdT &origClOrderID, const SourceIdT &instrument, const SourceIdT &account,
+               const SourceIdT &clearing, const SourceIdT &executions);
+    OrderEntry(const OrderEntry &ord);
+    ~OrderEntry();
 
-		OrderEntry *clone()const;
-		bool compare(const OrderEntry &val)const;
-	private:
-		const OrderEntry& operator =(const OrderEntry &);
+    //Todo: change string reason to error code
+    bool isValid(std::string *invalid) const;        // verifies that order is correct
+    bool isReplaceValid(std::string *invalid) const; // verifies that order could be replaced
 
+    OrdState::OrderStatePersistence stateMachinePersistance() const;
+    void setStateMachinePersistance(const OrdState::OrderStatePersistence &persist);
 
-	};
+    OrderEntry *clone() const;
+    bool compare(const OrderEntry &val) const;
 
-	class OrderFunctor{
-	public:
-		virtual ~OrderFunctor(){}
-		virtual SourceIdT instrument()const = 0;
-		inline Side side()const{return side_;}
-		virtual bool match(const IdT &order, bool *stop)const = 0;
-	protected:
-		Side side_;
-	};
+private:
+    const OrderEntry &operator=(const OrderEntry &);
+};
 
-	class OrderBook{
-	public:
-		virtual ~OrderBook(){}
+class OrderFunctor
+{
+public:
+    virtual ~OrderFunctor() {}
+    virtual SourceIdT instrument() const = 0;
+    inline Side side() const
+    {
+        return side_;
+    }
+    virtual bool match(const IdT &order, bool *stop) const = 0;
 
-		typedef std::deque<IdT> OrdersT;
+protected:
+    Side side_;
+};
 
-		virtual void add(const OrderEntry& order) = 0;
-		virtual void remove(const OrderEntry& order) = 0;
-		virtual IdT find(const OrderFunctor &functor)const = 0;
-		virtual void findAll(const OrderFunctor &functor, OrdersT *result)const = 0;
+class OrderBook
+{
+public:
+    virtual ~OrderBook() {}
 
-		virtual IdT getTop(const SourceIdT &instrument, const Side &side)const = 0;
+    typedef std::deque<IdT> OrdersT;
 
-		virtual void restore(const OrderEntry& order) = 0;
-	};
+    virtual void add(const OrderEntry &order) = 0;
+    virtual void remove(const OrderEntry &order) = 0;
+    virtual IdT find(const OrderFunctor &functor) const = 0;
+    virtual void findAll(const OrderFunctor &functor, OrdersT *result) const = 0;
 
+    virtual IdT getTop(const SourceIdT &instrument, const Side &side) const = 0;
+
+    virtual void restore(const OrderEntry &order) = 0;
+};
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Incapsulates information about order's executions
 
-	/// used when execution created by internal system instead of market
-	const std::string INTERNAL_EXECUTION = "Internal";
+/// used when execution created by internal system instead of market
+const std::string INTERNAL_EXECUTION = "Internal";
 
-	enum ExecLegType : uint8_t {
-		SINGLE_LEG = 0,
-		NEAR_LEG,
-		FAR_LEG
-	};
+enum ExecLegType : uint8_t
+{
+    SINGLE_LEG = 0,
+    NEAR_LEG,
+    FAR_LEG
+};
 
-	// general parameters of the executions, will be stored in persistent storage
-	struct ExecParams{
-		// type of the execution
-		ExecType type_;
-		// creation timestamp
-		DateTimeT transactTime_;
-		// order's id that changed according execution
-		IdT orderId_;
-		// id of the execution
-		IdT execId_;
-		//Describes the current state of order
-		OrderStatus orderStatus_;
-		// market name, where order was executed. If internal, than equal to INTERNAL_EXECUTION
-		StringT market_;
-		// which leg this execution belongs to (SINGLE_LEG for non-swap orders)
-		ExecLegType execLegType_;
+// general parameters of the executions, will be stored in persistent storage
+struct ExecParams
+{
+    // type of the execution
+    ExecType type_;
+    // creation timestamp
+    DateTimeT transactTime_;
+    // order's id that changed according execution
+    IdT orderId_;
+    // id of the execution
+    IdT execId_;
+    //Describes the current state of order
+    OrderStatus orderStatus_;
+    // market name, where order was executed. If internal, than equal to INTERNAL_EXECUTION
+    StringT market_;
+    // which leg this execution belongs to (SINGLE_LEG for non-swap orders)
+    ExecLegType execLegType_;
 
-		ExecParams();
-		ExecParams(const ExecParams &param);
-	};
+    ExecParams();
+    ExecParams(const ExecParams &param);
+};
 
-	// trade parameters, will be stored in persistent storage
-	struct ExecTradeParams{
-		// trade's quantity
-		QuantityT lastQty_;
-		// trade's price
-		PriceT lastPx_;
-		// trade's currency
-		Currency currency_;
-		// time stamp of the trade
-		DateTimeT tradeDate_;
+// trade parameters, will be stored in persistent storage
+struct ExecTradeParams
+{
+    // trade's quantity
+    QuantityT lastQty_;
+    // trade's price
+    PriceT lastPx_;
+    // trade's currency
+    Currency currency_;
+    // time stamp of the trade
+    DateTimeT tradeDate_;
 
-		ExecTradeParams();
-		ExecTradeParams(const ExecTradeParams &param);
-	};
+    ExecTradeParams();
+    ExecTradeParams(const ExecTradeParams &param);
+};
 
-	// execution correct parameters, will be stored in persistent storage
-	struct ExecCorrectParams{
-		QuantityT cumQty_;
-		QuantityT leavesQty_;
-		QuantityT lastQty_;
-		PriceT lastPx_;
-		Currency currency_;
-		DateTimeT tradeDate_;
+// execution correct parameters, will be stored in persistent storage
+struct ExecCorrectParams
+{
+    QuantityT cumQty_;
+    QuantityT leavesQty_;
+    QuantityT lastQty_;
+    PriceT lastPx_;
+    Currency currency_;
+    DateTimeT tradeDate_;
 
-		// order's id that changed according execution
-		IdT origOrderId_;
+    // order's id that changed according execution
+    IdT origOrderId_;
+};
 
-	};
+// execution reject parameters, will be stored in persistent storage
+struct ExecRejectParams
+{
+    StringT rejectReason_;
+};
 
-	// execution reject parameters, will be stored in persistent storage
-	struct ExecRejectParams{
-		StringT rejectReason_;
-	};
+struct ExecutionEntry : public ExecParams
+{
+public:
+    ExecutionEntry();
+    explicit ExecutionEntry(const ExecParams &param);
+    virtual ~ExecutionEntry() {}
+    virtual ExecutionEntry *clone() const;
+};
 
-	
-	struct ExecutionEntry: public ExecParams{
-	public:
-		ExecutionEntry();
-		explicit ExecutionEntry(const ExecParams &param);
-		virtual ~ExecutionEntry(){}
-		virtual ExecutionEntry *clone()const;
-	};
+struct TradeExecEntry : public ExecutionEntry, public ExecTradeParams
+{
+    TradeExecEntry();
+    TradeExecEntry(const ExecutionEntry &exec, const ExecTradeParams &trade);
+    TradeExecEntry(const TradeExecEntry &params);
+    virtual ExecutionEntry *clone() const;
+};
 
-	struct TradeExecEntry: public ExecutionEntry, 
-							public ExecTradeParams{
-		TradeExecEntry();
-		TradeExecEntry(const ExecutionEntry &exec, const ExecTradeParams &trade);
-		TradeExecEntry(const TradeExecEntry &params);
-		virtual ExecutionEntry *clone()const;
-	};
+struct RejectExecEntry : public ExecutionEntry, public ExecRejectParams
+{
+    virtual ExecutionEntry *clone() const;
+};
 
-	struct RejectExecEntry: public ExecutionEntry,
-							public ExecRejectParams{
+struct ExecCorrectExecEntry : public ExecutionEntry, public ExecCorrectParams
+{
+    IdT execRefId_;
 
-		virtual ExecutionEntry *clone()const;
-	};
+    virtual ExecutionEntry *clone() const;
+};
 
-	struct ExecCorrectExecEntry: public ExecutionEntry, 
-							public ExecCorrectParams{
-		IdT execRefId_;
+struct ReplaceExecEntry : public ExecutionEntry
+{
+    IdT origOrderId_;
 
-		virtual ExecutionEntry *clone()const;
-	};
+    virtual ExecutionEntry *clone() const;
+};
 
-	struct ReplaceExecEntry: public ExecutionEntry{
-		IdT origOrderId_;
+struct TradeCancelExecEntry : public ExecutionEntry
+{
+    IdT execRefId_;
 
-		virtual ExecutionEntry *clone()const;
-	};
+    virtual ExecutionEntry *clone() const;
+};
 
-	struct TradeCancelExecEntry: public ExecutionEntry{
-		IdT execRefId_;
+class OrderSaver
+{
+public:
+    virtual ~OrderSaver() {};
+    virtual void save(const OrderEntry &order) = 0;
+};
 
-		virtual ExecutionEntry *clone()const;
-	};
-
-	class OrderSaver{
-	public:
-		virtual ~OrderSaver(){};
-		virtual void save(const OrderEntry& order) = 0;
-	};
-
-}
-
+} // namespace COP

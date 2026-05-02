@@ -30,53 +30,65 @@ using namespace COP::Store;
 using namespace COP::Proc;
 using namespace test;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Deferred Event Container
 // =============================================================================
 
-class TestDeferedContainer : public DeferedEventContainer {
+class TestDeferedContainer : public DeferedEventContainer
+{
 public:
-    void addDeferedEvent(DeferedEventBase* evnt) override {
+    void addDeferedEvent(DeferedEventBase *evnt) override
+    {
         events_.push_back(evnt);
     }
 
-    size_t deferedEventCount() const override {
+    size_t deferedEventCount() const override
+    {
         return events_.size();
     }
 
-    void removeDeferedEventsFrom(size_t startIndex) override {
-        if (startIndex >= events_.size()) {
+    void removeDeferedEventsFrom(size_t startIndex) override
+    {
+        if (startIndex >= events_.size())
+        {
             return;
         }
-        for (size_t i = startIndex; i < events_.size(); ++i) {
+        for (size_t i = startIndex; i < events_.size(); ++i)
+        {
             delete events_[i];
         }
         events_.erase(events_.begin() + startIndex, events_.end());
     }
 
-    void clear() {
-        for (auto* e : events_) {
+    void clear()
+    {
+        for (auto *e : events_)
+        {
             delete e;
         }
         events_.clear();
     }
 
-    ~TestDeferedContainer() {
+    ~TestDeferedContainer()
+    {
         clear();
     }
 
-    std::vector<DeferedEventBase*> events_;
+    std::vector<DeferedEventBase *> events_;
 };
 
 // =============================================================================
 // Test Fixture for OrderBook Operations
 // =============================================================================
 
-class OrderBookOperationTest : public SingletonFixture {
+class OrderBookOperationTest : public SingletonFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         SingletonFixture::SetUp();
 
         // Create instrument using the proper test helper
@@ -92,27 +104,28 @@ protected:
 
         // Create test order - don't save to OrderStorage, just create it
         testOrder_ = test::createCorrectOrder(instrumentId_);
-        testOrder_->orderId_ = IdT(1, 1);  // Set orderId manually
+        testOrder_->orderId_ = IdT(1, 1); // Set orderId manually
         testOrder_->side_ = BUY_SIDE;
         testOrder_->price_ = 100.0;
         testOrder_->orderQty_ = 100;
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         testOrder_.reset();
         orderBook_.reset();
         SingletonFixture::TearDown();
     }
 
-    Context createContext() {
-        return Context(
-            nullptr,  // orderStorage
-            orderBook_.get(),
-            nullptr,  // inQueues
-            nullptr,  // outQueues
-            nullptr,  // orderMatcher
-            IdTGenerator::instance(),
-            nullptr   // deferedEvents
+    Context createContext()
+    {
+        return Context(nullptr, // orderStorage
+                       orderBook_.get(),
+                       nullptr, // inQueues
+                       nullptr, // outQueues
+                       nullptr, // orderMatcher
+                       IdTGenerator::instance(),
+                       nullptr // deferedEvents
         );
     }
 
@@ -127,7 +140,8 @@ protected:
 // AddToOrderBookTrOperation Tests
 // =============================================================================
 
-TEST_F(OrderBookOperationTest, AddToOrderBook_Execute_AddsOrderToBook) {
+TEST_F(OrderBookOperationTest, AddToOrderBook_Execute_AddsOrderToBook)
+{
     AddToOrderBookTrOperation op(*testOrder_, instrumentId_);
     Context ctx = createContext();
 
@@ -139,7 +153,8 @@ TEST_F(OrderBookOperationTest, AddToOrderBook_Execute_AddsOrderToBook) {
     EXPECT_EQ(testOrder_->orderId_, foundId);
 }
 
-TEST_F(OrderBookOperationTest, AddToOrderBook_Rollback_RemovesOrderFromBook) {
+TEST_F(OrderBookOperationTest, AddToOrderBook_Rollback_RemovesOrderFromBook)
+{
     AddToOrderBookTrOperation op(*testOrder_, instrumentId_);
     Context ctx = createContext();
 
@@ -152,7 +167,8 @@ TEST_F(OrderBookOperationTest, AddToOrderBook_Rollback_RemovesOrderFromBook) {
     EXPECT_FALSE(foundId.isValid());
 }
 
-TEST_F(OrderBookOperationTest, AddToOrderBook_ExecuteThenRollback_BookUnchanged) {
+TEST_F(OrderBookOperationTest, AddToOrderBook_ExecuteThenRollback_BookUnchanged)
+{
     // Verify book is empty initially
     IdT initialTop = orderBook_->getTop(instrumentId_, BUY_SIDE);
     EXPECT_FALSE(initialTop.isValid());
@@ -172,7 +188,8 @@ TEST_F(OrderBookOperationTest, AddToOrderBook_ExecuteThenRollback_BookUnchanged)
 // RemoveFromOrderBookTrOperation Tests
 // =============================================================================
 
-TEST_F(OrderBookOperationTest, RemoveFromOrderBook_Execute_RemovesOrderFromBook) {
+TEST_F(OrderBookOperationTest, RemoveFromOrderBook_Execute_RemovesOrderFromBook)
+{
     // First add the order to the book
     orderBook_->add(*testOrder_);
 
@@ -186,7 +203,8 @@ TEST_F(OrderBookOperationTest, RemoveFromOrderBook_Execute_RemovesOrderFromBook)
     EXPECT_FALSE(foundId.isValid());
 }
 
-TEST_F(OrderBookOperationTest, RemoveFromOrderBook_Rollback_ReAddsOrderToBook) {
+TEST_F(OrderBookOperationTest, RemoveFromOrderBook_Rollback_ReAddsOrderToBook)
+{
     // First add the order to the book
     orderBook_->add(*testOrder_);
 
@@ -203,7 +221,8 @@ TEST_F(OrderBookOperationTest, RemoveFromOrderBook_Rollback_ReAddsOrderToBook) {
     EXPECT_EQ(testOrder_->orderId_, foundId);
 }
 
-TEST_F(OrderBookOperationTest, RemoveFromOrderBook_ExecuteThenRollback_BookUnchanged) {
+TEST_F(OrderBookOperationTest, RemoveFromOrderBook_ExecuteThenRollback_BookUnchanged)
+{
     // Add order to book
     orderBook_->add(*testOrder_);
 
@@ -227,9 +246,11 @@ TEST_F(OrderBookOperationTest, RemoveFromOrderBook_ExecuteThenRollback_BookUncha
 // MatchOrderTrOperation Tests
 // =============================================================================
 
-class MatchOrderOperationTest : public OrderStorageFixture {
+class MatchOrderOperationTest : public OrderStorageFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         OrderStorageFixture::SetUp();
 
         // Create instrument using the proper test helper
@@ -249,7 +270,7 @@ protected:
 
         // Create test orders with unique ClOrderIds and save to OrderStorage
         auto buyOrderTemp = test::createCorrectOrder(instrumentId_);
-        test::assignClOrderId(buyOrderTemp.get());  // Assign unique ClOrderId
+        test::assignClOrderId(buyOrderTemp.get()); // Assign unique ClOrderId
         buyOrderTemp->side_ = BUY_SIDE;
         buyOrderTemp->price_ = 100.0;
         buyOrderTemp->orderQty_ = 100;
@@ -257,7 +278,7 @@ protected:
         buyOrder_ = OrderStorage::instance()->save(*buyOrderTemp, IdTGenerator::instance());
 
         auto sellOrderTemp = test::createCorrectOrder(instrumentId_);
-        test::assignClOrderId(sellOrderTemp.get());  // Assign unique ClOrderId
+        test::assignClOrderId(sellOrderTemp.get()); // Assign unique ClOrderId
         sellOrderTemp->side_ = SELL_SIDE;
         sellOrderTemp->price_ = 100.0;
         sellOrderTemp->orderQty_ = 100;
@@ -265,7 +286,8 @@ protected:
         sellOrder_ = OrderStorage::instance()->save(*sellOrderTemp, IdTGenerator::instance());
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         // Orders are owned by OrderStorage, don't delete them
         buyOrder_ = nullptr;
         sellOrder_ = nullptr;
@@ -274,29 +296,26 @@ protected:
         OrderStorageFixture::TearDown();
     }
 
-    Context createContext() {
-        return Context(
-            OrderStorage::instance(),
-            orderBook_.get(),
-            nullptr,  // inQueues
-            nullptr,  // outQueues
-            matcher_.get(),
-            IdTGenerator::instance(),
-            &deferedContainer_
-        );
+    Context createContext()
+    {
+        return Context(OrderStorage::instance(), orderBook_.get(),
+                       nullptr, // inQueues
+                       nullptr, // outQueues
+                       matcher_.get(), IdTGenerator::instance(), &deferedContainer_);
     }
 
 protected:
     SourceIdT instrumentId_;
     std::unique_ptr<OrderBookImpl> orderBook_;
     std::unique_ptr<OrderMatcher> matcher_;
-    OrderEntry* buyOrder_;   // Owned by OrderStorage
-    OrderEntry* sellOrder_;  // Owned by OrderStorage
+    OrderEntry *buyOrder_;  // Owned by OrderStorage
+    OrderEntry *sellOrder_; // Owned by OrderStorage
     TestDeferedContainer deferedContainer_;
     DummyOrderSaver saver_;
 };
 
-TEST_F(MatchOrderOperationTest, MatchOrder_Execute_NoMatchingOrder_NoDeferredEvents) {
+TEST_F(MatchOrderOperationTest, MatchOrder_Execute_NoMatchingOrder_NoDeferredEvents)
+{
     // When there's no matching order for a limit order, no events are generated
     buyOrder_->ordType_ = LIMIT_ORDERTYPE;
 
@@ -311,7 +330,8 @@ TEST_F(MatchOrderOperationTest, MatchOrder_Execute_NoMatchingOrder_NoDeferredEve
     EXPECT_EQ(initialEventCount, deferedContainer_.deferedEventCount());
 }
 
-TEST_F(MatchOrderOperationTest, MatchOrder_Execute_WithMatchingOrder_CreatesDeferredEvents) {
+TEST_F(MatchOrderOperationTest, MatchOrder_Execute_WithMatchingOrder_CreatesDeferredEvents)
+{
     // Add sell order to book so buy order can match
     orderBook_->add(*sellOrder_);
 
@@ -326,7 +346,8 @@ TEST_F(MatchOrderOperationTest, MatchOrder_Execute_WithMatchingOrder_CreatesDefe
     EXPECT_GT(deferedContainer_.deferedEventCount(), initialEventCount);
 }
 
-TEST_F(MatchOrderOperationTest, MatchOrder_Rollback_RemovesDeferredEvents) {
+TEST_F(MatchOrderOperationTest, MatchOrder_Rollback_RemovesDeferredEvents)
+{
     // Add sell order to book so buy order can match
     orderBook_->add(*sellOrder_);
 
@@ -344,7 +365,8 @@ TEST_F(MatchOrderOperationTest, MatchOrder_Rollback_RemovesDeferredEvents) {
     EXPECT_EQ(0u, deferedContainer_.deferedEventCount());
 }
 
-TEST_F(MatchOrderOperationTest, MatchOrder_ExecuteThenRollback_NoDeferredEventsRemain) {
+TEST_F(MatchOrderOperationTest, MatchOrder_ExecuteThenRollback_NoDeferredEventsRemain)
+{
     // Add sell order to book
     orderBook_->add(*sellOrder_);
 
@@ -360,7 +382,8 @@ TEST_F(MatchOrderOperationTest, MatchOrder_ExecuteThenRollback_NoDeferredEventsR
     EXPECT_EQ(0u, deferedContainer_.deferedEventCount());
 }
 
-TEST_F(MatchOrderOperationTest, MatchOrder_Rollback_OnlyRemovesOwnEvents) {
+TEST_F(MatchOrderOperationTest, MatchOrder_Rollback_OnlyRemovesOwnEvents)
+{
     // Add a pre-existing event
     deferedContainer_.addDeferedEvent(new ExecutionDeferedEvent(buyOrder_));
     EXPECT_EQ(1u, deferedContainer_.deferedEventCount());
@@ -386,9 +409,11 @@ TEST_F(MatchOrderOperationTest, MatchOrder_Rollback_OnlyRemovesOwnEvents) {
 // Exec Report Operations - Verify Intentional No-Op Rollback
 // =============================================================================
 
-class ExecReportOperationTest : public SingletonFixture {
+class ExecReportOperationTest : public SingletonFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         SingletonFixture::SetUp();
 
         // Create instrument using the proper test helper
@@ -401,7 +426,8 @@ protected:
         testOrder_->orderQty_ = 100;
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         testOrder_.reset();
         SingletonFixture::TearDown();
     }
@@ -411,7 +437,8 @@ protected:
     std::unique_ptr<OrderEntry> testOrder_;
 };
 
-TEST_F(ExecReportOperationTest, CreateExecReport_Rollback_IsNoOp) {
+TEST_F(ExecReportOperationTest, CreateExecReport_Rollback_IsNoOp)
+{
     // This test documents that exec report rollback is intentionally empty
     // because you cannot unsend a message
     CreateExecReportTrOperation op(NEW_ORDSTATUS, NEW_EXECTYPE, *testOrder_);
@@ -421,14 +448,16 @@ TEST_F(ExecReportOperationTest, CreateExecReport_Rollback_IsNoOp) {
     EXPECT_NO_THROW(op.rollback(ctx));
 }
 
-TEST_F(ExecReportOperationTest, CreateRejectExecReport_Rollback_IsNoOp) {
+TEST_F(ExecReportOperationTest, CreateRejectExecReport_Rollback_IsNoOp)
+{
     CreateRejectExecReportTrOperation op("test reason", REJECTED_ORDSTATUS, *testOrder_);
     Context ctx;
 
     EXPECT_NO_THROW(op.rollback(ctx));
 }
 
-TEST_F(ExecReportOperationTest, CreateReplaceExecReport_Rollback_IsNoOp) {
+TEST_F(ExecReportOperationTest, CreateReplaceExecReport_Rollback_IsNoOp)
+{
     CreateReplaceExecReportTrOperation op(testOrder_->orderId_, NEW_ORDSTATUS, *testOrder_);
     Context ctx;
 

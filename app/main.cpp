@@ -34,40 +34,57 @@
 
 using namespace COP;
 
-namespace {
+namespace
+{
 
-struct Config {
+struct Config
+{
     unsigned short port = 8080;
     std::string dataDir = "./data";
     int workers = 0;
-    int cpuAffinityStart = -1;  // -1 = disabled, >= 0 = pin starting from this core
+    int cpuAffinityStart = -1; // -1 = disabled, >= 0 = pin starting from this core
     bool hugePages = false;
-    std::string fixCfg;          // path to QuickFIX settings file (empty = FIX disabled)
+    std::string fixCfg; // path to QuickFIX settings file (empty = FIX disabled)
 };
 
-Config parseArgs(int argc, char* argv[]) {
+Config parseArgs(int argc, char *argv[])
+{
     Config cfg;
-    for (int i = 1; i < argc; ++i) {
+    for (int i = 1; i < argc; ++i)
+    {
         std::string arg = argv[i];
         if (arg == "--port" && i + 1 < argc)
+        {
             cfg.port = static_cast<unsigned short>(std::stoi(argv[++i]));
+        }
         else if (arg == "--data-dir" && i + 1 < argc)
+        {
             cfg.dataDir = argv[++i];
+        }
         else if (arg == "--workers" && i + 1 < argc)
+        {
             cfg.workers = std::stoi(argv[++i]);
+        }
         else if (arg == "--cpu-affinity" && i + 1 < argc)
+        {
             cfg.cpuAffinityStart = std::stoi(argv[++i]);
+        }
         else if (arg == "--huge-pages")
+        {
             cfg.hugePages = true;
+        }
         else if (arg == "--fix-cfg" && i + 1 < argc)
+        {
             cfg.fixCfg = argv[++i];
+        }
     }
     return cfg;
 }
 
-}
+} // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[])
+{
     Config cfg = parseArgs(argc, argv);
 
     // 1. Create singletons
@@ -83,22 +100,30 @@ int main(int argc, char* argv[]) {
     aux::ExchLogger::instance()->note("OrderProcessor WebSocket Server starting...");
 
     // 1b. Pin main IO thread to a dedicated core if affinity is enabled
-    if (cfg.cpuAffinityStart >= 0) {
-        if (CpuAffinity::pinThreadToCore(cfg.cpuAffinityStart)) {
-            aux::ExchLogger::instance()->note(
-                std::string("Main IO thread pinned to core ") + std::to_string(cfg.cpuAffinityStart));
-        } else {
-            aux::ExchLogger::instance()->warn(
-                std::string("Failed to pin main thread to core ") + std::to_string(cfg.cpuAffinityStart));
+    if (cfg.cpuAffinityStart >= 0)
+    {
+        if (CpuAffinity::pinThreadToCore(cfg.cpuAffinityStart))
+        {
+            aux::ExchLogger::instance()->note(std::string("Main IO thread pinned to core ") +
+                                              std::to_string(cfg.cpuAffinityStart));
+        }
+        else
+        {
+            aux::ExchLogger::instance()->warn(std::string("Failed to pin main thread to core ") +
+                                              std::to_string(cfg.cpuAffinityStart));
         }
     }
 
     // 1c. Log HugePages availability
-    if (cfg.hugePages) {
-        if (HugePages::isAvailable()) {
-            aux::ExchLogger::instance()->note(
-                std::string("Huge pages enabled (") + std::to_string(HugePages::getFreeCount()) + " free)");
-        } else {
+    if (cfg.hugePages)
+    {
+        if (HugePages::isAvailable())
+        {
+            aux::ExchLogger::instance()->note(std::string("Huge pages enabled (") +
+                                              std::to_string(HugePages::getFreeCount()) + " free)");
+        }
+        else
+        {
             aux::ExchLogger::instance()->warn("Huge pages requested but not available on this system");
             cfg.hugePages = false;
         }
@@ -109,8 +134,7 @@ int main(int argc, char* argv[]) {
     auto dispatcher = std::make_unique<Store::StorageRecordDispatcher>();
 
     // Phase 1: Load reference data (instruments, accounts, strings) — orderBook is null
-    dispatcher->init(Store::WideDataStorage::instance(), nullptr, lmdbStorage.get(),
-                     Store::OrderStorage::instance());
+    dispatcher->init(Store::WideDataStorage::instance(), nullptr, lmdbStorage.get(), Store::OrderStorage::instance());
     lmdbStorage->load(cfg.dataDir, dispatcher.get());
 
     aux::ExchLogger::instance()->note("Phase 1 LMDB load complete (reference data)");
@@ -118,7 +142,8 @@ int main(int argc, char* argv[]) {
     // 3. Collect instrument IDs and init OrderBook
     OrderBookImpl::InstrumentsT instrumentIds;
     Store::WideDataStorage::instance()->forEachInstrument(
-        [&](const SourceIdT& id, const InstrumentEntry& /*instr*/) {
+        [&](const SourceIdT &id, const InstrumentEntry & /*instr*/)
+        {
             instrumentIds.insert(id);
         });
 
@@ -146,23 +171,19 @@ int main(int argc, char* argv[]) {
     // 6. Create SessionManager and WsOutQueues
     auto sessionMgr = std::make_unique<App::SessionManager>();
     auto inQueues = std::make_unique<Queues::IncomingQueues>();
-    auto wsOutQueues = std::make_unique<App::WsOutQueues>(
-        sessionMgr.get(),
-        Store::WideDataStorage::instance(),
-        Store::OrderStorage::instance(),
-        orderBook.get());
+    auto wsOutQueues = std::make_unique<App::WsOutQueues>(sessionMgr.get(), Store::WideDataStorage::instance(),
+                                                          Store::OrderStorage::instance(), orderBook.get());
 
     // 6b. Create FIX gateway (if configured)
 #ifdef BUILD_FIX
     std::unique_ptr<App::FixServer> fixServer;
     std::unique_ptr<App::MultiOutQueues> multiOutQueues;
 
-    if (!cfg.fixCfg.empty()) {
-        fixServer = std::make_unique<App::FixServer>(
-            inQueues.get(),
-            Store::WideDataStorage::instance(),
-            Store::OrderStorage::instance(),
-            SourceIdT());  // default clearing ID
+    if (!cfg.fixCfg.empty())
+    {
+        fixServer = std::make_unique<App::FixServer>(inQueues.get(), Store::WideDataStorage::instance(),
+                                                     Store::OrderStorage::instance(),
+                                                     SourceIdT()); // default clearing ID
 
         multiOutQueues = std::make_unique<App::MultiOutQueues>();
         multiOutQueues->addDelegate(wsOutQueues.get());
@@ -185,26 +206,24 @@ int main(int argc, char* argv[]) {
     Queues::InQueueProcessorsPoolT evntProcessors;
     ACID::ProcessorPoolT transactProcessors;
 
-    Queues::OutQueues* outQueuesPtr = wsOutQueues.get();
+    Queues::OutQueues *outQueuesPtr = wsOutQueues.get();
 #ifdef BUILD_FIX
-    if (multiOutQueues) outQueuesPtr = multiOutQueues.get();
+    if (multiOutQueues)
+    {
+        outQueuesPtr = multiOutQueues.get();
+    }
 #endif
 
-    for (int i = 0; i < numProcessors; ++i) {
-        Proc::ProcessorParams params(
-            IdTGenerator::instance(),
-            Store::OrderStorage::instance(),
-            orderBook.get(),
-            inQueues.get(),
-            outQueuesPtr,
-            inQueues.get(),
-            transactMgr.get());
+    for (int i = 0; i < numProcessors; ++i)
+    {
+        Proc::ProcessorParams params(IdTGenerator::instance(), Store::OrderStorage::instance(), orderBook.get(),
+                                     inQueues.get(), outQueuesPtr, inQueues.get(), transactMgr.get());
 
-        auto* evtProc = new Proc::Processor();
+        auto *evtProc = new Proc::Processor();
         evtProc->init(params);
         evntProcessors.push_back(evtProc);
 
-        auto* trProc = new Proc::Processor();
+        auto *trProc = new Proc::Processor();
         trProc->init(params);
         transactProcessors.push_back(trProc);
     }
@@ -222,45 +241,39 @@ int main(int argc, char* argv[]) {
     auto taskMgr = std::make_unique<Tasks::TaskManager>(taskParams);
 
     // 10. Create Beast io_context and WsServer
-    boost::asio::io_context ioc{1};
+    boost::asio::io_context ioc{ 1 };
 
     auto server = std::make_shared<App::WsServer>(
-        ioc,
-        boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("0.0.0.0"), cfg.port),
-        sessionMgr.get(),
-        Store::WideDataStorage::instance(),
-        Store::OrderStorage::instance(),
-        inQueues.get(),
-        IdTGenerator::instance(),
+        ioc, boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("0.0.0.0"), cfg.port), sessionMgr.get(),
+        Store::WideDataStorage::instance(), Store::OrderStorage::instance(), inQueues.get(), IdTGenerator::instance(),
         orderBook.get());
     server->run();
 
     // 10b. Start FIX acceptor (if configured)
 #ifdef BUILD_FIX
-    if (fixServer) {
+    if (fixServer)
+    {
         fixServer->start(cfg.fixCfg);
     }
 #endif
 
     // 10c. Create MetricsPublisher for system monitoring
     auto metricsPublisher = std::make_shared<App::MetricsPublisher>(
-        ioc,
-        sessionMgr.get(),
-        taskMgr.get(),
-        inQueues.get(),
-        Store::OrderStorage::instance(),
-        static_cast<Proc::Processor*>(evntProcessors[0])->scopePool());
+        ioc, sessionMgr.get(), taskMgr.get(), inQueues.get(), Store::OrderStorage::instance(),
+        static_cast<Proc::Processor *>(evntProcessors[0])->scopePool());
     metricsPublisher->start();
 
     // 11. Signal handling for graceful shutdown
     boost::asio::signal_set signals(ioc, SIGINT, SIGTERM);
-    signals.async_wait([&](boost::system::error_code const&, int) {
-        aux::ExchLogger::instance()->note("Shutdown signal received");
-        ioc.stop();
-    });
+    signals.async_wait(
+        [&](boost::system::error_code const &, int)
+        {
+            aux::ExchLogger::instance()->note("Shutdown signal received");
+            ioc.stop();
+        });
 
-    aux::ExchLogger::instance()->note(
-        std::string("OrderProcessor WebSocket Server listening on port ") + std::to_string(cfg.port));
+    aux::ExchLogger::instance()->note(std::string("OrderProcessor WebSocket Server listening on port ") +
+                                      std::to_string(cfg.port));
 
     // 12. Run io_context on main thread
     ioc.run();
@@ -269,7 +282,10 @@ int main(int argc, char* argv[]) {
     aux::ExchLogger::instance()->note("Shutting down...");
 
 #ifdef BUILD_FIX
-    if (fixServer) fixServer->stop();
+    if (fixServer)
+    {
+        fixServer->stop();
+    }
 #endif
 
     metricsPublisher->stop();

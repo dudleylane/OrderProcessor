@@ -15,45 +15,88 @@
 #include <string>
 #include <deque>
 
-namespace COP{ 
-	struct OrderEntry;	
+namespace COP
+{
+struct OrderEntry;
 
-namespace EventMgr{
+namespace EventMgr
+{
 
-struct NewOrderEvent{
-	OrderEntry *order_;
+struct NewOrderEvent
+{
+    OrderEntry *order_;
 };
 
-struct CancelOrderEvent{};
-struct ReplaceOrderEvent{};
-struct ChangedOrderEvent{};
+struct CancelOrderEvent
+{
+};
+struct ReplaceOrderEvent
+{
+};
+struct ChangedOrderEvent
+{
+};
 
-struct ExecutionEvent{};
-struct TradeCancelExecEvent{};
-struct ReplaceExecEvent{};
-struct RejectExecEvent{};
-struct TradeCorrectExecEvent{};
-struct TradeExecEvent{};
-struct ChangedExecEvent{};
+struct ExecutionEvent
+{
+};
+struct TradeCancelExecEvent
+{
+};
+struct ReplaceExecEvent
+{
+};
+struct RejectExecEvent
+{
+};
+struct TradeCorrectExecEvent
+{
+};
+struct TradeExecEvent
+{
+};
+struct ChangedExecEvent
+{
+};
 
-struct MarketDataEvent{};
+struct MarketDataEvent
+{
+};
 
-struct TimerEvent{};
+struct TimerEvent
+{
+};
 
-struct HaltEvent{};
-struct AlertEvent{};
+struct HaltEvent
+{
+};
+struct AlertEvent
+{
+};
 
-struct TransactionEvent{};
-struct InvalidTransactEvent{};
-struct FailedTransactEvent{};
-struct CanceledTransactEvent{};
+struct TransactionEvent
+{
+};
+struct InvalidTransactEvent
+{
+};
+struct FailedTransactEvent
+{
+};
+struct CanceledTransactEvent
+{
+};
 
-struct NoSubscribersEvent{};
+struct NoSubscribersEvent
+{
+};
 
-class EventDispatcher{
+class EventDispatcher
+{
 public:
-	virtual ~EventDispatcher(){}
-	virtual void dispatch(const NewOrderEvent &evnt)const = 0;
+    virtual ~EventDispatcher() {}
+    virtual void dispatch(const NewOrderEvent &evnt) const = 0;
 };
 
-}}
+} // namespace EventMgr
+} // namespace COP

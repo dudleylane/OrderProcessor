@@ -18,59 +18,67 @@
 
 #include "DataModelDef.h"
 
-namespace COP{
+namespace COP
+{
 
-	namespace Store { class OrderDataStorage; }
-
-	struct BookLevel {
-		PriceT price;
-		QuantityT totalQty;
-		u32 orderCount;
-	};
-
-	struct BookSnapshot {
-		std::vector<BookLevel> bids;
-		std::vector<BookLevel> asks;
-	};
-
-	class OrderBookImpl: public OrderBook
-	{
-	public:
-		typedef std::set<SourceIdT> InstrumentsT;
-	public:
-		OrderBookImpl(void);
-		~OrderBookImpl(void);
-
-		void init(const InstrumentsT &instr, OrderSaver *storage);
-
-	public:
-		virtual void add(const OrderEntry& order);
-		virtual void remove(const OrderEntry& order);
-		virtual IdT find(const OrderFunctor &functor)const;
-		virtual void findAll(const OrderFunctor &functor, OrdersT *result)const;
-
-		virtual IdT getTop(const SourceIdT &instrument, const Side &side)const;
-
-		virtual void restore(const OrderEntry& order);
-
-		BookSnapshot getSnapshot(const SourceIdT &instrument, const Store::OrderDataStorage* storage) const;
-	private:
-		typedef std::multimap<PriceT, IdT, PriceTAscend> OrdersByPriceAscT;
-		typedef std::multimap<PriceT, IdT, PriceTDescend> OrdersByPriceDescT;
-		struct OrdersGroup{
-			mutable oneapi::tbb::mutex buyLock_;
-			OrdersByPriceDescT buyOrder_;
-
-			mutable oneapi::tbb::mutex sellLock_;
-			OrdersByPriceAscT sellOrder_;
-		};
-
-		typedef std::map<IdT, OrdersGroup *> OrderGroupsByInstrumentT;
-
-		OrderGroupsByInstrumentT orderGroups_;
-
-		OrderSaver *storage_;
-	};
-
+namespace Store
+{
+class OrderDataStorage;
 }
 
+struct BookLevel
+{
+    PriceT price;
+    QuantityT totalQty;
+    u32 orderCount;
+};
+
+struct BookSnapshot
+{
+    std::vector<BookLevel> bids;
+    std::vector<BookLevel> asks;
+};
+
+class OrderBookImpl : public OrderBook
+{
+public:
+    typedef std::set<SourceIdT> InstrumentsT;
+
+public:
+    OrderBookImpl(void);
+    ~OrderBookImpl(void);
+
+    void init(const InstrumentsT &instr, OrderSaver *storage);
+
+public:
+    virtual void add(const OrderEntry &order);
+    virtual void remove(const OrderEntry &order);
+    virtual IdT find(const OrderFunctor &functor) const;
+    virtual void findAll(const OrderFunctor &functor, OrdersT *result) const;
+
+    virtual IdT getTop(const SourceIdT &instrument, const Side &side) const;
+
+    virtual void restore(const OrderEntry &order);
+
+    BookSnapshot getSnapshot(const SourceIdT &instrument, const Store::OrderDataStorage *storage) const;
+
+private:
+    typedef std::multimap<PriceT, IdT, PriceTAscend> OrdersByPriceAscT;
+    typedef std::multimap<PriceT, IdT, PriceTDescend> OrdersByPriceDescT;
+    struct OrdersGroup
+    {
+        mutable oneapi::tbb::mutex buyLock_;
+        OrdersByPriceDescT buyOrder_;
+
+        mutable oneapi::tbb::mutex sellLock_;
+        OrdersByPriceAscT sellOrder_;
+    };
+
+    typedef std::map<IdT, OrdersGroup *> OrderGroupsByInstrumentT;
+
+    OrderGroupsByInstrumentT orderGroups_;
+
+    OrderSaver *storage_;
+};
+
+} // namespace COP

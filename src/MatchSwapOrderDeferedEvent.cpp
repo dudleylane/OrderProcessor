@@ -20,19 +20,18 @@ using namespace COP::ACID;
 using namespace COP::OrdState;
 using namespace COP::Store;
 
-MatchSwapOrderDeferedEvent::MatchSwapOrderDeferedEvent(): order_(nullptr)
-{}
+MatchSwapOrderDeferedEvent::MatchSwapOrderDeferedEvent() : order_(nullptr) {}
 
-MatchSwapOrderDeferedEvent::MatchSwapOrderDeferedEvent(OrderEntry *ord): order_(ord)
+MatchSwapOrderDeferedEvent::MatchSwapOrderDeferedEvent(OrderEntry *ord) : order_(ord)
 {
-	assert(nullptr != order_);
+    assert(nullptr != order_);
 }
 
 void MatchSwapOrderDeferedEvent::execute(DeferedEventFunctor *func, const Context &cnxt, ACID::Scope * /*scope*/)
 {
-	assert(nullptr != func);
-	assert(nullptr != order_);
+    assert(nullptr != func);
+    assert(nullptr != order_);
 
-	// Delegates to OrderMatcher::match() which dispatches to matchSwap() for FXSWAP orders
-	cnxt.orderMatch_->match(order_, cnxt);
+    // Delegates to OrderMatcher::match() which dispatches to matchSwap() for FXSWAP orders
+    cnxt.orderMatch_->match(order_, cnxt);
 }

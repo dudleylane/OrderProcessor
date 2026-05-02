@@ -17,160 +17,188 @@
 #include "DataModelDef.h"
 #include "OrderStateEvents.h"
 
-namespace COP{
+namespace COP
+{
 
-	namespace ACID{
-	
-		class CreateExecReportTrOperation final : public Operation{
-		public:
-			CreateExecReportTrOperation(OrderStatus status, ExecType execType, const OrderEntry &order);
-			~CreateExecReportTrOperation();
+namespace ACID
+{
 
-			void execute(const Context &cnxt) override;
-			void rollback(const Context &cnxt) override;
-		private:
-			OrderStatus status_;
-			ExecType execType_;
-		};
+class CreateExecReportTrOperation final : public Operation
+{
+public:
+    CreateExecReportTrOperation(OrderStatus status, ExecType execType, const OrderEntry &order);
+    ~CreateExecReportTrOperation();
 
-		class CreateTradeExecReportTrOperation final : public Operation{
-		public:
-			CreateTradeExecReportTrOperation(const TradeExecEntry *trade, OrderStatus status, const OrderEntry &order);
-			CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx, Currency currency,
-				OrderStatus status, ExecLegType legType, const OrderEntry &order);
-			~CreateTradeExecReportTrOperation();
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
 
-			void execute(const Context &cnxt) override;
-			void rollback(const Context &cnxt) override;
-		private:
-			QuantityT lastQty_;
-			PriceT lastPx_;
-			DateTimeT tradeDate_;
-			Currency currency_;
-			OrderStatus status_;
-			ExecLegType execLegType_;
-		};
+private:
+    OrderStatus status_;
+    ExecType execType_;
+};
 
-		class CreateRejectExecReportTrOperation final : public Operation{
-		public:
-			CreateRejectExecReportTrOperation(std::string_view reason, OrderStatus status, const OrderEntry &order);
-			~CreateRejectExecReportTrOperation();
+class CreateTradeExecReportTrOperation final : public Operation
+{
+public:
+    CreateTradeExecReportTrOperation(const TradeExecEntry *trade, OrderStatus status, const OrderEntry &order);
+    CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx, Currency currency, OrderStatus status,
+                                     ExecLegType legType, const OrderEntry &order);
+    ~CreateTradeExecReportTrOperation();
 
-			void execute(const Context &cnxt) override;
-			void rollback(const Context &cnxt) override;
-		private:
-			std::string reason_;
-			OrderStatus status_;
-		};
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
 
-		class CreateReplaceExecReportTrOperation final : public Operation{
-		public:
-			CreateReplaceExecReportTrOperation(const IdT &origOrderId, OrderStatus status, const OrderEntry &order);
-			~CreateReplaceExecReportTrOperation();
+private:
+    QuantityT lastQty_;
+    PriceT lastPx_;
+    DateTimeT tradeDate_;
+    Currency currency_;
+    OrderStatus status_;
+    ExecLegType execLegType_;
+};
 
-			void execute(const Context &cnxt) override;
-			void rollback(const Context &cnxt) override;
-		private:
-			IdT origOrderId_;
-			OrderStatus status_;
-		};
+class CreateRejectExecReportTrOperation final : public Operation
+{
+public:
+    CreateRejectExecReportTrOperation(std::string_view reason, OrderStatus status, const OrderEntry &order);
+    ~CreateRejectExecReportTrOperation();
 
-		class CreateCorrectExecReportTrOperation final : public Operation{
-		public:
-			CreateCorrectExecReportTrOperation(const ExecCorrectExecEntry *correct, OrderStatus status, const OrderEntry &order);
-			~CreateCorrectExecReportTrOperation();
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
 
-			void execute(const Context &cnxt) override;
-			void rollback(const Context &cnxt) override;
-		private:
-			QuantityT cumQty_;
-			QuantityT leavesQty_;
-			QuantityT lastQty_;
-			PriceT lastPx_;
-			Currency currency_;
-			DateTimeT tradeDate_;
-			IdT origOrderId_;
-			IdT execRefId_;
+private:
+    std::string reason_;
+    OrderStatus status_;
+};
 
-			OrderStatus status_;
-		};
+class CreateReplaceExecReportTrOperation final : public Operation
+{
+public:
+    CreateReplaceExecReportTrOperation(const IdT &origOrderId, OrderStatus status, const OrderEntry &order);
+    ~CreateReplaceExecReportTrOperation();
 
-		class AddToOrderBookTrOperation final : public Operation{
-		public:
-			AddToOrderBookTrOperation(const OrderEntry &order, const IdT &instrId);
-			~AddToOrderBookTrOperation();
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
 
-			void execute(const Context &cnxt) override;
-			void rollback(const Context &cnxt) override;
-		private:
-			AddToOrderBookTrOperation(const AddToOrderBookTrOperation &);
-			AddToOrderBookTrOperation &operator=(const AddToOrderBookTrOperation &);
-			const OrderEntry &order_;
-		};
+private:
+    IdT origOrderId_;
+    OrderStatus status_;
+};
 
-		class RemoveFromOrderBookTrOperation final : public Operation{
-		public:
-			RemoveFromOrderBookTrOperation(const OrderEntry &order, const IdT &instrId);
-			~RemoveFromOrderBookTrOperation();
+class CreateCorrectExecReportTrOperation final : public Operation
+{
+public:
+    CreateCorrectExecReportTrOperation(const ExecCorrectExecEntry *correct, OrderStatus status,
+                                       const OrderEntry &order);
+    ~CreateCorrectExecReportTrOperation();
 
-			void execute(const Context &cnxt) override;
-			void rollback(const Context &cnxt) override;
-		private:
-			RemoveFromOrderBookTrOperation(const RemoveFromOrderBookTrOperation &);
-			RemoveFromOrderBookTrOperation &operator=(const RemoveFromOrderBookTrOperation &);
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
 
-			const OrderEntry &order_;
-		};
+private:
+    QuantityT cumQty_;
+    QuantityT leavesQty_;
+    QuantityT lastQty_;
+    PriceT lastPx_;
+    Currency currency_;
+    DateTimeT tradeDate_;
+    IdT origOrderId_;
+    IdT execRefId_;
 
-		void executeEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
-		void rollbackEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
-		void executeEnqueueOrderEvent(const OrdState::onExecReplace &event_, const Context &cnxt);
-		void rollbackEnqueueOrderEvent(const OrdState::onExecReplace &event_, const Context &cnxt);
-		void executeEnqueueOrderEvent(const OrdState::onReplaceRejected &event_, const Context &cnxt);
-		void rollbackEnqueueOrderEvent(const OrdState::onReplaceRejected &event_, const Context &cnxt);
+    OrderStatus status_;
+};
 
-		template<typename T>
-		class EnqueueOrderEventTrOperation: public Operation{
-		public:
-			EnqueueOrderEventTrOperation(const OrderEntry &order, const T& evnt):
-				Operation(ENQUEUE_EVENT_TROPERATION, order.orderId_), event_(evnt){}
-			EnqueueOrderEventTrOperation(const OrderEntry &order, const T& evnt, const IdT &instrId):
-				Operation(ENQUEUE_EVENT_TROPERATION, order.orderId_, instrId), event_(evnt){}
+class AddToOrderBookTrOperation final : public Operation
+{
+public:
+    AddToOrderBookTrOperation(const OrderEntry &order, const IdT &instrId);
+    ~AddToOrderBookTrOperation();
 
-			~EnqueueOrderEventTrOperation(){}
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
 
-			virtual void execute(const Context &cnxt){
-				executeEnqueueOrderEvent(event_, cnxt);
-			}
-			virtual void rollback(const Context &cnxt){
-				rollbackEnqueueOrderEvent(event_, cnxt);
-			}
-		private:
-			T event_;
-		};
+private:
+    AddToOrderBookTrOperation(const AddToOrderBookTrOperation &);
+    AddToOrderBookTrOperation &operator=(const AddToOrderBookTrOperation &);
+    const OrderEntry &order_;
+};
 
-		class CancelRejectTrOperation final : public Operation{
-		public:
-			CancelRejectTrOperation(OrderStatus status, const OrderEntry &order);
-			~CancelRejectTrOperation();
+class RemoveFromOrderBookTrOperation final : public Operation
+{
+public:
+    RemoveFromOrderBookTrOperation(const OrderEntry &order, const IdT &instrId);
+    ~RemoveFromOrderBookTrOperation();
 
-			void execute(const Context &cnxt) override;
-			void rollback(const Context &cnxt) override;
-		private:
-			OrderStatus status_;
-		};
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
 
-		class MatchOrderTrOperation final : public Operation{
-		public:
-			MatchOrderTrOperation(OrderEntry *order);
-			~MatchOrderTrOperation();
+private:
+    RemoveFromOrderBookTrOperation(const RemoveFromOrderBookTrOperation &);
+    RemoveFromOrderBookTrOperation &operator=(const RemoveFromOrderBookTrOperation &);
 
-			void execute(const Context &cnxt) override;
-			void rollback(const Context &cnxt) override;
-		private:
-			OrderEntry *order_;
-			size_t eventCountBefore_;
-		};
+    const OrderEntry &order_;
+};
 
-	}
-}
+void executeEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
+void rollbackEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
+void executeEnqueueOrderEvent(const OrdState::onExecReplace &event_, const Context &cnxt);
+void rollbackEnqueueOrderEvent(const OrdState::onExecReplace &event_, const Context &cnxt);
+void executeEnqueueOrderEvent(const OrdState::onReplaceRejected &event_, const Context &cnxt);
+void rollbackEnqueueOrderEvent(const OrdState::onReplaceRejected &event_, const Context &cnxt);
+
+template <typename T> class EnqueueOrderEventTrOperation : public Operation
+{
+public:
+    EnqueueOrderEventTrOperation(const OrderEntry &order, const T &evnt)
+        : Operation(ENQUEUE_EVENT_TROPERATION, order.orderId_), event_(evnt)
+    {
+    }
+    EnqueueOrderEventTrOperation(const OrderEntry &order, const T &evnt, const IdT &instrId)
+        : Operation(ENQUEUE_EVENT_TROPERATION, order.orderId_, instrId), event_(evnt)
+    {
+    }
+
+    ~EnqueueOrderEventTrOperation() {}
+
+    virtual void execute(const Context &cnxt)
+    {
+        executeEnqueueOrderEvent(event_, cnxt);
+    }
+    virtual void rollback(const Context &cnxt)
+    {
+        rollbackEnqueueOrderEvent(event_, cnxt);
+    }
+
+private:
+    T event_;
+};
+
+class CancelRejectTrOperation final : public Operation
+{
+public:
+    CancelRejectTrOperation(OrderStatus status, const OrderEntry &order);
+    ~CancelRejectTrOperation();
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    OrderStatus status_;
+};
+
+class MatchOrderTrOperation final : public Operation
+{
+public:
+    MatchOrderTrOperation(OrderEntry *order);
+    ~MatchOrderTrOperation();
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    OrderEntry *order_;
+    size_t eventCountBefore_;
+};
+
+} // namespace ACID
+} // namespace COP

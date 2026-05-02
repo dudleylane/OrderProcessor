@@ -46,22 +46,26 @@ using namespace COP::Tasks;
 using namespace COP::App;
 using test::DummyOrderSaver;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Capturing OutQueues — records all outbound events for verification
 // =============================================================================
 
-struct CapturedExecReport {
+struct CapturedExecReport
+{
     IdT orderId;
     ExecType execType;
     OrderStatus orderStatus;
     std::string source;
 };
 
-class CapturingOutQueues : public Queues::OutQueues {
+class CapturingOutQueues : public Queues::OutQueues
+{
 public:
-    void push(const ExecReportEvent& evnt, const std::string& target) override {
+    void push(const ExecReportEvent &evnt, const std::string &target) override
+    {
         std::lock_guard<std::mutex> lock(mtx_);
         CapturedExecReport r;
         r.orderId = evnt.exec_->orderId_;
@@ -72,33 +76,40 @@ public:
         totalEvents_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    void push(const CancelRejectEvent&, const std::string&) override {
+    void push(const CancelRejectEvent &, const std::string &) override
+    {
         totalEvents_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    void push(const BusinessRejectEvent&, const std::string&) override {
+    void push(const BusinessRejectEvent &, const std::string &) override
+    {
         totalEvents_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    std::deque<CapturedExecReport> reports() const {
+    std::deque<CapturedExecReport> reports() const
+    {
         std::lock_guard<std::mutex> lock(mtx_);
         return reports_;
     }
 
-    int totalEvents() const { return totalEvents_.load(std::memory_order_relaxed); }
+    int totalEvents() const
+    {
+        return totalEvents_.load(std::memory_order_relaxed);
+    }
 
 private:
     mutable std::mutex mtx_;
     std::deque<CapturedExecReport> reports_;
-    std::atomic<int> totalEvents_{0};
+    std::atomic<int> totalEvents_{ 0 };
 };
 
 // =============================================================================
 // Helper: add instrument to WideDataStorage
 // =============================================================================
 
-SourceIdT addTestInstrument(const std::string& symbol) {
-    auto* instr = new InstrumentEntry();
+SourceIdT addTestInstrument(const std::string &symbol)
+{
+    auto *instr = new InstrumentEntry();
     instr->symbol_ = symbol;
     instr->securityId_ = "SEC1";
     instr->securityIdSource_ = "SRC1";
@@ -109,9 +120,11 @@ SourceIdT addTestInstrument(const std::string& symbol) {
 // Test Fixture
 // =============================================================================
 
-class FixEndToEndTest : public ::testing::Test {
+class FixEndToEndTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         WideDataStorage::create();
         SubscrMgr::SubscriptionMgr::create();
         IdTGenerator::create();
@@ -120,13 +133,13 @@ protected:
         instrId_ = addTestInstrument("EURUSD");
 
         // Set up test account and clearing (required by OrderEntry::isValid)
-        auto* acct = new AccountEntry();
+        auto *acct = new AccountEntry();
         acct->account_ = "TESTACCT";
         acct->firm_ = "TESTFIRM";
         acct->type_ = PRINCIPAL_ACCOUNTTYPE;
         WideDataStorage::instance()->add(acct);
 
-        auto* clearing = new ClearingEntry();
+        auto *clearing = new ClearingEntry();
         clearing->firm_ = "CLRFIRM";
         clearingId_ = WideDataStorage::instance()->add(clearing);
 
@@ -144,21 +157,15 @@ protected:
         transMgr_->init(transParams);
 
         // Create processor pool
-        ProcessorParams params(
-            IdTGenerator::instance(),
-            OrderStorage::instance(),
-            orderBook_.get(),
-            inQueues_.get(),
-            outQueues_.get(),
-            inQueues_.get(),
-            transMgr_.get());
+        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
+                               outQueues_.get(), inQueues_.get(), transMgr_.get());
 
         TaskManagerParams tmparams;
-        auto* evtProc = new Processor();
+        auto *evtProc = new Processor();
         evtProc->init(params);
         tmparams.evntProcessors_.push_back(evtProc);
 
-        auto* trProc = new Processor();
+        auto *trProc = new Processor();
         trProc->init(params);
         tmparams.transactProcessors_.push_back(trProc);
 
@@ -169,14 +176,12 @@ protected:
         taskMgr_ = std::make_unique<TaskManager>(tmparams);
 
         // Create FIX gateway pointing at real IncomingQueues
-        gateway_ = std::make_unique<FixGateway>(
-            inQueues_.get(),
-            WideDataStorage::instance(),
-            OrderStorage::instance(),
-            clearingId_);
+        gateway_ = std::make_unique<FixGateway>(inQueues_.get(), WideDataStorage::instance(), OrderStorage::instance(),
+                                                clearingId_);
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         transMgr_->stop();
         taskMgr_->waitUntilTransactionsFinished(5);
         inQueues_->detach();
@@ -197,9 +202,8 @@ protected:
     }
 
     // Helper: build a FIX NewOrderSingle
-    FIX44::NewOrderSingle makeNOS(const std::string& clOrdId, char side,
-                                   char ordType, double price, double qty,
-                                   char tif = FIX::TimeInForce_DAY)
+    FIX44::NewOrderSingle makeNOS(const std::string &clOrdId, char side, char ordType, double price, double qty,
+                                  char tif = FIX::TimeInForce_DAY)
     {
         FIX::UtcTimeStamp now;
         FIX44::NewOrderSingle msg;
@@ -211,13 +215,16 @@ protected:
         msg.set(FIX::OrderQty(qty));
         msg.set(FIX::TimeInForce(tif));
         if (ordType != FIX::OrdType_MARKET)
+        {
             msg.set(FIX::Price(price));
+        }
         msg.set(FIX::Account("TESTACCT"));
         msg.set(FIX::Currency("USD"));
         return msg;
     }
 
-    void waitForProcessing() {
+    void waitForProcessing()
+    {
         taskMgr_->waitUntilTransactionsFinished(10);
     }
 
@@ -232,14 +239,15 @@ protected:
     std::unique_ptr<TaskManager> taskMgr_;
     std::unique_ptr<FixGateway> gateway_;
 
-    const FIX::SessionID fixSid_{"FIX.4.4", "TRADER_A", "ORDER_PROCESSOR", ""};
+    const FIX::SessionID fixSid_{ "FIX.4.4", "TRADER_A", "ORDER_PROCESSOR", "" };
 };
 
 // =============================================================================
 // End-to-End Tests
 // =============================================================================
 
-TEST_F(FixEndToEndTest, LimitOrder_Accepted) {
+TEST_F(FixEndToEndTest, LimitOrder_Accepted)
+{
     auto msg = makeNOS("FIX-001", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100);
     gateway_->onMessage(msg, fixSid_);
 
@@ -247,7 +255,7 @@ TEST_F(FixEndToEndTest, LimitOrder_Accepted) {
 
     // Find the order by scanning storage
     RawDataEntry rawKey(STRING_RAWDATATYPE, "FIX-001", 7);
-    OrderEntry* order = OrderStorage::instance()->locateByClOrderId(rawKey);
+    OrderEntry *order = OrderStorage::instance()->locateByClOrderId(rawKey);
     ASSERT_NE(nullptr, order);
     EXPECT_EQ(NEW_ORDSTATUS, order->status_);
     EXPECT_EQ(BUY_SIDE, order->side_);
@@ -261,14 +269,15 @@ TEST_F(FixEndToEndTest, LimitOrder_Accepted) {
     // (exec reports are generated on fills, cancels, rejects)
 }
 
-TEST_F(FixEndToEndTest, TwoOrders_MatchAndFill) {
+TEST_F(FixEndToEndTest, TwoOrders_MatchAndFill)
+{
     // 1. Submit sell limit via FIX
     auto sellMsg = makeNOS("FIX-SELL-001", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 100);
     gateway_->onMessage(sellMsg, fixSid_);
     waitForProcessing();
 
     RawDataEntry sellKey(STRING_RAWDATATYPE, "FIX-SELL-001", 12);
-    OrderEntry* sellOrder = OrderStorage::instance()->locateByClOrderId(sellKey);
+    OrderEntry *sellOrder = OrderStorage::instance()->locateByClOrderId(sellKey);
     ASSERT_NE(nullptr, sellOrder);
     EXPECT_EQ(NEW_ORDSTATUS, sellOrder->status_);
 
@@ -278,7 +287,7 @@ TEST_F(FixEndToEndTest, TwoOrders_MatchAndFill) {
     waitForProcessing();
 
     RawDataEntry buyKey(STRING_RAWDATATYPE, "FIX-BUY-001", 11);
-    OrderEntry* buyOrder = OrderStorage::instance()->locateByClOrderId(buyKey);
+    OrderEntry *buyOrder = OrderStorage::instance()->locateByClOrderId(buyKey);
     ASSERT_NE(nullptr, buyOrder);
 
     // 3. Both should be filled
@@ -292,13 +301,18 @@ TEST_F(FixEndToEndTest, TwoOrders_MatchAndFill) {
     // 4. Verify trade execution reports generated for both orders
     auto reports = outQueues_->reports();
     int tradeReports = 0;
-    for (const auto& r : reports) {
-        if (r.execType == TRADE_EXECTYPE) tradeReports++;
+    for (const auto &r : reports)
+    {
+        if (r.execType == TRADE_EXECTYPE)
+        {
+            tradeReports++;
+        }
     }
     EXPECT_GE(tradeReports, 2) << "Expected at least 2 TRADE execution reports (one per side)";
 }
 
-TEST_F(FixEndToEndTest, PartialFill) {
+TEST_F(FixEndToEndTest, PartialFill)
+{
     // Sell 50 on book
     auto sellMsg = makeNOS("FIX-SELL-P1", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 50);
     gateway_->onMessage(sellMsg, fixSid_);
@@ -311,8 +325,8 @@ TEST_F(FixEndToEndTest, PartialFill) {
 
     RawDataEntry sellKey(STRING_RAWDATATYPE, "FIX-SELL-P1", 11);
     RawDataEntry buyKey(STRING_RAWDATATYPE, "FIX-BUY-P1", 10);
-    OrderEntry* sellOrder = OrderStorage::instance()->locateByClOrderId(sellKey);
-    OrderEntry* buyOrder = OrderStorage::instance()->locateByClOrderId(buyKey);
+    OrderEntry *sellOrder = OrderStorage::instance()->locateByClOrderId(sellKey);
+    OrderEntry *buyOrder = OrderStorage::instance()->locateByClOrderId(buyKey);
 
     ASSERT_NE(nullptr, sellOrder);
     ASSERT_NE(nullptr, buyOrder);
@@ -323,14 +337,15 @@ TEST_F(FixEndToEndTest, PartialFill) {
     EXPECT_EQ(50u, buyOrder->leavesQty_);
 }
 
-TEST_F(FixEndToEndTest, CancelOrder_ViaFix_Queued) {
+TEST_F(FixEndToEndTest, CancelOrder_ViaFix_Queued)
+{
     // Submit and accept order
     auto msg = makeNOS("FIX-CNL-001", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100);
     gateway_->onMessage(msg, fixSid_);
     waitForProcessing();
 
     RawDataEntry key(STRING_RAWDATATYPE, "FIX-CNL-001", 11);
-    OrderEntry* order = OrderStorage::instance()->locateByClOrderId(key);
+    OrderEntry *order = OrderStorage::instance()->locateByClOrderId(key);
     ASSERT_NE(nullptr, order);
     EXPECT_EQ(NEW_ORDSTATUS, order->status_);
 
@@ -352,21 +367,23 @@ TEST_F(FixEndToEndTest, CancelOrder_ViaFix_Queued) {
     EXPECT_GE(inQueues_->size(), sizeBefore);
 }
 
-TEST_F(FixEndToEndTest, SourceStringPreserved) {
+TEST_F(FixEndToEndTest, SourceStringPreserved)
+{
     // Submit via FIX — verify order's source matches the FIX session
     auto msg = makeNOS("FIX-SRC-001", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100);
     gateway_->onMessage(msg, fixSid_);
     waitForProcessing();
 
     RawDataEntry key(STRING_RAWDATATYPE, "FIX-SRC-001", 11);
-    OrderEntry* order = OrderStorage::instance()->locateByClOrderId(key);
+    OrderEntry *order = OrderStorage::instance()->locateByClOrderId(key);
     ASSERT_NE(nullptr, order);
 
     std::string source = order->source_.get();
     EXPECT_EQ("FIX:TRADER_A->ORDER_PROCESSOR", source);
 }
 
-TEST_F(FixEndToEndTest, MarketOrder_FillsImmediately) {
+TEST_F(FixEndToEndTest, MarketOrder_FillsImmediately)
+{
     // Place a resting sell limit
     auto sellMsg = makeNOS("FIX-MKT-S1", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 100);
     gateway_->onMessage(sellMsg, fixSid_);
@@ -374,7 +391,7 @@ TEST_F(FixEndToEndTest, MarketOrder_FillsImmediately) {
 
     // Verify sell is on book before sending market
     RawDataEntry sellVerifyKey(STRING_RAWDATATYPE, "FIX-MKT-S1", 10);
-    OrderEntry* sellVerify = OrderStorage::instance()->locateByClOrderId(sellVerifyKey);
+    OrderEntry *sellVerify = OrderStorage::instance()->locateByClOrderId(sellVerifyKey);
     ASSERT_NE(nullptr, sellVerify);
     ASSERT_EQ(NEW_ORDSTATUS, sellVerify->status_);
 
@@ -383,12 +400,12 @@ TEST_F(FixEndToEndTest, MarketOrder_FillsImmediately) {
     gateway_->onMessage(buyMsg, fixSid_);
     waitForProcessing();
     waitForProcessing();
-    waitForProcessing();  // market orders chain: match → execution → cancel-if-unfilled
+    waitForProcessing(); // market orders chain: match → execution → cancel-if-unfilled
 
     RawDataEntry sellKey(STRING_RAWDATATYPE, "FIX-MKT-S1", 10);
     RawDataEntry buyKey(STRING_RAWDATATYPE, "FIX-MKT-B1", 10);
-    OrderEntry* sellOrder = OrderStorage::instance()->locateByClOrderId(sellKey);
-    OrderEntry* buyOrder = OrderStorage::instance()->locateByClOrderId(buyKey);
+    OrderEntry *sellOrder = OrderStorage::instance()->locateByClOrderId(sellKey);
+    OrderEntry *buyOrder = OrderStorage::instance()->locateByClOrderId(buyKey);
 
     ASSERT_NE(nullptr, sellOrder);
     ASSERT_NE(nullptr, buyOrder);

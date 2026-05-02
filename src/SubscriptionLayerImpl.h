@@ -14,21 +14,26 @@
 
 #include "SubscriptionLayerDef.h"
 
-namespace COP{ namespace SL{
+namespace COP
+{
+namespace SL
+{
 
-class SubscriptionLayerImpl: public SubscriptionLayer
+class SubscriptionLayerImpl : public SubscriptionLayer
 {
 public:
-	SubscriptionLayerImpl(void);
-	~SubscriptionLayerImpl(void);
+    SubscriptionLayerImpl(void);
+    ~SubscriptionLayerImpl(void);
 
 public:
-	virtual void attach(SubscrMgr::SubscriptionManager *subscMgr);
-	virtual SubscrMgr::SubscriptionManager* dettach();
+    virtual void attach(SubscrMgr::SubscriptionManager *subscMgr);
+    virtual SubscrMgr::SubscriptionManager *dettach();
 
-	virtual void process(const OrderEntry &order, const SubscrMgr::MatchedSubscribersT &subscr);
+    virtual void process(const OrderEntry &order, const SubscrMgr::MatchedSubscribersT &subscr);
+
 private:
-	SubscrMgr::SubscriptionManager* subscrMgr_;
+    SubscrMgr::SubscriptionManager *subscrMgr_;
 };
 
-}}
+} // namespace SL
+} // namespace COP

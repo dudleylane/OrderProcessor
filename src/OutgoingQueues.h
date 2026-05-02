@@ -19,45 +19,44 @@
 
 #include "QueuesDef.h"
 
-namespace COP{
-namespace Queues{
+namespace COP
+{
+namespace Queues
+{
 
-	class OutgoingQueues: public OutQueues
-	{
-	public:
-		OutgoingQueues(void);
-		~OutgoingQueues(void);
-	public:
-		/// reimplementeed from OutQueues
-		virtual void push(const ExecReportEvent &evnt, const std::string &target);
-		virtual void push(const CancelRejectEvent &evnt, const std::string &target);
-		virtual void push(const BusinessRejectEvent &evnt, const std::string &target);
+class OutgoingQueues : public OutQueues
+{
+public:
+    OutgoingQueues(void);
+    ~OutgoingQueues(void);
 
-	private:
-		/// Unified event type using std::variant for lock-free queue
-		using OutEventVariant = std::variant<
-			std::monostate,  // Default state for empty initialization
-			ExecReportEvent,
-			CancelRejectEvent,
-			BusinessRejectEvent
-		>;
+public:
+    /// reimplementeed from OutQueues
+    virtual void push(const ExecReportEvent &evnt, const std::string &target);
+    virtual void push(const CancelRejectEvent &evnt, const std::string &target);
+    virtual void push(const BusinessRejectEvent &evnt, const std::string &target);
 
-		/// Queued outgoing event with target
-		struct QueuedOutEvent {
-			std::string target_;
-			OutEventVariant event_;
+private:
+    /// Unified event type using std::variant for lock-free queue
+    using OutEventVariant = std::variant<std::monostate, // Default state for empty initialization
+                                         ExecReportEvent, CancelRejectEvent, BusinessRejectEvent>;
 
-			QueuedOutEvent() = default;
-			QueuedOutEvent(const std::string &tgt, OutEventVariant evt)
-				: target_(tgt), event_(std::move(evt)) {}
-		};
+    /// Queued outgoing event with target
+    struct QueuedOutEvent
+    {
+        std::string target_;
+        OutEventVariant event_;
 
-		/// Lock-free concurrent queue for all outgoing events (MPSC pattern)
-		oneapi::tbb::concurrent_queue<QueuedOutEvent> eventQueue_;
+        QueuedOutEvent() = default;
+        QueuedOutEvent(const std::string &tgt, OutEventVariant evt) : target_(tgt), event_(std::move(evt)) {}
+    };
 
-	private:
-		void clear();
-	};
+    /// Lock-free concurrent queue for all outgoing events (MPSC pattern)
+    oneapi::tbb::concurrent_queue<QueuedOutEvent> eventQueue_;
 
-}
-}
+private:
+    void clear();
+};
+
+} // namespace Queues
+} // namespace COP

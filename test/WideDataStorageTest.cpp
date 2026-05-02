@@ -22,23 +22,28 @@ using namespace COP;
 using namespace COP::Store;
 using namespace test;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Fixture
 // =============================================================================
 
-class WideDataStorageTest : public ::testing::Test {
+class WideDataStorageTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         WideDataStorage::create();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         WideDataStorage::destroy();
     }
 
-    WideParamsDataStorage* storage() {
+    WideParamsDataStorage *storage()
+    {
         return WideDataStorage::instance();
     }
 };
@@ -47,13 +52,15 @@ protected:
 // Basic Singleton Tests
 // =============================================================================
 
-TEST_F(WideDataStorageTest, InstanceNotNull) {
+TEST_F(WideDataStorageTest, InstanceNotNull)
+{
     ASSERT_NE(nullptr, storage());
 }
 
-TEST_F(WideDataStorageTest, InstanceReturnsSamePointer) {
-    auto* ptr1 = storage();
-    auto* ptr2 = storage();
+TEST_F(WideDataStorageTest, InstanceReturnsSamePointer)
+{
+    auto *ptr1 = storage();
+    auto *ptr2 = storage();
     EXPECT_EQ(ptr1, ptr2);
 }
 
@@ -61,7 +68,8 @@ TEST_F(WideDataStorageTest, InstanceReturnsSamePointer) {
 // Instrument Tests
 // =============================================================================
 
-TEST_F(WideDataStorageTest, AddAndGetInstrument) {
+TEST_F(WideDataStorageTest, AddAndGetInstrument)
+{
     auto instr = new InstrumentEntry();
     instr->symbol_ = "AAPL";
     instr->securityId_ = "US0378331005";
@@ -78,10 +86,12 @@ TEST_F(WideDataStorageTest, AddAndGetInstrument) {
     EXPECT_EQ("ISIN", retrieved.securityIdSource_);
 }
 
-TEST_F(WideDataStorageTest, AddMultipleInstruments) {
+TEST_F(WideDataStorageTest, AddMultipleInstruments)
+{
     std::vector<SourceIdT> ids;
 
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 10; ++i)
+    {
         auto instr = new InstrumentEntry();
         instr->symbol_ = "SYM" + std::to_string(i);
         instr->securityId_ = "SEC" + std::to_string(i);
@@ -93,7 +103,8 @@ TEST_F(WideDataStorageTest, AddMultipleInstruments) {
     }
 
     // Verify all were stored correctly
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 10; ++i)
+    {
         InstrumentEntry retrieved;
         storage()->get(ids[i], &retrieved);
         EXPECT_EQ("SYM" + std::to_string(i), retrieved.symbol_);
@@ -104,7 +115,8 @@ TEST_F(WideDataStorageTest, AddMultipleInstruments) {
 // String Tests
 // =============================================================================
 
-TEST_F(WideDataStorageTest, AddAndGetString) {
+TEST_F(WideDataStorageTest, AddAndGetString)
+{
     auto str = new StringT("Hello, World!");
 
     SourceIdT id = storage()->add(str);
@@ -118,10 +130,12 @@ TEST_F(WideDataStorageTest, AddAndGetString) {
     EXPECT_EQ("Hello, World!", retrieved);
 }
 
-TEST_F(WideDataStorageTest, AddMultipleStrings) {
+TEST_F(WideDataStorageTest, AddMultipleStrings)
+{
     std::vector<SourceIdT> ids;
 
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < 100; ++i)
+    {
         auto str = new StringT("String" + std::to_string(i));
         SourceIdT id = storage()->add(str);
         // Note: WideDataStorage uses date_=0 for IDs, so isValid() returns false
@@ -130,7 +144,8 @@ TEST_F(WideDataStorageTest, AddMultipleStrings) {
     }
 
     // Verify all were stored correctly
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < 100; ++i)
+    {
         StringT retrieved;
         storage()->get(ids[i], &retrieved);
         EXPECT_EQ("String" + std::to_string(i), retrieved);
@@ -141,7 +156,8 @@ TEST_F(WideDataStorageTest, AddMultipleStrings) {
 // Account Tests
 // =============================================================================
 
-TEST_F(WideDataStorageTest, AddAndGetAccount) {
+TEST_F(WideDataStorageTest, AddAndGetAccount)
+{
     auto account = new AccountEntry();
     account->account_ = "ACCT001";
     account->firm_ = "TestFirm";
@@ -162,7 +178,8 @@ TEST_F(WideDataStorageTest, AddAndGetAccount) {
 // Clearing Tests
 // =============================================================================
 
-TEST_F(WideDataStorageTest, AddAndGetClearing) {
+TEST_F(WideDataStorageTest, AddAndGetClearing)
+{
     auto clearing = new ClearingEntry();
     clearing->firm_ = "ClearingFirm";
 
@@ -179,7 +196,8 @@ TEST_F(WideDataStorageTest, AddAndGetClearing) {
 // RawData Tests
 // =============================================================================
 
-TEST_F(WideDataStorageTest, AddAndGetRawData) {
+TEST_F(WideDataStorageTest, AddAndGetRawData)
+{
     auto rawData = new RawDataEntry(STRING_RAWDATATYPE, "TestData", 8);
 
     SourceIdT id = storage()->add(rawData);
@@ -195,13 +213,14 @@ TEST_F(WideDataStorageTest, AddAndGetRawData) {
 // Executions Tests
 // =============================================================================
 
-TEST_F(WideDataStorageTest, AddAndGetExecutions) {
+TEST_F(WideDataStorageTest, AddAndGetExecutions)
+{
     auto execList = new ExecutionsT();
 
     SourceIdT id = storage()->add(execList);
     ASSERT_TRUE(id.isValid());
 
-    ExecutionsT* retrieved = nullptr;
+    ExecutionsT *retrieved = nullptr;
     storage()->get(id, &retrieved);
 
     ASSERT_NE(nullptr, retrieved);
@@ -211,10 +230,12 @@ TEST_F(WideDataStorageTest, AddAndGetExecutions) {
 // Concurrent Read Tests
 // =============================================================================
 
-TEST_F(WideDataStorageTest, ConcurrentReads) {
+TEST_F(WideDataStorageTest, ConcurrentReads)
+{
     // Add some test data
     std::vector<SourceIdT> instrIds;
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 10; ++i)
+    {
         auto instr = new InstrumentEntry();
         instr->symbol_ = "SYM" + std::to_string(i);
         instrIds.push_back(storage()->add(instr));
@@ -223,21 +244,26 @@ TEST_F(WideDataStorageTest, ConcurrentReads) {
     // Concurrent reads
     const int numThreads = 8;
     const int numReadsPerThread = 100;
-    std::atomic<int> totalReads{0};
+    std::atomic<int> totalReads{ 0 };
 
     std::vector<std::thread> threads;
-    for (int t = 0; t < numThreads; ++t) {
-        threads.emplace_back([this, &instrIds, &totalReads, numReadsPerThread]() {
-            for (int i = 0; i < numReadsPerThread; ++i) {
-                InstrumentEntry retrieved;
-                SourceIdT id = instrIds[i % instrIds.size()];
-                storage()->get(id, &retrieved);
-                ++totalReads;
-            }
-        });
+    for (int t = 0; t < numThreads; ++t)
+    {
+        threads.emplace_back(
+            [this, &instrIds, &totalReads, numReadsPerThread]()
+            {
+                for (int i = 0; i < numReadsPerThread; ++i)
+                {
+                    InstrumentEntry retrieved;
+                    SourceIdT id = instrIds[i % instrIds.size()];
+                    storage()->get(id, &retrieved);
+                    ++totalReads;
+                }
+            });
     }
 
-    for (auto& thread : threads) {
+    for (auto &thread : threads)
+    {
         thread.join();
     }
 
@@ -248,44 +274,54 @@ TEST_F(WideDataStorageTest, ConcurrentReads) {
 // Mixed Concurrent Operations Tests
 // =============================================================================
 
-TEST_F(WideDataStorageTest, ConcurrentAddAndRead) {
+TEST_F(WideDataStorageTest, ConcurrentAddAndRead)
+{
     const int numWriters = 2;
     const int numReaders = 4;
     const int numOpsPerThread = 50;
 
-    std::atomic<int> totalAdds{0};
-    std::atomic<int> totalReads{0};
+    std::atomic<int> totalAdds{ 0 };
+    std::atomic<int> totalReads{ 0 };
 
     std::vector<std::thread> threads;
 
     // Writer threads
-    for (int t = 0; t < numWriters; ++t) {
-        threads.emplace_back([this, &totalAdds, numOpsPerThread, t]() {
-            for (int i = 0; i < numOpsPerThread; ++i) {
-                auto instr = new InstrumentEntry();
-                instr->symbol_ = "W" + std::to_string(t) + "_" + std::to_string(i);
-                storage()->add(instr);
-                ++totalAdds;
-            }
-        });
+    for (int t = 0; t < numWriters; ++t)
+    {
+        threads.emplace_back(
+            [this, &totalAdds, numOpsPerThread, t]()
+            {
+                for (int i = 0; i < numOpsPerThread; ++i)
+                {
+                    auto instr = new InstrumentEntry();
+                    instr->symbol_ = "W" + std::to_string(t) + "_" + std::to_string(i);
+                    storage()->add(instr);
+                    ++totalAdds;
+                }
+            });
     }
 
     // Let writers add some data first
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
     // Reader threads
-    for (int t = 0; t < numReaders; ++t) {
-        threads.emplace_back([this, &totalReads, numOpsPerThread]() {
-            for (int i = 0; i < numOpsPerThread; ++i) {
-                // Just verify the singleton is accessible
-                auto* ptr = storage();
-                EXPECT_NE(nullptr, ptr);
-                ++totalReads;
-            }
-        });
+    for (int t = 0; t < numReaders; ++t)
+    {
+        threads.emplace_back(
+            [this, &totalReads, numOpsPerThread]()
+            {
+                for (int i = 0; i < numOpsPerThread; ++i)
+                {
+                    // Just verify the singleton is accessible
+                    auto *ptr = storage();
+                    EXPECT_NE(nullptr, ptr);
+                    ++totalReads;
+                }
+            });
     }
 
-    for (auto& thread : threads) {
+    for (auto &thread : threads)
+    {
         thread.join();
     }
 
@@ -297,7 +333,8 @@ TEST_F(WideDataStorageTest, ConcurrentAddAndRead) {
 // Restore Tests
 // =============================================================================
 
-TEST_F(WideDataStorageTest, RestoreInstrument) {
+TEST_F(WideDataStorageTest, RestoreInstrument)
+{
     auto instr = new InstrumentEntry();
     instr->symbol_ = "RESTORED";
     instr->securityId_ = "REST001";
@@ -316,7 +353,8 @@ TEST_F(WideDataStorageTest, RestoreInstrument) {
 // Helper Function Tests (using test utilities)
 // =============================================================================
 
-TEST_F(WideDataStorageTest, AddInstrumentHelper) {
+TEST_F(WideDataStorageTest, AddInstrumentHelper)
+{
     SourceIdT id = addInstrument("TSLA", "US88160R1014", "ISIN");
     ASSERT_TRUE(id.isValid());
 
@@ -326,7 +364,8 @@ TEST_F(WideDataStorageTest, AddInstrumentHelper) {
     EXPECT_EQ("TSLA", retrieved.symbol_);
 }
 
-TEST_F(WideDataStorageTest, AddAccountHelper) {
+TEST_F(WideDataStorageTest, AddAccountHelper)
+{
     SourceIdT id = addAccount("TestAccount", "TestFirm", AGENCY_ACCOUNTTYPE);
     ASSERT_TRUE(id.isValid());
 
@@ -338,7 +377,8 @@ TEST_F(WideDataStorageTest, AddAccountHelper) {
     EXPECT_EQ(AGENCY_ACCOUNTTYPE, retrieved.type_);
 }
 
-TEST_F(WideDataStorageTest, AddClearingHelper) {
+TEST_F(WideDataStorageTest, AddClearingHelper)
+{
     SourceIdT id = addClearing("ClearFirm");
     ASSERT_TRUE(id.isValid());
 

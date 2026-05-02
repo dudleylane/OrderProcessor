@@ -14,12 +14,14 @@
 #include <gmock/gmock.h>
 #include "TasksDef.h"
 
-namespace test {
+namespace test
+{
 
 /**
  * Mock for ExecTask interface - represents an executable task
  */
-class MockExecTask : public COP::Tasks::ExecTask {
+class MockExecTask : public COP::Tasks::ExecTask
+{
 public:
     MOCK_METHOD(void, execute, (), (override));
 };
@@ -27,7 +29,8 @@ public:
 /**
  * Mock for ExecTaskManager interface - manages task scheduling
  */
-class MockExecTaskManager : public COP::Tasks::ExecTaskManager {
+class MockExecTaskManager : public COP::Tasks::ExecTaskManager
+{
 public:
     MOCK_METHOD(void, addTask, (const COP::ACID::TransactionId &id), (override));
 };

@@ -18,57 +18,70 @@ using namespace COP::Queues;
 
 OutgoingQueues::OutgoingQueues(void)
 {
-	aux::ExchLogger::instance()->note("OutgoingQueues created.");
+    aux::ExchLogger::instance()->note("OutgoingQueues created.");
 }
 
 OutgoingQueues::~OutgoingQueues(void)
 {
-	clear();
-	aux::ExchLogger::instance()->note("OutgoingQueues destroyed.");
+    clear();
+    aux::ExchLogger::instance()->note("OutgoingQueues destroyed.");
 }
 
 void OutgoingQueues::clear()
 {
-	// Drain the lock-free queue
-	QueuedOutEvent event;
-	while (eventQueue_.try_pop(event)) {
-		// Events don't own heap memory, no cleanup needed
-	}
-	aux::ExchLogger::instance()->note("OutgoingQueues cleared.");
+    // Drain the lock-free queue
+    QueuedOutEvent event;
+    while (eventQueue_.try_pop(event))
+    {
+        // Events don't own heap memory, no cleanup needed
+    }
+    aux::ExchLogger::instance()->note("OutgoingQueues cleared.");
 }
 
 void OutgoingQueues::push(const ExecReportEvent &evnt, const std::string &target)
 {
-	if (aux::ExchLogger::instance()->isNoteOn())
-		aux::ExchLogger::instance()->note("OutgoingQueues push new ExecReportEvent.");
+    if (aux::ExchLogger::instance()->isNoteOn())
+    {
+        aux::ExchLogger::instance()->note("OutgoingQueues push new ExecReportEvent.");
+    }
 
-	// Lock-free push to concurrent queue
-	eventQueue_.push(QueuedOutEvent(target, evnt));
+    // Lock-free push to concurrent queue
+    eventQueue_.push(QueuedOutEvent(target, evnt));
 
-	if (aux::ExchLogger::instance()->isNoteOn())
-		aux::ExchLogger::instance()->note("OutgoingQueues pushed new ExecReportEvent.");
+    if (aux::ExchLogger::instance()->isNoteOn())
+    {
+        aux::ExchLogger::instance()->note("OutgoingQueues pushed new ExecReportEvent.");
+    }
 }
 
 void OutgoingQueues::push(const CancelRejectEvent &evnt, const std::string &target)
 {
-	if (aux::ExchLogger::instance()->isNoteOn())
-		aux::ExchLogger::instance()->note("OutgoingQueues push new CancelRejectEvent.");
+    if (aux::ExchLogger::instance()->isNoteOn())
+    {
+        aux::ExchLogger::instance()->note("OutgoingQueues push new CancelRejectEvent.");
+    }
 
-	// Lock-free push to concurrent queue
-	eventQueue_.push(QueuedOutEvent(target, evnt));
+    // Lock-free push to concurrent queue
+    eventQueue_.push(QueuedOutEvent(target, evnt));
 
-	if (aux::ExchLogger::instance()->isNoteOn())
-		aux::ExchLogger::instance()->note("OutgoingQueues pushed new CancelRejectEvent.");
+    if (aux::ExchLogger::instance()->isNoteOn())
+    {
+        aux::ExchLogger::instance()->note("OutgoingQueues pushed new CancelRejectEvent.");
+    }
 }
 
 void OutgoingQueues::push(const BusinessRejectEvent &evnt, const std::string &target)
 {
-	if (aux::ExchLogger::instance()->isNoteOn())
-		aux::ExchLogger::instance()->note("OutgoingQueues push new BusinessRejectEvent.");
+    if (aux::ExchLogger::instance()->isNoteOn())
+    {
+        aux::ExchLogger::instance()->note("OutgoingQueues push new BusinessRejectEvent.");
+    }
 
-	// Lock-free push to concurrent queue
-	eventQueue_.push(QueuedOutEvent(target, evnt));
+    // Lock-free push to concurrent queue
+    eventQueue_.push(QueuedOutEvent(target, evnt));
 
-	if (aux::ExchLogger::instance()->isNoteOn())
-		aux::ExchLogger::instance()->note("OutgoingQueues pushed new BusinessRejectEvent.");
+    if (aux::ExchLogger::instance()->isNoteOn())
+    {
+        aux::ExchLogger::instance()->note("OutgoingQueues pushed new BusinessRejectEvent.");
+    }
 }

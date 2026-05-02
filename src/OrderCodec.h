@@ -15,20 +15,22 @@
 #include "TypesDef.h"
 #include "DataModelDef.h"
 
-namespace COP{
-	namespace Codec{
+namespace COP
+{
+namespace Codec
+{
 
 class OrderCodec
 {
 public:
-	OrderCodec(void);
-	~OrderCodec(void);
+    OrderCodec(void);
+    ~OrderCodec(void);
 
 public:
-	static void encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *version);
-	static char *encode(const OrderEntry &val, char *buf, IdT *id, u32 *version);
-	static OrderEntry *decode(const IdT& id, u32 version, const char *buf, size_t size);
+    static void encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *version);
+    static char *encode(const OrderEntry &val, char *buf, IdT *id, u32 *version);
+    static OrderEntry *decode(const IdT &id, u32 version, const char *buf, size_t size);
 };
 
-	}
-}
+} // namespace Codec
+} // namespace COP

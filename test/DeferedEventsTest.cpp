@@ -29,30 +29,36 @@ using namespace COP::ACID;
 // Test Helpers
 // =============================================================================
 
-namespace {
+namespace
+{
 
-class TestDeferedEventFunctor : public DeferedEventFunctor {
+class TestDeferedEventFunctor : public DeferedEventFunctor
+{
 public:
-    std::vector<OrderEntry*> tradeExecutionOrders;
-    std::vector<OrderEntry*> internalCancelOrders;
+    std::vector<OrderEntry *> tradeExecutionOrders;
+    std::vector<OrderEntry *> internalCancelOrders;
 
-    void process(OrdState::onTradeExecution& /*ev*/, OrderEntry* order, const Context& /*cnxt*/) override {
+    void process(OrdState::onTradeExecution & /*ev*/, OrderEntry *order, const Context & /*cnxt*/) override
+    {
         tradeExecutionOrders.push_back(order);
     }
 
-    void process(OrdState::onInternalCancel& /*ev*/, OrderEntry* order, const Context& /*cnxt*/) override {
+    void process(OrdState::onInternalCancel & /*ev*/, OrderEntry *order, const Context & /*cnxt*/) override
+    {
         internalCancelOrders.push_back(order);
     }
 
-    void reset() {
+    void reset()
+    {
         tradeExecutionOrders.clear();
         internalCancelOrders.clear();
     }
 };
 
-OrderEntry* createTestOrder(SourceIdT instrId, Side side, PriceT price, QuantityT qty) {
+OrderEntry *createTestOrder(SourceIdT instrId, Side side, PriceT price, QuantityT qty)
+{
     SourceIdT srcId, destId, clOrdId, origClOrdId, accountId, clearingId, execList;
-    auto* order = new OrderEntry(srcId, destId, clOrdId, origClOrdId, instrId, accountId, clearingId, execList);
+    auto *order = new OrderEntry(srcId, destId, clOrdId, origClOrdId, instrId, accountId, clearingId, execList);
     order->side_ = side;
     order->price_ = price;
     order->orderQty_ = qty;
@@ -69,23 +75,26 @@ OrderEntry* createTestOrder(SourceIdT instrId, Side side, PriceT price, Quantity
 // DeferedEvents Test Fixture
 // =============================================================================
 
-class DeferedEventsTest : public ::testing::Test {
+class DeferedEventsTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         // Note: ExchLogger is created globally by TestMain.cpp
         WideDataStorage::create();
         IdTGenerator::create();
         OrderStorage::create();
 
         // Add test instrument
-        auto* instr = new InstrumentEntry();
+        auto *instr = new InstrumentEntry();
         instr->symbol_ = "TEST";
         instr->securityId_ = "TESTSEC";
         instr->securityIdSource_ = "ISIN";
         instrId_ = WideDataStorage::instance()->add(instr);
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         OrderStorage::destroy();
         IdTGenerator::destroy();
         WideDataStorage::destroy();
@@ -99,24 +108,23 @@ protected:
 // ExecutionDeferedEvent Tests
 // =============================================================================
 
-TEST_F(DeferedEventsTest, ExecutionDeferedEventConstruction) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, ExecutionDeferedEventConstruction)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
 
-    EXPECT_NO_THROW({
-        ExecutionDeferedEvent event(order);
-    });
+    EXPECT_NO_THROW({ ExecutionDeferedEvent event(order); });
 
     delete order;
 }
 
-TEST_F(DeferedEventsTest, ExecutionDeferedEventDefaultConstruction) {
-    EXPECT_NO_THROW({
-        ExecutionDeferedEvent event;
-    });
+TEST_F(DeferedEventsTest, ExecutionDeferedEventDefaultConstruction)
+{
+    EXPECT_NO_THROW({ ExecutionDeferedEvent event; });
 }
 
-TEST_F(DeferedEventsTest, ExecutionDeferedEventStoresBaseOrder) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, ExecutionDeferedEventStoresBaseOrder)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     ExecutionDeferedEvent event(order);
 
     EXPECT_EQ(event.baseOrder_, order);
@@ -124,8 +132,9 @@ TEST_F(DeferedEventsTest, ExecutionDeferedEventStoresBaseOrder) {
     delete order;
 }
 
-TEST_F(DeferedEventsTest, ExecutionDeferedEventEmptyTrades) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, ExecutionDeferedEventEmptyTrades)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     ExecutionDeferedEvent event(order);
 
     EXPECT_TRUE(event.trades_.empty());
@@ -133,8 +142,9 @@ TEST_F(DeferedEventsTest, ExecutionDeferedEventEmptyTrades) {
     delete order;
 }
 
-TEST_F(DeferedEventsTest, ExecutionDeferedEventAddTrade) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, ExecutionDeferedEventAddTrade)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     ExecutionDeferedEvent event(order);
 
     TradeParams params;
@@ -151,8 +161,9 @@ TEST_F(DeferedEventsTest, ExecutionDeferedEventAddTrade) {
     delete order;
 }
 
-TEST_F(DeferedEventsTest, ExecutionDeferedEventMultipleTrades) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, ExecutionDeferedEventMultipleTrades)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     ExecutionDeferedEvent event(order);
 
     TradeParams params1;
@@ -183,24 +194,23 @@ TEST_F(DeferedEventsTest, ExecutionDeferedEventMultipleTrades) {
 // MatchOrderDeferedEvent Tests
 // =============================================================================
 
-TEST_F(DeferedEventsTest, MatchOrderDeferedEventConstruction) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, MatchOrderDeferedEventConstruction)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
 
-    EXPECT_NO_THROW({
-        MatchOrderDeferedEvent event(order);
-    });
+    EXPECT_NO_THROW({ MatchOrderDeferedEvent event(order); });
 
     delete order;
 }
 
-TEST_F(DeferedEventsTest, MatchOrderDeferedEventDefaultConstruction) {
-    EXPECT_NO_THROW({
-        MatchOrderDeferedEvent event;
-    });
+TEST_F(DeferedEventsTest, MatchOrderDeferedEventDefaultConstruction)
+{
+    EXPECT_NO_THROW({ MatchOrderDeferedEvent event; });
 }
 
-TEST_F(DeferedEventsTest, MatchOrderDeferedEventStoresOrder) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, MatchOrderDeferedEventStoresOrder)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     MatchOrderDeferedEvent event(order);
 
     EXPECT_EQ(event.order_, order);
@@ -212,24 +222,23 @@ TEST_F(DeferedEventsTest, MatchOrderDeferedEventStoresOrder) {
 // CancelOrderDeferedEvent Tests
 // =============================================================================
 
-TEST_F(DeferedEventsTest, CancelOrderDeferedEventConstruction) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, CancelOrderDeferedEventConstruction)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
 
-    EXPECT_NO_THROW({
-        CancelOrderDeferedEvent event(order);
-    });
+    EXPECT_NO_THROW({ CancelOrderDeferedEvent event(order); });
 
     delete order;
 }
 
-TEST_F(DeferedEventsTest, CancelOrderDeferedEventDefaultConstruction) {
-    EXPECT_NO_THROW({
-        CancelOrderDeferedEvent event;
-    });
+TEST_F(DeferedEventsTest, CancelOrderDeferedEventDefaultConstruction)
+{
+    EXPECT_NO_THROW({ CancelOrderDeferedEvent event; });
 }
 
-TEST_F(DeferedEventsTest, CancelOrderDeferedEventStoresOrder) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, CancelOrderDeferedEventStoresOrder)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     CancelOrderDeferedEvent event(order);
 
     EXPECT_EQ(event.order_, order);
@@ -237,8 +246,9 @@ TEST_F(DeferedEventsTest, CancelOrderDeferedEventStoresOrder) {
     delete order;
 }
 
-TEST_F(DeferedEventsTest, CancelOrderDeferedEventCancelReason) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, CancelOrderDeferedEventCancelReason)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     CancelOrderDeferedEvent event(order);
 
     event.cancelReason_ = "Market closed";
@@ -247,8 +257,9 @@ TEST_F(DeferedEventsTest, CancelOrderDeferedEventCancelReason) {
     delete order;
 }
 
-TEST_F(DeferedEventsTest, CancelOrderDeferedEventEmptyReason) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, CancelOrderDeferedEventEmptyReason)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     CancelOrderDeferedEvent event(order);
 
     // Default reason should be empty
@@ -257,8 +268,9 @@ TEST_F(DeferedEventsTest, CancelOrderDeferedEventEmptyReason) {
     delete order;
 }
 
-TEST_F(DeferedEventsTest, CancelReasonWithSpecialCharacters) {
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+TEST_F(DeferedEventsTest, CancelReasonWithSpecialCharacters)
+{
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     CancelOrderDeferedEvent event(order);
 
     event.cancelReason_ = "Cancel: [User Request] @12:30 - \"immediate\"";
@@ -271,9 +283,10 @@ TEST_F(DeferedEventsTest, CancelReasonWithSpecialCharacters) {
 // Edge Cases
 // =============================================================================
 
-TEST_F(DeferedEventsTest, MultipleOrdersWithSameEventType) {
-    OrderEntry* order1 = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
-    OrderEntry* order2 = createTestOrder(instrId_, BUY_SIDE, 101.0, 200);
+TEST_F(DeferedEventsTest, MultipleOrdersWithSameEventType)
+{
+    OrderEntry *order1 = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+    OrderEntry *order2 = createTestOrder(instrId_, BUY_SIDE, 101.0, 200);
 
     MatchOrderDeferedEvent event1(order1);
     MatchOrderDeferedEvent event2(order2);
@@ -286,25 +299,28 @@ TEST_F(DeferedEventsTest, MultipleOrdersWithSameEventType) {
     delete order2;
 }
 
-TEST_F(DeferedEventsTest, ExecutionDeferedEventWithValidOrder) {
+TEST_F(DeferedEventsTest, ExecutionDeferedEventWithValidOrder)
+{
     // Note: null base orders are not allowed (assertion in implementation)
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     ExecutionDeferedEvent event(order);
     EXPECT_EQ(event.baseOrder_, order);
     delete order;
 }
 
-TEST_F(DeferedEventsTest, MatchOrderDeferedEventWithValidOrder) {
+TEST_F(DeferedEventsTest, MatchOrderDeferedEventWithValidOrder)
+{
     // Note: null orders are not allowed (assertion in implementation)
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     MatchOrderDeferedEvent event(order);
     EXPECT_EQ(event.order_, order);
     delete order;
 }
 
-TEST_F(DeferedEventsTest, CancelOrderDeferedEventWithValidOrder) {
+TEST_F(DeferedEventsTest, CancelOrderDeferedEventWithValidOrder)
+{
     // Note: null orders are not allowed (assertion in implementation)
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     CancelOrderDeferedEvent event(order);
     EXPECT_EQ(event.order_, order);
     delete order;
@@ -314,9 +330,10 @@ TEST_F(DeferedEventsTest, CancelOrderDeferedEventWithValidOrder) {
 // Functor Integration Tests
 // =============================================================================
 
-TEST_F(DeferedEventsTest, FunctorReset) {
+TEST_F(DeferedEventsTest, FunctorReset)
+{
     TestDeferedEventFunctor functor;
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
 
     OrdState::onInternalCancel cancelEvent;
     Context context;
@@ -330,10 +347,11 @@ TEST_F(DeferedEventsTest, FunctorReset) {
     delete order;
 }
 
-TEST_F(DeferedEventsTest, FunctorReceivesMultipleOrders) {
+TEST_F(DeferedEventsTest, FunctorReceivesMultipleOrders)
+{
     TestDeferedEventFunctor functor;
-    OrderEntry* order1 = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
-    OrderEntry* order2 = createTestOrder(instrId_, SELL_SIDE, 99.0, 50);
+    OrderEntry *order1 = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+    OrderEntry *order2 = createTestOrder(instrId_, SELL_SIDE, 99.0, 50);
 
     OrdState::onInternalCancel cancelEvent1;
     OrdState::onInternalCancel cancelEvent2;

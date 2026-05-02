@@ -22,23 +22,28 @@ using namespace COP;
 using namespace COP::Store;
 using namespace test;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Fixture
 // =============================================================================
 
-class OrderStorageTest : public OrderStorageFixture {
+class OrderStorageTest : public OrderStorageFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         OrderStorageFixture::SetUp();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         OrderStorageFixture::TearDown();
     }
 
-    OrderDataStorage* storage() {
+    OrderDataStorage *storage()
+    {
         return OrderStorage::instance();
     }
 };
@@ -47,13 +52,15 @@ protected:
 // Basic Singleton Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, InstanceNotNull) {
+TEST_F(OrderStorageTest, InstanceNotNull)
+{
     ASSERT_NE(nullptr, storage());
 }
 
-TEST_F(OrderStorageTest, InstanceReturnsSamePointer) {
-    auto* ptr1 = storage();
-    auto* ptr2 = storage();
+TEST_F(OrderStorageTest, InstanceReturnsSamePointer)
+{
+    auto *ptr1 = storage();
+    auto *ptr2 = storage();
     EXPECT_EQ(ptr1, ptr2);
 }
 
@@ -61,28 +68,32 @@ TEST_F(OrderStorageTest, InstanceReturnsSamePointer) {
 // Order Save Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, SaveOrderAssignsId) {
+TEST_F(OrderStorageTest, SaveOrderAssignsId)
+{
     auto order = createCorrectOrder();
     ASSERT_FALSE(order->orderId_.isValid());
 
-    OrderEntry* saved = storage()->save(*order, IdTGenerator::instance());
+    OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
 
     ASSERT_NE(nullptr, saved);
     EXPECT_TRUE(saved->orderId_.isValid());
 }
 
-TEST_F(OrderStorageTest, SaveMultipleOrdersAssignsUniqueIds) {
+TEST_F(OrderStorageTest, SaveMultipleOrdersAssignsUniqueIds)
+{
     std::vector<IdT> orderIds;
 
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 10; ++i)
+    {
         auto order = createCorrectOrder();
         assignClOrderId(order.get());
 
-        OrderEntry* saved = storage()->save(*order, IdTGenerator::instance());
+        OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
         ASSERT_NE(nullptr, saved);
 
         // Check uniqueness
-        for (const auto& existingId : orderIds) {
+        for (const auto &existingId : orderIds)
+        {
             EXPECT_NE(existingId, saved->orderId_);
         }
         orderIds.push_back(saved->orderId_);
@@ -93,21 +104,23 @@ TEST_F(OrderStorageTest, SaveMultipleOrdersAssignsUniqueIds) {
 // Order Lookup by OrderId Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, LocateByOrderIdFindsOrder) {
+TEST_F(OrderStorageTest, LocateByOrderIdFindsOrder)
+{
     auto order = createCorrectOrder();
-    OrderEntry* saved = storage()->save(*order, IdTGenerator::instance());
+    OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
     ASSERT_NE(nullptr, saved);
 
-    OrderEntry* found = storage()->locateByOrderId(saved->orderId_);
+    OrderEntry *found = storage()->locateByOrderId(saved->orderId_);
 
     ASSERT_NE(nullptr, found);
     EXPECT_EQ(saved->orderId_, found->orderId_);
 }
 
-TEST_F(OrderStorageTest, LocateByOrderIdReturnsNullForMissing) {
+TEST_F(OrderStorageTest, LocateByOrderIdReturnsNullForMissing)
+{
     IdT nonExistentId(9999, 9999);
 
-    OrderEntry* found = storage()->locateByOrderId(nonExistentId);
+    OrderEntry *found = storage()->locateByOrderId(nonExistentId);
 
     EXPECT_EQ(nullptr, found);
 }
@@ -116,24 +129,26 @@ TEST_F(OrderStorageTest, LocateByOrderIdReturnsNullForMissing) {
 // Order Lookup by ClOrderId Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, LocateByClOrderIdFindsOrder) {
+TEST_F(OrderStorageTest, LocateByClOrderIdFindsOrder)
+{
     auto order = createCorrectOrder();
     assignClOrderId(order.get());
     RawDataEntry clOrdId = order->clOrderId_.get();
 
-    OrderEntry* saved = storage()->save(*order, IdTGenerator::instance());
+    OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
     ASSERT_NE(nullptr, saved);
 
-    OrderEntry* found = storage()->locateByClOrderId(clOrdId);
+    OrderEntry *found = storage()->locateByClOrderId(clOrdId);
 
     ASSERT_NE(nullptr, found);
     EXPECT_EQ(saved->orderId_, found->orderId_);
 }
 
-TEST_F(OrderStorageTest, LocateByClOrderIdReturnsNullForMissing) {
+TEST_F(OrderStorageTest, LocateByClOrderIdReturnsNullForMissing)
+{
     RawDataEntry nonExistentClId(STRING_RAWDATATYPE, "NonExistent", 11);
 
-    OrderEntry* found = storage()->locateByClOrderId(nonExistentClId);
+    OrderEntry *found = storage()->locateByClOrderId(nonExistentClId);
 
     EXPECT_EQ(nullptr, found);
 }
@@ -142,7 +157,8 @@ TEST_F(OrderStorageTest, LocateByClOrderIdReturnsNullForMissing) {
 // Order Restore Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, RestoreLoadsOrder) {
+TEST_F(OrderStorageTest, RestoreLoadsOrder)
+{
     // restore() is for loading orders from persistence (creates new entry)
     // Create an order with a pre-assigned OrderId (as if from a different storage)
     auto order = test::createCorrectOrder();
@@ -156,7 +172,7 @@ TEST_F(OrderStorageTest, RestoreLoadsOrder) {
     storage()->restore(order.release());
 
     // Verify by locating - the order should now be in storage
-    OrderEntry* found = storage()->locateByOrderId(savedOrderId);
+    OrderEntry *found = storage()->locateByOrderId(savedOrderId);
     ASSERT_NE(nullptr, found);
     EXPECT_EQ(NEW_ORDSTATUS, found->status_);
     EXPECT_DOUBLE_EQ(99.99, found->price_);
@@ -166,24 +182,26 @@ TEST_F(OrderStorageTest, RestoreLoadsOrder) {
 // Execution Save Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, SaveExecutionAssignsId) {
+TEST_F(OrderStorageTest, SaveExecutionAssignsId)
+{
     auto order = createCorrectOrder();
-    OrderEntry* savedOrder = storage()->save(*order, IdTGenerator::instance());
+    OrderEntry *savedOrder = storage()->save(*order, IdTGenerator::instance());
     ASSERT_NE(nullptr, savedOrder);
 
     ExecutionEntry exec;
     exec.orderId_ = savedOrder->orderId_;
     exec.type_ = NEW_EXECTYPE;
 
-    ExecutionEntry* savedExec = storage()->save(exec, IdTGenerator::instance());
+    ExecutionEntry *savedExec = storage()->save(exec, IdTGenerator::instance());
 
     ASSERT_NE(nullptr, savedExec);
     EXPECT_TRUE(savedExec->execId_.isValid());
 }
 
-TEST_F(OrderStorageTest, SaveAndLocateExecution) {
+TEST_F(OrderStorageTest, SaveAndLocateExecution)
+{
     auto order = createCorrectOrder();
-    OrderEntry* savedOrder = storage()->save(*order, IdTGenerator::instance());
+    OrderEntry *savedOrder = storage()->save(*order, IdTGenerator::instance());
     ASSERT_NE(nullptr, savedOrder);
 
     // Use the reference version which assigns the ID
@@ -191,13 +209,13 @@ TEST_F(OrderStorageTest, SaveAndLocateExecution) {
     exec.orderId_ = savedOrder->orderId_;
     exec.type_ = NEW_EXECTYPE;
 
-    ExecutionEntry* savedExec = storage()->save(exec, IdTGenerator::instance());
+    ExecutionEntry *savedExec = storage()->save(exec, IdTGenerator::instance());
 
     ASSERT_NE(nullptr, savedExec);
     EXPECT_TRUE(savedExec->execId_.isValid());
 
     // Verify by locating
-    ExecutionEntry* found = storage()->locateByExecId(savedExec->execId_);
+    ExecutionEntry *found = storage()->locateByExecId(savedExec->execId_);
     ASSERT_NE(nullptr, found);
     EXPECT_EQ(savedExec->execId_, found->execId_);
 }
@@ -206,28 +224,30 @@ TEST_F(OrderStorageTest, SaveAndLocateExecution) {
 // Execution Lookup Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, LocateByExecIdFindsExecution) {
+TEST_F(OrderStorageTest, LocateByExecIdFindsExecution)
+{
     auto order = createCorrectOrder();
-    OrderEntry* savedOrder = storage()->save(*order, IdTGenerator::instance());
+    OrderEntry *savedOrder = storage()->save(*order, IdTGenerator::instance());
     ASSERT_NE(nullptr, savedOrder);
 
     ExecutionEntry exec;
     exec.orderId_ = savedOrder->orderId_;
     exec.type_ = NEW_EXECTYPE;
 
-    ExecutionEntry* savedExec = storage()->save(exec, IdTGenerator::instance());
+    ExecutionEntry *savedExec = storage()->save(exec, IdTGenerator::instance());
     ASSERT_NE(nullptr, savedExec);
 
-    ExecutionEntry* found = storage()->locateByExecId(savedExec->execId_);
+    ExecutionEntry *found = storage()->locateByExecId(savedExec->execId_);
 
     ASSERT_NE(nullptr, found);
     EXPECT_EQ(savedExec->execId_, found->execId_);
 }
 
-TEST_F(OrderStorageTest, LocateByExecIdReturnsNullForMissing) {
+TEST_F(OrderStorageTest, LocateByExecIdReturnsNullForMissing)
+{
     IdT nonExistentId(8888, 8888);
 
-    ExecutionEntry* found = storage()->locateByExecId(nonExistentId);
+    ExecutionEntry *found = storage()->locateByExecId(nonExistentId);
 
     EXPECT_EQ(nullptr, found);
 }
@@ -236,26 +256,32 @@ TEST_F(OrderStorageTest, LocateByExecIdReturnsNullForMissing) {
 // Concurrent Order Save Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, ConcurrentOrderSaves) {
+TEST_F(OrderStorageTest, ConcurrentOrderSaves)
+{
     const int numThreads = 4;
     const int numOrdersPerThread = 50;
-    std::atomic<int> totalSaved{0};
+    std::atomic<int> totalSaved{ 0 };
 
     std::vector<std::thread> threads;
-    for (int t = 0; t < numThreads; ++t) {
-        threads.emplace_back([this, &totalSaved, numOrdersPerThread]() {
-            for (int i = 0; i < numOrdersPerThread; ++i) {
-                auto order = createCorrectOrder();
-                assignClOrderId(order.get());
+    for (int t = 0; t < numThreads; ++t)
+    {
+        threads.emplace_back(
+            [this, &totalSaved, numOrdersPerThread]()
+            {
+                for (int i = 0; i < numOrdersPerThread; ++i)
+                {
+                    auto order = createCorrectOrder();
+                    assignClOrderId(order.get());
 
-                OrderEntry* saved = storage()->save(*order, IdTGenerator::instance());
-                EXPECT_NE(nullptr, saved);
-                ++totalSaved;
-            }
-        });
+                    OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
+                    EXPECT_NE(nullptr, saved);
+                    ++totalSaved;
+                }
+            });
     }
 
-    for (auto& thread : threads) {
+    for (auto &thread : threads)
+    {
         thread.join();
     }
 
@@ -266,13 +292,15 @@ TEST_F(OrderStorageTest, ConcurrentOrderSaves) {
 // Concurrent Order Lookup Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, ConcurrentOrderLookups) {
+TEST_F(OrderStorageTest, ConcurrentOrderLookups)
+{
     // Save some orders first
     std::vector<IdT> orderIds;
-    for (int i = 0; i < 20; ++i) {
+    for (int i = 0; i < 20; ++i)
+    {
         auto order = createCorrectOrder();
         assignClOrderId(order.get());
-        OrderEntry* saved = storage()->save(*order, IdTGenerator::instance());
+        OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
         ASSERT_NE(nullptr, saved);
         orderIds.push_back(saved->orderId_);
     }
@@ -280,21 +308,26 @@ TEST_F(OrderStorageTest, ConcurrentOrderLookups) {
     // Concurrent lookups
     const int numThreads = 8;
     const int numLookupsPerThread = 100;
-    std::atomic<int> totalLookups{0};
+    std::atomic<int> totalLookups{ 0 };
 
     std::vector<std::thread> threads;
-    for (int t = 0; t < numThreads; ++t) {
-        threads.emplace_back([this, &orderIds, &totalLookups, numLookupsPerThread]() {
-            for (int i = 0; i < numLookupsPerThread; ++i) {
-                IdT id = orderIds[i % orderIds.size()];
-                OrderEntry* found = storage()->locateByOrderId(id);
-                EXPECT_NE(nullptr, found);
-                ++totalLookups;
-            }
-        });
+    for (int t = 0; t < numThreads; ++t)
+    {
+        threads.emplace_back(
+            [this, &orderIds, &totalLookups, numLookupsPerThread]()
+            {
+                for (int i = 0; i < numLookupsPerThread; ++i)
+                {
+                    IdT id = orderIds[i % orderIds.size()];
+                    OrderEntry *found = storage()->locateByOrderId(id);
+                    EXPECT_NE(nullptr, found);
+                    ++totalLookups;
+                }
+            });
     }
 
-    for (auto& thread : threads) {
+    for (auto &thread : threads)
+    {
         thread.join();
     }
 
@@ -305,37 +338,44 @@ TEST_F(OrderStorageTest, ConcurrentOrderLookups) {
 // Concurrent Execution Save/Lookup Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, ConcurrentExecutionOperations) {
+TEST_F(OrderStorageTest, ConcurrentExecutionOperations)
+{
     // Create orders first
     std::vector<IdT> orderIds;
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 10; ++i)
+    {
         auto order = createCorrectOrder();
         assignClOrderId(order.get());
-        OrderEntry* saved = storage()->save(*order, IdTGenerator::instance());
+        OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
         ASSERT_NE(nullptr, saved);
         orderIds.push_back(saved->orderId_);
     }
 
     const int numThreads = 4;
     const int numExecsPerThread = 25;
-    std::atomic<int> totalSaved{0};
+    std::atomic<int> totalSaved{ 0 };
 
     std::vector<std::thread> threads;
-    for (int t = 0; t < numThreads; ++t) {
-        threads.emplace_back([this, &orderIds, &totalSaved, numExecsPerThread]() {
-            for (int i = 0; i < numExecsPerThread; ++i) {
-                ExecutionEntry exec;
-                exec.orderId_ = orderIds[i % orderIds.size()];
-                exec.type_ = TRADE_EXECTYPE;
+    for (int t = 0; t < numThreads; ++t)
+    {
+        threads.emplace_back(
+            [this, &orderIds, &totalSaved, numExecsPerThread]()
+            {
+                for (int i = 0; i < numExecsPerThread; ++i)
+                {
+                    ExecutionEntry exec;
+                    exec.orderId_ = orderIds[i % orderIds.size()];
+                    exec.type_ = TRADE_EXECTYPE;
 
-                ExecutionEntry* saved = storage()->save(exec, IdTGenerator::instance());
-                EXPECT_NE(nullptr, saved);
-                ++totalSaved;
-            }
-        });
+                    ExecutionEntry *saved = storage()->save(exec, IdTGenerator::instance());
+                    EXPECT_NE(nullptr, saved);
+                    ++totalSaved;
+                }
+            });
     }
 
-    for (auto& thread : threads) {
+    for (auto &thread : threads)
+    {
         thread.join();
     }
 
@@ -346,13 +386,15 @@ TEST_F(OrderStorageTest, ConcurrentExecutionOperations) {
 // Mixed Concurrent Operations Tests
 // =============================================================================
 
-TEST_F(OrderStorageTest, MixedConcurrentWritesAndReads) {
+TEST_F(OrderStorageTest, MixedConcurrentWritesAndReads)
+{
     // Initial orders
     std::vector<IdT> orderIds;
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 10; ++i)
+    {
         auto order = createCorrectOrder();
         assignClOrderId(order.get());
-        OrderEntry* saved = storage()->save(*order, IdTGenerator::instance());
+        OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
         orderIds.push_back(saved->orderId_);
     }
 
@@ -360,35 +402,44 @@ TEST_F(OrderStorageTest, MixedConcurrentWritesAndReads) {
     const int numReaders = 4;
     const int numOps = 50;
 
-    std::atomic<int> totalWrites{0};
-    std::atomic<int> totalReads{0};
+    std::atomic<int> totalWrites{ 0 };
+    std::atomic<int> totalReads{ 0 };
 
     std::vector<std::thread> threads;
 
     // Writers
-    for (int t = 0; t < numWriters; ++t) {
-        threads.emplace_back([this, &totalWrites, numOps]() {
-            for (int i = 0; i < numOps; ++i) {
-                auto order = createCorrectOrder();
-                assignClOrderId(order.get());
-                storage()->save(*order, IdTGenerator::instance());
-                ++totalWrites;
-            }
-        });
+    for (int t = 0; t < numWriters; ++t)
+    {
+        threads.emplace_back(
+            [this, &totalWrites, numOps]()
+            {
+                for (int i = 0; i < numOps; ++i)
+                {
+                    auto order = createCorrectOrder();
+                    assignClOrderId(order.get());
+                    storage()->save(*order, IdTGenerator::instance());
+                    ++totalWrites;
+                }
+            });
     }
 
     // Readers
-    for (int t = 0; t < numReaders; ++t) {
-        threads.emplace_back([this, &orderIds, &totalReads, numOps]() {
-            for (int i = 0; i < numOps; ++i) {
-                IdT id = orderIds[i % orderIds.size()];
-                storage()->locateByOrderId(id);
-                ++totalReads;
-            }
-        });
+    for (int t = 0; t < numReaders; ++t)
+    {
+        threads.emplace_back(
+            [this, &orderIds, &totalReads, numOps]()
+            {
+                for (int i = 0; i < numOps; ++i)
+                {
+                    IdT id = orderIds[i % orderIds.size()];
+                    storage()->locateByOrderId(id);
+                    ++totalReads;
+                }
+            });
     }
 
-    for (auto& thread : threads) {
+    for (auto &thread : threads)
+    {
         thread.join();
     }
 

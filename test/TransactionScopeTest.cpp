@@ -23,7 +23,8 @@
 using namespace COP;
 using namespace COP::ACID;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Operation Classes
@@ -32,39 +33,50 @@ namespace {
 /**
  * Operation that tracks execution and rollback calls
  */
-class TrackingOperation : public Operation {
+class TrackingOperation : public Operation
+{
 public:
-    TrackingOperation(int id, std::vector<int>* execOrder, std::vector<int>* rollbackOrder)
-        : Operation(MATCH_ORDER_TROPERATION, IdT(id, 1))
-        , id_(id)
-        , execOrder_(execOrder)
-        , rollbackOrder_(rollbackOrder)
-        , executed_(false)
-        , rolledBack_(false)
-    {}
+    TrackingOperation(int id, std::vector<int> *execOrder, std::vector<int> *rollbackOrder)
+        : Operation(MATCH_ORDER_TROPERATION, IdT(id, 1)), id_(id), execOrder_(execOrder), rollbackOrder_(rollbackOrder),
+          executed_(false), rolledBack_(false)
+    {
+    }
 
-    void execute(const Context&) override {
+    void execute(const Context &) override
+    {
         executed_ = true;
-        if (execOrder_) {
+        if (execOrder_)
+        {
             execOrder_->push_back(id_);
         }
     }
 
-    void rollback(const Context&) override {
+    void rollback(const Context &) override
+    {
         rolledBack_ = true;
-        if (rollbackOrder_) {
+        if (rollbackOrder_)
+        {
             rollbackOrder_->push_back(id_);
         }
     }
 
-    bool wasExecuted() const { return executed_; }
-    bool wasRolledBack() const { return rolledBack_; }
-    int id() const { return id_; }
+    bool wasExecuted() const
+    {
+        return executed_;
+    }
+    bool wasRolledBack() const
+    {
+        return rolledBack_;
+    }
+    int id() const
+    {
+        return id_;
+    }
 
 private:
     int id_;
-    std::vector<int>* execOrder_;
-    std::vector<int>* rollbackOrder_;
+    std::vector<int> *execOrder_;
+    std::vector<int> *rollbackOrder_;
     bool executed_;
     bool rolledBack_;
 };
@@ -72,51 +84,59 @@ private:
 /**
  * Operation that throws an exception during execute
  */
-class FailingOperation : public Operation {
+class FailingOperation : public Operation
+{
 public:
-    FailingOperation(int id, std::vector<int>* rollbackOrder)
-        : Operation(MATCH_ORDER_TROPERATION, IdT(id, 1))
-        , id_(id)
-        , rollbackOrder_(rollbackOrder)
-        , rolledBack_(false)
-    {}
+    FailingOperation(int id, std::vector<int> *rollbackOrder)
+        : Operation(MATCH_ORDER_TROPERATION, IdT(id, 1)), id_(id), rollbackOrder_(rollbackOrder), rolledBack_(false)
+    {
+    }
 
-    void execute(const Context&) override {
+    void execute(const Context &) override
+    {
         throw std::runtime_error("Intentional failure for testing");
     }
 
-    void rollback(const Context&) override {
+    void rollback(const Context &) override
+    {
         rolledBack_ = true;
-        if (rollbackOrder_) {
+        if (rollbackOrder_)
+        {
             rollbackOrder_->push_back(id_);
         }
     }
 
-    bool wasRolledBack() const { return rolledBack_; }
+    bool wasRolledBack() const
+    {
+        return rolledBack_;
+    }
 
 private:
     int id_;
-    std::vector<int>* rollbackOrder_;
+    std::vector<int> *rollbackOrder_;
     bool rolledBack_;
 };
 
 /**
  * Operation that throws during rollback
  */
-class FailingRollbackOperation : public Operation {
+class FailingRollbackOperation : public Operation
+{
 public:
-    FailingRollbackOperation(int id, std::vector<int>* rollbackOrder)
-        : Operation(MATCH_ORDER_TROPERATION, IdT(id, 1))
-        , id_(id)
-        , rollbackOrder_(rollbackOrder)
-    {}
+    FailingRollbackOperation(int id, std::vector<int> *rollbackOrder)
+        : Operation(MATCH_ORDER_TROPERATION, IdT(id, 1)), id_(id), rollbackOrder_(rollbackOrder)
+    {
+    }
 
-    void execute(const Context&) override {
+    void execute(const Context &) override
+    {
         // Success
     }
 
-    void rollback(const Context&) override {
-        if (rollbackOrder_) {
+    void rollback(const Context &) override
+    {
+        if (rollbackOrder_)
+        {
             rollbackOrder_->push_back(id_);
         }
         throw std::runtime_error("Rollback failure for testing");
@@ -124,21 +144,24 @@ public:
 
 private:
     int id_;
-    std::vector<int>* rollbackOrder_;
+    std::vector<int> *rollbackOrder_;
 };
 
 // =============================================================================
 // Test Fixture
 // =============================================================================
 
-class TransactionScopeTest : public ::testing::Test {
+class TransactionScopeTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         execOrder_.clear();
         rollbackOrder_.clear();
     }
 
-    Context createContext() {
+    Context createContext()
+    {
         return Context();
     }
 
@@ -150,7 +173,8 @@ protected:
 // Basic Execution Tests
 // =============================================================================
 
-TEST_F(TransactionScopeTest, ExecuteEmptyTransaction_ReturnsTrue) {
+TEST_F(TransactionScopeTest, ExecuteEmptyTransaction_ReturnsTrue)
+{
     TransactionScope scope;
     Context ctx = createContext();
 
@@ -159,10 +183,11 @@ TEST_F(TransactionScopeTest, ExecuteEmptyTransaction_ReturnsTrue) {
     EXPECT_TRUE(result);
 }
 
-TEST_F(TransactionScopeTest, ExecuteSingleOperation_CallsExecute) {
+TEST_F(TransactionScopeTest, ExecuteSingleOperation_CallsExecute)
+{
     TransactionScope scope;
     auto op = std::make_unique<TrackingOperation>(1, &execOrder_, &rollbackOrder_);
-    TrackingOperation* opPtr = op.get();
+    TrackingOperation *opPtr = op.get();
 
     std::unique_ptr<Operation> baseOp(op.release());
     scope.addOperation(baseOp);
@@ -177,10 +202,12 @@ TEST_F(TransactionScopeTest, ExecuteSingleOperation_CallsExecute) {
     EXPECT_EQ(1, execOrder_[0]);
 }
 
-TEST_F(TransactionScopeTest, ExecuteMultipleOperations_CallsAllInOrder) {
+TEST_F(TransactionScopeTest, ExecuteMultipleOperations_CallsAllInOrder)
+{
     TransactionScope scope;
 
-    for (int i = 1; i <= 5; ++i) {
+    for (int i = 1; i <= 5; ++i)
+    {
         auto op = std::make_unique<TrackingOperation>(i, &execOrder_, &rollbackOrder_);
         std::unique_ptr<Operation> baseOp(op.release());
         scope.addOperation(baseOp);
@@ -191,7 +218,8 @@ TEST_F(TransactionScopeTest, ExecuteMultipleOperations_CallsAllInOrder) {
 
     EXPECT_TRUE(result);
     ASSERT_EQ(5u, execOrder_.size());
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 5; ++i)
+    {
         EXPECT_EQ(i + 1, execOrder_[i]);
     }
     EXPECT_TRUE(rollbackOrder_.empty());
@@ -201,7 +229,8 @@ TEST_F(TransactionScopeTest, ExecuteMultipleOperations_CallsAllInOrder) {
 // Rollback Tests
 // =============================================================================
 
-TEST_F(TransactionScopeTest, ExecuteReturnsFalse_WhenOperationThrows) {
+TEST_F(TransactionScopeTest, ExecuteReturnsFalse_WhenOperationThrows)
+{
     TransactionScope scope;
 
     auto op = std::make_unique<FailingOperation>(1, &rollbackOrder_);
@@ -214,7 +243,8 @@ TEST_F(TransactionScopeTest, ExecuteReturnsFalse_WhenOperationThrows) {
     EXPECT_FALSE(result);
 }
 
-TEST_F(TransactionScopeTest, RollbackCalledOnFailure_ForExecutedOperations) {
+TEST_F(TransactionScopeTest, RollbackCalledOnFailure_ForExecutedOperations)
+{
     TransactionScope scope;
 
     // Add two successful operations, then one that fails
@@ -222,8 +252,8 @@ TEST_F(TransactionScopeTest, RollbackCalledOnFailure_ForExecutedOperations) {
     auto op2 = std::make_unique<TrackingOperation>(2, &execOrder_, &rollbackOrder_);
     auto op3 = std::make_unique<FailingOperation>(3, &rollbackOrder_);
 
-    TrackingOperation* op1Ptr = op1.get();
-    TrackingOperation* op2Ptr = op2.get();
+    TrackingOperation *op1Ptr = op1.get();
+    TrackingOperation *op2Ptr = op2.get();
 
     std::unique_ptr<Operation> baseOp1(op1.release());
     std::unique_ptr<Operation> baseOp2(op2.release());
@@ -243,11 +273,13 @@ TEST_F(TransactionScopeTest, RollbackCalledOnFailure_ForExecutedOperations) {
     EXPECT_TRUE(op2Ptr->wasRolledBack());
 }
 
-TEST_F(TransactionScopeTest, RollbackOrder_IsReverseOfExecution) {
+TEST_F(TransactionScopeTest, RollbackOrder_IsReverseOfExecution)
+{
     TransactionScope scope;
 
     // Add three successful operations, then one that fails
-    for (int i = 1; i <= 3; ++i) {
+    for (int i = 1; i <= 3; ++i)
+    {
         auto op = std::make_unique<TrackingOperation>(i, &execOrder_, &rollbackOrder_);
         std::unique_ptr<Operation> baseOp(op.release());
         scope.addOperation(baseOp);
@@ -274,13 +306,14 @@ TEST_F(TransactionScopeTest, RollbackOrder_IsReverseOfExecution) {
     EXPECT_EQ(1, rollbackOrder_[3]);
 }
 
-TEST_F(TransactionScopeTest, RollbackNotCalled_ForUnexecutedOperations) {
+TEST_F(TransactionScopeTest, RollbackNotCalled_ForUnexecutedOperations)
+{
     TransactionScope scope;
 
     // First operation fails immediately
     auto failOp = std::make_unique<FailingOperation>(1, &rollbackOrder_);
     auto op2 = std::make_unique<TrackingOperation>(2, &execOrder_, &rollbackOrder_);
-    TrackingOperation* op2Ptr = op2.get();
+    TrackingOperation *op2Ptr = op2.get();
 
     std::unique_ptr<Operation> baseFailOp(failOp.release());
     std::unique_ptr<Operation> baseOp2(op2.release());
@@ -300,7 +333,8 @@ TEST_F(TransactionScopeTest, RollbackNotCalled_ForUnexecutedOperations) {
     EXPECT_EQ(1, rollbackOrder_[0]);
 }
 
-TEST_F(TransactionScopeTest, RollbackStops_WhenRollbackThrows) {
+TEST_F(TransactionScopeTest, RollbackStops_WhenRollbackThrows)
+{
     // Documents current behavior: rollback stops on first exception
     // This is a design trade-off; some systems continue rollback on exception
     TransactionScope scope;
@@ -311,8 +345,8 @@ TEST_F(TransactionScopeTest, RollbackStops_WhenRollbackThrows) {
     auto op3 = std::make_unique<TrackingOperation>(3, &execOrder_, &rollbackOrder_);
     auto op4 = std::make_unique<FailingOperation>(4, &rollbackOrder_);
 
-    TrackingOperation* op1Ptr = op1.get();
-    TrackingOperation* op3Ptr = op3.get();
+    TrackingOperation *op1Ptr = op1.get();
+    TrackingOperation *op3Ptr = op3.get();
 
     std::unique_ptr<Operation> baseOp1(op1.release());
     std::unique_ptr<Operation> baseOp2(op2.release());
@@ -340,7 +374,8 @@ TEST_F(TransactionScopeTest, RollbackStops_WhenRollbackThrows) {
 // Edge Cases
 // =============================================================================
 
-TEST_F(TransactionScopeTest, FirstOperationFails_OnlyFirstRolledBack) {
+TEST_F(TransactionScopeTest, FirstOperationFails_OnlyFirstRolledBack)
+{
     TransactionScope scope;
 
     auto failOp = std::make_unique<FailingOperation>(1, &rollbackOrder_);
@@ -355,10 +390,12 @@ TEST_F(TransactionScopeTest, FirstOperationFails_OnlyFirstRolledBack) {
     EXPECT_EQ(1, rollbackOrder_[0]);
 }
 
-TEST_F(TransactionScopeTest, LastOperationFails_AllRolledBack) {
+TEST_F(TransactionScopeTest, LastOperationFails_AllRolledBack)
+{
     TransactionScope scope;
 
-    for (int i = 1; i <= 4; ++i) {
+    for (int i = 1; i <= 4; ++i)
+    {
         auto op = std::make_unique<TrackingOperation>(i, &execOrder_, &rollbackOrder_);
         std::unique_ptr<Operation> baseOp(op.release());
         scope.addOperation(baseOp);
@@ -383,7 +420,8 @@ TEST_F(TransactionScopeTest, LastOperationFails_AllRolledBack) {
     EXPECT_EQ(1, rollbackOrder_[4]);
 }
 
-TEST_F(TransactionScopeTest, TransactionId_CanBeSetAndRetrieved) {
+TEST_F(TransactionScopeTest, TransactionId_CanBeSetAndRetrieved)
+{
     TransactionScope scope;
     TransactionId id(123, 456);
 
@@ -392,7 +430,8 @@ TEST_F(TransactionScopeTest, TransactionId_CanBeSetAndRetrieved) {
     EXPECT_EQ(id, scope.transactionId());
 }
 
-TEST_F(TransactionScopeTest, RemoveLastOperation_RemovesCorrectly) {
+TEST_F(TransactionScopeTest, RemoveLastOperation_RemovesCorrectly)
+{
     TransactionScope scope;
 
     auto op1 = std::make_unique<TrackingOperation>(1, &execOrder_, &rollbackOrder_);
@@ -417,41 +456,49 @@ TEST_F(TransactionScopeTest, RemoveLastOperation_RemovesCorrectly) {
 // Arena Allocator Tests
 // =============================================================================
 
-TEST_F(TransactionScopeTest, ArenaAllocateReturnsNonNull) {
+TEST_F(TransactionScopeTest, ArenaAllocateReturnsNonNull)
+{
     TransactionScope scope;
 
-    void* ptr = scope.arenaAllocate(64, alignof(std::max_align_t));
+    void *ptr = scope.arenaAllocate(64, alignof(std::max_align_t));
     EXPECT_NE(nullptr, ptr);
 }
 
-TEST_F(TransactionScopeTest, ArenaAllocateRespectsSizeLimit) {
+TEST_F(TransactionScopeTest, ArenaAllocateRespectsSizeLimit)
+{
     TransactionScope scope;
 
     // ARENA_SIZE is 2048 — allocating exactly that should succeed
-    void* ptr = scope.arenaAllocate(TransactionScope::ARENA_SIZE, 1);
+    void *ptr = scope.arenaAllocate(TransactionScope::ARENA_SIZE, 1);
     EXPECT_NE(nullptr, ptr);
 
     // Arena is now full — next allocation should return nullptr
-    void* ptr2 = scope.arenaAllocate(1, 1);
+    void *ptr2 = scope.arenaAllocate(1, 1);
     EXPECT_EQ(nullptr, ptr2);
 }
 
-TEST_F(TransactionScopeTest, ArenaAllocateOversizeReturnsNull) {
+TEST_F(TransactionScopeTest, ArenaAllocateOversizeReturnsNull)
+{
     TransactionScope scope;
 
     // Requesting more than ARENA_SIZE should return nullptr immediately
-    void* ptr = scope.arenaAllocate(TransactionScope::ARENA_SIZE + 1, 1);
+    void *ptr = scope.arenaAllocate(TransactionScope::ARENA_SIZE + 1, 1);
     EXPECT_EQ(nullptr, ptr);
 }
 
-TEST_F(TransactionScopeTest, ArenaAllocateMultipleSmallAllocations) {
+TEST_F(TransactionScopeTest, ArenaAllocateMultipleSmallAllocations)
+{
     TransactionScope scope;
 
     // Allocate many small objects until arena is full
     int count = 0;
-    while (true) {
-        void* ptr = scope.arenaAllocate(64, alignof(std::max_align_t));
-        if (!ptr) break;
+    while (true)
+    {
+        void *ptr = scope.arenaAllocate(64, alignof(std::max_align_t));
+        if (!ptr)
+        {
+            break;
+        }
         ++count;
     }
 
@@ -460,16 +507,18 @@ TEST_F(TransactionScopeTest, ArenaAllocateMultipleSmallAllocations) {
     EXPECT_GE(count, 10);
 }
 
-TEST_F(TransactionScopeTest, IsFromArenaIdentifiesArenaPointers) {
+TEST_F(TransactionScopeTest, IsFromArenaIdentifiesArenaPointers)
+{
     TransactionScope scope;
 
-    void* arenaPtr = scope.arenaAllocate(64, alignof(std::max_align_t));
+    void *arenaPtr = scope.arenaAllocate(64, alignof(std::max_align_t));
     ASSERT_NE(nullptr, arenaPtr);
 
     EXPECT_TRUE(scope.isFromArena(arenaPtr));
 }
 
-TEST_F(TransactionScopeTest, IsFromArenaRejectsHeapPointers) {
+TEST_F(TransactionScopeTest, IsFromArenaRejectsHeapPointers)
+{
     TransactionScope scope;
 
     int heapVar = 42;
@@ -479,16 +528,19 @@ TEST_F(TransactionScopeTest, IsFromArenaRejectsHeapPointers) {
     EXPECT_FALSE(scope.isFromArena(heapAlloc.get()));
 }
 
-TEST_F(TransactionScopeTest, IsFromArenaRejectsNull) {
+TEST_F(TransactionScopeTest, IsFromArenaRejectsNull)
+{
     TransactionScope scope;
     EXPECT_FALSE(scope.isFromArena(nullptr));
 }
 
-TEST_F(TransactionScopeTest, ResetClearsArena) {
+TEST_F(TransactionScopeTest, ResetClearsArena)
+{
     TransactionScope scope;
 
     // Fill up most of the arena
-    for (int i = 0; i < 20; ++i) {
+    for (int i = 0; i < 20; ++i)
+    {
         scope.arenaAllocate(64, alignof(std::max_align_t));
     }
 
@@ -496,11 +548,12 @@ TEST_F(TransactionScopeTest, ResetClearsArena) {
     scope.reset();
 
     // Should be able to allocate again
-    void* ptr = scope.arenaAllocate(64, alignof(std::max_align_t));
+    void *ptr = scope.arenaAllocate(64, alignof(std::max_align_t));
     EXPECT_NE(nullptr, ptr);
 }
 
-TEST_F(TransactionScopeTest, ActiveScopeIsThreadLocal) {
+TEST_F(TransactionScopeTest, ActiveScopeIsThreadLocal)
+{
     TransactionScope scope1;
     TransactionScope scope2;
 
@@ -508,10 +561,12 @@ TEST_F(TransactionScopeTest, ActiveScopeIsThreadLocal) {
     EXPECT_EQ(&scope1, TransactionScope::s_activeScope);
 
     // Verify it's thread-local: another thread sees nullptr
-    TransactionScope* otherThreadScope = nullptr;
-    std::thread t([&]() {
-        otherThreadScope = TransactionScope::s_activeScope;
-    });
+    TransactionScope *otherThreadScope = nullptr;
+    std::thread t(
+        [&]()
+        {
+            otherThreadScope = TransactionScope::s_activeScope;
+        });
     t.join();
 
     EXPECT_EQ(nullptr, otherThreadScope);
@@ -521,7 +576,8 @@ TEST_F(TransactionScopeTest, ActiveScopeIsThreadLocal) {
     TransactionScope::s_activeScope = nullptr;
 }
 
-TEST_F(TransactionScopeTest, SwapExchangesContents) {
+TEST_F(TransactionScopeTest, SwapExchangesContents)
+{
     TransactionScope scope1;
     TransactionScope scope2;
 
@@ -537,7 +593,8 @@ TEST_F(TransactionScopeTest, SwapExchangesContents) {
     EXPECT_EQ(id1, scope2.transactionId());
 }
 
-TEST_F(TransactionScopeTest, ArenaArenaSizeConstant) {
+TEST_F(TransactionScopeTest, ArenaArenaSizeConstant)
+{
     // Verify ARENA_SIZE is at least 1024 as documented
     EXPECT_GE(TransactionScope::ARENA_SIZE, 1024u);
 }

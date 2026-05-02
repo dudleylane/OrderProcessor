@@ -15,22 +15,27 @@
 #include "SubscriptionDef.h"
 #include "DataModelDef.h"
 
-namespace COP{ 
+namespace COP
+{
 
-	namespace SubscrMgr{
-		class SubscriptionManager;
-	}
+namespace SubscrMgr
+{
+class SubscriptionManager;
+}
 
-namespace SL{
+namespace SL
+{
 
-	class SubscriptionLayer{
-	public:
-		virtual ~SubscriptionLayer(){}
+class SubscriptionLayer
+{
+public:
+    virtual ~SubscriptionLayer() {}
 
-		virtual void attach(SubscrMgr::SubscriptionManager *subscMgr) = 0;
-		virtual SubscrMgr::SubscriptionManager* dettach() = 0;
+    virtual void attach(SubscrMgr::SubscriptionManager *subscMgr) = 0;
+    virtual SubscrMgr::SubscriptionManager *dettach() = 0;
 
-		virtual void process(const OrderEntry &order, const SubscrMgr::MatchedSubscribersT &subscr) = 0;
-	};
+    virtual void process(const OrderEntry &order, const SubscrMgr::MatchedSubscribersT &subscr) = 0;
+};
 
-}}
+} // namespace SL
+} // namespace COP

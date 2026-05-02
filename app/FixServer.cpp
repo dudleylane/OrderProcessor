@@ -16,7 +16,8 @@
 using namespace COP;
 using namespace COP::App;
 
-struct FixServer::Impl {
+struct FixServer::Impl
+{
     std::unique_ptr<FixGateway> gateway;
     std::unique_ptr<FixOutQueues> fixOutQueues;
     std::unique_ptr<FIX::SessionSettings> settings;
@@ -25,34 +26,34 @@ struct FixServer::Impl {
     std::unique_ptr<FIX::ThreadedSocketAcceptor> acceptor;
 };
 
-FixServer::FixServer(Queues::InQueues* inQueues,
-                     Store::WideParamsDataStorage* wideData,
-                     Store::OrderDataStorage* orderStorage,
-                     SourceIdT defaultClearingId)
+FixServer::FixServer(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
+                     Store::OrderDataStorage *orderStorage, SourceIdT defaultClearingId)
     : impl_(std::make_unique<Impl>())
 {
-    impl_->gateway = std::make_unique<FixGateway>(
-        inQueues, wideData, orderStorage, defaultClearingId);
-    impl_->fixOutQueues = std::make_unique<FixOutQueues>(
-        impl_->gateway.get(), orderStorage);
+    impl_->gateway = std::make_unique<FixGateway>(inQueues, wideData, orderStorage, defaultClearingId);
+    impl_->fixOutQueues = std::make_unique<FixOutQueues>(impl_->gateway.get(), orderStorage);
 }
 
-FixServer::~FixServer() {
+FixServer::~FixServer()
+{
     stop();
 }
 
-void FixServer::start(const std::string& configFile) {
+void FixServer::start(const std::string &configFile)
+{
     impl_->settings = std::make_unique<FIX::SessionSettings>(configFile);
     impl_->storeFactory = std::make_unique<FIX::FileStoreFactory>(*impl_->settings);
     impl_->logFactory = std::make_unique<FIX::FileLogFactory>(*impl_->settings);
-    impl_->acceptor = std::make_unique<FIX::ThreadedSocketAcceptor>(
-        *impl_->gateway, *impl_->storeFactory, *impl_->settings, *impl_->logFactory);
+    impl_->acceptor = std::make_unique<FIX::ThreadedSocketAcceptor>(*impl_->gateway, *impl_->storeFactory,
+                                                                    *impl_->settings, *impl_->logFactory);
     impl_->acceptor->start();
     aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSocketAcceptor)");
 }
 
-void FixServer::stop() {
-    if (impl_->acceptor) {
+void FixServer::stop()
+{
+    if (impl_->acceptor)
+    {
         impl_->acceptor->stop();
         impl_->acceptor.reset();
         impl_->settings.reset();
@@ -62,7 +63,8 @@ void FixServer::stop() {
     }
 }
 
-Queues::OutQueues* FixServer::outQueues() {
+Queues::OutQueues *FixServer::outQueues()
+{
     return impl_->fixOutQueues.get();
 }
 

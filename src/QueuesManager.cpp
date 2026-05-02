@@ -18,21 +18,20 @@ using namespace COP::Queues;
 
 QueuesManager::QueuesManager(void)
 {
-	aux::ExchLogger::instance()->note("QueuesManager created");
+    aux::ExchLogger::instance()->note("QueuesManager created");
 }
 
 QueuesManager::~QueuesManager(void)
 {
-	aux::ExchLogger::instance()->note("QueuesManager destroyed");
+    aux::ExchLogger::instance()->note("QueuesManager destroyed");
 }
 
 InQueues *QueuesManager::getInQueues()
 {
-	return &inQueues_;
+    return &inQueues_;
 }
 
 OutQueues *QueuesManager::getOutQueues()
 {
-	return &outQueues_;
+    return &outQueues_;
 }
-

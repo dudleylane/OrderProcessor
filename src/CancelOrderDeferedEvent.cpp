@@ -24,22 +24,20 @@ using namespace COP::ACID;
 using namespace COP::OrdState;
 using namespace COP::Store;
 
-CancelOrderDeferedEvent::CancelOrderDeferedEvent(): order_(nullptr)
-{}
+CancelOrderDeferedEvent::CancelOrderDeferedEvent() : order_(nullptr) {}
 
-CancelOrderDeferedEvent::CancelOrderDeferedEvent(OrderEntry *ord): order_(ord)
+CancelOrderDeferedEvent::CancelOrderDeferedEvent(OrderEntry *ord) : order_(ord)
 {
-	assert(nullptr != order_);
+    assert(nullptr != order_);
 }
 
 void CancelOrderDeferedEvent::execute(DeferedEventFunctor *func, const Context &cnxt, ACID::Scope *scope)
 {
-	assert(nullptr != func);
-	assert(nullptr != order_);
+    assert(nullptr != func);
+    assert(nullptr != order_);
 
-	onInternalCancel evnt4Proc;
-	evnt4Proc.transaction_ = scope;
+    onInternalCancel evnt4Proc;
+    evnt4Proc.transaction_ = scope;
 
-	func->process(evnt4Proc, order_, cnxt);
+    func->process(evnt4Proc, order_, cnxt);
 }
-

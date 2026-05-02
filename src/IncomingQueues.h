@@ -21,75 +21,72 @@
 #include "QueuesDef.h"
 #include "CacheAlignedAtomic.h"
 
-namespace COP{
-namespace Queues{
+namespace COP
+{
+namespace Queues
+{
 
-	class IncomingQueues: public InQueues, public InQueuesPublisher, public InQueuesContainer
-	{
-	public:
-		IncomingQueues(void);
-		~IncomingQueues(void);
-	public:
-		/// reimplemented from InQueues
-		virtual void push(const std::string &source, const OrderEvent &evnt);
-		virtual void push(const std::string &source, const OrderCancelEvent &evnt);
-		virtual void push(const std::string &source, const OrderReplaceEvent &evnt);
-		virtual void push(const std::string &source, const OrderChangeStateEvent &evnt);
-		virtual void push(const std::string &source, const ProcessEvent &evnt);
-		virtual void push(const std::string &source, const TimerEvent &evnt);
-		virtual InQueuesObserver *attach(InQueuesObserver *obs);
-		virtual InQueuesObserver *detach();
+class IncomingQueues : public InQueues, public InQueuesPublisher, public InQueuesContainer
+{
+public:
+    IncomingQueues(void);
+    ~IncomingQueues(void);
 
-	public:
-		/// reimplemented from InQueuesPublisher
-		virtual InQueueProcessor *attach(InQueueProcessor *obs);
-		virtual InQueueProcessor *detachProcessor();
+public:
+    /// reimplemented from InQueues
+    virtual void push(const std::string &source, const OrderEvent &evnt);
+    virtual void push(const std::string &source, const OrderCancelEvent &evnt);
+    virtual void push(const std::string &source, const OrderReplaceEvent &evnt);
+    virtual void push(const std::string &source, const OrderChangeStateEvent &evnt);
+    virtual void push(const std::string &source, const ProcessEvent &evnt);
+    virtual void push(const std::string &source, const TimerEvent &evnt);
+    virtual InQueuesObserver *attach(InQueuesObserver *obs);
+    virtual InQueuesObserver *detach();
 
-	public:
-		/// reimplemented from InQueuesContainer
-		virtual u32 size()const;
-		virtual bool top(InQueueProcessor *obs);
-		virtual bool pop();
-		virtual bool pop(InQueueProcessor *obs);
+public:
+    /// reimplemented from InQueuesPublisher
+    virtual InQueueProcessor *attach(InQueueProcessor *obs);
+    virtual InQueueProcessor *detachProcessor();
 
-	private:
-		std::atomic<InQueueProcessor *> processor_;
-		std::atomic<InQueuesObserver *> observer_;
+public:
+    /// reimplemented from InQueuesContainer
+    virtual u32 size() const;
+    virtual bool top(InQueueProcessor *obs);
+    virtual bool pop();
+    virtual bool pop(InQueueProcessor *obs);
 
-		/// Unified event type using std::variant for lock-free queue
-		using EventVariant = std::variant<
-			OrderEvent,
-			OrderCancelEvent,
-			OrderReplaceEvent,
-			OrderChangeStateEvent,
-			ProcessEvent,
-			TimerEvent
-		>;
+private:
+    std::atomic<InQueueProcessor *> processor_;
+    std::atomic<InQueuesObserver *> observer_;
 
-		/// Queued event containing source and the event data
-		struct QueuedEvent {
-			std::string source_;
-			EventVariant event_;
+    /// Unified event type using std::variant for lock-free queue
+    using EventVariant =
+        std::variant<OrderEvent, OrderCancelEvent, OrderReplaceEvent, OrderChangeStateEvent, ProcessEvent, TimerEvent>;
 
-			QueuedEvent() = default;
-			QueuedEvent(const std::string &src, EventVariant evt)
-				: source_(src), event_(std::move(evt)) {}
-		};
+    /// Queued event containing source and the event data
+    struct QueuedEvent
+    {
+        std::string source_;
+        EventVariant event_;
 
-		/// Lock-free concurrent queue (MPMC safe)
-		oneapi::tbb::concurrent_queue<QueuedEvent> eventQueue_;
+        QueuedEvent() = default;
+        QueuedEvent(const std::string &src, EventVariant evt) : source_(src), event_(std::move(evt)) {}
+    };
 
-		/// Atomic size counter for O(1) size() queries - cache aligned
-		CacheAlignedAtomic<u32> queueSize_;
+    /// Lock-free concurrent queue (MPMC safe)
+    oneapi::tbb::concurrent_queue<QueuedEvent> eventQueue_;
 
-		/// Pending event for top() without pop() - protected by pendingLock_
-		mutable oneapi::tbb::spin_mutex pendingLock_;
-		std::optional<QueuedEvent> pendingEvent_;
+    /// Atomic size counter for O(1) size() queries - cache aligned
+    CacheAlignedAtomic<u32> queueSize_;
 
-	private:
-		void clear();
-		void dispatchEvent(InQueueProcessor *obs, const std::string &source, const EventVariant &event);
-	};
+    /// Pending event for top() without pop() - protected by pendingLock_
+    mutable oneapi::tbb::spin_mutex pendingLock_;
+    std::optional<QueuedEvent> pendingEvent_;
 
-}
-}
+private:
+    void clear();
+    void dispatchEvent(InQueueProcessor *obs, const std::string &source, const EventVariant &event);
+};
+
+} // namespace Queues
+} // namespace COP

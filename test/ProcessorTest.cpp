@@ -34,39 +34,48 @@ using namespace COP::Proc;
 using namespace COP::Store;
 using namespace COP::ACID;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test InQueue Observer Implementation
 // =============================================================================
 
-class TestInQueueObserver : public InQueueProcessor {
+class TestInQueueObserver : public InQueueProcessor
+{
 public:
-    bool process() override {
+    bool process() override
+    {
         return false;
     }
 
-    void onEvent(const std::string& source, const OrderEvent& evnt) override {
+    void onEvent(const std::string &source, const OrderEvent &evnt) override
+    {
         orders_.push_back(OrderQueueT::value_type(source, evnt));
     }
 
-    void onEvent(const std::string& source, const OrderCancelEvent& evnt) override {
+    void onEvent(const std::string &source, const OrderCancelEvent &evnt) override
+    {
         orderCancels_.push_back(OrderCancelQueueT::value_type(source, evnt));
     }
 
-    void onEvent(const std::string& source, const OrderReplaceEvent& evnt) override {
+    void onEvent(const std::string &source, const OrderReplaceEvent &evnt) override
+    {
         orderReplaces_.push_back(OrderReplaceQueueT::value_type(source, evnt));
     }
 
-    void onEvent(const std::string& source, const OrderChangeStateEvent& evnt) override {
+    void onEvent(const std::string &source, const OrderChangeStateEvent &evnt) override
+    {
         orderStates_.push_back(OrderStateQueueT::value_type(source, evnt));
     }
 
-    void onEvent(const std::string& source, const ProcessEvent& evnt) override {
+    void onEvent(const std::string &source, const ProcessEvent &evnt) override
+    {
         processes_.push_back(ProcessQueueT::value_type(source, evnt));
     }
 
-    void onEvent(const std::string& source, const TimerEvent& evnt) override {
+    void onEvent(const std::string &source, const TimerEvent &evnt) override
+    {
         timers_.push_back(TimerQueueT::value_type(source, evnt));
     }
 
@@ -90,43 +99,54 @@ public:
 // Test Transaction Manager Implementation
 // =============================================================================
 
-class TestTransactionManager : public TransactionManager {
+class TestTransactionManager : public TransactionManager
+{
 public:
     TestTransactionManager() : proc_(nullptr), transactionCount_(0) {}
 
-    void attach(TransactionObserver*) override {}
+    void attach(TransactionObserver *) override {}
 
-    TransactionObserver* detach() override {
+    TransactionObserver *detach() override
+    {
         return nullptr;
     }
 
-    void addTransaction(std::unique_ptr<Transaction>& tr) override {
+    void addTransaction(std::unique_ptr<Transaction> &tr) override
+    {
         tr->setTransactionId(TransactionId(1, 1));
-        if (proc_) {
+        if (proc_)
+        {
             proc_->process(tr->transactionId(), tr.get());
         }
         ++transactionCount_;
     }
 
-    bool removeTransaction(const TransactionId&, Transaction*) override {
+    bool removeTransaction(const TransactionId &, Transaction *) override
+    {
         return false;
     }
 
-    bool getParentTransactions(const TransactionId&, TransactionIdsT*) const override {
+    bool getParentTransactions(const TransactionId &, TransactionIdsT *) const override
+    {
         return false;
     }
 
-    bool getRelatedTransactions(const TransactionId&, TransactionIdsT*) const override {
+    bool getRelatedTransactions(const TransactionId &, TransactionIdsT *) const override
+    {
         return false;
     }
 
-    TransactionIterator* iterator() override {
+    TransactionIterator *iterator() override
+    {
         return nullptr;
     }
 
-    int transactionCount() const { return transactionCount_; }
+    int transactionCount() const
+    {
+        return transactionCount_;
+    }
 
-    Processor* proc_;
+    Processor *proc_;
 
 private:
     int transactionCount_;
@@ -136,9 +156,11 @@ private:
 // Test Fixture
 // =============================================================================
 
-class ProcessorTest : public ::testing::Test {
+class ProcessorTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         // Create singletons
         WideDataStorage::create();
         IdTGenerator::create();
@@ -161,14 +183,8 @@ protected:
         orderBook_->init(instruments, &orderSaver_);
 
         // Initialize processor
-        ProcessorParams params(
-            IdTGenerator::instance(),
-            OrderStorage::instance(),
-            orderBook_.get(),
-            inQueues_.get(),
-            outQueues_.get(),
-            inQueues_.get(),
-            transMgr_.get());
+        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
+                               outQueues_.get(), inQueues_.get(), transMgr_.get());
 
         processor_ = std::make_unique<Processor>();
         processor_->init(params);
@@ -176,7 +192,8 @@ protected:
         transMgr_->proc_ = processor_.get();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         processor_.reset();
         transMgr_.reset();
         orderBook_.reset();
@@ -189,8 +206,8 @@ protected:
     }
 
     // Helper to create an order with specific settings
-    std::unique_ptr<OrderEntry> createTestOrder(SourceIdT instrId, Side side,
-                                                 PriceT price, QuantityT qty) {
+    std::unique_ptr<OrderEntry> createTestOrder(SourceIdT instrId, Side side, PriceT price, QuantityT qty)
+    {
         auto order = test::createCorrectOrder(instrId);
         test::assignClOrderId(order.get());
         order->side_ = side;
@@ -216,11 +233,13 @@ protected:
 // Basic Initialization Tests
 // =============================================================================
 
-TEST_F(ProcessorTest, CreateProcessor) {
+TEST_F(ProcessorTest, CreateProcessor)
+{
     ASSERT_NE(nullptr, processor_);
 }
 
-TEST_F(ProcessorTest, ProcessEmptyQueue) {
+TEST_F(ProcessorTest, ProcessEmptyQueue)
+{
     // Processing empty queue should not crash
     bool processed = processor_->process();
     EXPECT_FALSE(processed);
@@ -230,7 +249,8 @@ TEST_F(ProcessorTest, ProcessEmptyQueue) {
 // Order Processing Tests
 // =============================================================================
 
-TEST_F(ProcessorTest, ProcessSingleNewOrder) {
+TEST_F(ProcessorTest, ProcessSingleNewOrder)
+{
     auto order = test::createCorrectOrder(instrId1_);
     RawDataEntry clOrdId = order->clOrderId_.get();
 
@@ -238,12 +258,13 @@ TEST_F(ProcessorTest, ProcessSingleNewOrder) {
 
     processor_->process();
 
-    OrderEntry* savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    OrderEntry *savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, savedOrder);
     EXPECT_EQ(NEW_ORDSTATUS, savedOrder->status_);
 }
 
-TEST_F(ProcessorTest, ProcessMultipleOrders) {
+TEST_F(ProcessorTest, ProcessMultipleOrders)
+{
     auto order1 = test::createCorrectOrder(instrId1_);
     RawDataEntry ord1ClOrdId = order1->clOrderId_.get();
     inQueues_->push("test", OrderEvent(order1.release()));
@@ -255,12 +276,12 @@ TEST_F(ProcessorTest, ProcessMultipleOrders) {
 
     // First process - first order
     processor_->process();
-    OrderEntry* savedOrder1 = OrderStorage::instance()->locateByClOrderId(ord1ClOrdId);
+    OrderEntry *savedOrder1 = OrderStorage::instance()->locateByClOrderId(ord1ClOrdId);
     ASSERT_NE(nullptr, savedOrder1);
     EXPECT_EQ(NEW_ORDSTATUS, savedOrder1->status_);
 
     // Second order should not be processed yet or same processing cycle
-    OrderEntry* savedOrder2 = OrderStorage::instance()->locateByClOrderId(ord2ClOrdId);
+    OrderEntry *savedOrder2 = OrderStorage::instance()->locateByClOrderId(ord2ClOrdId);
     // It may or may not be processed depending on implementation
     // EXPECT_EQ(nullptr, savedOrder2);
 
@@ -271,7 +292,8 @@ TEST_F(ProcessorTest, ProcessMultipleOrders) {
     EXPECT_EQ(NEW_ORDSTATUS, savedOrder2->status_);
 }
 
-TEST_F(ProcessorTest, ProcessMultipleCycles) {
+TEST_F(ProcessorTest, ProcessMultipleCycles)
+{
     auto order = test::createCorrectOrder(instrId1_);
     RawDataEntry clOrdId = order->clOrderId_.get();
 
@@ -283,7 +305,7 @@ TEST_F(ProcessorTest, ProcessMultipleCycles) {
     processor_->process();
     processor_->process();
 
-    OrderEntry* savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    OrderEntry *savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, savedOrder);
     EXPECT_EQ(NEW_ORDSTATUS, savedOrder->status_);
 }
@@ -292,7 +314,8 @@ TEST_F(ProcessorTest, ProcessMultipleCycles) {
 // Order Matching Tests
 // =============================================================================
 
-TEST_F(ProcessorTest, MatchBuyAgainstSell) {
+TEST_F(ProcessorTest, MatchBuyAgainstSell)
+{
     // Create sell order first
     auto sellOrder = createTestOrder(instrId1_, SELL_SIDE, 10.0, 100);
     RawDataEntry sellClOrdId = sellOrder->clOrderId_.get();
@@ -300,7 +323,7 @@ TEST_F(ProcessorTest, MatchBuyAgainstSell) {
 
     // Process sell order
     processor_->process();
-    OrderEntry* savedSell = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
+    OrderEntry *savedSell = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
     ASSERT_NE(nullptr, savedSell);
     EXPECT_EQ(NEW_ORDSTATUS, savedSell->status_);
 
@@ -315,7 +338,7 @@ TEST_F(ProcessorTest, MatchBuyAgainstSell) {
     // Process buy order - should match
     processor_->process();
 
-    OrderEntry* savedBuy = OrderStorage::instance()->locateByClOrderId(buyClOrdId);
+    OrderEntry *savedBuy = OrderStorage::instance()->locateByClOrderId(buyClOrdId);
     ASSERT_NE(nullptr, savedBuy);
     EXPECT_EQ(FILLED_ORDSTATUS, savedBuy->status_);
 
@@ -324,7 +347,8 @@ TEST_F(ProcessorTest, MatchBuyAgainstSell) {
     EXPECT_EQ(PARTFILL_ORDSTATUS, savedSell->status_);
 }
 
-TEST_F(ProcessorTest, PartialFillScenario) {
+TEST_F(ProcessorTest, PartialFillScenario)
+{
     // Create sell order with larger quantity
     auto sellOrder = createTestOrder(instrId1_, SELL_SIDE, 10.0, 100);
     RawDataEntry sellClOrdId = sellOrder->clOrderId_.get();
@@ -341,12 +365,12 @@ TEST_F(ProcessorTest, PartialFillScenario) {
     processor_->process();
 
     // Buy should be fully filled
-    OrderEntry* savedBuy = OrderStorage::instance()->locateByClOrderId(buyClOrdId);
+    OrderEntry *savedBuy = OrderStorage::instance()->locateByClOrderId(buyClOrdId);
     ASSERT_NE(nullptr, savedBuy);
     EXPECT_EQ(FILLED_ORDSTATUS, savedBuy->status_);
 
     // Sell should be partially filled
-    OrderEntry* savedSell = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
+    OrderEntry *savedSell = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
     ASSERT_NE(nullptr, savedSell);
     EXPECT_EQ(PARTFILL_ORDSTATUS, savedSell->status_);
 }
@@ -355,7 +379,8 @@ TEST_F(ProcessorTest, PartialFillScenario) {
 // Different Instruments Tests
 // =============================================================================
 
-TEST_F(ProcessorTest, OrdersOnDifferentInstruments) {
+TEST_F(ProcessorTest, OrdersOnDifferentInstruments)
+{
     // Create order for instrument 1
     auto order1 = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
     RawDataEntry clOrdId1 = order1->clOrderId_.get();
@@ -370,11 +395,11 @@ TEST_F(ProcessorTest, OrdersOnDifferentInstruments) {
     processor_->process();
 
     // Both orders should be processed
-    OrderEntry* saved1 = OrderStorage::instance()->locateByClOrderId(clOrdId1);
+    OrderEntry *saved1 = OrderStorage::instance()->locateByClOrderId(clOrdId1);
     ASSERT_NE(nullptr, saved1);
     EXPECT_EQ(NEW_ORDSTATUS, saved1->status_);
 
-    OrderEntry* saved2 = OrderStorage::instance()->locateByClOrderId(clOrdId2);
+    OrderEntry *saved2 = OrderStorage::instance()->locateByClOrderId(clOrdId2);
     ASSERT_NE(nullptr, saved2);
     EXPECT_EQ(NEW_ORDSTATUS, saved2->status_);
 }
@@ -383,7 +408,8 @@ TEST_F(ProcessorTest, OrdersOnDifferentInstruments) {
 // Cancel Event Tests
 // =============================================================================
 
-TEST_F(ProcessorTest, ProcessCancelEvent) {
+TEST_F(ProcessorTest, ProcessCancelEvent)
+{
     // First create and process an order
     auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
     RawDataEntry clOrdId = order->clOrderId_.get();
@@ -391,7 +417,7 @@ TEST_F(ProcessorTest, ProcessCancelEvent) {
     processor_->process();
 
     // Get the saved order to retrieve its ID
-    OrderEntry* savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    OrderEntry *savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, savedOrder);
     EXPECT_EQ(NEW_ORDSTATUS, savedOrder->status_);
 
@@ -411,7 +437,8 @@ TEST_F(ProcessorTest, ProcessCancelEvent) {
 // Replace Event Tests
 // =============================================================================
 
-TEST_F(ProcessorTest, ProcessReplaceEvent) {
+TEST_F(ProcessorTest, ProcessReplaceEvent)
+{
     // First create and process an order
     auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
     RawDataEntry clOrdId = order->clOrderId_.get();
@@ -419,7 +446,7 @@ TEST_F(ProcessorTest, ProcessReplaceEvent) {
     processor_->process();
 
     // Get the saved order to retrieve its ID
-    OrderEntry* savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    OrderEntry *savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, savedOrder);
     EXPECT_EQ(NEW_ORDSTATUS, savedOrder->status_);
 
@@ -438,8 +465,9 @@ TEST_F(ProcessorTest, ProcessReplaceEvent) {
 // Process Event Tests
 // =============================================================================
 
-TEST_F(ProcessorTest, ProcessProcessEventWithInvalidType) {
-    ProcessEvent event;  // Default constructor creates INVALID type
+TEST_F(ProcessorTest, ProcessProcessEventWithInvalidType)
+{
+    ProcessEvent event; // Default constructor creates INVALID type
     inQueues_->push("test", event);
 
     // Invalid ProcessEvent type should throw
@@ -450,7 +478,8 @@ TEST_F(ProcessorTest, ProcessProcessEventWithInvalidType) {
 // Timer Event Tests
 // =============================================================================
 
-TEST_F(ProcessorTest, ProcessTimerEvent) {
+TEST_F(ProcessorTest, ProcessTimerEvent)
+{
     // First create and process an order
     auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
     RawDataEntry clOrdId = order->clOrderId_.get();
@@ -458,7 +487,7 @@ TEST_F(ProcessorTest, ProcessTimerEvent) {
     processor_->process();
 
     // Get the saved order to retrieve its ID
-    OrderEntry* savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    OrderEntry *savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, savedOrder);
     EXPECT_EQ(NEW_ORDSTATUS, savedOrder->status_);
 
@@ -478,12 +507,14 @@ TEST_F(ProcessorTest, ProcessTimerEvent) {
 // Concurrent Access Tests
 // =============================================================================
 
-TEST_F(ProcessorTest, ConcurrentOrderSubmission) {
+TEST_F(ProcessorTest, ConcurrentOrderSubmission)
+{
     const int numOrders = 50;
     std::vector<RawDataEntry> clOrderIds;
 
     // Submit orders
-    for (int i = 0; i < numOrders; ++i) {
+    for (int i = 0; i < numOrders; ++i)
+    {
         auto order = test::createCorrectOrder(instrId1_);
         test::assignClOrderId(order.get());
         clOrderIds.push_back(order->clOrderId_.get());
@@ -491,14 +522,17 @@ TEST_F(ProcessorTest, ConcurrentOrderSubmission) {
     }
 
     // Process all orders
-    for (int i = 0; i < numOrders; ++i) {
+    for (int i = 0; i < numOrders; ++i)
+    {
         processor_->process();
     }
 
     // Verify all orders were processed
     int processedCount = 0;
-    for (const auto& clOrdId : clOrderIds) {
-        if (OrderStorage::instance()->locateByClOrderId(clOrdId) != nullptr) {
+    for (const auto &clOrdId : clOrderIds)
+    {
+        if (OrderStorage::instance()->locateByClOrderId(clOrdId) != nullptr)
+        {
             ++processedCount;
         }
     }
@@ -520,7 +554,8 @@ TEST_F(ProcessorTest, ConcurrentOrderSubmission) {
  * deferred events, even after a transaction failure.
  */
 
-TEST_F(ProcessorTest, ProcessTransaction_Success_ProcessesDeferredEvents) {
+TEST_F(ProcessorTest, ProcessTransaction_Success_ProcessesDeferredEvents)
+{
     // Submit a valid order - this should succeed
     auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
     inQueues_->push("test", OrderEvent(order.release()));
@@ -532,24 +567,28 @@ TEST_F(ProcessorTest, ProcessTransaction_Success_ProcessesDeferredEvents) {
     EXPECT_GT(transMgr_->transactionCount(), 0);
 }
 
-TEST_F(ProcessorTest, ProcessTransaction_EmptyQueueReturnsFalse) {
+TEST_F(ProcessorTest, ProcessTransaction_EmptyQueueReturnsFalse)
+{
     // Processing an empty queue should return false
     bool result = processor_->process();
     EXPECT_FALSE(result);
 }
 
-TEST_F(ProcessorTest, ProcessMultipleOrders_AllTransactionsExecuted) {
+TEST_F(ProcessorTest, ProcessMultipleOrders_AllTransactionsExecuted)
+{
     const int numOrders = 5;
 
     // Submit multiple orders
-    for (int i = 0; i < numOrders; ++i) {
+    for (int i = 0; i < numOrders; ++i)
+    {
         auto order = test::createCorrectOrder(instrId1_);
         test::assignClOrderId(order.get());
         inQueues_->push("test", OrderEvent(order.release()));
     }
 
     // Process all
-    for (int i = 0; i < numOrders; ++i) {
+    for (int i = 0; i < numOrders; ++i)
+    {
         processor_->process();
     }
 

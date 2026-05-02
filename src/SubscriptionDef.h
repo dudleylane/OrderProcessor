@@ -16,19 +16,23 @@
 #include <deque>
 #include "TypesDef.h"
 
-namespace COP{ namespace SubscrMgr{
+namespace COP
+{
+namespace SubscrMgr
+{
 
-	class OrderFilter;
+class OrderFilter;
 
-	typedef std::deque<IdT> MatchedSubscribersT;
+typedef std::deque<IdT> MatchedSubscribersT;
 
-class SubscriptionManager{
+class SubscriptionManager
+{
 public:
-	~SubscriptionManager(){};
+    ~SubscriptionManager() {};
 
-	virtual void addSubscription(const std::string &name, OrderFilter *filter, 
-								 const SubscriberIdT &subscriber) = 0;
-	virtual void removeSubscriptions(const SubscriberIdT &subscriber) = 0;
+    virtual void addSubscription(const std::string &name, OrderFilter *filter, const SubscriberIdT &subscriber) = 0;
+    virtual void removeSubscriptions(const SubscriberIdT &subscriber) = 0;
 };
 
-}}
+} // namespace SubscrMgr
+} // namespace COP

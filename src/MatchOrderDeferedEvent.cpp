@@ -24,20 +24,18 @@ using namespace COP::ACID;
 using namespace COP::OrdState;
 using namespace COP::Store;
 
-MatchOrderDeferedEvent::MatchOrderDeferedEvent(): order_(nullptr)
-{}
+MatchOrderDeferedEvent::MatchOrderDeferedEvent() : order_(nullptr) {}
 
-MatchOrderDeferedEvent::MatchOrderDeferedEvent(OrderEntry *ord): order_(ord)
+MatchOrderDeferedEvent::MatchOrderDeferedEvent(OrderEntry *ord) : order_(ord)
 {
-	assert(nullptr != order_);
+    assert(nullptr != order_);
 }
 
 void MatchOrderDeferedEvent::execute(DeferedEventFunctor *func, const Context &cnxt, ACID::Scope * /*scope*/)
 {
-	assert(nullptr != func);
-	assert(nullptr != order_);
+    assert(nullptr != func);
+    assert(nullptr != order_);
 
-	// initiate new order matching iteration
-	cnxt.orderMatch_->match(order_, cnxt);
+    // initiate new order matching iteration
+    cnxt.orderMatch_->match(order_, cnxt);
 }
-

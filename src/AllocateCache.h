@@ -16,141 +16,171 @@
 #include <vector>
 #include <oneapi/tbb/scalable_allocator.h>
 
-namespace aux{
+namespace aux
+{
 
-	template<typename T>
-	class AllocateCache{
-	public:
-		using AllocatorType = tbb::scalable_allocator<T>;
-		using AllocTraits = std::allocator_traits<AllocatorType>;
+template <typename T> class AllocateCache
+{
+public:
+    using AllocatorType = tbb::scalable_allocator<T>;
+    using AllocTraits = std::allocator_traits<AllocatorType>;
 
-		explicit AllocateCache(const size_t cacheSize = 100): cacheSize_(cacheSize){
-			cache_.reserve(cacheSize_);
-			for(size_t i = 0; i < cacheSize_; ++i){
-				T *ptr = AllocTraits::allocate(allocator_, 1);
-				AllocTraits::construct(allocator_, ptr, T());
-				cache_.push_back(ptr);
-			}
-			lastAvailable_ = static_cast<int>(cacheSize_) - 1;
-		}
-		~AllocateCache(){
-			clear();
-		}
+    explicit AllocateCache(const size_t cacheSize = 100) : cacheSize_(cacheSize)
+    {
+        cache_.reserve(cacheSize_);
+        for (size_t i = 0; i < cacheSize_; ++i)
+        {
+            T *ptr = AllocTraits::allocate(allocator_, 1);
+            AllocTraits::construct(allocator_, ptr, T());
+            cache_.push_back(ptr);
+        }
+        lastAvailable_ = static_cast<int>(cacheSize_) - 1;
+    }
+    ~AllocateCache()
+    {
+        clear();
+    }
 
-		T *create(){
-			T *ptr = allocate();
-			AllocTraits::construct(allocator_, ptr, T());
-			return ptr;
-		}
-		T *create(const T &val){
-			T *ptr = allocate();
-			AllocTraits::construct(allocator_, ptr, val);
-			return ptr;
-		}
-		void destroy(T *val){
-			AllocTraits::destroy(allocator_, val);
-			if(lastAvailable_ + 1 < static_cast<int>(cacheSize_)){
-				++lastAvailable_;
-				cache_[lastAvailable_] = val;
-			}else{
-				AllocTraits::deallocate(allocator_, val, 1);
-			}
-		}
+    T *create()
+    {
+        T *ptr = allocate();
+        AllocTraits::construct(allocator_, ptr, T());
+        return ptr;
+    }
+    T *create(const T &val)
+    {
+        T *ptr = allocate();
+        AllocTraits::construct(allocator_, ptr, val);
+        return ptr;
+    }
+    void destroy(T *val)
+    {
+        AllocTraits::destroy(allocator_, val);
+        if (lastAvailable_ + 1 < static_cast<int>(cacheSize_))
+        {
+            ++lastAvailable_;
+            cache_[lastAvailable_] = val;
+        }
+        else
+        {
+            AllocTraits::deallocate(allocator_, val, 1);
+        }
+    }
 
-		void clear(){
-			CacheT tmp;
-			{
-				std::swap(tmp, cache_);
-				lastAvailable_ = -1;
-			}
-			for(size_t i = 0; i < tmp.size(); ++i){
-				AllocTraits::deallocate(allocator_, tmp[i], 1);
-			}
-		}
-	private:
-		T *allocate(){
-			T *ptr = nullptr;
-			if(0 <= lastAvailable_){
-				ptr = cache_[lastAvailable_];
-				cache_[lastAvailable_] = nullptr;
-				--lastAvailable_;
-			}else{
-				ptr = AllocTraits::allocate(allocator_, 1);
-			}
-			return ptr;
-		}
+    void clear()
+    {
+        CacheT tmp;
+        {
+            std::swap(tmp, cache_);
+            lastAvailable_ = -1;
+        }
+        for (size_t i = 0; i < tmp.size(); ++i)
+        {
+            AllocTraits::deallocate(allocator_, tmp[i], 1);
+        }
+    }
 
-	private:
-		AllocatorType allocator_;
-		typedef std::vector<T *> CacheT;
-		int lastAvailable_;
-		CacheT cache_;
-		size_t cacheSize_;
+private:
+    T *allocate()
+    {
+        T *ptr = nullptr;
+        if (0 <= lastAvailable_)
+        {
+            ptr = cache_[lastAvailable_];
+            cache_[lastAvailable_] = nullptr;
+            --lastAvailable_;
+        }
+        else
+        {
+            ptr = AllocTraits::allocate(allocator_, 1);
+        }
+        return ptr;
+    }
 
-	protected:
-		AllocateCache(const AllocateCache &);
-		const AllocateCache &operator=(const AllocateCache &);
-	};
+private:
+    AllocatorType allocator_;
+    typedef std::vector<T *> CacheT;
+    int lastAvailable_;
+    CacheT cache_;
+    size_t cacheSize_;
 
-	template<typename V>
-	class AllocAutoPtr{
-	public:
-		AllocAutoPtr(): val_(nullptr), alloc_(nullptr){}
-		AllocAutoPtr(V *val, AllocateCache<V> *alloc): val_(val), alloc_(alloc){}
+protected:
+    AllocateCache(const AllocateCache &);
+    const AllocateCache &operator=(const AllocateCache &);
+};
 
-		AllocAutoPtr(AllocAutoPtr<V>& val): val_(val.release()), alloc_(val.alloc_){}
+template <typename V> class AllocAutoPtr
+{
+public:
+    AllocAutoPtr() : val_(nullptr), alloc_(nullptr) {}
+    AllocAutoPtr(V *val, AllocateCache<V> *alloc) : val_(val), alloc_(alloc) {}
 
-		AllocAutoPtr<V>& operator=(AllocAutoPtr<V>& val){
-			reset(val.release());
-			alloc_ = val.alloc_;
-			return (*this);
-		}
+    AllocAutoPtr(AllocAutoPtr<V> &val) : val_(val.release()), alloc_(val.alloc_) {}
 
-		~AllocAutoPtr(){
-			if(nullptr != val_){
-				assert(nullptr != alloc_);
-				alloc_->destroy(val_);
-			}
-		}
+    AllocAutoPtr<V> &operator=(AllocAutoPtr<V> &val)
+    {
+        reset(val.release());
+        alloc_ = val.alloc_;
+        return (*this);
+    }
 
-		V& operator*() const{
-			assert(nullptr != val_);
-			return *val_;
-		}
+    ~AllocAutoPtr()
+    {
+        if (nullptr != val_)
+        {
+            assert(nullptr != alloc_);
+            alloc_->destroy(val_);
+        }
+    }
 
-		V *operator->() const{
-			return (&**this);
-		}
+    V &operator*() const
+    {
+        assert(nullptr != val_);
+        return *val_;
+    }
 
-		V *get() const{ return val_;}
+    V *operator->() const
+    {
+        return (&**this);
+    }
 
-		V *release(){
-			V *t = val_;
-			val_ = nullptr;
-			alloc_ = nullptr;
-			return t;
-		}
+    V *get() const
+    {
+        return val_;
+    }
 
-		void reset(){
-			if(nullptr != val_){
-				assert(nullptr != alloc_);
-				alloc_->destroy(val_);
-			}
-			release();
-		}
+    V *release()
+    {
+        V *t = val_;
+        val_ = nullptr;
+        alloc_ = nullptr;
+        return t;
+    }
 
-		void reset(V *val, AllocateCache<V> *alloc){
-			if(nullptr != val_){
-				assert(nullptr != alloc_);
-				alloc_->destroy(val_);
-			}
-			val_ = val;
-			alloc_ = alloc;
-		}
+    void reset()
+    {
+        if (nullptr != val_)
+        {
+            assert(nullptr != alloc_);
+            alloc_->destroy(val_);
+        }
+        release();
+    }
 
-	private:
-		V *val_;
-		AllocateCache<V> *alloc_;
-	};
+    void reset(V *val, AllocateCache<V> *alloc)
+    {
+        if (nullptr != val_)
+        {
+            assert(nullptr != alloc_);
+            alloc_->destroy(val_);
+        }
+        val_ = val;
+        alloc_ = alloc;
+    }
 
-}
+private:
+    V *val_;
+    AllocateCache<V> *alloc_;
+};
+
+} // namespace aux
