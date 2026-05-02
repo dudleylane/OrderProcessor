@@ -489,8 +489,8 @@ COP (Concurrent Order Processor)
 │      • Session::sendToTarget() — internally synchronized        │
 │      • sessionMap_ — protected by spin_rw_mutex                 │
 │                                                                  │
-│  GCC 15 Note: PIMPL isolation (FixServer) + conditional guard   │
-│    in NLinkedTree.h avoids std::flat_map / Config23.h conflict  │
+│  PIMPL isolation (FixServer) keeps QuickFIX headers confined    │
+│    to FixServer.cpp — no header leakage to other TUs            │
 ├─────────────────────────────────────────────────────────────────┤
 │ FIX↔COP Enum Mapping:                                           │
 │   Side:  '1'↔BUY  '2'↔SELL  '5'↔SELL_SHORT  '6'↔CROSS        │

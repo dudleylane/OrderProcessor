@@ -72,7 +72,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 | Boost | 1.70+ | Headers only (MPL for Meta State Machine) |
 | LMDB | Latest | Persistent key-value storage backend |
 | numactl | Latest | NUMA-aware memory allocation |
-| QuickFIX | 1.17.0-hft | FIX protocol engine (optional, `BUILD_FIX=ON`) |
+| QuickFIX | 1.16.1-hardened | FIX protocol engine (optional, `BUILD_FIX=ON`) |
 
 Install on CentOS 10:
 ```bash

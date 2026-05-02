@@ -5,7 +5,7 @@
 | Property | Value |
 |----------|-------|
 | **Package** | QuickFIX (Hardened Fork) |
-| **Version** | 1.17.0-hft (fork of upstream quickfix/quickfix) |
+| **Version** | 1.16.1-hardened |
 | **Source** | https://github.com/dudleylane/quickfix |
 | **Library** | `/usr/local/lib/libquickfix.so.17.0.0` (shared, 1.5 MB) |
 | **Headers** | `/usr/local/include/quickfix/` (94 core headers) |
@@ -114,7 +114,7 @@ No ordering constraints on QuickFIX includes vs `<flat_map>` includes. GCC 15's 
 | PostgreSQL | Linked | Not linked (unused by OrderProcessor) |
 | TBB allocator | Not available | Linked (`libtbbmalloc.so.2`) |
 | GroupArena | Not available | Per-message bump-pointer arena for groups |
-| Thread safety | Hand-rolled recursive mutex (data race) | `PTHREAD_MUTEX_RECURSIVE` |
+| Thread safety | Hand-rolled recursive mutex (data race) | `PTHREAD_MUTEX_RECURSIVE` (per-session), `std::shared_mutex` (global session registry) |
 | `sizeof(Group)` | 120 bytes | 128 bytes (**ABI break — recompile required**) |
 
 ## ABI Break Notice

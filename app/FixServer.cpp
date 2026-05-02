@@ -1,8 +1,6 @@
 #ifdef BUILD_FIX
 
-// QuickFIX headers FIRST — Config23.h installs boost::container::flat_map as
-// std::flat_map polyfill. This TU is isolated via PIMPL so the polyfill
-// doesn't leak to other TUs that use GCC 15's native std::flat_map.
+// QuickFIX headers isolated in this TU via PIMPL (FixServer::Impl).
 #include <quickfix/ThreadedSocketAcceptor.h>
 #include <quickfix/FileStore.h>
 #include <quickfix/FileLog.h>
