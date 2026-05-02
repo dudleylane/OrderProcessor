@@ -25,32 +25,49 @@ using namespace COP::ACID;
 using namespace COP::Store;
 using namespace test;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Transaction Implementation
 // =============================================================================
 
-class TestTransaction : public Transaction {
+class TestTransaction : public Transaction
+{
 public:
     TestTransaction() : id_(), executed_(false), rolledBack_(false) {}
 
-    const TransactionId& transactionId() const override { return id_; }
-    void setTransactionId(const TransactionId& id) override { id_ = id; }
+    const TransactionId &transactionId() const override
+    {
+        return id_;
+    }
+    void setTransactionId(const TransactionId &id) override
+    {
+        id_ = id;
+    }
 
-    void getRelatedObjects(ObjectsInTransactionT* obj) const override {
-        if (obj) {
+    void getRelatedObjects(ObjectsInTransactionT *obj) const override
+    {
+        if (obj)
+        {
             obj->size_ = 0;
         }
     }
 
-    bool executeTransaction(const Context& cnxt) override {
+    bool executeTransaction(const Context &cnxt) override
+    {
         executed_ = true;
         return true;
     }
 
-    bool wasExecuted() const { return executed_; }
-    bool wasRolledBack() const { return rolledBack_; }
+    bool wasExecuted() const
+    {
+        return executed_;
+    }
+    bool wasRolledBack() const
+    {
+        return rolledBack_;
+    }
 
 private:
     TransactionId id_;
@@ -62,15 +79,20 @@ private:
 // Test Observer Implementation
 // =============================================================================
 
-class TestTransactionObserver : public TransactionObserver {
+class TestTransactionObserver : public TransactionObserver
+{
 public:
     TestTransactionObserver() : readyCount_(0) {}
 
-    void onReadyToExecute() override {
+    void onReadyToExecute() override
+    {
         ++readyCount_;
     }
 
-    int readyCount() const { return readyCount_.load(); }
+    int readyCount() const
+    {
+        return readyCount_.load();
+    }
 
 private:
     std::atomic<int> readyCount_;
@@ -80,9 +102,11 @@ private:
 // Test Fixture
 // =============================================================================
 
-class TransactionMgrTest : public SingletonFixture {
+class TransactionMgrTest : public SingletonFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         SingletonFixture::SetUp();
 
         TransactionMgrParams params(IdTGenerator::instance());
@@ -90,8 +114,10 @@ protected:
         transMgr_->init(params);
     }
 
-    void TearDown() override {
-        if (transMgr_) {
+    void TearDown() override
+    {
+        if (transMgr_)
+        {
             transMgr_->stop();
         }
         transMgr_.reset();
@@ -106,7 +132,8 @@ protected:
 // Basic Tests
 // =============================================================================
 
-TEST_F(TransactionMgrTest, CreateManager) {
+TEST_F(TransactionMgrTest, CreateManager)
+{
     ASSERT_NE(nullptr, transMgr_);
 }
 
@@ -114,33 +141,36 @@ TEST_F(TransactionMgrTest, CreateManager) {
 // Observer Tests
 // =============================================================================
 
-TEST_F(TransactionMgrTest, AttachObserver) {
+TEST_F(TransactionMgrTest, AttachObserver)
+{
     TestTransactionObserver observer;
 
     transMgr_->attach(&observer);
 
     // Verify attach succeeded by checking detach returns same pointer
-    TransactionObserver* detached = transMgr_->detach();
+    TransactionObserver *detached = transMgr_->detach();
     EXPECT_EQ(&observer, detached);
 }
 
-TEST_F(TransactionMgrTest, DetachObserverReturnsNull) {
+TEST_F(TransactionMgrTest, DetachObserverReturnsNull)
+{
     // No observer attached
-    TransactionObserver* detached = transMgr_->detach();
+    TransactionObserver *detached = transMgr_->detach();
     EXPECT_EQ(nullptr, detached);
 }
 
-TEST_F(TransactionMgrTest, AttachReplacesPreviousObserver) {
+TEST_F(TransactionMgrTest, AttachReplacesPreviousObserver)
+{
     TestTransactionObserver observer1;
     TestTransactionObserver observer2;
 
     transMgr_->attach(&observer1);
     // Must detach before attaching a new observer (implementation requirement)
-    TransactionObserver* detached1 = transMgr_->detach();
+    TransactionObserver *detached1 = transMgr_->detach();
     EXPECT_EQ(&observer1, detached1);
 
     transMgr_->attach(&observer2);
-    TransactionObserver* detached2 = transMgr_->detach();
+    TransactionObserver *detached2 = transMgr_->detach();
     EXPECT_EQ(&observer2, detached2);
 }
 
@@ -148,7 +178,8 @@ TEST_F(TransactionMgrTest, AttachReplacesPreviousObserver) {
 // Add Transaction Tests
 // =============================================================================
 
-TEST_F(TransactionMgrTest, AddTransactionAssignsId) {
+TEST_F(TransactionMgrTest, AddTransactionAssignsId)
+{
     std::unique_ptr<Transaction> txn = std::make_unique<TestTransaction>();
     EXPECT_FALSE(txn->transactionId().isValid());
 
@@ -159,8 +190,10 @@ TEST_F(TransactionMgrTest, AddTransactionAssignsId) {
     SUCCEED();
 }
 
-TEST_F(TransactionMgrTest, AddMultipleTransactions) {
-    for (int i = 0; i < 10; ++i) {
+TEST_F(TransactionMgrTest, AddMultipleTransactions)
+{
+    for (int i = 0; i < 10; ++i)
+    {
         std::unique_ptr<Transaction> txn = std::make_unique<TestTransaction>();
         transMgr_->addTransaction(txn);
     }
@@ -171,14 +204,15 @@ TEST_F(TransactionMgrTest, AddMultipleTransactions) {
 // Remove Transaction Tests
 // =============================================================================
 
-TEST_F(TransactionMgrTest, RemoveValidIdReturnsResult) {
+TEST_F(TransactionMgrTest, RemoveValidIdReturnsResult)
+{
     // Add a transaction first
     std::unique_ptr<Transaction> txn = std::make_unique<TestTransaction>();
     transMgr_->addTransaction(txn);
 
     // Now we can test removing - note that the transaction was released by addTransaction
     // The implementation uses the tree to find the transaction
-    TransactionIterator* iter = transMgr_->iterator();
+    TransactionIterator *iter = transMgr_->iterator();
     EXPECT_NE(nullptr, iter);
 }
 
@@ -186,7 +220,8 @@ TEST_F(TransactionMgrTest, RemoveValidIdReturnsResult) {
 // Get Parent/Related Transactions Tests
 // =============================================================================
 
-TEST_F(TransactionMgrTest, GetParentTransactionsForNonExistent) {
+TEST_F(TransactionMgrTest, GetParentTransactionsForNonExistent)
+{
     TransactionId nonExistentId(9999, 9999);
     TransactionIdsT parents;
 
@@ -196,7 +231,8 @@ TEST_F(TransactionMgrTest, GetParentTransactionsForNonExistent) {
     EXPECT_TRUE(parents.empty());
 }
 
-TEST_F(TransactionMgrTest, GetRelatedTransactionsForNonExistent) {
+TEST_F(TransactionMgrTest, GetRelatedTransactionsForNonExistent)
+{
     TransactionId nonExistentId(9999, 9999);
     TransactionIdsT related;
 
@@ -210,13 +246,15 @@ TEST_F(TransactionMgrTest, GetRelatedTransactionsForNonExistent) {
 // Iterator Tests
 // =============================================================================
 
-TEST_F(TransactionMgrTest, IteratorReturnsManager) {
-    TransactionIterator* iter = transMgr_->iterator();
+TEST_F(TransactionMgrTest, IteratorReturnsManager)
+{
+    TransactionIterator *iter = transMgr_->iterator();
     EXPECT_NE(nullptr, iter);
 }
 
-TEST_F(TransactionMgrTest, EmptyIteratorIsInvalid) {
-    TransactionIterator* iter = transMgr_->iterator();
+TEST_F(TransactionMgrTest, EmptyIteratorIsInvalid)
+{
+    TransactionIterator *iter = transMgr_->iterator();
     ASSERT_NE(nullptr, iter);
 
     // Empty manager should have invalid iterator
@@ -227,7 +265,8 @@ TEST_F(TransactionMgrTest, EmptyIteratorIsInvalid) {
 // Stop Tests
 // =============================================================================
 
-TEST_F(TransactionMgrTest, StopWorksCorrectly) {
+TEST_F(TransactionMgrTest, StopWorksCorrectly)
+{
     // Verify stop works when called once
     // Note: calling stop() twice is not supported - second call would fail assertion
     // The TearDown will call stop() after this test, but we set transMgr_ to null
@@ -245,23 +284,29 @@ TEST_F(TransactionMgrTest, StopWorksCorrectly) {
 // Concurrent Add Tests
 // =============================================================================
 
-TEST_F(TransactionMgrTest, ConcurrentAddTransactions) {
+TEST_F(TransactionMgrTest, ConcurrentAddTransactions)
+{
     const int numThreads = 4;
     const int numTxnPerThread = 25;
-    std::atomic<int> totalAdded{0};
+    std::atomic<int> totalAdded{ 0 };
 
     std::vector<std::thread> threads;
-    for (int t = 0; t < numThreads; ++t) {
-        threads.emplace_back([this, &totalAdded, numTxnPerThread]() {
-            for (int i = 0; i < numTxnPerThread; ++i) {
-                std::unique_ptr<Transaction> txn = std::make_unique<TestTransaction>();
-                transMgr_->addTransaction(txn);
-                ++totalAdded;
-            }
-        });
+    for (int t = 0; t < numThreads; ++t)
+    {
+        threads.emplace_back(
+            [this, &totalAdded, numTxnPerThread]()
+            {
+                for (int i = 0; i < numTxnPerThread; ++i)
+                {
+                    std::unique_ptr<Transaction> txn = std::make_unique<TestTransaction>();
+                    transMgr_->addTransaction(txn);
+                    ++totalAdded;
+                }
+            });
     }
 
-    for (auto& thread : threads) {
+    for (auto &thread : threads)
+    {
         thread.join();
     }
 
@@ -272,7 +317,8 @@ TEST_F(TransactionMgrTest, ConcurrentAddTransactions) {
 // Observer Notification Tests
 // =============================================================================
 
-TEST_F(TransactionMgrTest, ObserverNotifiedOnReady) {
+TEST_F(TransactionMgrTest, ObserverNotifiedOnReady)
+{
     TestTransactionObserver observer;
     transMgr_->attach(&observer);
 

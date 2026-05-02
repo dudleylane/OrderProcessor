@@ -16,26 +16,29 @@
 #include "TransactionDef.h"
 #include "StateMachine.h"
 
-namespace COP{
+namespace COP
+{
 
-	struct OrderEntry;
+struct OrderEntry;
 
-namespace Proc{
+namespace Proc
+{
 
-	class DeferedEventContainer;
+class DeferedEventContainer;
 
-	class OrderMatcher
-	{
-	public:
-		OrderMatcher(void);
-		~OrderMatcher(void);
+class OrderMatcher
+{
+public:
+    OrderMatcher(void);
+    ~OrderMatcher(void);
 
-		void init(DeferedEventContainer *cont);
-		void match(OrderEntry *order, const ACID::Context &ctxt);
-	private:
-		std::unique_ptr<OrdState::OrderState> stateMachine_;
-		DeferedEventContainer *defered_;
-	};
+    void init(DeferedEventContainer *cont);
+    void match(OrderEntry *order, const ACID::Context &ctxt);
 
-}
-}
+private:
+    std::unique_ptr<OrdState::OrderState> stateMachine_;
+    DeferedEventContainer *defered_;
+};
+
+} // namespace Proc
+} // namespace COP

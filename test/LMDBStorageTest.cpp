@@ -21,21 +21,25 @@
 using namespace COP;
 using namespace COP::Store;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Observer Implementation
 // =============================================================================
 
-class TestLMDBObserver : public FileStorageObserver {
+class TestLMDBObserver : public FileStorageObserver
+{
 public:
     TestLMDBObserver() : finished_(false) {}
 
-    void startLoad() override {
+    void startLoad() override
+    {
         finished_ = false;
     }
 
-    void onRecordLoaded(const IdT& id, u32 version, const char* ptr, size_t s) override {
+    void onRecordLoaded(const IdT &id, u32 version, const char *ptr, size_t s) override
+    {
         ASSERT_NE(nullptr, ptr);
         ASSERT_GT(s, 0u);
         ids_.push_back(id);
@@ -43,11 +47,13 @@ public:
         records_.push_back(std::string(ptr, s));
     }
 
-    void finishLoad() override {
+    void finishLoad() override
+    {
         finished_ = true;
     }
 
-    void reset() {
+    void reset()
+    {
         finished_ = false;
         ids_.clear();
         versions_.clear();
@@ -65,18 +71,22 @@ public:
 // Test Fixture
 // =============================================================================
 
-class LMDBStorageTest : public ::testing::Test {
+class LMDBStorageTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         testDir_ = "test_lmdb_storage";
         cleanup();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         cleanup();
     }
 
-    void cleanup() {
+    void cleanup()
+    {
         std::filesystem::remove_all(testDir_);
     }
 
@@ -88,12 +98,14 @@ protected:
 // Basic Initialization Tests
 // =============================================================================
 
-TEST_F(LMDBStorageTest, CreateDefaultLMDBStorage) {
+TEST_F(LMDBStorageTest, CreateDefaultLMDBStorage)
+{
     LMDBStorage storage;
     SUCCEED();
 }
 
-TEST_F(LMDBStorageTest, CreateWithNewDirectory) {
+TEST_F(LMDBStorageTest, CreateWithNewDirectory)
+{
     TestLMDBObserver observer;
     EXPECT_FALSE(observer.finished_);
 
@@ -107,7 +119,8 @@ TEST_F(LMDBStorageTest, CreateWithNewDirectory) {
 // Save Tests
 // =============================================================================
 
-TEST_F(LMDBStorageTest, SaveWithPredefinedId) {
+TEST_F(LMDBStorageTest, SaveWithPredefinedId)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -115,7 +128,8 @@ TEST_F(LMDBStorageTest, SaveWithPredefinedId) {
     SUCCEED();
 }
 
-TEST_F(LMDBStorageTest, SaveDuplicateIdThrows) {
+TEST_F(LMDBStorageTest, SaveDuplicateIdThrows)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -124,7 +138,8 @@ TEST_F(LMDBStorageTest, SaveDuplicateIdThrows) {
     EXPECT_THROW(storage.save(IdT(1, 1), "dubRec", 6), std::exception);
 }
 
-TEST_F(LMDBStorageTest, SaveWithAutoId) {
+TEST_F(LMDBStorageTest, SaveWithAutoId)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -138,7 +153,8 @@ TEST_F(LMDBStorageTest, SaveWithAutoId) {
 // Persistence (Round-Trip) Tests
 // =============================================================================
 
-TEST_F(LMDBStorageTest, SaveAndReloadViaObserver) {
+TEST_F(LMDBStorageTest, SaveAndReloadViaObserver)
+{
     // Save some records
     {
         TestLMDBObserver observer;
@@ -157,16 +173,24 @@ TEST_F(LMDBStorageTest, SaveAndReloadViaObserver) {
 
         // LMDB may return records in key order; check both present
         bool foundA = false, foundB = false;
-        for(size_t i = 0; i < observer.records_.size(); ++i){
-            if(observer.records_[i] == "aaaa") foundA = true;
-            if(observer.records_[i] == "bbbb") foundB = true;
+        for (size_t i = 0; i < observer.records_.size(); ++i)
+        {
+            if (observer.records_[i] == "aaaa")
+            {
+                foundA = true;
+            }
+            if (observer.records_[i] == "bbbb")
+            {
+                foundB = true;
+            }
         }
         EXPECT_TRUE(foundA);
         EXPECT_TRUE(foundB);
     }
 }
 
-TEST_F(LMDBStorageTest, DataSurvivesCloseAndReopen) {
+TEST_F(LMDBStorageTest, DataSurvivesCloseAndReopen)
+{
     {
         TestLMDBObserver observer;
         LMDBStorage storage(testDir_, &observer);
@@ -186,7 +210,8 @@ TEST_F(LMDBStorageTest, DataSurvivesCloseAndReopen) {
 // Update Tests
 // =============================================================================
 
-TEST_F(LMDBStorageTest, UpdateCreatesNewVersion) {
+TEST_F(LMDBStorageTest, UpdateCreatesNewVersion)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -196,7 +221,8 @@ TEST_F(LMDBStorageTest, UpdateCreatesNewVersion) {
     EXPECT_EQ(1u, result);
 }
 
-TEST_F(LMDBStorageTest, UpdateNonExistentCreatesVersion0) {
+TEST_F(LMDBStorageTest, UpdateNonExistentCreatesVersion0)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -204,7 +230,8 @@ TEST_F(LMDBStorageTest, UpdateNonExistentCreatesVersion0) {
     EXPECT_EQ(0u, result);
 }
 
-TEST_F(LMDBStorageTest, UpdatePersistsAllVersions) {
+TEST_F(LMDBStorageTest, UpdatePersistsAllVersions)
+{
     {
         TestLMDBObserver observer;
         LMDBStorage storage(testDir_, &observer);
@@ -218,9 +245,16 @@ TEST_F(LMDBStorageTest, UpdatePersistsAllVersions) {
 
         ASSERT_EQ(2u, observer.records_.size());
         bool foundV0 = false, foundV1 = false;
-        for(size_t i = 0; i < observer.records_.size(); ++i){
-            if(observer.records_[i] == "v0data") foundV0 = true;
-            if(observer.records_[i] == "v1data") foundV1 = true;
+        for (size_t i = 0; i < observer.records_.size(); ++i)
+        {
+            if (observer.records_[i] == "v0data")
+            {
+                foundV0 = true;
+            }
+            if (observer.records_[i] == "v1data")
+            {
+                foundV1 = true;
+            }
         }
         EXPECT_TRUE(foundV0);
         EXPECT_TRUE(foundV1);
@@ -231,14 +265,16 @@ TEST_F(LMDBStorageTest, UpdatePersistsAllVersions) {
 // Replace Tests
 // =============================================================================
 
-TEST_F(LMDBStorageTest, ReplaceNonExistentIdThrows) {
+TEST_F(LMDBStorageTest, ReplaceNonExistentIdThrows)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
     EXPECT_THROW(storage.replace(IdT(2, 1), 1, "aaaaa", 5), std::exception);
 }
 
-TEST_F(LMDBStorageTest, ReplaceWrongVersionThrows) {
+TEST_F(LMDBStorageTest, ReplaceWrongVersionThrows)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -247,7 +283,8 @@ TEST_F(LMDBStorageTest, ReplaceWrongVersionThrows) {
     EXPECT_THROW(storage.replace(IdT(1, 1), 1, "aaaaa", 5), std::exception);
 }
 
-TEST_F(LMDBStorageTest, ReplaceRemovesOldVersionAtomically) {
+TEST_F(LMDBStorageTest, ReplaceRemovesOldVersionAtomically)
+{
     {
         TestLMDBObserver observer;
         LMDBStorage storage(testDir_, &observer);
@@ -270,7 +307,8 @@ TEST_F(LMDBStorageTest, ReplaceRemovesOldVersionAtomically) {
 // Erase Tests
 // =============================================================================
 
-TEST_F(LMDBStorageTest, EraseSingleVersion) {
+TEST_F(LMDBStorageTest, EraseSingleVersion)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -283,7 +321,8 @@ TEST_F(LMDBStorageTest, EraseSingleVersion) {
     EXPECT_TRUE(storage.isExists(IdT(1, 1), 1));
 }
 
-TEST_F(LMDBStorageTest, EraseAllVersions) {
+TEST_F(LMDBStorageTest, EraseAllVersions)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -295,7 +334,8 @@ TEST_F(LMDBStorageTest, EraseAllVersions) {
     EXPECT_FALSE(storage.isExists(IdT(1, 1)));
 }
 
-TEST_F(LMDBStorageTest, EraseNonExistentIsNoop) {
+TEST_F(LMDBStorageTest, EraseNonExistentIsNoop)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -305,7 +345,8 @@ TEST_F(LMDBStorageTest, EraseNonExistentIsNoop) {
     SUCCEED();
 }
 
-TEST_F(LMDBStorageTest, ErasePersists) {
+TEST_F(LMDBStorageTest, ErasePersists)
+{
     {
         TestLMDBObserver observer;
         LMDBStorage storage(testDir_, &observer);
@@ -327,7 +368,8 @@ TEST_F(LMDBStorageTest, ErasePersists) {
 // Query Method Tests
 // =============================================================================
 
-TEST_F(LMDBStorageTest, IsExistsById) {
+TEST_F(LMDBStorageTest, IsExistsById)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -339,7 +381,8 @@ TEST_F(LMDBStorageTest, IsExistsById) {
     EXPECT_FALSE(storage.isExists(IdT(2, 2)));
 }
 
-TEST_F(LMDBStorageTest, IsExistsByIdAndVersion) {
+TEST_F(LMDBStorageTest, IsExistsByIdAndVersion)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -349,7 +392,8 @@ TEST_F(LMDBStorageTest, IsExistsByIdAndVersion) {
     EXPECT_FALSE(storage.isExists(IdT(1, 1), 1));
 }
 
-TEST_F(LMDBStorageTest, GetTopVersion) {
+TEST_F(LMDBStorageTest, GetTopVersion)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -363,7 +407,8 @@ TEST_F(LMDBStorageTest, GetTopVersion) {
     EXPECT_EQ(2u, storage.getTopVersion(IdT(1, 1)));
 }
 
-TEST_F(LMDBStorageTest, RecordSize) {
+TEST_F(LMDBStorageTest, RecordSize)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -374,7 +419,8 @@ TEST_F(LMDBStorageTest, RecordSize) {
     EXPECT_EQ(0u, storage.recordSize(IdT(2, 2), 0)); // non-existent id
 }
 
-TEST_F(LMDBStorageTest, LoadRecord) {
+TEST_F(LMDBStorageTest, LoadRecord)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -393,7 +439,8 @@ TEST_F(LMDBStorageTest, LoadRecord) {
 // Concurrent Read During Write (MVCC Isolation)
 // =============================================================================
 
-TEST_F(LMDBStorageTest, ReadDuringWriteIsolation) {
+TEST_F(LMDBStorageTest, ReadDuringWriteIsolation)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
@@ -413,16 +460,19 @@ TEST_F(LMDBStorageTest, ReadDuringWriteIsolation) {
 // Multiple Records Test
 // =============================================================================
 
-TEST_F(LMDBStorageTest, MultipleRecordsDifferentIds) {
+TEST_F(LMDBStorageTest, MultipleRecordsDifferentIds)
+{
     TestLMDBObserver observer;
     LMDBStorage storage(testDir_, &observer);
 
-    for(u64 i = 1; i <= 10; ++i){
+    for (u64 i = 1; i <= 10; ++i)
+    {
         std::string data = "record_" + std::to_string(i);
         storage.save(IdT(i, 1), data.c_str(), data.size());
     }
 
-    for(u64 i = 1; i <= 10; ++i){
+    for (u64 i = 1; i <= 10; ++i)
+    {
         EXPECT_TRUE(storage.isExists(IdT(i, 1)));
         std::string expected = "record_" + std::to_string(i);
         EXPECT_EQ(expected.size(), storage.recordSize(IdT(i, 1), 0));

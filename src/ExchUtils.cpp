@@ -17,10 +17,12 @@
 #include <chrono>
 #include "ExchUtils.h"
 
-namespace{
-	const size_t NUMBERS_AMOUNT = 100;
+namespace
+{
+const size_t NUMBERS_AMOUNT = 100;
+// clang-format off
 	const char *NUMBERS[] = {
-		"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", 
+		"0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
 		"10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
 		"20", "21", "22", "23", "24", "25", "26", "27", "28", "29",
 		"30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
@@ -67,255 +69,364 @@ namespace{
 */
 
 	};
-	
-	char *append(char *buf, size_t val){
-		char *p = buf;
-		assert(val < NUMBERS_AMOUNT);
-		strcat(buf, NUMBERS[val]);
-		if(val >= 10)
-			++p;
-		++p;
-		return p;	
-	}
+// clang-format on
 
-	char *append_2PosZeroFwd(char *buf, size_t val){
-		char *p = buf;
-		assert(val < NUMBERS_AMOUNT);
-		if(val < 10)
-			strcat(buf, NUMBERS[0]);
-		strcat(buf, NUMBERS[val]);
-		return p + 2;	
-	}
-
+char *append(char *buf, size_t val)
+{
+    char *p = buf;
+    assert(val < NUMBERS_AMOUNT);
+    strcat(buf, NUMBERS[val]);
+    if (val >= 10)
+    {
+        ++p;
+    }
+    ++p;
+    return p;
 }
 
-namespace aux{
-
-char *toStr(char *buf, size_t val){
-	assert(nullptr != buf);
-	buf[0] = 0;
-	if(val >= NUMBERS_AMOUNT){
-		char *p = buf;
-		size_t part1 = val%NUMBERS_AMOUNT;
-		size_t v = val/NUMBERS_AMOUNT;
-		if(v < NUMBERS_AMOUNT)
-			p = append(buf, v);
-		else{
-			size_t part2 = v%NUMBERS_AMOUNT;
-			v /= NUMBERS_AMOUNT;
-			if(v < NUMBERS_AMOUNT)
-				p = append(buf, v);
-			else{
-				size_t part3 = v%NUMBERS_AMOUNT;
-				v /= NUMBERS_AMOUNT;
-				if(v < NUMBERS_AMOUNT)
-					p = append(buf, v);
-				else{
-					size_t part4 = v%NUMBERS_AMOUNT;
-					v /= NUMBERS_AMOUNT;
-					if(v < NUMBERS_AMOUNT)
-						p = append(buf, v);
-					else{
-						size_t part5 = v%NUMBERS_AMOUNT;
-						v /= NUMBERS_AMOUNT;
-						assert(v < NUMBERS_AMOUNT);
-						p = append(buf, v);
-						p = append_2PosZeroFwd(p, part5);
-					}
-					p = append_2PosZeroFwd(p, part4);
-				}
-				p = append_2PosZeroFwd(p, part3);
-			}
-			p = append_2PosZeroFwd(p, part2);
-		}
-		return append_2PosZeroFwd(p, part1);
-	}else 
-		return append(buf, val);
+char *append_2PosZeroFwd(char *buf, size_t val)
+{
+    char *p = buf;
+    assert(val < NUMBERS_AMOUNT);
+    if (val < 10)
+    {
+        strcat(buf, NUMBERS[0]);
+    }
+    strcat(buf, NUMBERS[val]);
+    return p + 2;
 }
 
-char *toStr(char *buf, int val){
-	assert(nullptr != buf);
-	if(0 > val){
-		buf[0] = '-';
-		++buf;
-		// Use unsigned negation to avoid UB when val == INT_MIN
-		return toStr(buf, static_cast<size_t>(-(static_cast<long long>(val))));
-	}
-	return toStr(buf, static_cast<size_t>(val));
+} // namespace
+
+namespace aux
+{
+
+char *toStr(char *buf, size_t val)
+{
+    assert(nullptr != buf);
+    buf[0] = 0;
+    if (val >= NUMBERS_AMOUNT)
+    {
+        char *p = buf;
+        size_t part1 = val % NUMBERS_AMOUNT;
+        size_t v = val / NUMBERS_AMOUNT;
+        if (v < NUMBERS_AMOUNT)
+        {
+            p = append(buf, v);
+        }
+        else
+        {
+            size_t part2 = v % NUMBERS_AMOUNT;
+            v /= NUMBERS_AMOUNT;
+            if (v < NUMBERS_AMOUNT)
+            {
+                p = append(buf, v);
+            }
+            else
+            {
+                size_t part3 = v % NUMBERS_AMOUNT;
+                v /= NUMBERS_AMOUNT;
+                if (v < NUMBERS_AMOUNT)
+                {
+                    p = append(buf, v);
+                }
+                else
+                {
+                    size_t part4 = v % NUMBERS_AMOUNT;
+                    v /= NUMBERS_AMOUNT;
+                    if (v < NUMBERS_AMOUNT)
+                    {
+                        p = append(buf, v);
+                    }
+                    else
+                    {
+                        size_t part5 = v % NUMBERS_AMOUNT;
+                        v /= NUMBERS_AMOUNT;
+                        assert(v < NUMBERS_AMOUNT);
+                        p = append(buf, v);
+                        p = append_2PosZeroFwd(p, part5);
+                    }
+                    p = append_2PosZeroFwd(p, part4);
+                }
+                p = append_2PosZeroFwd(p, part3);
+            }
+            p = append_2PosZeroFwd(p, part2);
+        }
+        return append_2PosZeroFwd(p, part1);
+    }
+    else
+    {
+        return append(buf, val);
+    }
 }
 
-char *toStr(char *buf, int val, size_t pos){
-	if(0 > val){
-		buf[0] = '-';
-		++buf;
-		val *= -1;
-	}
-	buf[0] = 0;
-	size_t usePos = 0;
-	if(val < 10)
-		usePos = 1;
-	else if(val < 100)
-		usePos = 2;
-	else if(val < 1000)
-		usePos = 3;
-	else if(val < 10000)
-		usePos = 4;
-	else if(val < 100000)
-		usePos = 5;
-	else if(val < 1000000)
-		usePos = 6;
-	else if(val < 10000000)
-		usePos = 7;
-	else if(val < 100000000)
-		usePos = 8;
-	else if(val < 1000000000)
-		usePos = 9;
-	else
-		usePos = 10;
-	if(usePos < pos){
-		for(size_t i = usePos; i < pos; ++i)
-			buf = append(buf, 0);
-	}
-	return toStr(buf, val);
+char *toStr(char *buf, int val)
+{
+    assert(nullptr != buf);
+    if (0 > val)
+    {
+        buf[0] = '-';
+        ++buf;
+        // Use unsigned negation to avoid UB when val == INT_MIN
+        return toStr(buf, static_cast<size_t>(-(static_cast<long long>(val))));
+    }
+    return toStr(buf, static_cast<size_t>(val));
 }
 
-char *toStr(char *buf, COP::u32 val){
-	assert(nullptr != buf);
-	return toStr(buf, static_cast<size_t>(val));
+char *toStr(char *buf, int val, size_t pos)
+{
+    if (0 > val)
+    {
+        buf[0] = '-';
+        ++buf;
+        val *= -1;
+    }
+    buf[0] = 0;
+    size_t usePos = 0;
+    if (val < 10)
+    {
+        usePos = 1;
+    }
+    else if (val < 100)
+    {
+        usePos = 2;
+    }
+    else if (val < 1000)
+    {
+        usePos = 3;
+    }
+    else if (val < 10000)
+    {
+        usePos = 4;
+    }
+    else if (val < 100000)
+    {
+        usePos = 5;
+    }
+    else if (val < 1000000)
+    {
+        usePos = 6;
+    }
+    else if (val < 10000000)
+    {
+        usePos = 7;
+    }
+    else if (val < 100000000)
+    {
+        usePos = 8;
+    }
+    else if (val < 1000000000)
+    {
+        usePos = 9;
+    }
+    else
+    {
+        usePos = 10;
+    }
+    if (usePos < pos)
+    {
+        for (size_t i = usePos; i < pos; ++i)
+        {
+            buf = append(buf, 0);
+        }
+    }
+    return toStr(buf, val);
 }
 
-char *toStr(char *buf, COP::u32 val, size_t pos){
-	buf[0] = 0;
-	size_t usePos = 0;
-	if(val < 10)
-		usePos = 1;
-	else if(val < 100)
-		usePos = 2;
-	else if(val < 1000)
-		usePos = 3;
-	else if(val < 10000)
-		usePos = 4;
-	else if(val < 100000)
-		usePos = 5;
-	else if(val < 1000000)
-		usePos = 6;
-	else if(val < 10000000)
-		usePos = 7;
-	else if(val < 100000000)
-		usePos = 8;
-	else if(val < 1000000000)
-		usePos = 9;
-	else
-		usePos = 10;
-	if(usePos < pos){
-		for(size_t i = usePos; i < pos; ++i)
-			buf = append(buf, 0);
-	}
-	return toStr(buf, static_cast<size_t>(val));
+char *toStr(char *buf, COP::u32 val)
+{
+    assert(nullptr != buf);
+    return toStr(buf, static_cast<size_t>(val));
+}
+
+char *toStr(char *buf, COP::u32 val, size_t pos)
+{
+    buf[0] = 0;
+    size_t usePos = 0;
+    if (val < 10)
+    {
+        usePos = 1;
+    }
+    else if (val < 100)
+    {
+        usePos = 2;
+    }
+    else if (val < 1000)
+    {
+        usePos = 3;
+    }
+    else if (val < 10000)
+    {
+        usePos = 4;
+    }
+    else if (val < 100000)
+    {
+        usePos = 5;
+    }
+    else if (val < 1000000)
+    {
+        usePos = 6;
+    }
+    else if (val < 10000000)
+    {
+        usePos = 7;
+    }
+    else if (val < 100000000)
+    {
+        usePos = 8;
+    }
+    else if (val < 1000000000)
+    {
+        usePos = 9;
+    }
+    else
+    {
+        usePos = 10;
+    }
+    if (usePos < pos)
+    {
+        for (size_t i = usePos; i < pos; ++i)
+        {
+            buf = append(buf, 0);
+        }
+    }
+    return toStr(buf, static_cast<size_t>(val));
 }
 
 // u64 and i64 overloads only if different from size_t (Windows or 32-bit systems)
 #if defined(_WIN32) || ULONG_MAX == 0xFFFFFFFF
-char *toStr(char *buf, COP::u64 val){
-	assert(nullptr != buf);
-	buf[0] = 0;
-	if(val >= NUMBERS_AMOUNT){
-		char *p = buf;
-		size_t part1 = static_cast<size_t>(val%NUMBERS_AMOUNT);
-		COP::u64 v = val/NUMBERS_AMOUNT;
-		if(v < NUMBERS_AMOUNT)
-			p = append(buf, static_cast<size_t>(v));
-		else{
-			size_t part2 = static_cast<size_t>(v%NUMBERS_AMOUNT);
-			v /= NUMBERS_AMOUNT;
-			if(v < NUMBERS_AMOUNT)
-				p = append(buf, static_cast<size_t>(v));
-			else{
-				size_t part3 = static_cast<size_t>(v%NUMBERS_AMOUNT);
-				v /= NUMBERS_AMOUNT;
-				if(v < NUMBERS_AMOUNT)
-					p = append(buf, static_cast<size_t>(v));
-				else{
-					size_t part4 = static_cast<size_t>(v%NUMBERS_AMOUNT);
-					v /= NUMBERS_AMOUNT;
-					if(v < NUMBERS_AMOUNT)
-						p = append(buf, static_cast<size_t>(v));
-					else{
-						size_t part5 = static_cast<size_t>(v%NUMBERS_AMOUNT);
-						v /= NUMBERS_AMOUNT;
-						if(v < NUMBERS_AMOUNT)
-							p = append(buf, static_cast<size_t>(v));
-						else{
-							size_t part6 = static_cast<size_t>(v%NUMBERS_AMOUNT);
-							v /= NUMBERS_AMOUNT;
-							if(v < NUMBERS_AMOUNT)
-								p = append(buf, static_cast<size_t>(v));
-							else{
-								size_t part7 = static_cast<size_t>(v%NUMBERS_AMOUNT);
-								v /= NUMBERS_AMOUNT;
-								if(v < NUMBERS_AMOUNT)
-									p = append(buf, static_cast<size_t>(v));
-								else{
-									size_t part8 = static_cast<size_t>(v%NUMBERS_AMOUNT);
-									v /= NUMBERS_AMOUNT;
-									if(v < NUMBERS_AMOUNT)
-										p = append(buf, static_cast<size_t>(v));
-									else{
-										size_t part9 = static_cast<size_t>(v%NUMBERS_AMOUNT);
-										v /= NUMBERS_AMOUNT;
-										if(v < NUMBERS_AMOUNT)
-											p = append(buf, static_cast<size_t>(v));
-										else{
-											size_t part10 = static_cast<size_t>(v%NUMBERS_AMOUNT);
-											v /= NUMBERS_AMOUNT;
-											assert(v < NUMBERS_AMOUNT);
-											p = append(buf, static_cast<size_t>(v));
-											p = append_2PosZeroFwd(p, part10);
-										}
-										p = append_2PosZeroFwd(p, part9);
-									}
-									p = append_2PosZeroFwd(p, part8);
-								}
-								p = append_2PosZeroFwd(p, part7);
-							}
-							p = append_2PosZeroFwd(p, part6);
-						}
-						p = append_2PosZeroFwd(p, part5);
-					}
-					p = append_2PosZeroFwd(p, part4);
-				}
-				p = append_2PosZeroFwd(p, part3);
-			}
-			p = append_2PosZeroFwd(p, part2);
-		}
-		return append_2PosZeroFwd(p, part1);
-	}else 
-		return append(buf, static_cast<size_t>(val));
+char *toStr(char *buf, COP::u64 val)
+{
+    assert(nullptr != buf);
+    buf[0] = 0;
+    if (val >= NUMBERS_AMOUNT)
+    {
+        char *p = buf;
+        size_t part1 = static_cast<size_t>(val % NUMBERS_AMOUNT);
+        COP::u64 v = val / NUMBERS_AMOUNT;
+        if (v < NUMBERS_AMOUNT)
+        {
+            p = append(buf, static_cast<size_t>(v));
+        }
+        else
+        {
+            size_t part2 = static_cast<size_t>(v % NUMBERS_AMOUNT);
+            v /= NUMBERS_AMOUNT;
+            if (v < NUMBERS_AMOUNT)
+            {
+                p = append(buf, static_cast<size_t>(v));
+            }
+            else
+            {
+                size_t part3 = static_cast<size_t>(v % NUMBERS_AMOUNT);
+                v /= NUMBERS_AMOUNT;
+                if (v < NUMBERS_AMOUNT)
+                {
+                    p = append(buf, static_cast<size_t>(v));
+                }
+                else
+                {
+                    size_t part4 = static_cast<size_t>(v % NUMBERS_AMOUNT);
+                    v /= NUMBERS_AMOUNT;
+                    if (v < NUMBERS_AMOUNT)
+                    {
+                        p = append(buf, static_cast<size_t>(v));
+                    }
+                    else
+                    {
+                        size_t part5 = static_cast<size_t>(v % NUMBERS_AMOUNT);
+                        v /= NUMBERS_AMOUNT;
+                        if (v < NUMBERS_AMOUNT)
+                        {
+                            p = append(buf, static_cast<size_t>(v));
+                        }
+                        else
+                        {
+                            size_t part6 = static_cast<size_t>(v % NUMBERS_AMOUNT);
+                            v /= NUMBERS_AMOUNT;
+                            if (v < NUMBERS_AMOUNT)
+                            {
+                                p = append(buf, static_cast<size_t>(v));
+                            }
+                            else
+                            {
+                                size_t part7 = static_cast<size_t>(v % NUMBERS_AMOUNT);
+                                v /= NUMBERS_AMOUNT;
+                                if (v < NUMBERS_AMOUNT)
+                                {
+                                    p = append(buf, static_cast<size_t>(v));
+                                }
+                                else
+                                {
+                                    size_t part8 = static_cast<size_t>(v % NUMBERS_AMOUNT);
+                                    v /= NUMBERS_AMOUNT;
+                                    if (v < NUMBERS_AMOUNT)
+                                    {
+                                        p = append(buf, static_cast<size_t>(v));
+                                    }
+                                    else
+                                    {
+                                        size_t part9 = static_cast<size_t>(v % NUMBERS_AMOUNT);
+                                        v /= NUMBERS_AMOUNT;
+                                        if (v < NUMBERS_AMOUNT)
+                                        {
+                                            p = append(buf, static_cast<size_t>(v));
+                                        }
+                                        else
+                                        {
+                                            size_t part10 = static_cast<size_t>(v % NUMBERS_AMOUNT);
+                                            v /= NUMBERS_AMOUNT;
+                                            assert(v < NUMBERS_AMOUNT);
+                                            p = append(buf, static_cast<size_t>(v));
+                                            p = append_2PosZeroFwd(p, part10);
+                                        }
+                                        p = append_2PosZeroFwd(p, part9);
+                                    }
+                                    p = append_2PosZeroFwd(p, part8);
+                                }
+                                p = append_2PosZeroFwd(p, part7);
+                            }
+                            p = append_2PosZeroFwd(p, part6);
+                        }
+                        p = append_2PosZeroFwd(p, part5);
+                    }
+                    p = append_2PosZeroFwd(p, part4);
+                }
+                p = append_2PosZeroFwd(p, part3);
+            }
+            p = append_2PosZeroFwd(p, part2);
+        }
+        return append_2PosZeroFwd(p, part1);
+    }
+    else
+    {
+        return append(buf, static_cast<size_t>(val));
+    }
 }
 
-char *toStr(char *buf, COP::i64 val){
-	assert(nullptr != buf);
-	if(0 > val){
-		buf[0] = '-';
-		++buf;
-		val *= -1;
-	}
-	return toStr(buf, static_cast<COP::u64>(val));
+char *toStr(char *buf, COP::i64 val)
+{
+    assert(nullptr != buf);
+    if (0 > val)
+    {
+        buf[0] = '-';
+        ++buf;
+        val *= -1;
+    }
+    return toStr(buf, static_cast<COP::u64>(val));
 }
 #endif // _WIN32 || 32-bit
 
 COP::DateTimeT currentDateTime()
 {
-	return static_cast<COP::DateTimeT>(
-		std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::system_clock::now().time_since_epoch()
-		).count()
-	);
+    return static_cast<COP::DateTimeT>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count());
 }
 
 void WaitInterval(int mseconds)
 {
-	std::this_thread::sleep_for(std::chrono::milliseconds(mseconds));
+    std::this_thread::sleep_for(std::chrono::milliseconds(mseconds));
 }
 
-}
+} // namespace aux

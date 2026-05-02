@@ -14,22 +14,26 @@
 
 #include "TransactionDef.h"
 
-namespace COP{
+namespace COP
+{
 
-	namespace Tasks{
+namespace Tasks
+{
 
-		class ExecTask{
-		public:
-			virtual ~ExecTask(){}
+class ExecTask
+{
+public:
+    virtual ~ExecTask() {}
 
-			virtual void execute() = 0;
-		};
+    virtual void execute() = 0;
+};
 
-		class ExecTaskManager{
-		public:
-			virtual ~ExecTaskManager(){}
+class ExecTaskManager
+{
+public:
+    virtual ~ExecTaskManager() {}
 
-			virtual void addTask(const ACID::TransactionId &id) = 0;		
-		};
-	}
-}
+    virtual void addTask(const ACID::TransactionId &id) = 0;
+};
+} // namespace Tasks
+} // namespace COP

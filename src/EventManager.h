@@ -15,38 +15,43 @@
 #include "EventDef.h"
 #include "Singleton.h"
 
-namespace COP{ 
-	namespace SubscrMgr{
-		class SubscrManager;
-		class SubscriptionManager;
-	}
+namespace COP
+{
+namespace SubscrMgr
+{
+class SubscrManager;
+class SubscriptionManager;
+} // namespace SubscrMgr
 
-	namespace SL{
-		class SubscriptionLayer;
-	}
+namespace SL
+{
+class SubscriptionLayer;
+}
 
-namespace EventMgr{
+namespace EventMgr
+{
 
-class EventManager: public EventDispatcher
+class EventManager : public EventDispatcher
 {
 public:
-	EventManager(void);
-	~EventManager(void);
+    EventManager(void);
+    ~EventManager(void);
 
-	SubscrMgr::SubscriptionManager *getSubscriptionManager()const;
+    SubscrMgr::SubscriptionManager *getSubscriptionManager() const;
 
-	void attach(SL::SubscriptionLayer *sl);
-	SL::SubscriptionLayer *dettach();
+    void attach(SL::SubscriptionLayer *sl);
+    SL::SubscriptionLayer *dettach();
 
 public:
-	/// Reimplemented from EventDispatcher
-	virtual void dispatch(const NewOrderEvent &evnt)const;
+    /// Reimplemented from EventDispatcher
+    virtual void dispatch(const NewOrderEvent &evnt) const;
 
 private:
-	SubscrMgr::SubscrManager *subscrMgr_;
-	SL::SubscriptionLayer *sl_;
+    SubscrMgr::SubscrManager *subscrMgr_;
+    SL::SubscriptionLayer *sl_;
 };
 
 aux::Singleton<EventManager> EventDispatcher;
 
-}}
+} // namespace EventMgr
+} // namespace COP

@@ -17,60 +17,75 @@
 #include "TypesDef.h"
 #include "WideDataStorage.h"
 
-namespace COP{
+namespace COP
+{
 
-template<typename T>
-class WideDataLazyRef
+template <typename T> class WideDataLazyRef
 {
 public:
-	WideDataLazyRef(const SourceIdT &id, bool load = false): id_(id), loaded_(false){
-		if(load)
-			this->load();
-	}
+    WideDataLazyRef(const SourceIdT &id, bool load = false) : id_(id), loaded_(false)
+    {
+        if (load)
+        {
+            this->load();
+        }
+    }
 
-	WideDataLazyRef(const WideDataLazyRef &other)
-		: val_(other.val_), id_(other.id_), loaded_(other.loaded_.load(std::memory_order_acquire)){}
+    WideDataLazyRef(const WideDataLazyRef &other)
+        : val_(other.val_), id_(other.id_), loaded_(other.loaded_.load(std::memory_order_acquire))
+    {
+    }
 
-	WideDataLazyRef &operator=(const WideDataLazyRef &other){
-		if(this != &other){
-			val_ = other.val_;
-			id_ = other.id_;
-			loaded_.store(other.loaded_.load(std::memory_order_acquire), std::memory_order_release);
-		}
-		return *this;
-	}
+    WideDataLazyRef &operator=(const WideDataLazyRef &other)
+    {
+        if (this != &other)
+        {
+            val_ = other.val_;
+            id_ = other.id_;
+            loaded_.store(other.loaded_.load(std::memory_order_acquire), std::memory_order_release);
+        }
+        return *this;
+    }
 
-	~WideDataLazyRef(void){}
+    ~WideDataLazyRef(void) {}
 
-	const T &get()const{
-		if(!loaded_.load(std::memory_order_acquire)){
-			std::lock_guard<std::mutex> guard(mtx_);
-			if(!loaded_.load(std::memory_order_relaxed)){
-				Store::WideDataStorage::instance()->get(id_, &val_);
-				loaded_.store(true, std::memory_order_release);
-			}
-		}
-		return val_;
-	}
+    const T &get() const
+    {
+        if (!loaded_.load(std::memory_order_acquire))
+        {
+            std::lock_guard<std::mutex> guard(mtx_);
+            if (!loaded_.load(std::memory_order_relaxed))
+            {
+                Store::WideDataStorage::instance()->get(id_, &val_);
+                loaded_.store(true, std::memory_order_release);
+            }
+        }
+        return val_;
+    }
 
-	void load(){
-		if(!loaded_.load(std::memory_order_acquire)){
-			std::lock_guard<std::mutex> guard(mtx_);
-			if(!loaded_.load(std::memory_order_relaxed)){
-				Store::WideDataStorage::instance()->get(id_, &val_);
-				loaded_.store(true, std::memory_order_release);
-			}
-		}
-	}
+    void load()
+    {
+        if (!loaded_.load(std::memory_order_acquire))
+        {
+            std::lock_guard<std::mutex> guard(mtx_);
+            if (!loaded_.load(std::memory_order_relaxed))
+            {
+                Store::WideDataStorage::instance()->get(id_, &val_);
+                loaded_.store(true, std::memory_order_release);
+            }
+        }
+    }
 
-	const SourceIdT &getId()const{
-		return id_;
-	};
+    const SourceIdT &getId() const
+    {
+        return id_;
+    };
+
 private:
-	mutable T val_;
-	SourceIdT id_;
-	mutable std::atomic<bool> loaded_;
-	mutable std::mutex mtx_;
+    mutable T val_;
+    SourceIdT id_;
+    mutable std::atomic<bool> loaded_;
+    mutable std::mutex mtx_;
 };
 
-}
+} // namespace COP

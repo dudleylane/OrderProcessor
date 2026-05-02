@@ -22,7 +22,8 @@
 #include "OrderStorage.h"
 #include "IdTGenerator.h"
 
-namespace test {
+namespace test
+{
 
 // =============================================================================
 // Legacy Assertion Helper (for migration from legacy tests)
@@ -41,7 +42,8 @@ void check(bool rez, const std::string &error = "");
 /**
  * Test double for COP::ACID::Scope - captures operations for verification
  */
-class TestTransactionContext : public COP::ACID::Scope {
+class TestTransactionContext : public COP::ACID::Scope
+{
 public:
     ~TestTransactionContext();
 
@@ -57,8 +59,11 @@ public:
 
     void clear();
     bool isOperationEnqueued(COP::ACID::OperationType type) const;
-    size_t operationCount() const { return op_.size(); }
-    COP::ACID::Operation* getOperation(size_t index) const;
+    size_t operationCount() const
+    {
+        return op_.size();
+    }
+    COP::ACID::Operation *getOperation(size_t index) const;
 
 public:
     std::string reason_;
@@ -68,12 +73,13 @@ public:
 /**
  * No-op implementation of OrderSaver for tests that don't need persistence
  */
-class DummyOrderSaver : public COP::OrderSaver {
+class DummyOrderSaver : public COP::OrderSaver
+{
 public:
     DummyOrderSaver() = default;
     ~DummyOrderSaver() = default;
 
-    void save(const COP::OrderEntry&) override {}
+    void save(const COP::OrderEntry &) override {}
 };
 
 // =============================================================================
@@ -87,9 +93,8 @@ public:
  * @param securityIdSource Optional security ID source (defaults to "AAASrc")
  * @return SourceIdT reference to the stored instrument
  */
-COP::SourceIdT addInstrument(const std::string &symbol,
-                              const std::string &securityId = "AAA",
-                              const std::string &securityIdSource = "AAASrc");
+COP::SourceIdT addInstrument(const std::string &symbol, const std::string &securityId = "AAA",
+                             const std::string &securityIdSource = "AAASrc");
 
 /**
  * Creates and registers an account in WideDataStorage
@@ -98,9 +103,8 @@ COP::SourceIdT addInstrument(const std::string &symbol,
  * @param type Account type (defaults to PRINCIPAL_ACCOUNTTYPE)
  * @return SourceIdT reference to the stored account
  */
-COP::SourceIdT addAccount(const std::string &accountName,
-                           const std::string &firmName = "ACTFirm",
-                           COP::AccountType type = COP::PRINCIPAL_ACCOUNTTYPE);
+COP::SourceIdT addAccount(const std::string &accountName, const std::string &firmName = "ACTFirm",
+                          COP::AccountType type = COP::PRINCIPAL_ACCOUNTTYPE);
 
 /**
  * Creates and registers a clearing entry in WideDataStorage
@@ -136,11 +140,8 @@ std::unique_ptr<COP::OrderEntry> createReplOrder();
  * @param lastPx Fill price (defaults to 10.25)
  * @return unique_ptr to the created TradeExecEntry
  */
-std::unique_ptr<COP::TradeExecEntry> createTradeExec(
-    const COP::OrderEntry &order,
-    const COP::IdT &execId,
-    COP::QuantityT lastQty = 100,
-    COP::PriceT lastPx = 10.25);
+std::unique_ptr<COP::TradeExecEntry> createTradeExec(const COP::OrderEntry &order, const COP::IdT &execId,
+                                                     COP::QuantityT lastQty = 100, COP::PriceT lastPx = 10.25);
 
 /**
  * Creates an execution correction entry for testing
@@ -148,9 +149,7 @@ std::unique_ptr<COP::TradeExecEntry> createTradeExec(
  * @param execId The execution ID
  * @return unique_ptr to the created ExecCorrectExecEntry
  */
-std::unique_ptr<COP::ExecCorrectExecEntry> createCorrectExec(
-    const COP::OrderEntry &order,
-    const COP::IdT &execId);
+std::unique_ptr<COP::ExecCorrectExecEntry> createCorrectExec(const COP::OrderEntry &order, const COP::IdT &execId);
 
 /**
  * Assigns a unique client order ID to the order
@@ -174,8 +173,8 @@ void assignOrderId(COP::OrderEntry *order);
  * @param checkRez Expected result of the state check
  * @return Event configured for state machine testing
  */
-template<typename T>
-T createTestEvent(bool checkRez = true) {
+template <typename T> T createTestEvent(bool checkRez = true)
+{
     T evnt;
     evnt.testStateMachine_ = true;
     evnt.testStateMachineCheckResult_ = checkRez;
@@ -190,8 +189,8 @@ T createTestEvent(bool checkRez = true) {
  * @param checkRez Expected result of the state check
  * @return Event configured for state machine testing
  */
-template<typename T, typename P>
-T createTestEvent(const P &param, bool checkRez = true) {
+template <typename T, typename P> T createTestEvent(const P &param, bool checkRez = true)
+{
     T evnt(param);
     evnt.testStateMachine_ = true;
     evnt.testStateMachineCheckResult_ = checkRez;

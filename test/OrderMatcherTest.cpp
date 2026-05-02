@@ -28,48 +28,64 @@ using namespace COP::Store;
 using namespace COP::Queues;
 using namespace test;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Deferred Event Container
 // =============================================================================
 
-class TestDeferedEventContainer : public DeferedEventContainer {
+class TestDeferedEventContainer : public DeferedEventContainer
+{
 public:
-    void addDeferedEvent(DeferedEventBase* evnt) override {
+    void addDeferedEvent(DeferedEventBase *evnt) override
+    {
         events_.push_back(evnt);
     }
 
-    size_t deferedEventCount() const override { return events_.size(); }
+    size_t deferedEventCount() const override
+    {
+        return events_.size();
+    }
 
-    void removeDeferedEventsFrom(size_t startIndex) override {
-        if (startIndex >= events_.size()) {
+    void removeDeferedEventsFrom(size_t startIndex) override
+    {
+        if (startIndex >= events_.size())
+        {
             return;
         }
-        for (size_t i = startIndex; i < events_.size(); ++i) {
+        for (size_t i = startIndex; i < events_.size(); ++i)
+        {
             delete events_[i];
         }
         events_.erase(events_.begin() + startIndex, events_.end());
     }
 
-    size_t eventCount() const { return events_.size(); }
-    void clear() {
-        for (auto* e : events_) {
+    size_t eventCount() const
+    {
+        return events_.size();
+    }
+    void clear()
+    {
+        for (auto *e : events_)
+        {
             delete e;
         }
         events_.clear();
     }
 
-    std::vector<DeferedEventBase*> events_;
+    std::vector<DeferedEventBase *> events_;
 };
 
 // =============================================================================
 // Test Fixture
 // =============================================================================
 
-class OrderMatcherTest : public ProcessorFixture {
+class OrderMatcherTest : public ProcessorFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         ProcessorFixture::SetUp();
 
         deferedContainer_ = std::make_unique<TestDeferedEventContainer>();
@@ -79,16 +95,12 @@ protected:
         inQueues_ = std::make_unique<IncomingQueues>();
         outQueues_ = std::make_unique<OutgoingQueues>();
 
-        context_ = Context(
-            OrderStorage::instance(),
-            orderBook_.get(),
-            inQueues_.get(),
-            outQueues_.get(),
-            matcher_.get(),
-            IdTGenerator::instance());
+        context_ = Context(OrderStorage::instance(), orderBook_.get(), inQueues_.get(), outQueues_.get(),
+                           matcher_.get(), IdTGenerator::instance());
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         deferedContainer_->clear();
         deferedContainer_.reset();
         matcher_.reset();
@@ -99,7 +111,8 @@ protected:
     }
 
     // Helper to create and save an order
-    OrderEntry* createAndSaveOrder(Side side, PriceT price, QuantityT qty) {
+    OrderEntry *createAndSaveOrder(Side side, PriceT price, QuantityT qty)
+    {
         auto order = createCorrectOrder(instrumentId1_);
         assignClOrderId(order.get());
         order->side_ = side;
@@ -122,11 +135,13 @@ protected:
 // Basic Tests
 // =============================================================================
 
-TEST_F(OrderMatcherTest, CreateMatcher) {
+TEST_F(OrderMatcherTest, CreateMatcher)
+{
     ASSERT_NE(nullptr, matcher_);
 }
 
-TEST_F(OrderMatcherTest, InitWithContainer) {
+TEST_F(OrderMatcherTest, InitWithContainer)
+{
     OrderMatcher matcher;
     TestDeferedEventContainer container;
 
@@ -138,8 +153,9 @@ TEST_F(OrderMatcherTest, InitWithContainer) {
 // Single Order Match Tests
 // =============================================================================
 
-TEST_F(OrderMatcherTest, MatchSingleBuyOrder) {
-    OrderEntry* order = createAndSaveOrder(BUY_SIDE, 10.0, 100);
+TEST_F(OrderMatcherTest, MatchSingleBuyOrder)
+{
+    OrderEntry *order = createAndSaveOrder(BUY_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, order);
     order->status_ = NEW_ORDSTATUS;
 
@@ -152,8 +168,9 @@ TEST_F(OrderMatcherTest, MatchSingleBuyOrder) {
     SUCCEED();
 }
 
-TEST_F(OrderMatcherTest, MatchSingleSellOrder) {
-    OrderEntry* order = createAndSaveOrder(SELL_SIDE, 10.0, 100);
+TEST_F(OrderMatcherTest, MatchSingleSellOrder)
+{
+    OrderEntry *order = createAndSaveOrder(SELL_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, order);
     order->status_ = NEW_ORDSTATUS;
 
@@ -170,15 +187,16 @@ TEST_F(OrderMatcherTest, MatchSingleSellOrder) {
 // Order Matching Tests
 // =============================================================================
 
-TEST_F(OrderMatcherTest, MatchBuyAgainstSellAtSamePrice) {
+TEST_F(OrderMatcherTest, MatchBuyAgainstSellAtSamePrice)
+{
     // Create and add sell order to book
-    OrderEntry* sellOrder = createAndSaveOrder(SELL_SIDE, 10.0, 100);
+    OrderEntry *sellOrder = createAndSaveOrder(SELL_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, sellOrder);
     sellOrder->status_ = NEW_ORDSTATUS;
     orderBook_->add(*sellOrder);
 
     // Create buy order at same price
-    OrderEntry* buyOrder = createAndSaveOrder(BUY_SIDE, 10.0, 100);
+    OrderEntry *buyOrder = createAndSaveOrder(BUY_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, buyOrder);
     buyOrder->status_ = NEW_ORDSTATUS;
 
@@ -190,15 +208,16 @@ TEST_F(OrderMatcherTest, MatchBuyAgainstSellAtSamePrice) {
     SUCCEED();
 }
 
-TEST_F(OrderMatcherTest, MatchSellAgainstBuyAtSamePrice) {
+TEST_F(OrderMatcherTest, MatchSellAgainstBuyAtSamePrice)
+{
     // Create and add buy order to book
-    OrderEntry* buyOrder = createAndSaveOrder(BUY_SIDE, 10.0, 100);
+    OrderEntry *buyOrder = createAndSaveOrder(BUY_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, buyOrder);
     buyOrder->status_ = NEW_ORDSTATUS;
     orderBook_->add(*buyOrder);
 
     // Create sell order at same price
-    OrderEntry* sellOrder = createAndSaveOrder(SELL_SIDE, 10.0, 100);
+    OrderEntry *sellOrder = createAndSaveOrder(SELL_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, sellOrder);
     sellOrder->status_ = NEW_ORDSTATUS;
 
@@ -212,9 +231,10 @@ TEST_F(OrderMatcherTest, MatchSellAgainstBuyAtSamePrice) {
 // No Match Tests
 // =============================================================================
 
-TEST_F(OrderMatcherTest, NoMatchWhenPricesDontCross) {
+TEST_F(OrderMatcherTest, NoMatchWhenPricesDontCross)
+{
     // Create sell order at high price
-    OrderEntry* sellOrder = createAndSaveOrder(SELL_SIDE, 20.0, 100);
+    OrderEntry *sellOrder = createAndSaveOrder(SELL_SIDE, 20.0, 100);
     ASSERT_NE(nullptr, sellOrder);
     sellOrder->status_ = NEW_ORDSTATUS;
     orderBook_->add(*sellOrder);
@@ -222,7 +242,7 @@ TEST_F(OrderMatcherTest, NoMatchWhenPricesDontCross) {
     size_t eventsBefore = deferedContainer_->eventCount();
 
     // Create buy order at lower price - should not match
-    OrderEntry* buyOrder = createAndSaveOrder(BUY_SIDE, 10.0, 100);
+    OrderEntry *buyOrder = createAndSaveOrder(BUY_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, buyOrder);
     buyOrder->status_ = NEW_ORDSTATUS;
 
@@ -237,15 +257,16 @@ TEST_F(OrderMatcherTest, NoMatchWhenPricesDontCross) {
 // Partial Fill Tests
 // =============================================================================
 
-TEST_F(OrderMatcherTest, PartialFillWhenDifferentQuantities) {
+TEST_F(OrderMatcherTest, PartialFillWhenDifferentQuantities)
+{
     // Create sell order with small quantity
-    OrderEntry* sellOrder = createAndSaveOrder(SELL_SIDE, 10.0, 50);
+    OrderEntry *sellOrder = createAndSaveOrder(SELL_SIDE, 10.0, 50);
     ASSERT_NE(nullptr, sellOrder);
     sellOrder->status_ = NEW_ORDSTATUS;
     orderBook_->add(*sellOrder);
 
     // Create buy order with larger quantity at same price
-    OrderEntry* buyOrder = createAndSaveOrder(BUY_SIDE, 10.0, 100);
+    OrderEntry *buyOrder = createAndSaveOrder(BUY_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, buyOrder);
     buyOrder->status_ = NEW_ORDSTATUS;
 
@@ -259,17 +280,19 @@ TEST_F(OrderMatcherTest, PartialFillWhenDifferentQuantities) {
 // Multiple Orders Match Tests
 // =============================================================================
 
-TEST_F(OrderMatcherTest, MatchAgainstMultipleOrders) {
+TEST_F(OrderMatcherTest, MatchAgainstMultipleOrders)
+{
     // Add multiple sell orders
-    for (int i = 0; i < 5; ++i) {
-        OrderEntry* sellOrder = createAndSaveOrder(SELL_SIDE, 10.0, 20);
+    for (int i = 0; i < 5; ++i)
+    {
+        OrderEntry *sellOrder = createAndSaveOrder(SELL_SIDE, 10.0, 20);
         ASSERT_NE(nullptr, sellOrder);
         sellOrder->status_ = NEW_ORDSTATUS;
         orderBook_->add(*sellOrder);
     }
 
     // Create buy order that could match against all
-    OrderEntry* buyOrder = createAndSaveOrder(BUY_SIDE, 10.0, 100);
+    OrderEntry *buyOrder = createAndSaveOrder(BUY_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, buyOrder);
     buyOrder->status_ = NEW_ORDSTATUS;
 
@@ -282,20 +305,21 @@ TEST_F(OrderMatcherTest, MatchAgainstMultipleOrders) {
 // Price Priority Tests
 // =============================================================================
 
-TEST_F(OrderMatcherTest, MatchWithBestPriceFirst) {
+TEST_F(OrderMatcherTest, MatchWithBestPriceFirst)
+{
     // Add sell orders at different prices
-    OrderEntry* sellHigh = createAndSaveOrder(SELL_SIDE, 12.0, 100);
+    OrderEntry *sellHigh = createAndSaveOrder(SELL_SIDE, 12.0, 100);
     ASSERT_NE(nullptr, sellHigh);
     sellHigh->status_ = NEW_ORDSTATUS;
     orderBook_->add(*sellHigh);
 
-    OrderEntry* sellLow = createAndSaveOrder(SELL_SIDE, 10.0, 100);
+    OrderEntry *sellLow = createAndSaveOrder(SELL_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, sellLow);
     sellLow->status_ = NEW_ORDSTATUS;
     orderBook_->add(*sellLow);
 
     // Buy order should match against lowest sell first
-    OrderEntry* buyOrder = createAndSaveOrder(BUY_SIDE, 12.0, 50);
+    OrderEntry *buyOrder = createAndSaveOrder(BUY_SIDE, 12.0, 50);
     ASSERT_NE(nullptr, buyOrder);
     buyOrder->status_ = NEW_ORDSTATUS;
 
@@ -308,8 +332,9 @@ TEST_F(OrderMatcherTest, MatchWithBestPriceFirst) {
 // Empty Order Book Tests
 // =============================================================================
 
-TEST_F(OrderMatcherTest, MatchOnEmptyBook) {
-    OrderEntry* order = createAndSaveOrder(BUY_SIDE, 10.0, 100);
+TEST_F(OrderMatcherTest, MatchOnEmptyBook)
+{
+    OrderEntry *order = createAndSaveOrder(BUY_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, order);
     order->status_ = NEW_ORDSTATUS;
 
@@ -323,9 +348,10 @@ TEST_F(OrderMatcherTest, MatchOnEmptyBook) {
 // Different Instruments Tests
 // =============================================================================
 
-TEST_F(OrderMatcherTest, NoMatchAcrossDifferentInstruments) {
+TEST_F(OrderMatcherTest, NoMatchAcrossDifferentInstruments)
+{
     // Create sell order for instrument 1
-    OrderEntry* sellOrder = createAndSaveOrder(SELL_SIDE, 10.0, 100);
+    OrderEntry *sellOrder = createAndSaveOrder(SELL_SIDE, 10.0, 100);
     ASSERT_NE(nullptr, sellOrder);
     sellOrder->status_ = NEW_ORDSTATUS;
     orderBook_->add(*sellOrder);
@@ -338,7 +364,7 @@ TEST_F(OrderMatcherTest, NoMatchAcrossDifferentInstruments) {
     buyOrder->orderQty_ = 100;
     buyOrder->leavesQty_ = 100;
 
-    OrderEntry* savedBuy = OrderStorage::instance()->save(*buyOrder, IdTGenerator::instance());
+    OrderEntry *savedBuy = OrderStorage::instance()->save(*buyOrder, IdTGenerator::instance());
     ASSERT_NE(nullptr, savedBuy);
     savedBuy->status_ = NEW_ORDSTATUS;
 

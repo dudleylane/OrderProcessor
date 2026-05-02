@@ -28,77 +28,80 @@
 
 namespace mpl = boost::mpl;
 
-namespace COP{
+namespace COP
+{
 
-	struct OrderEntry;
+struct OrderEntry;
 
-namespace OrdState{
+namespace OrdState
+{
 
 // Front-end state machine definition
-struct OrderState_ : public boost::msm::front::state_machine_def<OrderState_>{
+struct OrderState_ : public boost::msm::front::state_machine_def<OrderState_>
+{
 public:
-	OrderState_();
-	explicit OrderState_(OrderEntry *orderData);
-	~OrderState_();
+    OrderState_();
+    explicit OrderState_(OrderEntry *orderData);
+    ~OrderState_();
 
-	static const std::string &getStateName(int idx);
+    static const std::string &getStateName(int idx);
 
-	OrderStatePersistence getPersistence()const;
-	void setPersistance(const OrderStatePersistence &state);
-public:
-	/// main zone
-
-	/// New order event was received
-	void receive(onOrderReceived const&);
-	/// Order replace event was received
-	void receive(onRplOrderReceived const&);
-
-	void accept(onExternalOrder const&);
-	void reject(onExternalOrderRejected const&);
-	void reject(onRecvOrderRejected const&);
-	void reject(onOrderRejected const&);
-	void rejectNew(onOrderRejected const&);
-	void reject(onRecvRplOrderRejected const&);
-	void reject(onRplOrderRejected const&);
-
-	void accept(onReplace const&);
-
-	void fill(onTradeExecution const&);
-	bool notexecuted(onTradeExecution const &);
-	bool notexecuted(onTradeCrctCncl const &);
-	bool notexecuted(onNewDay const &);
-	bool notexecuted(onContinue const &);
-	bool complete(onTradeExecution const &);
-	void corrected(onTradeCrctCncl const &);
-	void correctedWithoutRestore(onTradeCrctCncl const &);
-	void expire(onRplOrderExpired const&);
-	void expire(onExpired const&);
-	void cancel(onCanceled const&);
-	void restored(onNewDay const &);
-	void continued(onContinue const &);
-	void finished(onFinished const&);
-	void suspended(onSuspended const&);
-
-	// cancel/replace zone
-	void receive(onReplaceReceived const&);
-	bool acceptable(onReplaceReceived const&);
-	void receive(onCancelReceived const&);
-	bool acceptable(onCancelReceived const&);
-	void reject(onCancelRejected const &);
-	void canceled(onExecCancel const&);
-	void canceled(onInternalCancel const&);
-	void reject(onReplaceRejected const &);
-	void replaced(onExecReplace const&);
-
-
-
-	typedef mpl::vector<Rcvd_New, NoCnlReplace> initial_state;
-	typedef OrderState_ os;
+    OrderStatePersistence getPersistence() const;
+    void setPersistance(const OrderStatePersistence &state);
 
 public:
-	// Transition table for Order
-	// ToDo: add execCorrect, when qty not changed Fill->Fill for example
-	// ToDo: add administrative switch to any state
+    /// main zone
+
+    /// New order event was received
+    void receive(onOrderReceived const &);
+    /// Order replace event was received
+    void receive(onRplOrderReceived const &);
+
+    void accept(onExternalOrder const &);
+    void reject(onExternalOrderRejected const &);
+    void reject(onRecvOrderRejected const &);
+    void reject(onOrderRejected const &);
+    void rejectNew(onOrderRejected const &);
+    void reject(onRecvRplOrderRejected const &);
+    void reject(onRplOrderRejected const &);
+
+    void accept(onReplace const &);
+
+    void fill(onTradeExecution const &);
+    bool notexecuted(onTradeExecution const &);
+    bool notexecuted(onTradeCrctCncl const &);
+    bool notexecuted(onNewDay const &);
+    bool notexecuted(onContinue const &);
+    bool complete(onTradeExecution const &);
+    void corrected(onTradeCrctCncl const &);
+    void correctedWithoutRestore(onTradeCrctCncl const &);
+    void expire(onRplOrderExpired const &);
+    void expire(onExpired const &);
+    void cancel(onCanceled const &);
+    void restored(onNewDay const &);
+    void continued(onContinue const &);
+    void finished(onFinished const &);
+    void suspended(onSuspended const &);
+
+    // cancel/replace zone
+    void receive(onReplaceReceived const &);
+    bool acceptable(onReplaceReceived const &);
+    void receive(onCancelReceived const &);
+    bool acceptable(onCancelReceived const &);
+    void reject(onCancelRejected const &);
+    void canceled(onExecCancel const &);
+    void canceled(onInternalCancel const &);
+    void reject(onReplaceRejected const &);
+    void replaced(onExecReplace const &);
+
+    typedef mpl::vector<Rcvd_New, NoCnlReplace> initial_state;
+    typedef OrderState_ os;
+
+public:
+    // Transition table for Order
+    // ToDo: add execCorrect, when qty not changed Fill->Fill for example
+    // ToDo: add administrative switch to any state
+    // clang-format off
 	struct transition_table : mpl::vector42<
 		//    Start                Event           Next           Action				Guard
 		//	  +-------------+------------------+-------------+------------+----------------------+
@@ -243,31 +246,28 @@ public:
 		a_row< CnclReplaced, onTradeCrctCncl,	CnclReplaced, &os::correctedWithoutRestore      >
 		//    +-------------+------------------+-------------+----------------+------------------+
 	> {};
+    // clang-format on
 
     // Replaces the default no-transition response.
-    template <class FSM, class Event>
-    void no_transition(Event const&, FSM&, int)
+    template <class FSM, class Event> void no_transition(Event const &, FSM &, int)
     {
-		throw std::runtime_error("no transition!");
+        throw std::runtime_error("no transition!");
         /*std::cout << "no transition from state " << state
             << " on event " << typeid(e).name() << std::endl;*/
         //return state;
     }
 
-    template <class FSM, class Event>
-    void exception_caught (Event const&, FSM&, std::exception&)
-    {
-    }
+    template <class FSM, class Event> void exception_caught(Event const &, FSM &, std::exception &) {}
 
 private:
-	OrderEntry *orderData_;
+    OrderEntry *orderData_;
 };
 
 // Back-end state machine (wraps the front-end definition)
 typedef boost::msm::back::state_machine<OrderState_> OrderState;
 
-}
+} // namespace OrdState
 
-}
+} // namespace COP
 
 #endif //_STATE_MACHINE__H

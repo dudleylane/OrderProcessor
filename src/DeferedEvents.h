@@ -18,75 +18,85 @@
 #include "TransactionDef.h"
 #include "OrderStateEvents.h"
 
-namespace COP{
-	struct OrderEntry;
+namespace COP
+{
+struct OrderEntry;
 
-namespace Proc{
+namespace Proc
+{
 
-	class DeferedEventFunctor{
-	public:
-		virtual ~DeferedEventFunctor(){}
+class DeferedEventFunctor
+{
+public:
+    virtual ~DeferedEventFunctor() {}
 
-		virtual void process(OrdState::onTradeExecution &evnt, OrderEntry *order, const ACID::Context &cnxt) = 0;
-		virtual void process(OrdState::onInternalCancel &evnt, OrderEntry *order, const ACID::Context &cnxt) = 0;
-	};
+    virtual void process(OrdState::onTradeExecution &evnt, OrderEntry *order, const ACID::Context &cnxt) = 0;
+    virtual void process(OrdState::onInternalCancel &evnt, OrderEntry *order, const ACID::Context &cnxt) = 0;
+};
 
-	class DeferedEventBase{
-	public:
-		virtual ~DeferedEventBase(){}
+class DeferedEventBase
+{
+public:
+    virtual ~DeferedEventBase() {}
 
-		virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope) = 0;
-	};
+    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope) = 0;
+};
 
-	class DeferedEventContainer{
-	public:
-		virtual ~DeferedEventContainer(){}
-		virtual void addDeferedEvent(DeferedEventBase *evnt) = 0;
-		virtual size_t deferedEventCount() const = 0;
-		virtual void removeDeferedEventsFrom(size_t startIndex) = 0;
-	};
+class DeferedEventContainer
+{
+public:
+    virtual ~DeferedEventContainer() {}
+    virtual void addDeferedEvent(DeferedEventBase *evnt) = 0;
+    virtual size_t deferedEventCount() const = 0;
+    virtual void removeDeferedEventsFrom(size_t startIndex) = 0;
+};
 
-	struct TradeParams{
-		// trade's quantity
-		QuantityT lastQty_;
-		// trade's price
-		PriceT lastPx_;
-		// order's id that changed according execution
-		OrderEntry *order_;
-	};
+struct TradeParams
+{
+    // trade's quantity
+    QuantityT lastQty_;
+    // trade's price
+    PriceT lastPx_;
+    // order's id that changed according execution
+    OrderEntry *order_;
+};
 
-	typedef std::deque<TradeParams> TradesT;
+typedef std::deque<TradeParams> TradesT;
 
-	struct ExecutionDeferedEvent: public DeferedEventBase{
-		TradesT trades_;
-		OrderEntry *baseOrder_;
+struct ExecutionDeferedEvent : public DeferedEventBase
+{
+    TradesT trades_;
+    OrderEntry *baseOrder_;
 
-		ExecutionDeferedEvent();
-		explicit ExecutionDeferedEvent(OrderEntry *ord);
+    ExecutionDeferedEvent();
+    explicit ExecutionDeferedEvent(OrderEntry *ord);
 
-		virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
-	private:
-		void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope, const TradeParams &param);
-	};
+    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
 
-	struct MatchOrderDeferedEvent: public DeferedEventBase{
-		OrderEntry *order_;
+private:
+    void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope, const TradeParams &param);
+};
 
-		MatchOrderDeferedEvent();
-		explicit MatchOrderDeferedEvent(OrderEntry *ord);
+struct MatchOrderDeferedEvent : public DeferedEventBase
+{
+    OrderEntry *order_;
 
-		virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
-	};
+    MatchOrderDeferedEvent();
+    explicit MatchOrderDeferedEvent(OrderEntry *ord);
 
-	struct CancelOrderDeferedEvent: public DeferedEventBase{
-		OrderEntry *order_;
-		std::string cancelReason_;
+    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+};
 
-		CancelOrderDeferedEvent();
-		explicit CancelOrderDeferedEvent(OrderEntry *ord);
+struct CancelOrderDeferedEvent : public DeferedEventBase
+{
+    OrderEntry *order_;
+    std::string cancelReason_;
 
-		virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
-	};
+    CancelOrderDeferedEvent();
+    explicit CancelOrderDeferedEvent(OrderEntry *ord);
 
-}
-}
+    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+};
+
+} // namespace Proc
+} // namespace COP

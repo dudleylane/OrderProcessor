@@ -15,14 +15,16 @@
 #include "PGWriteRequest.h"
 #include "DataModelDef.h"
 
-namespace COP::PG {
+namespace COP::PG
+{
 
-class PGRequestBuilder final {
+class PGRequestBuilder final
+{
 public:
-    static InstrumentWrite fromInstrument(const InstrumentEntry& val);
-    static AccountWrite fromAccount(const AccountEntry& val);
-    static ClearingWrite fromClearing(const ClearingEntry& val);
-    static OrderWrite fromOrder(const OrderEntry& val);
+    static InstrumentWrite fromInstrument(const InstrumentEntry &val);
+    static AccountWrite fromAccount(const AccountEntry &val);
+    static ClearingWrite fromClearing(const ClearingEntry &val);
+    static OrderWrite fromOrder(const OrderEntry &val);
 };
 
 } // namespace COP::PG

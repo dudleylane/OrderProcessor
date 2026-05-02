@@ -15,19 +15,21 @@
 #include "TypesDef.h"
 #include "DataModelDef.h"
 
-namespace COP{
-	namespace Codec{
+namespace COP
+{
+namespace Codec
+{
 
 class ClearingCodec
 {
 public:
-	ClearingCodec(void);
-	~ClearingCodec(void);
+    ClearingCodec(void);
+    ~ClearingCodec(void);
 
 public:
-	static void encode(const ClearingEntry &val, std::string *buf, IdT *id, u32 *version);
-	static void decode(const IdT& id, u32 version, const char *buf, size_t size, ClearingEntry *val);
+    static void encode(const ClearingEntry &val, std::string *buf, IdT *id, u32 *version);
+    static void decode(const IdT &id, u32 version, const char *buf, size_t size, ClearingEntry *val);
 };
 
-	}
-}
+} // namespace Codec
+} // namespace COP

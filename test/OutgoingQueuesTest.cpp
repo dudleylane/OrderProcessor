@@ -22,26 +22,31 @@ using namespace COP;
 using namespace COP::Queues;
 using namespace test;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Fixture
 // =============================================================================
 
-class OutgoingQueuesTest : public SingletonFixture {
+class OutgoingQueuesTest : public SingletonFixture
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         SingletonFixture::SetUp();
         queues_ = std::make_unique<OutgoingQueues>();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         queues_.reset();
         SingletonFixture::TearDown();
     }
 
     // Helper to create a mock execution for ExecReportEvent
-    ExecutionEntry* createMockExecution() {
+    ExecutionEntry *createMockExecution()
+    {
         auto exec = new ExecutionEntry();
         exec->execId_ = IdT(1, execCounter_++);
         exec->type_ = NEW_EXECTYPE;
@@ -53,17 +58,19 @@ protected:
     static std::atomic<u64> execCounter_;
 };
 
-std::atomic<u64> OutgoingQueuesTest::execCounter_{1};
+std::atomic<u64> OutgoingQueuesTest::execCounter_{ 1 };
 
 // =============================================================================
 // Basic Operations Tests
 // =============================================================================
 
-TEST_F(OutgoingQueuesTest, CreateQueue) {
+TEST_F(OutgoingQueuesTest, CreateQueue)
+{
     ASSERT_NE(nullptr, queues_);
 }
 
-TEST_F(OutgoingQueuesTest, PushExecReportEvent) {
+TEST_F(OutgoingQueuesTest, PushExecReportEvent)
+{
     auto exec = createMockExecution();
     ExecReportEvent event(exec);
 
@@ -72,7 +79,8 @@ TEST_F(OutgoingQueuesTest, PushExecReportEvent) {
     SUCCEED();
 }
 
-TEST_F(OutgoingQueuesTest, PushCancelRejectEvent) {
+TEST_F(OutgoingQueuesTest, PushCancelRejectEvent)
+{
     CancelRejectEvent event;
 
     // Should not throw
@@ -80,7 +88,8 @@ TEST_F(OutgoingQueuesTest, PushCancelRejectEvent) {
     SUCCEED();
 }
 
-TEST_F(OutgoingQueuesTest, PushBusinessRejectEvent) {
+TEST_F(OutgoingQueuesTest, PushBusinessRejectEvent)
+{
     BusinessRejectEvent event;
 
     // Should not throw
@@ -92,10 +101,12 @@ TEST_F(OutgoingQueuesTest, PushBusinessRejectEvent) {
 // Multiple Events Tests
 // =============================================================================
 
-TEST_F(OutgoingQueuesTest, PushMultipleExecReportEvents) {
+TEST_F(OutgoingQueuesTest, PushMultipleExecReportEvents)
+{
     const int numEvents = 100;
 
-    for (int i = 0; i < numEvents; ++i) {
+    for (int i = 0; i < numEvents; ++i)
+    {
         auto exec = createMockExecution();
         ExecReportEvent event(exec);
         queues_->push(event, "target");
@@ -104,10 +115,12 @@ TEST_F(OutgoingQueuesTest, PushMultipleExecReportEvents) {
     SUCCEED();
 }
 
-TEST_F(OutgoingQueuesTest, PushMixedEventTypes) {
+TEST_F(OutgoingQueuesTest, PushMixedEventTypes)
+{
     const int numEvents = 30;
 
-    for (int i = 0; i < numEvents; ++i) {
+    for (int i = 0; i < numEvents; ++i)
+    {
         auto exec = createMockExecution();
         ExecReportEvent execEvent(exec);
         queues_->push(execEvent, "target");
@@ -126,56 +139,73 @@ TEST_F(OutgoingQueuesTest, PushMixedEventTypes) {
 // Concurrent Push Tests (Lock-Free Verification)
 // =============================================================================
 
-TEST_F(OutgoingQueuesTest, ConcurrentPushExecReportEvents) {
+TEST_F(OutgoingQueuesTest, ConcurrentPushExecReportEvents)
+{
     const int numThreads = 4;
     const int numEventsPerThread = 250;
-    std::atomic<int> totalPushed{0};
+    std::atomic<int> totalPushed{ 0 };
 
     std::vector<std::thread> threads;
-    for (int t = 0; t < numThreads; ++t) {
-        threads.emplace_back([this, &totalPushed, numEventsPerThread]() {
-            for (int i = 0; i < numEventsPerThread; ++i) {
-                auto exec = createMockExecution();
-                ExecReportEvent event(exec);
-                queues_->push(event, "target");
-                ++totalPushed;
-            }
-        });
+    for (int t = 0; t < numThreads; ++t)
+    {
+        threads.emplace_back(
+            [this, &totalPushed, numEventsPerThread]()
+            {
+                for (int i = 0; i < numEventsPerThread; ++i)
+                {
+                    auto exec = createMockExecution();
+                    ExecReportEvent event(exec);
+                    queues_->push(event, "target");
+                    ++totalPushed;
+                }
+            });
     }
 
-    for (auto& thread : threads) {
+    for (auto &thread : threads)
+    {
         thread.join();
     }
 
     EXPECT_EQ(numThreads * numEventsPerThread, totalPushed.load());
 }
 
-TEST_F(OutgoingQueuesTest, ConcurrentPushMixedEvents) {
+TEST_F(OutgoingQueuesTest, ConcurrentPushMixedEvents)
+{
     const int numThreads = 4;
     const int numEventsPerThread = 100;
-    std::atomic<int> totalPushed{0};
+    std::atomic<int> totalPushed{ 0 };
 
     std::vector<std::thread> threads;
-    for (int t = 0; t < numThreads; ++t) {
-        threads.emplace_back([this, &totalPushed, numEventsPerThread, t]() {
-            for (int i = 0; i < numEventsPerThread; ++i) {
-                if (t % 3 == 0) {
-                    auto exec = createMockExecution();
-                    ExecReportEvent event(exec);
-                    queues_->push(event, "target");
-                } else if (t % 3 == 1) {
-                    CancelRejectEvent event;
-                    queues_->push(event, "target");
-                } else {
-                    BusinessRejectEvent event;
-                    queues_->push(event, "target");
+    for (int t = 0; t < numThreads; ++t)
+    {
+        threads.emplace_back(
+            [this, &totalPushed, numEventsPerThread, t]()
+            {
+                for (int i = 0; i < numEventsPerThread; ++i)
+                {
+                    if (t % 3 == 0)
+                    {
+                        auto exec = createMockExecution();
+                        ExecReportEvent event(exec);
+                        queues_->push(event, "target");
+                    }
+                    else if (t % 3 == 1)
+                    {
+                        CancelRejectEvent event;
+                        queues_->push(event, "target");
+                    }
+                    else
+                    {
+                        BusinessRejectEvent event;
+                        queues_->push(event, "target");
+                    }
+                    ++totalPushed;
                 }
-                ++totalPushed;
-            }
-        });
+            });
     }
 
-    for (auto& thread : threads) {
+    for (auto &thread : threads)
+    {
         thread.join();
     }
 
@@ -186,7 +216,8 @@ TEST_F(OutgoingQueuesTest, ConcurrentPushMixedEvents) {
 // Different Targets Tests
 // =============================================================================
 
-TEST_F(OutgoingQueuesTest, PushToMultipleTargets) {
+TEST_F(OutgoingQueuesTest, PushToMultipleTargets)
+{
     auto exec1 = createMockExecution();
     auto exec2 = createMockExecution();
     auto exec3 = createMockExecution();
@@ -202,10 +233,12 @@ TEST_F(OutgoingQueuesTest, PushToMultipleTargets) {
 // High Volume Tests
 // =============================================================================
 
-TEST_F(OutgoingQueuesTest, HighVolumePush) {
+TEST_F(OutgoingQueuesTest, HighVolumePush)
+{
     const int numEvents = 10000;
 
-    for (int i = 0; i < numEvents; ++i) {
+    for (int i = 0; i < numEvents; ++i)
+    {
         auto exec = createMockExecution();
         ExecReportEvent event(exec);
         queues_->push(event, "target");

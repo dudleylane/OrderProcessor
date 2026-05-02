@@ -18,342 +18,314 @@
 using namespace COP;
 using namespace COP::Impl;
 
-StringEqualFilter::StringEqualFilter(const StringT &val):val_(val)
-{}
+StringEqualFilter::StringEqualFilter(const StringT &val) : val_(val) {}
 
-bool StringEqualFilter::filter(const StringT &val)const
+bool StringEqualFilter::filter(const StringT &val) const
 {
-/*	if(val.length() == val_.length()){
+    /*	if(val.length() == val_.length()){
 		return 0 == memcmp(val.c_str(), val_.c_str(), val_.length());
 	}
 	return false;*/
-	return val == val_;
+    return val == val_;
 }
 
-bool StringEqualFilter::getVal(StringT *val)const
+bool StringEqualFilter::getVal(StringT *val) const
 {
-	assert(nullptr != val);
-	*val = val_;
-	return true;
+    assert(nullptr != val);
+    *val = val_;
+    return true;
 }
 
-StringInSetFilter::StringInSetFilter(const ValuesT &val):val_(val)
-{}
+StringInSetFilter::StringInSetFilter(const ValuesT &val) : val_(val) {}
 
-bool StringInSetFilter::filter(const StringT &val)const
+bool StringInSetFilter::filter(const StringT &val) const
 {
-	return val_.end() != val_.find(val);
+    return val_.end() != val_.find(val);
 }
 
-bool StringInSetFilter::getVal(StringT *)const
+bool StringInSetFilter::getVal(StringT *) const
 {
-	return false;
+    return false;
 }
 
-StringMatchFilter::StringMatchFilter(const std::string &val):pattern_(val), regex_(pattern_)
-{}
+StringMatchFilter::StringMatchFilter(const std::string &val) : pattern_(val), regex_(pattern_) {}
 
-bool StringMatchFilter::filter(const StringT &val)const
+bool StringMatchFilter::filter(const StringT &val) const
 {
-	return std::regex_match(val, regex_);
+    return std::regex_match(val, regex_);
 }
 
-bool StringMatchFilter::getVal(StringT *)const
+bool StringMatchFilter::getVal(StringT *) const
 {
-	return false;
+    return false;
 }
 
-DateTimeEqualFilter::DateTimeEqualFilter(const DateTimeT &val):val_(val)
-{}
+DateTimeEqualFilter::DateTimeEqualFilter(const DateTimeT &val) : val_(val) {}
 
-bool DateTimeEqualFilter::filter(const DateTimeT &val)const
+bool DateTimeEqualFilter::filter(const DateTimeT &val) const
 {
-	return val == val_;
+    return val == val_;
 }
 
-DateTimeLessFilter::DateTimeLessFilter(const DateTimeT &val):val_(val)
-{}
+DateTimeLessFilter::DateTimeLessFilter(const DateTimeT &val) : val_(val) {}
 
-bool DateTimeLessFilter::filter(const DateTimeT &val)const
+bool DateTimeLessFilter::filter(const DateTimeT &val) const
 {
-	return val < val_;
+    return val < val_;
 }
 
-DateTimeGreaterFilter::DateTimeGreaterFilter(const DateTimeT &val):val_(val)
-{}
+DateTimeGreaterFilter::DateTimeGreaterFilter(const DateTimeT &val) : val_(val) {}
 
-bool DateTimeGreaterFilter::filter(const DateTimeT &val)const
+bool DateTimeGreaterFilter::filter(const DateTimeT &val) const
 {
-	return val > val_;
+    return val > val_;
 }
 
-DateTimeLessEqualFilter::DateTimeLessEqualFilter(const DateTimeT &val):val_(val)
-{}
+DateTimeLessEqualFilter::DateTimeLessEqualFilter(const DateTimeT &val) : val_(val) {}
 
-bool DateTimeLessEqualFilter::filter(const DateTimeT &val)const
+bool DateTimeLessEqualFilter::filter(const DateTimeT &val) const
 {
-	return val <= val_;
+    return val <= val_;
 }
 
-DateTimeGreaterEqualFilter::DateTimeGreaterEqualFilter(const DateTimeT &val):val_(val)
-{}
+DateTimeGreaterEqualFilter::DateTimeGreaterEqualFilter(const DateTimeT &val) : val_(val) {}
 
-bool DateTimeGreaterEqualFilter::filter(const DateTimeT &val)const
+bool DateTimeGreaterEqualFilter::filter(const DateTimeT &val) const
 {
-	return val >= val_;
+    return val >= val_;
 }
 
-DateTimeInRangeFilter::DateTimeInRangeFilter(const DateTimeT &begin, const DateTimeT &end):
-	begin_(begin), end_(end)
-{}
+DateTimeInRangeFilter::DateTimeInRangeFilter(const DateTimeT &begin, const DateTimeT &end) : begin_(begin), end_(end) {}
 
-bool DateTimeInRangeFilter::filter(const DateTimeT &val)const
+bool DateTimeInRangeFilter::filter(const DateTimeT &val) const
 {
-	return (val <= end_)&&(val >= begin_);
+    return (val <= end_) && (val >= begin_);
 }
 
-PriceEqualFilter::PriceEqualFilter(const PriceT &val):val_(val)
-{}
+PriceEqualFilter::PriceEqualFilter(const PriceT &val) : val_(val) {}
 
-bool PriceEqualFilter::filter(const PriceT &val)const
+bool PriceEqualFilter::filter(const PriceT &val) const
 {
-	return val == val_;// todo
+    return val == val_; // todo
 }
 
-PriceLessFilter::PriceLessFilter(const PriceT &val):val_(val)
-{}
+PriceLessFilter::PriceLessFilter(const PriceT &val) : val_(val) {}
 
-bool PriceLessFilter::filter(const PriceT &val)const
+bool PriceLessFilter::filter(const PriceT &val) const
 {
-	return val < val_;// todo
+    return val < val_; // todo
 }
 
-PriceGreaterFilter::PriceGreaterFilter(const PriceT &val):val_(val)
-{}
+PriceGreaterFilter::PriceGreaterFilter(const PriceT &val) : val_(val) {}
 
-bool PriceGreaterFilter::filter(const PriceT &val)const
+bool PriceGreaterFilter::filter(const PriceT &val) const
 {
-	return val > val_;//todo
+    return val > val_; //todo
 }
 
-PriceLessEqualFilter::PriceLessEqualFilter(const PriceT &val):val_(val)
-{}
+PriceLessEqualFilter::PriceLessEqualFilter(const PriceT &val) : val_(val) {}
 
-bool PriceLessEqualFilter::filter(const PriceT &val)const
+bool PriceLessEqualFilter::filter(const PriceT &val) const
 {
-	return val <= val_;//todo
+    return val <= val_; //todo
 }
 
-PriceGreaterEqualFilter::PriceGreaterEqualFilter(const PriceT &val):val_(val)
-{}
+PriceGreaterEqualFilter::PriceGreaterEqualFilter(const PriceT &val) : val_(val) {}
 
-bool PriceGreaterEqualFilter::filter(const PriceT &val)const
+bool PriceGreaterEqualFilter::filter(const PriceT &val) const
 {
-	return val >= val_;//todo
+    return val >= val_; //todo
 }
 
-PriceInRangeFilter::PriceInRangeFilter(const PriceT &begin, const PriceT &end):
-	begin_(begin), end_(end)
-{}
+PriceInRangeFilter::PriceInRangeFilter(const PriceT &begin, const PriceT &end) : begin_(begin), end_(end) {}
 
-bool PriceInRangeFilter::filter(const PriceT &val)const
+bool PriceInRangeFilter::filter(const PriceT &val) const
 {
-	return (val <= end_)&&(val >= begin_);//todo
+    return (val <= end_) && (val >= begin_); //todo
 }
 
-IdTDateEqualFilter::IdTDateEqualFilter(const u32 &val):val_(val)
-{}
+IdTDateEqualFilter::IdTDateEqualFilter(const u32 &val) : val_(val) {}
 
-bool IdTDateEqualFilter::filter(const u32 &val)const
+bool IdTDateEqualFilter::filter(const u32 &val) const
 {
-	return val == val_;
+    return val == val_;
 }
 
-bool IdTDateEqualFilter::getVal(u32 *val)const
+bool IdTDateEqualFilter::getVal(u32 *val) const
 {
-	assert(nullptr != val);
-	*val = val_;
-	return true;
+    assert(nullptr != val);
+    *val = val_;
+    return true;
 }
 
-IdTDateLessFilter::IdTDateLessFilter(const u32 &val):val_(val)
-{}
+IdTDateLessFilter::IdTDateLessFilter(const u32 &val) : val_(val) {}
 
-bool IdTDateLessFilter::filter(const u32 &val)const
+bool IdTDateLessFilter::filter(const u32 &val) const
 {
-	return val < val_;
+    return val < val_;
 }
 
-bool IdTDateLessFilter::getVal(u32 *)const
+bool IdTDateLessFilter::getVal(u32 *) const
 {
-	return false;
+    return false;
 }
 
-IdTDateGreaterFilter::IdTDateGreaterFilter(const u32 &val):val_(val)
-{}
+IdTDateGreaterFilter::IdTDateGreaterFilter(const u32 &val) : val_(val) {}
 
-bool IdTDateGreaterFilter::filter(const u32 &val)const
+bool IdTDateGreaterFilter::filter(const u32 &val) const
 {
-	return val > val_;
+    return val > val_;
 }
 
-bool IdTDateGreaterFilter::getVal(u32 *)const
+bool IdTDateGreaterFilter::getVal(u32 *) const
 {
-	return false;
+    return false;
 }
 
-IdTDateLessEqualFilter::IdTDateLessEqualFilter(const u32 &val):val_(val)
-{}
+IdTDateLessEqualFilter::IdTDateLessEqualFilter(const u32 &val) : val_(val) {}
 
-bool IdTDateLessEqualFilter::filter(const u32 &val)const
+bool IdTDateLessEqualFilter::filter(const u32 &val) const
 {
-	return val <= val_;
+    return val <= val_;
 }
 
-bool IdTDateLessEqualFilter::getVal(u32 *)const
+bool IdTDateLessEqualFilter::getVal(u32 *) const
 {
-	return false;
+    return false;
 }
 
-IdTDateGreaterEqualFilter::IdTDateGreaterEqualFilter(const u32 &val):val_(val)
-{}
+IdTDateGreaterEqualFilter::IdTDateGreaterEqualFilter(const u32 &val) : val_(val) {}
 
-bool IdTDateGreaterEqualFilter::filter(const u32 &val)const
+bool IdTDateGreaterEqualFilter::filter(const u32 &val) const
 {
-	return val >= val_;
+    return val >= val_;
 }
 
-bool IdTDateGreaterEqualFilter::getVal(u32 *)const
+bool IdTDateGreaterEqualFilter::getVal(u32 *) const
 {
-	return false;
+    return false;
 }
 
-IdTDateInRangeFilter::IdTDateInRangeFilter(const u32 &begin, const u32 &end):
-	begin_(begin), end_(end)
-{}
+IdTDateInRangeFilter::IdTDateInRangeFilter(const u32 &begin, const u32 &end) : begin_(begin), end_(end) {}
 
-bool IdTDateInRangeFilter::filter(const u32 &val)const
+bool IdTDateInRangeFilter::filter(const u32 &val) const
 {
-	return (val <= end_)&&(val >= begin_);
+    return (val <= end_) && (val >= begin_);
 }
 
-bool IdTDateInRangeFilter::getVal(u32 *)const
+bool IdTDateInRangeFilter::getVal(u32 *) const
 {
-	return false;
+    return false;
 }
 
-IdTDateMatchFilter::IdTDateMatchFilter(const std::string &val):pattern_(val)
-{}
+IdTDateMatchFilter::IdTDateMatchFilter(const std::string &val) : pattern_(val) {}
 
-bool IdTDateMatchFilter::filter(const u32 &)const
+bool IdTDateMatchFilter::filter(const u32 &) const
 {
-	return false; //todo
+    return false; //todo
 }
 
-bool IdTDateMatchFilter::getVal(u32 *)const
+bool IdTDateMatchFilter::getVal(u32 *) const
 {
-	return false;
+    return false;
 }
 
-IdTIdEqualFilter::IdTIdEqualFilter(const IdT &val):val_(val)
-{}
+IdTIdEqualFilter::IdTIdEqualFilter(const IdT &val) : val_(val) {}
 
-bool IdTIdEqualFilter::filter(const IdT &val)const
+bool IdTIdEqualFilter::filter(const IdT &val) const
 {
-	return val == val_;
+    return val == val_;
 }
 
-bool IdTIdEqualFilter::getVal(IdT *val)const
+bool IdTIdEqualFilter::getVal(IdT *val) const
 {
-	assert(nullptr != val);
-	*val = val_;
-	return true;
+    assert(nullptr != val);
+    *val = val_;
+    return true;
 }
 
-QuantityEqualFilter::QuantityEqualFilter(const QuantityT &val):val_(val)
-{}
+QuantityEqualFilter::QuantityEqualFilter(const QuantityT &val) : val_(val) {}
 
-bool QuantityEqualFilter::filter(const QuantityT &val)const
+bool QuantityEqualFilter::filter(const QuantityT &val) const
 {
-	return val == val_;
+    return val == val_;
 }
 
-QuantityLessFilter::QuantityLessFilter(const QuantityT &val):val_(val)
-{}
+QuantityLessFilter::QuantityLessFilter(const QuantityT &val) : val_(val) {}
 
-bool QuantityLessFilter::filter(const QuantityT &val)const
+bool QuantityLessFilter::filter(const QuantityT &val) const
 {
-	return val < val_;
+    return val < val_;
 }
 
-QuantityGreaterFilter::QuantityGreaterFilter(const QuantityT &val):val_(val)
-{}
+QuantityGreaterFilter::QuantityGreaterFilter(const QuantityT &val) : val_(val) {}
 
-bool QuantityGreaterFilter::filter(const QuantityT &val)const
+bool QuantityGreaterFilter::filter(const QuantityT &val) const
 {
-	return val > val_;
+    return val > val_;
 }
 
-QuantityLessEqualFilter::QuantityLessEqualFilter(const QuantityT &val):val_(val)
-{}
+QuantityLessEqualFilter::QuantityLessEqualFilter(const QuantityT &val) : val_(val) {}
 
-bool QuantityLessEqualFilter::filter(const QuantityT &val)const
+bool QuantityLessEqualFilter::filter(const QuantityT &val) const
 {
-	return val <= val_;
+    return val <= val_;
 }
 
-QuantityGreaterEqualFilter::QuantityGreaterEqualFilter(const QuantityT &val):val_(val)
-{}
+QuantityGreaterEqualFilter::QuantityGreaterEqualFilter(const QuantityT &val) : val_(val) {}
 
-bool QuantityGreaterEqualFilter::filter(const QuantityT &val)const
+bool QuantityGreaterEqualFilter::filter(const QuantityT &val) const
 {
-	return val >= val_;
+    return val >= val_;
 }
 
-QuantityInRangeFilter::QuantityInRangeFilter(const QuantityT &begin, const QuantityT &end):
-	begin_(begin), end_(end)
-{}
+QuantityInRangeFilter::QuantityInRangeFilter(const QuantityT &begin, const QuantityT &end) : begin_(begin), end_(end) {}
 
-bool QuantityInRangeFilter::filter(const QuantityT &val)const
+bool QuantityInRangeFilter::filter(const QuantityT &val) const
 {
-	return (val <= end_)&&(val >= begin_);
+    return (val <= end_) && (val >= begin_);
 }
 
-IdTFilter::IdTFilter():idFilter_(nullptr)
-{}
+IdTFilter::IdTFilter() : idFilter_(nullptr) {}
 
 void IdTFilter::setIdFilter(IdTIdEqualFilter *fltr)
 {
-	assert(nullptr == idFilter_);
-	idFilter_ = fltr;
+    assert(nullptr == idFilter_);
+    idFilter_ = fltr;
 }
 
 void IdTFilter::addFilter(IdTDateFilter *fltr)
 {
-	dateFilters_.push_back(fltr);
+    dateFilters_.push_back(fltr);
 }
 
-bool IdTFilter::match(const IdT &params)const
+bool IdTFilter::match(const IdT &params) const
 {
-	if((nullptr != idFilter_)&& (!idFilter_->filter(params)))
-		return false;
-	for(FiltersT::const_iterator it = dateFilters_.begin(); it != dateFilters_.end(); ++it){
-		assert(nullptr != *it);
-		if(!(*it)->filter(params.date_))
-			return false;
-	}
-	return true;
+    if ((nullptr != idFilter_) && (!idFilter_->filter(params)))
+    {
+        return false;
+    }
+    for (FiltersT::const_iterator it = dateFilters_.begin(); it != dateFilters_.end(); ++it)
+    {
+        assert(nullptr != *it);
+        if (!(*it)->filter(params.date_))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
-bool IdTFilter::getVal(IdT *params)const
+bool IdTFilter::getVal(IdT *params) const
 {
-	if((nullptr != idFilter_)&& (!idFilter_->getVal(params)))
-		return false;
+    if ((nullptr != idFilter_) && (!idFilter_->getVal(params)))
+    {
+        return false;
+    }
 
-	if((1 == dateFilters_.size())&&(*(dateFilters_.begin()))->getVal(&(params->date_)))
-		return true;
-	return false;
+    if ((1 == dateFilters_.size()) && (*(dateFilters_.begin()))->getVal(&(params->date_)))
+    {
+        return true;
+    }
+    return false;
 }
-
-
-

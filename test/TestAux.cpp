@@ -27,7 +27,9 @@ using namespace COP::Store;
 void test::check(bool rez, const std::string &error)
 {
     if (!rez)
+    {
         throw std::logic_error(error);
+    }
 }
 
 // =============================================================================
@@ -41,7 +43,8 @@ TestTransactionContext::~TestTransactionContext()
 
 void TestTransactionContext::clear()
 {
-    for (size_t pos = 0; pos < op_.size(); ++pos) {
+    for (size_t pos = 0; pos < op_.size(); ++pos)
+    {
         delete op_[pos];
     }
     op_.clear();
@@ -49,17 +52,22 @@ void TestTransactionContext::clear()
 
 bool TestTransactionContext::isOperationEnqueued(COP::ACID::OperationType type) const
 {
-    for (size_t pos = 0; pos < op_.size(); ++pos) {
+    for (size_t pos = 0; pos < op_.size(); ++pos)
+    {
         if (type == op_[pos]->type())
+        {
             return true;
+        }
     }
     return false;
 }
 
-COP::ACID::Operation* TestTransactionContext::getOperation(size_t index) const
+COP::ACID::Operation *TestTransactionContext::getOperation(size_t index) const
 {
     if (index < op_.size())
+    {
         return op_[index];
+    }
     return nullptr;
 }
 
@@ -70,7 +78,8 @@ void TestTransactionContext::addOperation(std::unique_ptr<Operation> &op)
 
 void TestTransactionContext::removeLastOperation()
 {
-    if (!op_.empty()) {
+    if (!op_.empty())
+    {
         delete op_.back();
         op_.pop_back();
     }
@@ -81,9 +90,7 @@ size_t TestTransactionContext::startNewStage()
     return 0;
 }
 
-void TestTransactionContext::removeStage(const size_t &)
-{
-}
+void TestTransactionContext::removeStage(const size_t &) {}
 
 const std::string &TestTransactionContext::invalidReason() const
 {
@@ -104,15 +111,15 @@ bool TestTransactionContext::executeTransaction(const Context &)
 // Data Factory Functions
 // =============================================================================
 
-namespace {
-    // Static counters for generating unique IDs
-    static std::atomic<int> s_clOrderIdCounter{0};
-    static std::atomic<int> s_orderIdCounter{0};
-}
+namespace
+{
+// Static counters for generating unique IDs
+static std::atomic<int> s_clOrderIdCounter{ 0 };
+static std::atomic<int> s_orderIdCounter{ 0 };
+} // namespace
 
-COP::SourceIdT test::addInstrument(const std::string &symbol,
-                                    const std::string &securityId,
-                                    const std::string &securityIdSource)
+COP::SourceIdT test::addInstrument(const std::string &symbol, const std::string &securityId,
+                                   const std::string &securityIdSource)
 {
     std::unique_ptr<InstrumentEntry> instr(new InstrumentEntry());
     instr->symbol_ = symbol;
@@ -121,9 +128,7 @@ COP::SourceIdT test::addInstrument(const std::string &symbol,
     return WideDataStorage::instance()->add(instr.release());
 }
 
-COP::SourceIdT test::addAccount(const std::string &accountName,
-                                 const std::string &firmName,
-                                 COP::AccountType type)
+COP::SourceIdT test::addAccount(const std::string &accountName, const std::string &firmName, COP::AccountType type)
 {
     std::unique_ptr<AccountEntry> account(new AccountEntry());
     account->type_ = type;
@@ -221,11 +226,8 @@ std::unique_ptr<OrderEntry> test::createReplOrder()
     return ptr;
 }
 
-std::unique_ptr<TradeExecEntry> test::createTradeExec(
-    const OrderEntry &order,
-    const COP::IdT &execId,
-    QuantityT lastQty,
-    PriceT lastPx)
+std::unique_ptr<TradeExecEntry> test::createTradeExec(const OrderEntry &order, const COP::IdT &execId,
+                                                      QuantityT lastQty, PriceT lastPx)
 {
     std::unique_ptr<TradeExecEntry> ptr(new TradeExecEntry);
 
@@ -245,9 +247,7 @@ std::unique_ptr<TradeExecEntry> test::createTradeExec(
     return ptr;
 }
 
-std::unique_ptr<ExecCorrectExecEntry> test::createCorrectExec(
-    const OrderEntry &order,
-    const COP::IdT &execId)
+std::unique_ptr<ExecCorrectExecEntry> test::createCorrectExec(const OrderEntry &order, const COP::IdT &execId)
 {
     std::unique_ptr<ExecCorrectExecEntry> ptr(new ExecCorrectExecEntry);
 

@@ -34,11 +34,13 @@ using namespace COP::Impl;
 // Test Fixture
 // =============================================================================
 
-class EventBenchmarkTest : public ::testing::Test {
+class EventBenchmarkTest : public ::testing::Test
+{
 protected:
     static constexpr size_t NUM_INSTRUMENTS = 10000;
 
-    void SetUp() override {
+    void SetUp() override
+    {
         WideDataStorage::create();
         IdTGenerator::create();
         SubscriptionMgr::create();
@@ -46,18 +48,18 @@ protected:
         srcId_ = WideDataStorage::instance()->add(new StringT("CLNT"));
         destId_ = WideDataStorage::instance()->add(new StringT("NASDAQ"));
 
-        auto* account = new AccountEntry();
+        auto *account = new AccountEntry();
         account->type_ = PRINCIPAL_ACCOUNTTYPE;
         account->firm_ = "ACTFirm";
         account->account_ = "ACT";
         account->id_ = IdT();
         accountId_ = WideDataStorage::instance()->add(account);
 
-        auto* clearing = new ClearingEntry();
+        auto *clearing = new ClearingEntry();
         clearing->firm_ = "CLRFirm";
         clearingId_ = WideDataStorage::instance()->add(clearing);
 
-        auto* execLst = new ExecutionsT();
+        auto *execLst = new ExecutionsT();
         execListId_ = WideDataStorage::instance()->add(execLst);
 
         symbols_.resize(NUM_INSTRUMENTS);
@@ -65,10 +67,13 @@ protected:
 
         size_t pos = 0;
         std::string symb;
-        for (char a = 'A'; a < 'Z' && pos < NUM_INSTRUMENTS; ++a) {
-            for (char b = 'A'; b < 'Z' && pos < NUM_INSTRUMENTS; ++b) {
-                for (char c = 'A'; c < 'Z' && pos < NUM_INSTRUMENTS; ++c) {
-                    auto* instr = new InstrumentEntry();
+        for (char a = 'A'; a < 'Z' && pos < NUM_INSTRUMENTS; ++a)
+        {
+            for (char b = 'A'; b < 'Z' && pos < NUM_INSTRUMENTS; ++b)
+            {
+                for (char c = 'A'; c < 'Z' && pos < NUM_INSTRUMENTS; ++c)
+                {
+                    auto *instr = new InstrumentEntry();
                     symb.clear();
                     symb += a;
                     symb += b;
@@ -84,24 +89,27 @@ protected:
         }
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         SubscriptionMgr::destroy();
         IdTGenerator::destroy();
         WideDataStorage::destroy();
     }
 
     // Helper: create an order with only an instrument set (for simple filter scenarios)
-    OrderEntry makeSimpleOrder(size_t index) {
+    OrderEntry makeSimpleOrder(size_t index)
+    {
         SourceIdT clOrderId, origClOrderID;
-        return OrderEntry(srcId_, destId_, clOrderId, origClOrderID,
-                          instrumentIds_[index], accountId_, clearingId_, execListId_);
+        return OrderEntry(srcId_, destId_, clOrderId, origClOrderID, instrumentIds_[index], accountId_, clearingId_,
+                          execListId_);
     }
 
     // Helper: create a fully-populated order matching complex filter criteria
-    OrderEntry makeComplexOrder(size_t index) {
+    OrderEntry makeComplexOrder(size_t index)
+    {
         SourceIdT clOrderId, origClOrderID;
-        OrderEntry order(srcId_, destId_, clOrderId, origClOrderID,
-                         instrumentIds_[index], accountId_, clearingId_, execListId_);
+        OrderEntry order(srcId_, destId_, clOrderId, origClOrderID, instrumentIds_[index], accountId_, clearingId_,
+                         execListId_);
         order.execInstruct_.insert(NOT_HELD_INSTRUCTION);
         order.creationTime_ = 4;
         order.lastUpdateTime_ = 5;
@@ -128,8 +136,9 @@ protected:
     }
 
     // Helper: build a complex filter with many field conditions and an instrument filter
-    OrderFilter* makeComplexFilterWithInstrument(InstrumentFilter& instrFlt) {
-        auto* filter = new OrderFilter();
+    OrderFilter *makeComplexFilterWithInstrument(InstrumentFilter &instrFlt)
+    {
+        auto *filter = new OrderFilter();
         filter->addFilter(new OrderStatusEqualFilter(RECEIVEDNEW_ORDSTATUS));
         filter->addFilter(new SideEqualFilter(BUY_SIDE));
         filter->addFilter(new OrderTypeEqualFilter(LIMIT_ORDERTYPE));
@@ -185,14 +194,16 @@ protected:
 // Simple Equal Filter Scenario (one subscription per symbol)
 // =============================================================================
 
-TEST_F(EventBenchmarkTest, SimpleEqualFilter_AddSubscriptions) {
+TEST_F(EventBenchmarkTest, SimpleEqualFilter_AddSubscriptions)
+{
     SubscriberIdT handlerId(1, 0);
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
-        auto* filter = new OrderFilter();
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
+        auto *filter = new OrderFilter();
         InstrumentFilter instrFlt;
-        auto* eqSymblFlt = new StringEqualFilter(symbols_[i]);
-        auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+        auto *eqSymblFlt = new StringEqualFilter(symbols_[i]);
+        auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
         instrFlt.addFilter(symblFlt);
         filter->addInstrumentFilter(&instrFlt);
         SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
@@ -207,14 +218,16 @@ TEST_F(EventBenchmarkTest, SimpleEqualFilter_AddSubscriptions) {
     SubscriptionMgr::instance()->removeSubscriptions(handlerId);
 }
 
-TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupAll) {
+TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupAll)
+{
     SubscriberIdT handlerId(1, 0);
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
-        auto* filter = new OrderFilter();
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
+        auto *filter = new OrderFilter();
         InstrumentFilter instrFlt;
-        auto* eqSymblFlt = new StringEqualFilter(symbols_[i]);
-        auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+        auto *eqSymblFlt = new StringEqualFilter(symbols_[i]);
+        auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
         instrFlt.addFilter(symblFlt);
         filter->addInstrumentFilter(&instrFlt);
         SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
@@ -222,11 +235,13 @@ TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupAll) {
 
     MatchedSubscribersT subscribers;
     size_t matchCount = 0;
-    for (size_t i = 0; i < instrumentIds_.size(); ++i) {
+    for (size_t i = 0; i < instrumentIds_.size(); ++i)
+    {
         subscribers.clear();
         OrderEntry order = makeSimpleOrder(i);
         SubscriptionMgr::instance()->getSubscribers(order, &subscribers);
-        if (!subscribers.empty()) {
+        if (!subscribers.empty())
+        {
             ++matchCount;
         }
     }
@@ -236,14 +251,16 @@ TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupAll) {
     SubscriptionMgr::instance()->removeSubscriptions(handlerId);
 }
 
-TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupFirst) {
+TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupFirst)
+{
     SubscriberIdT handlerId(1, 0);
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
-        auto* filter = new OrderFilter();
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
+        auto *filter = new OrderFilter();
         InstrumentFilter instrFlt;
-        auto* eqSymblFlt = new StringEqualFilter(symbols_[i]);
-        auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+        auto *eqSymblFlt = new StringEqualFilter(symbols_[i]);
+        auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
         instrFlt.addFilter(symblFlt);
         filter->addInstrumentFilter(&instrFlt);
         SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
@@ -257,14 +274,16 @@ TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupFirst) {
     SubscriptionMgr::instance()->removeSubscriptions(handlerId);
 }
 
-TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupLast) {
+TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupLast)
+{
     SubscriberIdT handlerId(1, 0);
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
-        auto* filter = new OrderFilter();
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
+        auto *filter = new OrderFilter();
         InstrumentFilter instrFlt;
-        auto* eqSymblFlt = new StringEqualFilter(symbols_[i]);
-        auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+        auto *eqSymblFlt = new StringEqualFilter(symbols_[i]);
+        auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
         instrFlt.addFilter(symblFlt);
         filter->addInstrumentFilter(&instrFlt);
         SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
@@ -278,14 +297,16 @@ TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupLast) {
     SubscriptionMgr::instance()->removeSubscriptions(handlerId);
 }
 
-TEST_F(EventBenchmarkTest, SimpleEqualFilter_RemoveAll) {
+TEST_F(EventBenchmarkTest, SimpleEqualFilter_RemoveAll)
+{
     SubscriberIdT handlerId(1, 0);
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
-        auto* filter = new OrderFilter();
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
+        auto *filter = new OrderFilter();
         InstrumentFilter instrFlt;
-        auto* eqSymblFlt = new StringEqualFilter(symbols_[i]);
-        auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+        auto *eqSymblFlt = new StringEqualFilter(symbols_[i]);
+        auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
         instrFlt.addFilter(symblFlt);
         filter->addInstrumentFilter(&instrFlt);
         SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
@@ -304,18 +325,21 @@ TEST_F(EventBenchmarkTest, SimpleEqualFilter_RemoveAll) {
 // Simple Match (regex) Filter Scenario (deduped by 2-char prefix)
 // =============================================================================
 
-TEST_F(EventBenchmarkTest, SimpleMatchFilter_AddSubscriptions) {
+TEST_F(EventBenchmarkTest, SimpleMatchFilter_AddSubscriptions)
+{
     SubscriberIdT handlerId(1, 0);
     size_t subscrCount = 0;
     std::string prevPattern;
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
         std::string part(symbols_[i].c_str(), 2);
-        if (prevPattern != part) {
-            auto* filter = new OrderFilter();
+        if (prevPattern != part)
+        {
+            auto *filter = new OrderFilter();
             InstrumentFilter instrFlt;
-            auto* eqSymblFlt = new StringMatchFilter(part + ".?");
-            auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+            auto *eqSymblFlt = new StringMatchFilter(part + ".?");
+            auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
             instrFlt.addFilter(symblFlt);
             filter->addInstrumentFilter(&instrFlt);
             SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
@@ -331,17 +355,20 @@ TEST_F(EventBenchmarkTest, SimpleMatchFilter_AddSubscriptions) {
     SubscriptionMgr::instance()->removeSubscriptions(handlerId);
 }
 
-TEST_F(EventBenchmarkTest, SimpleMatchFilter_LookupAll) {
+TEST_F(EventBenchmarkTest, SimpleMatchFilter_LookupAll)
+{
     SubscriberIdT handlerId(1, 0);
     std::string prevPattern;
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
         std::string part(symbols_[i].c_str(), 2);
-        if (prevPattern != part) {
-            auto* filter = new OrderFilter();
+        if (prevPattern != part)
+        {
+            auto *filter = new OrderFilter();
             InstrumentFilter instrFlt;
-            auto* eqSymblFlt = new StringMatchFilter(part + ".?");
-            auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+            auto *eqSymblFlt = new StringMatchFilter(part + ".?");
+            auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
             instrFlt.addFilter(symblFlt);
             filter->addInstrumentFilter(&instrFlt);
             SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
@@ -351,11 +378,13 @@ TEST_F(EventBenchmarkTest, SimpleMatchFilter_LookupAll) {
 
     MatchedSubscribersT subscribers;
     size_t matchCount = 0;
-    for (size_t i = 0; i < instrumentIds_.size(); ++i) {
+    for (size_t i = 0; i < instrumentIds_.size(); ++i)
+    {
         subscribers.clear();
         OrderEntry order = makeSimpleOrder(i);
         SubscriptionMgr::instance()->getSubscribers(order, &subscribers);
-        if (!subscribers.empty()) {
+        if (!subscribers.empty())
+        {
             ++matchCount;
         }
     }
@@ -365,17 +394,20 @@ TEST_F(EventBenchmarkTest, SimpleMatchFilter_LookupAll) {
     SubscriptionMgr::instance()->removeSubscriptions(handlerId);
 }
 
-TEST_F(EventBenchmarkTest, SimpleMatchFilter_LookupFirstAndLast) {
+TEST_F(EventBenchmarkTest, SimpleMatchFilter_LookupFirstAndLast)
+{
     SubscriberIdT handlerId(1, 0);
     std::string prevPattern;
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
         std::string part(symbols_[i].c_str(), 2);
-        if (prevPattern != part) {
-            auto* filter = new OrderFilter();
+        if (prevPattern != part)
+        {
+            auto *filter = new OrderFilter();
             InstrumentFilter instrFlt;
-            auto* eqSymblFlt = new StringMatchFilter(part + ".?");
-            auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+            auto *eqSymblFlt = new StringMatchFilter(part + ".?");
+            auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
             instrFlt.addFilter(symblFlt);
             filter->addInstrumentFilter(&instrFlt);
             SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
@@ -404,18 +436,20 @@ TEST_F(EventBenchmarkTest, SimpleMatchFilter_LookupFirstAndLast) {
 // Complex Equal Filter Scenario (many filter fields, exact symbol match)
 // =============================================================================
 
-TEST_F(EventBenchmarkTest, ComplexEqualFilter_AddSubscriptions) {
+TEST_F(EventBenchmarkTest, ComplexEqualFilter_AddSubscriptions)
+{
     SubscriberIdT handlerId(1, 0);
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
         InstrumentFilter instrFlt;
-        auto* eqSymblFlt = new StringEqualFilter(symbols_[i]);
-        auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+        auto *eqSymblFlt = new StringEqualFilter(symbols_[i]);
+        auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
         instrFlt.addFilter(symblFlt);
         instrFlt.addFilter(new InstrumentSecurityIdFilter(new StringEqualFilter("AAA")));
         instrFlt.addFilter(new InstrumentSecurityIdSourceFilter(new StringEqualFilter("AAASrc")));
 
-        OrderFilter* filter = makeComplexFilterWithInstrument(instrFlt);
+        OrderFilter *filter = makeComplexFilterWithInstrument(instrFlt);
         SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
     }
 
@@ -427,28 +461,32 @@ TEST_F(EventBenchmarkTest, ComplexEqualFilter_AddSubscriptions) {
     SubscriptionMgr::instance()->removeSubscriptions(handlerId);
 }
 
-TEST_F(EventBenchmarkTest, ComplexEqualFilter_LookupAll) {
+TEST_F(EventBenchmarkTest, ComplexEqualFilter_LookupAll)
+{
     SubscriberIdT handlerId(1, 0);
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
         InstrumentFilter instrFlt;
-        auto* eqSymblFlt = new StringEqualFilter(symbols_[i]);
-        auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+        auto *eqSymblFlt = new StringEqualFilter(symbols_[i]);
+        auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
         instrFlt.addFilter(symblFlt);
         instrFlt.addFilter(new InstrumentSecurityIdFilter(new StringEqualFilter("AAA")));
         instrFlt.addFilter(new InstrumentSecurityIdSourceFilter(new StringEqualFilter("AAASrc")));
 
-        OrderFilter* filter = makeComplexFilterWithInstrument(instrFlt);
+        OrderFilter *filter = makeComplexFilterWithInstrument(instrFlt);
         SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
     }
 
     MatchedSubscribersT subscribers;
     size_t matchCount = 0;
-    for (size_t i = 0; i < instrumentIds_.size(); ++i) {
+    for (size_t i = 0; i < instrumentIds_.size(); ++i)
+    {
         subscribers.clear();
         OrderEntry order = makeComplexOrder(i);
         SubscriptionMgr::instance()->getSubscribers(order, &subscribers);
-        if (!subscribers.empty()) {
+        if (!subscribers.empty())
+        {
             ++matchCount;
         }
     }
@@ -458,18 +496,20 @@ TEST_F(EventBenchmarkTest, ComplexEqualFilter_LookupAll) {
     SubscriptionMgr::instance()->removeSubscriptions(handlerId);
 }
 
-TEST_F(EventBenchmarkTest, ComplexEqualFilter_LookupFirstAndLast) {
+TEST_F(EventBenchmarkTest, ComplexEqualFilter_LookupFirstAndLast)
+{
     SubscriberIdT handlerId(1, 0);
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
         InstrumentFilter instrFlt;
-        auto* eqSymblFlt = new StringEqualFilter(symbols_[i]);
-        auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+        auto *eqSymblFlt = new StringEqualFilter(symbols_[i]);
+        auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
         instrFlt.addFilter(symblFlt);
         instrFlt.addFilter(new InstrumentSecurityIdFilter(new StringEqualFilter("AAA")));
         instrFlt.addFilter(new InstrumentSecurityIdSourceFilter(new StringEqualFilter("AAASrc")));
 
-        OrderFilter* filter = makeComplexFilterWithInstrument(instrFlt);
+        OrderFilter *filter = makeComplexFilterWithInstrument(instrFlt);
         SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
     }
 
@@ -494,22 +534,25 @@ TEST_F(EventBenchmarkTest, ComplexEqualFilter_LookupFirstAndLast) {
 // Complex Match (regex) Filter Scenario (many fields, regex symbol match)
 // =============================================================================
 
-TEST_F(EventBenchmarkTest, ComplexMatchFilter_AddSubscriptions) {
+TEST_F(EventBenchmarkTest, ComplexMatchFilter_AddSubscriptions)
+{
     SubscriberIdT handlerId(1, 0);
     size_t subscrCount = 0;
     std::string prevPattern;
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
         std::string part(symbols_[i].c_str(), 2);
-        if (prevPattern != part) {
+        if (prevPattern != part)
+        {
             InstrumentFilter instrFlt;
-            auto* eqSymblFlt = new StringMatchFilter(part + ".?");
-            auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+            auto *eqSymblFlt = new StringMatchFilter(part + ".?");
+            auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
             instrFlt.addFilter(symblFlt);
             instrFlt.addFilter(new InstrumentSecurityIdFilter(new StringEqualFilter("AAA")));
             instrFlt.addFilter(new InstrumentSecurityIdSourceFilter(new StringEqualFilter("AAASrc")));
 
-            OrderFilter* filter = makeComplexFilterWithInstrument(instrFlt);
+            OrderFilter *filter = makeComplexFilterWithInstrument(instrFlt);
             SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
             ++subscrCount;
             prevPattern = part;
@@ -522,21 +565,24 @@ TEST_F(EventBenchmarkTest, ComplexMatchFilter_AddSubscriptions) {
     SubscriptionMgr::instance()->removeSubscriptions(handlerId);
 }
 
-TEST_F(EventBenchmarkTest, ComplexMatchFilter_LookupAll) {
+TEST_F(EventBenchmarkTest, ComplexMatchFilter_LookupAll)
+{
     SubscriberIdT handlerId(1, 0);
     std::string prevPattern;
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
         std::string part(symbols_[i].c_str(), 2);
-        if (prevPattern != part) {
+        if (prevPattern != part)
+        {
             InstrumentFilter instrFlt;
-            auto* eqSymblFlt = new StringMatchFilter(part + ".?");
-            auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+            auto *eqSymblFlt = new StringMatchFilter(part + ".?");
+            auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
             instrFlt.addFilter(symblFlt);
             instrFlt.addFilter(new InstrumentSecurityIdFilter(new StringEqualFilter("AAA")));
             instrFlt.addFilter(new InstrumentSecurityIdSourceFilter(new StringEqualFilter("AAASrc")));
 
-            OrderFilter* filter = makeComplexFilterWithInstrument(instrFlt);
+            OrderFilter *filter = makeComplexFilterWithInstrument(instrFlt);
             SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
             prevPattern = part;
         }
@@ -544,11 +590,13 @@ TEST_F(EventBenchmarkTest, ComplexMatchFilter_LookupAll) {
 
     MatchedSubscribersT subscribers;
     size_t matchCount = 0;
-    for (size_t i = 0; i < instrumentIds_.size(); ++i) {
+    for (size_t i = 0; i < instrumentIds_.size(); ++i)
+    {
         subscribers.clear();
         OrderEntry order = makeComplexOrder(i);
         SubscriptionMgr::instance()->getSubscribers(order, &subscribers);
-        if (!subscribers.empty()) {
+        if (!subscribers.empty())
+        {
             ++matchCount;
         }
     }
@@ -558,21 +606,24 @@ TEST_F(EventBenchmarkTest, ComplexMatchFilter_LookupAll) {
     SubscriptionMgr::instance()->removeSubscriptions(handlerId);
 }
 
-TEST_F(EventBenchmarkTest, ComplexMatchFilter_LookupFirstAndLast) {
+TEST_F(EventBenchmarkTest, ComplexMatchFilter_LookupFirstAndLast)
+{
     SubscriberIdT handlerId(1, 0);
     std::string prevPattern;
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
         std::string part(symbols_[i].c_str(), 2);
-        if (prevPattern != part) {
+        if (prevPattern != part)
+        {
             InstrumentFilter instrFlt;
-            auto* eqSymblFlt = new StringMatchFilter(part + ".?");
-            auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+            auto *eqSymblFlt = new StringMatchFilter(part + ".?");
+            auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
             instrFlt.addFilter(symblFlt);
             instrFlt.addFilter(new InstrumentSecurityIdFilter(new StringEqualFilter("AAA")));
             instrFlt.addFilter(new InstrumentSecurityIdSourceFilter(new StringEqualFilter("AAASrc")));
 
-            OrderFilter* filter = makeComplexFilterWithInstrument(instrFlt);
+            OrderFilter *filter = makeComplexFilterWithInstrument(instrFlt);
             SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
             prevPattern = part;
         }
@@ -599,22 +650,25 @@ TEST_F(EventBenchmarkTest, ComplexMatchFilter_LookupFirstAndLast) {
 // Spot-check lookups at specific positions across the instrument space
 // =============================================================================
 
-TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupAtMidpoints) {
+TEST_F(EventBenchmarkTest, SimpleEqualFilter_LookupAtMidpoints)
+{
     SubscriberIdT handlerId(1, 0);
 
-    for (size_t i = 0; i < symbols_.size(); ++i) {
-        auto* filter = new OrderFilter();
+    for (size_t i = 0; i < symbols_.size(); ++i)
+    {
+        auto *filter = new OrderFilter();
         InstrumentFilter instrFlt;
-        auto* eqSymblFlt = new StringEqualFilter(symbols_[i]);
-        auto* symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
+        auto *eqSymblFlt = new StringEqualFilter(symbols_[i]);
+        auto *symblFlt = new InstrumentSymbolFilter(eqSymblFlt);
         instrFlt.addFilter(symblFlt);
         filter->addInstrumentFilter(&instrFlt);
         SubscriptionMgr::instance()->addSubscription("aaa", filter, handlerId);
     }
 
     // Spot-check at positions matching the legacy test's specific indices
-    const size_t indices[] = {0, 4998, 4999, 5000, 5001, instrumentIds_.size() - 1};
-    for (size_t idx : indices) {
+    const size_t indices[] = { 0, 4998, 4999, 5000, 5001, instrumentIds_.size() - 1 };
+    for (size_t idx : indices)
+    {
         MatchedSubscribersT subscribers;
         OrderEntry order = makeSimpleOrder(idx);
         SubscriptionMgr::instance()->getSubscribers(order, &subscribers);

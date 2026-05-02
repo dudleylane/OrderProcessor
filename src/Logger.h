@@ -16,81 +16,91 @@
 #include <string>
 #include "Singleton.h"
 
-namespace aux{ 
+namespace aux
+{
 
-	struct LoggerImpl;
+struct LoggerImpl;
 
-	class LogMessage{
-	public:
-		LogMessage(): binary_(false){}
-		virtual ~LogMessage(){}
+class LogMessage
+{
+public:
+    LogMessage() : binary_(false) {}
+    virtual ~LogMessage() {}
 
-		virtual void prepareMessage() = 0;
-		
-		const char *getMessage(size_t *size){
-			assert(nullptr != size);
-			*size = msg.length();
-			return msg.c_str();
-		}
-		std::string &getMessage(){return msg;}
+    virtual void prepareMessage() = 0;
 
-		bool isBinary()const{return binary_;}
-	protected:
-		bool binary_;
-		std::string msg;
-	};
+    const char *getMessage(size_t *size)
+    {
+        assert(nullptr != size);
+        *size = msg.length();
+        return msg.c_str();
+    }
+    std::string &getMessage()
+    {
+        return msg;
+    }
 
-	class Logger
-	{
-	public:
-		Logger(void);
-		~Logger(void);
+    bool isBinary() const
+    {
+        return binary_;
+    }
 
-		void debug(const std::string &msg);
-		void debug(const char *msg);
-		void debug(const char *msg, size_t size);
-		void debug(int val);
-		void debug(LogMessage &msg);
-		
-		void note(const std::string &msg);
-		void note(const char *msg);
-		void note(const char *msg, size_t size);
-		void note(int val);
-		void note(LogMessage &msg);
+protected:
+    bool binary_;
+    std::string msg;
+};
 
-		void warn(const std::string &msg);
-		void warn(const char *msg);
-		void warn(const char *msg, size_t size);
-		void warn(int val);
-		void warn(LogMessage &msg);
+class Logger
+{
+public:
+    Logger(void);
+    ~Logger(void);
 
-		void error(const std::string &msg);
-		void error(const char *msg);
-		void error(const char *msg, size_t size);
-		void error(int val);
-		void error(LogMessage &msg);
+    void debug(const std::string &msg);
+    void debug(const char *msg);
+    void debug(const char *msg, size_t size);
+    void debug(int val);
+    void debug(LogMessage &msg);
 
-		void fatal(const std::string &msg);
-		void fatal(const char *msg);
-		void fatal(const char *msg, size_t size);
-		void fatal(int val);
-		void fatal(LogMessage &msg);
+    void note(const std::string &msg);
+    void note(const char *msg);
+    void note(const char *msg, size_t size);
+    void note(int val);
+    void note(LogMessage &msg);
 
-		void setDebugOn(bool val);
-		void setNoteOn(bool val);
-		void setWarnOn(bool val);
-		void setErrorOn(bool val);
-		void setFatalOn(bool val);
+    void warn(const std::string &msg);
+    void warn(const char *msg);
+    void warn(const char *msg, size_t size);
+    void warn(int val);
+    void warn(LogMessage &msg);
 
-		bool isDebugOn()const;
-		bool isNoteOn()const;
-		bool isWarnOn()const;
-		bool isErrorOn()const;
-		bool isFatalOn()const;
+    void error(const std::string &msg);
+    void error(const char *msg);
+    void error(const char *msg, size_t size);
+    void error(int val);
+    void error(LogMessage &msg);
 
-	private:
-		std::unique_ptr<LoggerImpl> impl_;
-	};
+    void fatal(const std::string &msg);
+    void fatal(const char *msg);
+    void fatal(const char *msg, size_t size);
+    void fatal(int val);
+    void fatal(LogMessage &msg);
 
-	typedef Singleton<Logger> ExchLogger;
-}
+    void setDebugOn(bool val);
+    void setNoteOn(bool val);
+    void setWarnOn(bool val);
+    void setErrorOn(bool val);
+    void setFatalOn(bool val);
+
+    bool isDebugOn() const;
+    bool isNoteOn() const;
+    bool isWarnOn() const;
+    bool isErrorOn() const;
+    bool isFatalOn() const;
+
+private:
+    std::unique_ptr<LoggerImpl> impl_;
+};
+
+typedef Singleton<Logger> ExchLogger;
+} // namespace aux

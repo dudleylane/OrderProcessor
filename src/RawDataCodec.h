@@ -15,19 +15,21 @@
 #include "TypesDef.h"
 #include "DataModelDef.h"
 
-namespace COP{
-	namespace Codec{
+namespace COP
+{
+namespace Codec
+{
 
 class RawDataCodec
 {
 public:
-	RawDataCodec(void);
-	~RawDataCodec(void);
+    RawDataCodec(void);
+    ~RawDataCodec(void);
 
 public:
-	static void encode(const RawDataEntry &val, std::string *buf, IdT *id, u32 *version);
-	static void decode(const IdT& id, u32 version, const char *buf, size_t size, RawDataEntry *val);
+    static void encode(const RawDataEntry &val, std::string *buf, IdT *id, u32 *version);
+    static void decode(const IdT &id, u32 version, const char *buf, size_t size, RawDataEntry *val);
 };
 
-	}
-}
+} // namespace Codec
+} // namespace COP

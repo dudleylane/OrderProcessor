@@ -10,10 +10,13 @@
 
 using namespace COP;
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[])
+{
     std::string dataDir = "./data";
     if (argc > 1)
+    {
         dataDir = argv[1];
+    }
 
     // 1. Create singletons
     aux::ExchLogger::create();
@@ -34,28 +37,29 @@ int main(int argc, char* argv[]) {
     Store::WideDataStorage::instance()->bindStorage(dispatcher.get());
 
     // 3. Add instruments
-    struct InstrDef { const char* symbol; const char* secId; const char* secIdSrc; };
+    struct InstrDef
+    {
+        const char *symbol;
+        const char *secId;
+        const char *secIdSrc;
+    };
     InstrDef instruments[] = {
-        {"AAPL",  "US0378331005", "ISIN"},
-        {"MSFT",  "US5949181045", "ISIN"},
-        {"GOOGL", "US02079K3059", "ISIN"},
-        {"AMZN",  "US0231351067", "ISIN"},
-        {"TSLA",  "US88160R1014", "ISIN"},
-        {"META",  "US30303M1027", "ISIN"},
-        {"NVDA",  "US67066G1040", "ISIN"},
-        {"JPM",   "US46625H1005", "ISIN"},
-        {"V",     "US92826C8394", "ISIN"},
-        {"JNJ",   "US4781601046", "ISIN"},
+        { "AAPL", "US0378331005", "ISIN" }, { "MSFT", "US5949181045", "ISIN" }, { "GOOGL", "US02079K3059", "ISIN" },
+        { "AMZN", "US0231351067", "ISIN" }, { "TSLA", "US88160R1014", "ISIN" }, { "META", "US30303M1027", "ISIN" },
+        { "NVDA", "US67066G1040", "ISIN" }, { "JPM", "US46625H1005", "ISIN" },  { "V", "US92826C8394", "ISIN" },
+        { "JNJ", "US4781601046", "ISIN" },
     };
 
     int instrCount = 0;
-    for (auto& def : instruments) {
+    for (auto &def : instruments)
+    {
         // Check if already exists
-        if (Store::WideDataStorage::instance()->findInstrumentBySymbol(def.symbol).isValid()) {
+        if (Store::WideDataStorage::instance()->findInstrumentBySymbol(def.symbol).isValid())
+        {
             std::cout << "  Instrument " << def.symbol << " already exists, skipping\n";
             continue;
         }
-        auto* instr = new InstrumentEntry();
+        auto *instr = new InstrumentEntry();
         instr->symbol_ = def.symbol;
         instr->securityId_ = def.secId;
         instr->securityIdSource_ = def.secIdSrc;
@@ -65,22 +69,27 @@ int main(int argc, char* argv[]) {
     }
 
     // 4. Add accounts
-    struct AcctDef { const char* name; const char* firm; AccountType type; };
+    struct AcctDef
+    {
+        const char *name;
+        const char *firm;
+        AccountType type;
+    };
     AcctDef accounts[] = {
-        {"TRADING-1",  "Apex Capital",      PRINCIPAL_ACCOUNTTYPE},
-        {"TRADING-2",  "Apex Capital",      PRINCIPAL_ACCOUNTTYPE},
-        {"CLIENT-A",   "Summit Partners",   AGENCY_ACCOUNTTYPE},
-        {"CLIENT-B",   "Meridian Fund",     AGENCY_ACCOUNTTYPE},
-        {"PROP-DESK",  "Apex Capital",      PRINCIPAL_ACCOUNTTYPE},
+        { "TRADING-1", "Apex Capital", PRINCIPAL_ACCOUNTTYPE }, { "TRADING-2", "Apex Capital", PRINCIPAL_ACCOUNTTYPE },
+        { "CLIENT-A", "Summit Partners", AGENCY_ACCOUNTTYPE },  { "CLIENT-B", "Meridian Fund", AGENCY_ACCOUNTTYPE },
+        { "PROP-DESK", "Apex Capital", PRINCIPAL_ACCOUNTTYPE },
     };
 
     int acctCount = 0;
-    for (auto& def : accounts) {
-        if (Store::WideDataStorage::instance()->findAccountByName(def.name).isValid()) {
+    for (auto &def : accounts)
+    {
+        if (Store::WideDataStorage::instance()->findAccountByName(def.name).isValid())
+        {
             std::cout << "  Account " << def.name << " already exists, skipping\n";
             continue;
         }
-        auto* acct = new AccountEntry();
+        auto *acct = new AccountEntry();
         acct->account_ = def.name;
         acct->firm_ = def.firm;
         acct->type_ = def.type;

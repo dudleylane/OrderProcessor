@@ -17,216 +17,229 @@
 using namespace COP;
 using namespace COP::SubscrMgr;
 
+InstrumentIdFilter::InstrumentIdFilter(Impl::IdTFilter *filter) : impl_(*filter) {}
 
-
-InstrumentIdFilter::InstrumentIdFilter(Impl::IdTFilter *filter): impl_(*filter)
-{}
-
-bool InstrumentIdFilter::match(const InstrumentEntry &params)const
+bool InstrumentIdFilter::match(const InstrumentEntry &params) const
 {
-	return impl_.match(params.id_);
+    return impl_.match(params.id_);
 }
 
-bool InstrumentIdFilter::getInstrumentEntry(InstrumentEntry *val)const
+bool InstrumentIdFilter::getInstrumentEntry(InstrumentEntry *val) const
 {
-	assert(nullptr != val);
-	return impl_.getVal(&(val->id_));
+    assert(nullptr != val);
+    return impl_.getVal(&(val->id_));
 }
 
-InstrumentSymbolFilter::InstrumentSymbolFilter(Impl::StringFilter *filter): filter_(filter)
-{}
+InstrumentSymbolFilter::InstrumentSymbolFilter(Impl::StringFilter *filter) : filter_(filter) {}
 
 InstrumentSymbolFilter::~InstrumentSymbolFilter()
 {
-	delete filter_;
+    delete filter_;
 }
 
-bool InstrumentSymbolFilter::match(const InstrumentEntry &params)const
+bool InstrumentSymbolFilter::match(const InstrumentEntry &params) const
 {
-	return filter_->filter(params.symbol_);
+    return filter_->filter(params.symbol_);
 }
 
-bool InstrumentSymbolFilter::getInstrumentEntry(InstrumentEntry *val)const
+bool InstrumentSymbolFilter::getInstrumentEntry(InstrumentEntry *val) const
 {
-	assert(nullptr != val);
-	return filter_->getVal(&(val->symbol_));
+    assert(nullptr != val);
+    return filter_->getVal(&(val->symbol_));
 }
 
-InstrumentSecurityIdFilter::InstrumentSecurityIdFilter(Impl::StringFilter *filter): filter_(filter)
-{}
+InstrumentSecurityIdFilter::InstrumentSecurityIdFilter(Impl::StringFilter *filter) : filter_(filter) {}
 
-bool InstrumentSecurityIdFilter::match(const InstrumentEntry &params)const
+bool InstrumentSecurityIdFilter::match(const InstrumentEntry &params) const
 {
-	return filter_->filter(params.securityId_);
+    return filter_->filter(params.securityId_);
 }
 
-bool InstrumentSecurityIdFilter::getInstrumentEntry(InstrumentEntry *val)const
+bool InstrumentSecurityIdFilter::getInstrumentEntry(InstrumentEntry *val) const
 {
-	assert(nullptr != val);
-	return filter_->getVal(&(val->securityId_));
+    assert(nullptr != val);
+    return filter_->getVal(&(val->securityId_));
 }
 
-InstrumentSecurityIdSourceFilter::InstrumentSecurityIdSourceFilter(Impl::StringFilter *filter): filter_(filter)
-{}
+InstrumentSecurityIdSourceFilter::InstrumentSecurityIdSourceFilter(Impl::StringFilter *filter) : filter_(filter) {}
 
-bool InstrumentSecurityIdSourceFilter::match(const InstrumentEntry &params)const
+bool InstrumentSecurityIdSourceFilter::match(const InstrumentEntry &params) const
 {
-	return filter_->filter(params.securityIdSource_);
+    return filter_->filter(params.securityIdSource_);
 }
 
-bool InstrumentSecurityIdSourceFilter::getInstrumentEntry(InstrumentEntry *val)const
+bool InstrumentSecurityIdSourceFilter::getInstrumentEntry(InstrumentEntry *val) const
 {
-	assert(nullptr != val);
-	return filter_->getVal(&(val->securityIdSource_));
+    assert(nullptr != val);
+    return filter_->getVal(&(val->securityIdSource_));
 }
 
 void InstrumentFilter::release()
 {
-	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		if(nullptr != *it)
-			delete *it;
-	}
-	filters_.clear();
+    for (FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it)
+    {
+        if (nullptr != *it)
+        {
+            delete *it;
+        }
+    }
+    filters_.clear();
 }
 
-bool InstrumentFilter::getInstrumentEntry(InstrumentEntry *val)const
+bool InstrumentFilter::getInstrumentEntry(InstrumentEntry *val) const
 {
-	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		assert(nullptr != *it);
-		if(!(*it)->getInstrumentEntry(val))
-			return false;
-	}	
-	return !filters_.empty();
+    for (FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it)
+    {
+        assert(nullptr != *it);
+        if (!(*it)->getInstrumentEntry(val))
+        {
+            return false;
+        }
+    }
+    return !filters_.empty();
 }
 
 void InstrumentFilter::addFilter(InstrumentElementFilter *fltr)
 {
-	assert(nullptr != fltr);
-	filters_.push_back(fltr);
+    assert(nullptr != fltr);
+    filters_.push_back(fltr);
 }
 
-bool InstrumentFilter::match(const OrderParams &params)const
+bool InstrumentFilter::match(const OrderParams &params) const
 {
-	if(filters_.empty())
-		return true;
-	const InstrumentEntry &entry = params.instrument_.get();
-	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		assert(nullptr != *it);
-		if(!(*it)->match(entry))
-			return false;
-	}
-	return true;
+    if (filters_.empty())
+    {
+        return true;
+    }
+    const InstrumentEntry &entry = params.instrument_.get();
+    for (FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it)
+    {
+        assert(nullptr != *it);
+        if (!(*it)->match(entry))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
-AccountIdFilter::AccountIdFilter(Impl::IdTFilter *filter): impl_(*filter)
-{}
+AccountIdFilter::AccountIdFilter(Impl::IdTFilter *filter) : impl_(*filter) {}
 
-bool AccountIdFilter::match(const AccountEntry &params)const
+bool AccountIdFilter::match(const AccountEntry &params) const
 {
-	return impl_.match(params.id_);
+    return impl_.match(params.id_);
 }
 
-AccountAccountFilter::AccountAccountFilter(Impl::StringFilter *filter): filter_(filter)
-{}
+AccountAccountFilter::AccountAccountFilter(Impl::StringFilter *filter) : filter_(filter) {}
 
-bool AccountAccountFilter::match(const AccountEntry &params)const
+bool AccountAccountFilter::match(const AccountEntry &params) const
 {
-	return filter_->filter(params.account_);
+    return filter_->filter(params.account_);
 }
 
-AccountFirmFilter::AccountFirmFilter(Impl::StringFilter *filter): filter_(filter)
-{}
+AccountFirmFilter::AccountFirmFilter(Impl::StringFilter *filter) : filter_(filter) {}
 
-bool AccountFirmFilter::match(const AccountEntry &params)const
+bool AccountFirmFilter::match(const AccountEntry &params) const
 {
-	return filter_->filter(params.firm_);
+    return filter_->filter(params.firm_);
 }
 
-AccountTypeEqualFilter::AccountTypeEqualFilter(AccountType value): impl_(value)
-{}
+AccountTypeEqualFilter::AccountTypeEqualFilter(AccountType value) : impl_(value) {}
 
-bool AccountTypeEqualFilter::match(const AccountEntry &params)const
+bool AccountTypeEqualFilter::match(const AccountEntry &params) const
 {
-	return impl_.filter(params.type_);
+    return impl_.filter(params.type_);
 }
 
-AccountTypeInFilter::AccountTypeInFilter(const ValuesT &values): Impl::EnumInSetFilter<AccountType>(values)
-{}
+AccountTypeInFilter::AccountTypeInFilter(const ValuesT &values) : Impl::EnumInSetFilter<AccountType>(values) {}
 
-bool AccountTypeInFilter::match(const AccountEntry &params)const
+bool AccountTypeInFilter::match(const AccountEntry &params) const
 {
-	return filter(params.type_);
+    return filter(params.type_);
 }
 
 void AccountFilter::addFilter(AccountElementFilter *fltr)
 {
-	assert(nullptr != fltr);
-	filters_.push_back(fltr);
+    assert(nullptr != fltr);
+    filters_.push_back(fltr);
 }
 
 void AccountFilter::release()
 {
-	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		if(nullptr != *it)
-			delete *it;
-	}
-	filters_.clear();
+    for (FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it)
+    {
+        if (nullptr != *it)
+        {
+            delete *it;
+        }
+    }
+    filters_.clear();
 }
 
-bool AccountFilter::match(const OrderParams &params)const
+bool AccountFilter::match(const OrderParams &params) const
 {
-	if(filters_.empty())
-		return true;
-	const AccountEntry &entry = params.account_.get();
-	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		assert(nullptr != *it);
-		if(!(*it)->match(entry))
-			return false;
-	}
-	return true;
+    if (filters_.empty())
+    {
+        return true;
+    }
+    const AccountEntry &entry = params.account_.get();
+    for (FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it)
+    {
+        assert(nullptr != *it);
+        if (!(*it)->match(entry))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
-ClearingIdFilter::ClearingIdFilter(Impl::IdTFilter *filter): impl_(*filter)
-{}
+ClearingIdFilter::ClearingIdFilter(Impl::IdTFilter *filter) : impl_(*filter) {}
 
-bool ClearingIdFilter::match(const ClearingEntry &params)const
+bool ClearingIdFilter::match(const ClearingEntry &params) const
 {
-	return impl_.match(params.id_);
+    return impl_.match(params.id_);
 }
 
-ClearingFirmFilter::ClearingFirmFilter(Impl::StringFilter *filter): filter_(filter)
-{}
+ClearingFirmFilter::ClearingFirmFilter(Impl::StringFilter *filter) : filter_(filter) {}
 
-bool ClearingFirmFilter::match(const ClearingEntry &params)const
+bool ClearingFirmFilter::match(const ClearingEntry &params) const
 {
-	return filter_->filter(params.firm_);
+    return filter_->filter(params.firm_);
 }
 
 void ClearingFilter::addFilter(ClearingElementFilter *fltr)
 {
-	assert(nullptr != fltr);
-	filters_.push_back(fltr);
+    assert(nullptr != fltr);
+    filters_.push_back(fltr);
 }
 
 void ClearingFilter::release()
 {
-	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		if(nullptr != *it)
-			delete *it;
-	}
-	filters_.clear();
+    for (FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it)
+    {
+        if (nullptr != *it)
+        {
+            delete *it;
+        }
+    }
+    filters_.clear();
 }
 
-bool ClearingFilter::match(const OrderParams &params)const
+bool ClearingFilter::match(const OrderParams &params) const
 {
-	if(filters_.empty())
-		return true;
-	const ClearingEntry &entry = params.clearing_.get();
-	for(FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it){
-		assert(nullptr != *it);
-		if(!(*it)->match(entry))
-			return false;
-	}
-	return true;
+    if (filters_.empty())
+    {
+        return true;
+    }
+    const ClearingEntry &entry = params.clearing_.get();
+    for (FiltersT::const_iterator it = filters_.begin(); it != filters_.end(); ++it)
+    {
+        assert(nullptr != *it);
+        if (!(*it)->match(entry))
+        {
+            return false;
+        }
+    }
+    return true;
 }
-

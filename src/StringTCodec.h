@@ -15,23 +15,24 @@
 #include "TypesDef.h"
 #include "DataModelDef.h"
 
-namespace COP{
-	namespace Codec{
+namespace COP
+{
+namespace Codec
+{
 
 class StringTCodec
 {
 public:
-	StringTCodec(void);
-	~StringTCodec(void);
+    StringTCodec(void);
+    ~StringTCodec(void);
 
 public:
-	static void encode(const StringT &val, std::string *buf);
-	static void decode(const char *buf, size_t size, StringT *val);
+    static void encode(const StringT &val, std::string *buf);
+    static void decode(const char *buf, size_t size, StringT *val);
 
-	static void serialize(const StringT &val, std::string *buf);
-	static const char *restore(const char *buf, size_t size, StringT *val);
-
+    static void serialize(const StringT &val, std::string *buf);
+    static const char *restore(const char *buf, size_t size, StringT *val);
 };
 
-	}
-}
+} // namespace Codec
+} // namespace COP

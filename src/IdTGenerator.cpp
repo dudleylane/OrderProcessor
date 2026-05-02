@@ -17,16 +17,15 @@ using namespace COP;
 
 IdTValueGenerator::IdTValueGenerator(void)
 {
-	counter_.store(1);
+    counter_.store(1);
 }
 
-IdTValueGenerator::~IdTValueGenerator(void)
+IdTValueGenerator::~IdTValueGenerator(void) {}
+
+IdT IdTValueGenerator::getId()
 {
-}
-
-IdT IdTValueGenerator::getId(){
-	std::time_t ltime = std::time(nullptr);
-	// Use relaxed ordering - only need atomicity for counter uniqueness,
-	// not memory synchronization. The ID value itself provides ordering context.
-	return IdT(counter_.fetch_add(1, std::memory_order_relaxed), static_cast<u32>(ltime));
+    std::time_t ltime = std::time(nullptr);
+    // Use relaxed ordering - only need atomicity for counter uniqueness,
+    // not memory synchronization. The ID value itself provides ordering context.
+    return IdT(counter_.fetch_add(1, std::memory_order_relaxed), static_cast<u32>(ltime));
 }

@@ -32,137 +32,175 @@ using namespace COP::ACID;
 using namespace COP::OrdState;
 using namespace COP::Store;
 
-namespace{
-	class FindOpositeOrder: public OrderFunctor{
-	public:
-		FindOpositeOrder(OrderEntry *order, OrderDataStorage *orderStorage): 
-					order_(order), orderStorage_(orderStorage)
-		{
-			assert(nullptr != order_);
-			assert(nullptr != orderStorage_);
-			if(BUY_SIDE == order_->side_)
-				side_ = SELL_SIDE;
-			else 
-				side_ = BUY_SIDE;
-		}
-		virtual SourceIdT instrument()const;
-		virtual bool match(const IdT &order, bool *stop)const;
-	private: 
-		OrderEntry *order_;
-		OrderDataStorage *orderStorage_;
-	};
+namespace
+{
+class FindOpositeOrder : public OrderFunctor
+{
+public:
+    FindOpositeOrder(OrderEntry *order, OrderDataStorage *orderStorage) : order_(order), orderStorage_(orderStorage)
+    {
+        assert(nullptr != order_);
+        assert(nullptr != orderStorage_);
+        if (BUY_SIDE == order_->side_)
+        {
+            side_ = SELL_SIDE;
+        }
+        else
+        {
+            side_ = BUY_SIDE;
+        }
+    }
+    virtual SourceIdT instrument() const;
+    virtual bool match(const IdT &order, bool *stop) const;
 
-	SourceIdT FindOpositeOrder::instrument()const{
-		return order_->instrument_.getId();
-	}
+private:
+    OrderEntry *order_;
+    OrderDataStorage *orderStorage_;
+};
 
-	bool FindOpositeOrder::match(const IdT &order, bool *stop)const{
-		OrderEntry *contrOrd = orderStorage_->locateByOrderId(order);
-		if(nullptr == contrOrd)
-			return false;
-
-		// read lock on contra order during field reads
-		oneapi::tbb::spin_rw_mutex::scoped_lock contrLock(contrOrd->entryMutex_, false);
-
-		if(0 == contrOrd->leavesQty_)
-			return false;
-		if(MARKET_ORDERTYPE == order_->ordType_)
-			return true;
-		if(MARKET_ORDERTYPE == contrOrd->ordType_)
-			return true;
-		if(BUY_SIDE == order_->side_){
-			if(order_->price_ >= contrOrd->price_)
-				return true;
-			else
-				*stop = true;
-		}else{
-			if(order_->price_ <= contrOrd->price_)
-				return true;
-			else
-				*stop = true;
-		}
-		assert(nullptr != stop);
-		return false;
-	}
+SourceIdT FindOpositeOrder::instrument() const
+{
+    return order_->instrument_.getId();
 }
 
-OrderMatcher::OrderMatcher(void): defered_(nullptr)
+bool FindOpositeOrder::match(const IdT &order, bool *stop) const
 {
-	aux::ExchLogger::instance()->note("OrderMatcher created.");
+    OrderEntry *contrOrd = orderStorage_->locateByOrderId(order);
+    if (nullptr == contrOrd)
+    {
+        return false;
+    }
+
+    // read lock on contra order during field reads
+    oneapi::tbb::spin_rw_mutex::scoped_lock contrLock(contrOrd->entryMutex_, false);
+
+    if (0 == contrOrd->leavesQty_)
+    {
+        return false;
+    }
+    if (MARKET_ORDERTYPE == order_->ordType_)
+    {
+        return true;
+    }
+    if (MARKET_ORDERTYPE == contrOrd->ordType_)
+    {
+        return true;
+    }
+    if (BUY_SIDE == order_->side_)
+    {
+        if (order_->price_ >= contrOrd->price_)
+        {
+            return true;
+        }
+        else
+        {
+            *stop = true;
+        }
+    }
+    else
+    {
+        if (order_->price_ <= contrOrd->price_)
+        {
+            return true;
+        }
+        else
+        {
+            *stop = true;
+        }
+    }
+    assert(nullptr != stop);
+    return false;
+}
+} // namespace
+
+OrderMatcher::OrderMatcher(void) : defered_(nullptr)
+{
+    aux::ExchLogger::instance()->note("OrderMatcher created.");
 }
 
 OrderMatcher::~OrderMatcher(void)
 {
-	aux::ExchLogger::instance()->note("OrderMatcher destroyed.");
+    aux::ExchLogger::instance()->note("OrderMatcher destroyed.");
 }
 
 void OrderMatcher::init(DeferedEventContainer *cont)
 {
-	assert(nullptr != cont);
-	defered_ = cont;
+    assert(nullptr != cont);
+    defered_ = cont;
 
-	stateMachine_ = std::make_unique<OrderState>();
-	stateMachine_->start();
-	aux::ExchLogger::instance()->note("OrderMatcher initialized.");
+    stateMachine_ = std::make_unique<OrderState>();
+    stateMachine_->start();
+    aux::ExchLogger::instance()->note("OrderMatcher initialized.");
 }
 
 void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
 {
-	assert(nullptr != order);
-	assert(nullptr != ctxt.orderBook_);
-	assert(nullptr != ctxt.orderStorage_);
+    assert(nullptr != order);
+    assert(nullptr != ctxt.orderBook_);
+    assert(nullptr != ctxt.orderStorage_);
 
-	IdT id = ctxt.orderBook_->find(FindOpositeOrder(order, ctxt.orderStorage_));
-	if(!id.isValid()){
-		if(MARKET_ORDERTYPE == order->ordType_){
-			/// if market not available - market order should be canceled
-			aux::ExchLogger::instance()->error("Unable to find oposite order for Market order during order matching.");
-			std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
-			defEvnt->cancelReason_ = "Unable to find oposite order for Market order during order matching.";
-			defEvnt->order_ = order;
-			defered_->addDeferedEvent(defEvnt.release());
-		}else{
-			if(aux::ExchLogger::instance()->isNoteOn())
-				aux::ExchLogger::instance()->note("Unable to find oposite order during order matching, stop matching.");
-		}
-		return;
-	}
+    IdT id = ctxt.orderBook_->find(FindOpositeOrder(order, ctxt.orderStorage_));
+    if (!id.isValid())
+    {
+        if (MARKET_ORDERTYPE == order->ordType_)
+        {
+            /// if market not available - market order should be canceled
+            aux::ExchLogger::instance()->error("Unable to find oposite order for Market order during order matching.");
+            std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
+            defEvnt->cancelReason_ = "Unable to find oposite order for Market order during order matching.";
+            defEvnt->order_ = order;
+            defered_->addDeferedEvent(defEvnt.release());
+        }
+        else
+        {
+            if (aux::ExchLogger::instance()->isNoteOn())
+            {
+                aux::ExchLogger::instance()->note("Unable to find oposite order during order matching, stop matching.");
+            }
+        }
+        return;
+    }
 
-	OrderEntry *contrOrd = ctxt.orderStorage_->locateByOrderId(id);
-	if(nullptr == contrOrd)
-		throw std::runtime_error("Unable to retrive order from OrderStorage after search!");
+    OrderEntry *contrOrd = ctxt.orderStorage_->locateByOrderId(id);
+    if (nullptr == contrOrd)
+    {
+        throw std::runtime_error("Unable to retrive order from OrderStorage after search!");
+    }
 
-	/// read lock both orders with deadlock prevention (ascending orderId_)
-	OrderEntry *first = order;
-	OrderEntry *second = contrOrd;
-	if(contrOrd->orderId_ < order->orderId_)
-		std::swap(first, second);
-	oneapi::tbb::spin_rw_mutex::scoped_lock firstLock(first->entryMutex_, false);
-	oneapi::tbb::spin_rw_mutex::scoped_lock secondLock(second->entryMutex_, false);
+    /// read lock both orders with deadlock prevention (ascending orderId_)
+    OrderEntry *first = order;
+    OrderEntry *second = contrOrd;
+    if (contrOrd->orderId_ < order->orderId_)
+    {
+        std::swap(first, second);
+    }
+    oneapi::tbb::spin_rw_mutex::scoped_lock firstLock(first->entryMutex_, false);
+    oneapi::tbb::spin_rw_mutex::scoped_lock secondLock(second->entryMutex_, false);
 
-	/// add trade event
-	std::unique_ptr<ExecutionDeferedEvent> defEvnt(new ExecutionDeferedEvent(order));
-	TradeParams trade;
-	trade.order_ = contrOrd;
-	trade.lastQty_ = std::min(order->leavesQty_, contrOrd->leavesQty_);
-	trade.lastPx_ = contrOrd->price_;
-	if(0 == trade.lastPx_ && 0 == order->price_)
-		throw std::runtime_error("OrderMatcher: cannot match two market orders - no reference price available!");
-	defEvnt->trades_.push_back(trade);
+    /// add trade event
+    std::unique_ptr<ExecutionDeferedEvent> defEvnt(new ExecutionDeferedEvent(order));
+    TradeParams trade;
+    trade.order_ = contrOrd;
+    trade.lastQty_ = std::min(order->leavesQty_, contrOrd->leavesQty_);
+    trade.lastPx_ = contrOrd->price_;
+    if (0 == trade.lastPx_ && 0 == order->price_)
+    {
+        throw std::runtime_error("OrderMatcher: cannot match two market orders - no reference price available!");
+    }
+    defEvnt->trades_.push_back(trade);
 
-	QuantityT remainingQty = order->leavesQty_ - trade.lastQty_;
+    QuantityT remainingQty = order->leavesQty_ - trade.lastQty_;
 
-	secondLock.release();
-	firstLock.release();
+    secondLock.release();
+    firstLock.release();
 
-	defered_->addDeferedEvent(defEvnt.release());
+    defered_->addDeferedEvent(defEvnt.release());
 
-	/// add another match event to continue matching
-	if(remainingQty > 0){
-		std::unique_ptr<MatchOrderDeferedEvent> defEvnt(new MatchOrderDeferedEvent(order));
-		defEvnt->order_ = order;
-		defered_->addDeferedEvent(defEvnt.release());
-	}
+    /// add another match event to continue matching
+    if (remainingQty > 0)
+    {
+        std::unique_ptr<MatchOrderDeferedEvent> defEvnt(new MatchOrderDeferedEvent(order));
+        defEvnt->order_ = order;
+        defered_->addDeferedEvent(defEvnt.release());
+    }
 }
-
-

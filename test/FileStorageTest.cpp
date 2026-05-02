@@ -23,31 +23,37 @@ using namespace COP;
 using namespace COP::Store;
 using test::DummyOrderSaver;
 
-namespace {
+namespace
+{
 
 // =============================================================================
 // Test Observer Implementation
 // =============================================================================
 
-class TestFileStorageObserver : public FileStorageObserver {
+class TestFileStorageObserver : public FileStorageObserver
+{
 public:
     TestFileStorageObserver() : finished_(false) {}
 
-    void startLoad() override {
+    void startLoad() override
+    {
         finished_ = false;
     }
 
-    void onRecordLoaded(const IdT& /*id*/, u32 /*version*/, const char* ptr, size_t s) override {
+    void onRecordLoaded(const IdT & /*id*/, u32 /*version*/, const char *ptr, size_t s) override
+    {
         ASSERT_NE(nullptr, ptr);
         ASSERT_GT(s, 0u);
         records_.push_back(std::string(ptr, s));
     }
 
-    void finishLoad() override {
+    void finishLoad() override
+    {
         finished_ = true;
     }
 
-    void reset() {
+    void reset()
+    {
         finished_ = false;
         records_.clear();
     }
@@ -65,33 +71,40 @@ static char VERSION_RECORD[] = "<Sxxxx::Version 0.0.0.1E>";
 static const int VERSION_SIZE = 25;
 static const int VERSION_BUFFER_SIZE = 64;
 
-void prepareTestFile(const std::string& fileName) {
+void prepareTestFile(const std::string &fileName)
+{
     std::memcpy(&(VERSION_RECORD[2]), &VERSION_SIZE, sizeof(VERSION_SIZE));
 
-    FILE* f = std::fopen(fileName.c_str(), "w+");
+    FILE *f = std::fopen(fileName.c_str(), "w+");
     ASSERT_NE(nullptr, f);
     std::fwrite(VERSION_RECORD, 1, VERSION_SIZE, f);
 
     char buf[256];
     {
         int s = 0;
-        std::memcpy(buf, "<S.....Y.", 10); s += 9;
+        std::memcpy(buf, "<S.....Y.", 10);
+        s += 9;
         IdT id(1, 2);
-        std::memcpy(&buf[s], &id, sizeof(id)); s += sizeof(id);
-        buf[s] = '.'; s++;
+        std::memcpy(&buf[s], &id, sizeof(id));
+        s += sizeof(id);
+        buf[s] = '.';
+        s++;
         int ver = 0;
-        std::memcpy(&buf[s], &ver, sizeof(ver)); s += sizeof(ver);
-        std::memcpy(&buf[s], "::valid vesion 0000E>", 21); s += 21;
+        std::memcpy(&buf[s], &ver, sizeof(ver));
+        s += sizeof(ver);
+        std::memcpy(&buf[s], "::valid vesion 0000E>", 21);
+        s += 21;
         std::memcpy(&buf[2], &s, 4);
         std::fwrite(buf, 1, s, f);
     }
     std::fclose(f);
 }
 
-void prepareBrokenTestFile(const std::string& fileName) {
+void prepareBrokenTestFile(const std::string &fileName)
+{
     std::memcpy(&(VERSION_RECORD[2]), &VERSION_SIZE, sizeof(VERSION_SIZE));
 
-    FILE* f = std::fopen(fileName.c_str(), "w+");
+    FILE *f = std::fopen(fileName.c_str(), "w+");
     ASSERT_NE(nullptr, f);
     std::fwrite(VERSION_RECORD, 1, VERSION_SIZE, f);
 
@@ -99,65 +112,90 @@ void prepareBrokenTestFile(const std::string& fileName) {
     // Valid record first
     {
         int s = 0;
-        std::memcpy(buf, "<S.....Y.", 10); s += 9;
+        std::memcpy(buf, "<S.....Y.", 10);
+        s += 9;
         IdT id(1, 2);
-        std::memcpy(&buf[s], &id, sizeof(id)); s += sizeof(id);
-        buf[s] = '.'; s++;
+        std::memcpy(&buf[s], &id, sizeof(id));
+        s += sizeof(id);
+        buf[s] = '.';
+        s++;
         int ver = 0;
-        std::memcpy(&buf[s], &ver, sizeof(ver)); s += sizeof(ver);
-        std::memcpy(&buf[s], "::valid vesion 0000E>", 21); s += 21;
+        std::memcpy(&buf[s], &ver, sizeof(ver));
+        s += sizeof(ver);
+        std::memcpy(&buf[s], "::valid vesion 0000E>", 21);
+        s += 21;
         std::memcpy(&buf[2], &s, 4);
         std::fwrite(buf, 1, s, f);
     }
     // Invalid beginning of record (starts with '.' instead of '<')
     {
         int s = 0;
-        std::memcpy(buf, ".S.....Y.", 10); s += 9;
+        std::memcpy(buf, ".S.....Y.", 10);
+        s += 9;
         IdT id(1, 2);
-        std::memcpy(&buf[s], &id, sizeof(id)); s += sizeof(id);
-        buf[s] = '.'; s++;
+        std::memcpy(&buf[s], &id, sizeof(id));
+        s += sizeof(id);
+        buf[s] = '.';
+        s++;
         int ver = 0;
-        std::memcpy(&buf[s], &ver, sizeof(ver)); s += sizeof(ver);
-        std::memcpy(&buf[s], "::invalid record 01E>", 21); s += 21;
+        std::memcpy(&buf[s], &ver, sizeof(ver));
+        s += sizeof(ver);
+        std::memcpy(&buf[s], "::invalid record 01E>", 21);
+        s += 21;
         std::memcpy(&buf[2], &s, 4);
         std::fwrite(buf, 1, s, f);
     }
     // Invalid beginning of record (no 'S' marker)
     {
         int s = 0;
-        std::memcpy(buf, "<......Y.", 10); s += 9;
+        std::memcpy(buf, "<......Y.", 10);
+        s += 9;
         IdT id(1, 2);
-        std::memcpy(&buf[s], &id, sizeof(id)); s += sizeof(id);
-        buf[s] = '.'; s++;
+        std::memcpy(&buf[s], &id, sizeof(id));
+        s += sizeof(id);
+        buf[s] = '.';
+        s++;
         int ver = 0;
-        std::memcpy(&buf[s], &ver, sizeof(ver)); s += sizeof(ver);
-        std::memcpy(&buf[s], "::invalid record 02E>", 21); s += 21;
+        std::memcpy(&buf[s], &ver, sizeof(ver));
+        s += sizeof(ver);
+        std::memcpy(&buf[s], "::invalid record 02E>", 21);
+        s += 21;
         std::memcpy(&buf[2], &s, 4);
         std::fwrite(buf, 1, s, f);
     }
     // Invalid record size
     {
         int s = 0;
-        std::memcpy(buf, "<S.....Y.", 10); s += 9;
+        std::memcpy(buf, "<S.....Y.", 10);
+        s += 9;
         IdT id(1, 2);
-        std::memcpy(&buf[s], &id, sizeof(id)); s += sizeof(id);
-        buf[s] = '.'; s++;
+        std::memcpy(&buf[s], &id, sizeof(id));
+        s += sizeof(id);
+        buf[s] = '.';
+        s++;
         int ver = 0;
-        std::memcpy(&buf[s], &ver, sizeof(ver)); s += sizeof(ver);
-        std::memcpy(&buf[s], "::invalid record 03E>", 21); s += 40;
+        std::memcpy(&buf[s], &ver, sizeof(ver));
+        s += sizeof(ver);
+        std::memcpy(&buf[s], "::invalid record 03E>", 21);
+        s += 40;
         std::memcpy(&buf[2], &s, 4);
         std::fwrite(buf, 1, s, f);
     }
     // Invalid end of record
     {
         int s = 0;
-        std::memcpy(buf, "<S.....Y.", 10); s += 9;
+        std::memcpy(buf, "<S.....Y.", 10);
+        s += 9;
         IdT id(1, 2);
-        std::memcpy(&buf[s], &id, sizeof(id)); s += sizeof(id);
-        buf[s] = '.'; s++;
+        std::memcpy(&buf[s], &id, sizeof(id));
+        s += sizeof(id);
+        buf[s] = '.';
+        s++;
         int ver = 0;
-        std::memcpy(&buf[s], &ver, sizeof(ver)); s += sizeof(ver);
-        std::memcpy(&buf[s], "::invalid record 01.>", 21); s += 21;
+        std::memcpy(&buf[s], &ver, sizeof(ver));
+        s += sizeof(ver);
+        std::memcpy(&buf[s], "::invalid record 01.>", 21);
+        s += 21;
         std::memcpy(&buf[2], &s, 4);
         std::fwrite(buf, 1, s, f);
     }
@@ -170,13 +208,18 @@ void prepareBrokenTestFile(const std::string& fileName) {
     // Valid record at end
     {
         int s = 0;
-        std::memcpy(buf, "<S.....Y.", 10); s += 9;
+        std::memcpy(buf, "<S.....Y.", 10);
+        s += 9;
         IdT id(1, 2);
-        std::memcpy(&buf[s], &id, sizeof(id)); s += sizeof(id);
-        buf[s] = '.'; s++;
+        std::memcpy(&buf[s], &id, sizeof(id));
+        s += sizeof(id);
+        buf[s] = '.';
+        s++;
         int ver = 0;
-        std::memcpy(&buf[s], &ver, sizeof(ver)); s += sizeof(ver);
-        std::memcpy(&buf[s], "::last record 00000E>", 21); s += 21;
+        std::memcpy(&buf[s], &ver, sizeof(ver));
+        s += sizeof(ver);
+        std::memcpy(&buf[s], "::last record 00000E>", 21);
+        s += 21;
         std::memcpy(&buf[2], &s, 4);
         std::fwrite(buf, 1, s, f);
     }
@@ -184,7 +227,8 @@ void prepareBrokenTestFile(const std::string& fileName) {
     std::fclose(f);
 }
 
-void cleanupTestFile(const std::string& fileName) {
+void cleanupTestFile(const std::string &fileName)
+{
     std::remove(fileName.c_str());
 }
 
@@ -192,15 +236,18 @@ void cleanupTestFile(const std::string& fileName) {
 // Test Fixture
 // =============================================================================
 
-class FileStorageTest : public ::testing::Test {
+class FileStorageTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         FileStorage::init();
         testFile_ = "testStorage.dat";
         brokenFile_ = "testBrokenStorage.dat";
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         cleanupTestFile(testFile_);
         cleanupTestFile(brokenFile_);
     }
@@ -214,12 +261,14 @@ protected:
 // Basic Initialization Tests
 // =============================================================================
 
-TEST_F(FileStorageTest, CreateDefaultFileStorage) {
+TEST_F(FileStorageTest, CreateDefaultFileStorage)
+{
     FileStorage storage;
     SUCCEED();
 }
 
-TEST_F(FileStorageTest, CreateWithNonExistentFile) {
+TEST_F(FileStorageTest, CreateWithNonExistentFile)
+{
     cleanupTestFile(testFile_);
     TestFileStorageObserver observer;
     EXPECT_FALSE(observer.finished_);
@@ -233,7 +282,8 @@ TEST_F(FileStorageTest, CreateWithNonExistentFile) {
 // Load Tests
 // =============================================================================
 
-TEST_F(FileStorageTest, LoadValidFile) {
+TEST_F(FileStorageTest, LoadValidFile)
+{
     prepareTestFile(testFile_);
     TestFileStorageObserver observer;
 
@@ -244,7 +294,8 @@ TEST_F(FileStorageTest, LoadValidFile) {
     EXPECT_EQ("valid vesion 0000", observer.records_.at(0));
 }
 
-TEST_F(FileStorageTest, LoadBrokenFileSkipsInvalidRecords) {
+TEST_F(FileStorageTest, LoadBrokenFileSkipsInvalidRecords)
+{
     cleanupTestFile(brokenFile_);
     prepareBrokenTestFile(brokenFile_);
     TestFileStorageObserver observer;
@@ -261,7 +312,8 @@ TEST_F(FileStorageTest, LoadBrokenFileSkipsInvalidRecords) {
 // Save Tests
 // =============================================================================
 
-TEST_F(FileStorageTest, SaveRecord) {
+TEST_F(FileStorageTest, SaveRecord)
+{
     cleanupTestFile(testFile_);
     TestFileStorageObserver observer;
     FileStorage storage(testFile_, &observer);
@@ -273,7 +325,8 @@ TEST_F(FileStorageTest, SaveRecord) {
     SUCCEED();
 }
 
-TEST_F(FileStorageTest, SaveDuplicateIdThrows) {
+TEST_F(FileStorageTest, SaveDuplicateIdThrows)
+{
     cleanupTestFile(testFile_);
     TestFileStorageObserver observer;
     FileStorage storage(testFile_, &observer);
@@ -283,7 +336,8 @@ TEST_F(FileStorageTest, SaveDuplicateIdThrows) {
     EXPECT_THROW(storage.save(IdT(1, 1), "dubRec", 6), std::exception);
 }
 
-TEST_F(FileStorageTest, SaveWithAutoId) {
+TEST_F(FileStorageTest, SaveWithAutoId)
+{
     cleanupTestFile(testFile_);
     TestFileStorageObserver observer;
     FileStorage storage(testFile_, &observer);
@@ -293,7 +347,8 @@ TEST_F(FileStorageTest, SaveWithAutoId) {
     EXPECT_THROW(storage.save(id, "dubRec2", 7), std::exception);
 }
 
-TEST_F(FileStorageTest, SavedRecordsArePersisted) {
+TEST_F(FileStorageTest, SavedRecordsArePersisted)
+{
     cleanupTestFile(testFile_);
 
     // Save some records
@@ -320,7 +375,8 @@ TEST_F(FileStorageTest, SavedRecordsArePersisted) {
 // Erase Tests
 // =============================================================================
 
-TEST_F(FileStorageTest, EraseRecord) {
+TEST_F(FileStorageTest, EraseRecord)
+{
     cleanupTestFile(testFile_);
 
     // Save records
@@ -351,7 +407,8 @@ TEST_F(FileStorageTest, EraseRecord) {
 // Update Tests
 // =============================================================================
 
-TEST_F(FileStorageTest, UpdateRecord) {
+TEST_F(FileStorageTest, UpdateRecord)
+{
     cleanupTestFile(testFile_);
 
     // Save and update
@@ -380,7 +437,8 @@ TEST_F(FileStorageTest, UpdateRecord) {
 // Replace Tests
 // =============================================================================
 
-TEST_F(FileStorageTest, ReplaceNonExistentThrows) {
+TEST_F(FileStorageTest, ReplaceNonExistentThrows)
+{
     cleanupTestFile(testFile_);
     TestFileStorageObserver observer;
     FileStorage storage(testFile_, &observer);
@@ -388,7 +446,8 @@ TEST_F(FileStorageTest, ReplaceNonExistentThrows) {
     EXPECT_THROW(storage.replace(IdT(2, 1), 1, "aaaaa", 5), std::exception);
 }
 
-TEST_F(FileStorageTest, ReplaceWrongVersionThrows) {
+TEST_F(FileStorageTest, ReplaceWrongVersionThrows)
+{
     cleanupTestFile(testFile_);
     TestFileStorageObserver observer;
     FileStorage storage(testFile_, &observer);
@@ -398,7 +457,8 @@ TEST_F(FileStorageTest, ReplaceWrongVersionThrows) {
     EXPECT_THROW(storage.replace(IdT(1, 1), 1, "aaaaa", 5), std::exception);
 }
 
-TEST_F(FileStorageTest, ReplaceCorrectVersion) {
+TEST_F(FileStorageTest, ReplaceCorrectVersion)
+{
     cleanupTestFile(testFile_);
 
     // Save and replace

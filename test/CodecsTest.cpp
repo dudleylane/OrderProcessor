@@ -26,9 +26,11 @@ using namespace COP;
 using namespace COP::Codec;
 using namespace COP::Store;
 
-namespace {
+namespace
+{
 
-SourceIdT addInstrument(const std::string &name) {
+SourceIdT addInstrument(const std::string &name)
+{
     auto instr = std::make_unique<InstrumentEntry>();
     instr->symbol_ = name;
     instr->securityId_ = "AAA";
@@ -36,18 +38,22 @@ SourceIdT addInstrument(const std::string &name) {
     return WideDataStorage::instance()->add(instr.release());
 }
 
-class CodecsTest : public ::testing::Test {
+class CodecsTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         // Setup code if needed
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         // Cleanup code if needed
     }
 };
 
-TEST_F(CodecsTest, InstrumentCodecEmpty) {
+TEST_F(CodecsTest, InstrumentCodecEmpty)
+{
     InstrumentEntry val;
     std::string buf;
     IdT id;
@@ -69,7 +75,8 @@ TEST_F(CodecsTest, InstrumentCodecEmpty) {
     EXPECT_TRUE(decVal.symbol_.empty());
 }
 
-TEST_F(CodecsTest, InstrumentCodecFilled) {
+TEST_F(CodecsTest, InstrumentCodecFilled)
+{
     InstrumentEntry val;
     val.id_ = IdT(1234, 6789);
     val.securityId_ = "securityId_";
@@ -92,7 +99,8 @@ TEST_F(CodecsTest, InstrumentCodecFilled) {
     EXPECT_EQ(decVal.symbol_, val.symbol_);
 }
 
-TEST_F(CodecsTest, StringTCodecEmpty) {
+TEST_F(CodecsTest, StringTCodecEmpty)
+{
     StringT val;
     std::string buf;
     StringTCodec::encode(val, &buf);
@@ -106,7 +114,8 @@ TEST_F(CodecsTest, StringTCodecEmpty) {
     EXPECT_TRUE(decVal.empty());
 }
 
-TEST_F(CodecsTest, StringTCodecFilled) {
+TEST_F(CodecsTest, StringTCodecFilled)
+{
     StringT val = "value_";
     std::string buf;
     StringTCodec::encode(val, &buf);
@@ -119,7 +128,8 @@ TEST_F(CodecsTest, StringTCodecFilled) {
     EXPECT_EQ(decVal, val);
 }
 
-TEST_F(CodecsTest, AccountCodecEmpty) {
+TEST_F(CodecsTest, AccountCodecEmpty)
+{
     AccountEntry val;
     std::string buf;
     IdT id;
@@ -142,7 +152,8 @@ TEST_F(CodecsTest, AccountCodecEmpty) {
     EXPECT_EQ(INVALID_ACCOUNTTYPE, decVal.type_);
 }
 
-TEST_F(CodecsTest, AccountCodecFilled) {
+TEST_F(CodecsTest, AccountCodecFilled)
+{
     AccountEntry val;
     val.id_ = IdT(1234, 6789);
     val.account_ = "account_";
@@ -165,7 +176,8 @@ TEST_F(CodecsTest, AccountCodecFilled) {
     EXPECT_EQ(decVal.type_, val.type_);
 }
 
-TEST_F(CodecsTest, ClearingCodecEmpty) {
+TEST_F(CodecsTest, ClearingCodecEmpty)
+{
     ClearingEntry val;
     std::string buf;
     IdT id;
@@ -183,7 +195,8 @@ TEST_F(CodecsTest, ClearingCodecEmpty) {
     EXPECT_TRUE(decVal.firm_.empty());
 }
 
-TEST_F(CodecsTest, ClearingCodecFilled) {
+TEST_F(CodecsTest, ClearingCodecFilled)
+{
     ClearingEntry val;
     val.id_ = IdT(1234, 6789);
     val.firm_ = "firm_";
@@ -202,7 +215,8 @@ TEST_F(CodecsTest, ClearingCodecFilled) {
     EXPECT_EQ(decVal.firm_, val.firm_);
 }
 
-TEST_F(CodecsTest, RawDataCodecEmpty) {
+TEST_F(CodecsTest, RawDataCodecEmpty)
+{
     RawDataEntry val;
     std::string buf;
     IdT id;
@@ -224,7 +238,8 @@ TEST_F(CodecsTest, RawDataCodecEmpty) {
     EXPECT_EQ(decVal.length_, val.length_);
 }
 
-TEST_F(CodecsTest, RawDataCodecFilled) {
+TEST_F(CodecsTest, RawDataCodecFilled)
+{
     RawDataEntry val;
     val.id_ = IdT(1234, 6789);
     std::string buf;
@@ -249,18 +264,22 @@ TEST_F(CodecsTest, RawDataCodecFilled) {
     delete[] decVal.data_;
 }
 
-class OrderCodecTest : public ::testing::Test {
+class OrderCodecTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         WideDataStorage::create();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         WideDataStorage::destroy();
     }
 };
 
-TEST_F(OrderCodecTest, OrderCodecEmpty) {
+TEST_F(OrderCodecTest, OrderCodecEmpty)
+{
     SourceIdT instrId = addInstrument("aaa");
     SourceIdT v;
     OrderEntry val(v, v, v, v, instrId, v, v, v);
@@ -304,10 +323,11 @@ TEST_F(OrderCodecTest, OrderCodecEmpty) {
     EXPECT_EQ(decVal->orderId_, val.orderId_);
 }
 
-TEST_F(OrderCodecTest, OrderCodecFilled) {
+TEST_F(OrderCodecTest, OrderCodecFilled)
+{
     SourceIdT instrId = addInstrument("instrument");
-    OrderEntry val(SourceIdT(1, 1), SourceIdT(2, 2), SourceIdT(3, 3), SourceIdT(4, 4),
-                   instrId, SourceIdT(6, 6), SourceIdT(7, 7), SourceIdT(8, 8));
+    OrderEntry val(SourceIdT(1, 1), SourceIdT(2, 2), SourceIdT(3, 3), SourceIdT(4, 4), instrId, SourceIdT(6, 6),
+                   SourceIdT(7, 7), SourceIdT(8, 8));
     std::string buf;
     IdT id;
     u32 version = 0;

@@ -38,19 +38,28 @@ using test::OrderStateWrapper;
 // Test Helpers
 // =============================================================================
 
-namespace {
+namespace
+{
 
-class TestOrderBook : public OrderBook {
+class TestOrderBook : public OrderBook
+{
 public:
-    void add(const OrderEntry&) override {}
-    void remove(const OrderEntry&) override {}
-    IdT find(const OrderFunctor&) const override { return IdT(); }
-    void findAll(const OrderFunctor&, OrdersT*) const override {}
-    IdT getTop(const SourceIdT&, const Side&) const override { return IdT(); }
-    void restore(const OrderEntry&) override {}
+    void add(const OrderEntry &) override {}
+    void remove(const OrderEntry &) override {}
+    IdT find(const OrderFunctor &) const override
+    {
+        return IdT();
+    }
+    void findAll(const OrderFunctor &, OrdersT *) const override {}
+    IdT getTop(const SourceIdT &, const Side &) const override
+    {
+        return IdT();
+    }
+    void restore(const OrderEntry &) override {}
 };
 
-std::unique_ptr<OrderEntry> createCorrectOrder() {
+std::unique_ptr<OrderEntry> createCorrectOrder()
+{
     SourceIdT srcId, destId, accountId, clearingId, instrument, clOrdId, origClOrderID, execList;
 
     srcId = WideDataStorage::instance()->add(new StringT("CLNT"));
@@ -99,7 +108,8 @@ std::unique_ptr<OrderEntry> createCorrectOrder() {
     return ptr;
 }
 
-std::unique_ptr<TradeExecEntry> createTradeExec(const OrderEntry& order, const IdT& execId) {
+std::unique_ptr<TradeExecEntry> createTradeExec(const OrderEntry &order, const IdT &execId)
+{
     std::unique_ptr<TradeExecEntry> ptr(new TradeExecEntry);
 
     ptr->execId_ = execId;
@@ -118,7 +128,8 @@ std::unique_ptr<TradeExecEntry> createTradeExec(const OrderEntry& order, const I
     return ptr;
 }
 
-std::unique_ptr<ExecCorrectExecEntry> createCorrectExec(const OrderEntry& order, const IdT& execId) {
+std::unique_ptr<ExecCorrectExecEntry> createCorrectExec(const OrderEntry &order, const IdT &execId)
+{
     std::unique_ptr<ExecCorrectExecEntry> ptr(new ExecCorrectExecEntry);
 
     ptr->execRefId_ = IdT();
@@ -142,11 +153,13 @@ std::unique_ptr<ExecCorrectExecEntry> createCorrectExec(const OrderEntry& order,
 
 static int clOrderIdCounter = 0;
 
-void assignClOrderId(OrderEntry* order) {
+void assignClOrderId(OrderEntry *order)
+{
     char buf[64];
     snprintf(buf, sizeof(buf), "TestClOrderId_%d", ++clOrderIdCounter);
     std::string val(buf);
-    std::unique_ptr<RawDataEntry> clOrd(new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
+    std::unique_ptr<RawDataEntry> clOrd(
+        new RawDataEntry(STRING_RAWDATATYPE, val.c_str(), static_cast<u32>(val.size())));
     order->clOrderId_ = WideDataStorage::instance()->add(clOrd.release());
 }
 
@@ -156,9 +169,11 @@ void assignClOrderId(OrderEntry* order) {
 // State Machine Test Fixture
 // =============================================================================
 
-class StateMachineTest : public ::testing::Test {
+class StateMachineTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         // Note: ExchLogger is created globally by TestMain.cpp
         WideDataStorage::create();
         SubscriptionMgr::create();
@@ -167,7 +182,8 @@ protected:
         clOrderIdCounter = 0;
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         OrderStorage::destroy();
         IdTGenerator::destroy();
         SubscriptionMgr::destroy();
@@ -180,7 +196,8 @@ protected:
 // Basic State Transitions - Received New to Rejected
 // =============================================================================
 
-TEST_F(StateMachineTest, RcvdNew_To_Rejected_OnInvalidSide) {
+TEST_F(StateMachineTest, RcvdNew_To_Rejected_OnInvalidSide)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -205,7 +222,8 @@ TEST_F(StateMachineTest, RcvdNew_To_Rejected_OnInvalidSide) {
 // Full Order Lifecycle - New to Filled
 // =============================================================================
 
-TEST_F(StateMachineTest, FullLifecycle_New_PartFill_Filled) {
+TEST_F(StateMachineTest, FullLifecycle_New_PartFill_Filled)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     TestOrderBook books;
@@ -232,7 +250,7 @@ TEST_F(StateMachineTest, FullLifecycle_New_PartFill_Filled) {
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
     trCntxt.clear();
 
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
     EXPECT_TRUE(ord->orderId_.isValid());
 
@@ -292,7 +310,8 @@ TEST_F(StateMachineTest, FullLifecycle_New_PartFill_Filled) {
 // Trade Correction Tests
 // =============================================================================
 
-TEST_F(StateMachineTest, Filled_To_PartFill_OnTradeCrctCncl) {
+TEST_F(StateMachineTest, Filled_To_PartFill_OnTradeCrctCncl)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     TestOrderBook books;
@@ -313,7 +332,7 @@ TEST_F(StateMachineTest, Filled_To_PartFill_OnTradeCrctCncl) {
     p.checkStates("New", "NoCnlReplace");
     trCntxt.clear();
 
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
     ASSERT_TRUE(ord->orderId_.isValid());
 
@@ -361,7 +380,8 @@ TEST_F(StateMachineTest, Filled_To_PartFill_OnTradeCrctCncl) {
 // Expiration Tests
 // =============================================================================
 
-TEST_F(StateMachineTest, New_To_Expired_OnExpired) {
+TEST_F(StateMachineTest, New_To_Expired_OnExpired)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -379,7 +399,7 @@ TEST_F(StateMachineTest, New_To_Expired_OnExpired) {
     p.checkStates("New", "NoCnlReplace");
     trCntxt.clear();
 
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
     EXPECT_TRUE(ord->orderId_.isValid());
 
@@ -401,7 +421,8 @@ TEST_F(StateMachineTest, New_To_Expired_OnExpired) {
 // Rejection Tests
 // =============================================================================
 
-TEST_F(StateMachineTest, New_To_Rejected_OnOrderRejected) {
+TEST_F(StateMachineTest, New_To_Rejected_OnOrderRejected)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -419,7 +440,7 @@ TEST_F(StateMachineTest, New_To_Rejected_OnOrderRejected) {
     p.checkStates("New", "NoCnlReplace");
     trCntxt.clear();
 
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
 
     // Apply rejection
@@ -440,7 +461,8 @@ TEST_F(StateMachineTest, New_To_Rejected_OnOrderRejected) {
 // DoneForDay / NewDay Tests
 // =============================================================================
 
-TEST_F(StateMachineTest, New_To_DoneForDay_OnFinished) {
+TEST_F(StateMachineTest, New_To_DoneForDay_OnFinished)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -458,7 +480,7 @@ TEST_F(StateMachineTest, New_To_DoneForDay_OnFinished) {
     p.checkStates("New", "NoCnlReplace");
     trCntxt.clear();
 
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
 
     // Apply finish for day
@@ -476,7 +498,8 @@ TEST_F(StateMachineTest, New_To_DoneForDay_OnFinished) {
 // Suspended / Continue Tests
 // =============================================================================
 
-TEST_F(StateMachineTest, New_To_Suspended_OnSuspended) {
+TEST_F(StateMachineTest, New_To_Suspended_OnSuspended)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -494,7 +517,7 @@ TEST_F(StateMachineTest, New_To_Suspended_OnSuspended) {
     p.checkStates("New", "NoCnlReplace");
     trCntxt.clear();
 
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
 
     // Apply suspend
@@ -512,7 +535,8 @@ TEST_F(StateMachineTest, New_To_Suspended_OnSuspended) {
 // Cancel/Replace Sub-State Machine Tests
 // =============================================================================
 
-TEST_F(StateMachineTest, NoCnlReplace_To_GoingCancel_OnCancelReceived) {
+TEST_F(StateMachineTest, NoCnlReplace_To_GoingCancel_OnCancelReceived)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -530,7 +554,7 @@ TEST_F(StateMachineTest, NoCnlReplace_To_GoingCancel_OnCancelReceived) {
     p.checkStates("New", "NoCnlReplace");
     trCntxt.clear();
 
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
 
     // Receive cancel request
@@ -544,7 +568,8 @@ TEST_F(StateMachineTest, NoCnlReplace_To_GoingCancel_OnCancelReceived) {
     p.checkStates("New", "GoingCancel");
 }
 
-TEST_F(StateMachineTest, NoCnlReplace_To_GoingReplace_OnReplaceReceived) {
+TEST_F(StateMachineTest, NoCnlReplace_To_GoingReplace_OnReplaceReceived)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     std::unique_ptr<OrderEntry> order(createCorrectOrder());
@@ -562,7 +587,7 @@ TEST_F(StateMachineTest, NoCnlReplace_To_GoingReplace_OnReplaceReceived) {
     p.checkStates("New", "NoCnlReplace");
     trCntxt.clear();
 
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
 
     // Receive replace request - create replacement order ID
@@ -581,7 +606,8 @@ TEST_F(StateMachineTest, NoCnlReplace_To_GoingReplace_OnReplaceReceived) {
 // Multiple State Transition Test (Complex Lifecycle)
 // =============================================================================
 
-TEST_F(StateMachineTest, ComplexLifecycle_WithCorrections) {
+TEST_F(StateMachineTest, ComplexLifecycle_WithCorrections)
+{
     TestTransactionContext trCntxt;
     OrderStateWrapper p;
     TestOrderBook books;
@@ -601,7 +627,7 @@ TEST_F(StateMachineTest, ComplexLifecycle_WithCorrections) {
     p.checkStates("New", "NoCnlReplace");
     trCntxt.clear();
 
-    OrderEntry* ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
 
     // Step 2: New -> PartFill
@@ -662,13 +688,15 @@ TEST_F(StateMachineTest, ComplexLifecycle_WithCorrections) {
 // State Validation Tests
 // =============================================================================
 
-TEST_F(StateMachineTest, StateWrapper_InitialState) {
+TEST_F(StateMachineTest, StateWrapper_InitialState)
+{
     OrderStateWrapper p;
     p.start();
     p.checkStates("Rcvd_New", "NoCnlReplace");
 }
 
-TEST_F(StateMachineTest, MultipleOrders_IndependentStateTracking) {
+TEST_F(StateMachineTest, MultipleOrders_IndependentStateTracking)
+{
     TestTransactionContext trCntxt1, trCntxt2;
     OrderStateWrapper p1, p2;
 

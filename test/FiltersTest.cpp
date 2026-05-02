@@ -28,12 +28,14 @@ using namespace COP::SubscrMgr;
 // Test Helpers
 // =============================================================================
 
-namespace {
+namespace
+{
 
-OrderEntry* createTestOrder(SourceIdT instrId, Side side, OrderType type,
-                            PriceT price, QuantityT qty, OrderStatus status) {
+OrderEntry *createTestOrder(SourceIdT instrId, Side side, OrderType type, PriceT price, QuantityT qty,
+                            OrderStatus status)
+{
     SourceIdT srcId, destId, clOrdId, origClOrdId, accountId, clearingId, execList;
-    auto* order = new OrderEntry(srcId, destId, clOrdId, origClOrdId, instrId, accountId, clearingId, execList);
+    auto *order = new OrderEntry(srcId, destId, clOrdId, origClOrdId, instrId, accountId, clearingId, execList);
     order->side_ = side;
     order->price_ = price;
     order->orderQty_ = qty;
@@ -50,23 +52,26 @@ OrderEntry* createTestOrder(SourceIdT instrId, Side side, OrderType type,
 // Filter Test Fixture
 // =============================================================================
 
-class FiltersTest : public ::testing::Test {
+class FiltersTest : public ::testing::Test
+{
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         // Note: ExchLogger is created globally by TestMain.cpp
         WideDataStorage::create();
         IdTGenerator::create();
         OrderStorage::create();
 
         // Add test instrument
-        auto* instr = new InstrumentEntry();
+        auto *instr = new InstrumentEntry();
         instr->symbol_ = "TEST";
         instr->securityId_ = "TESTSEC";
         instr->securityIdSource_ = "ISIN";
         instrId_ = WideDataStorage::instance()->add(instr);
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         OrderStorage::destroy();
         IdTGenerator::destroy();
         WideDataStorage::destroy();
@@ -80,15 +85,15 @@ protected:
 // OrderFilter Basic Tests
 // =============================================================================
 
-TEST_F(FiltersTest, OrderFilterConstruction) {
-    EXPECT_NO_THROW({
-        OrderFilter filter;
-    });
+TEST_F(FiltersTest, OrderFilterConstruction)
+{
+    EXPECT_NO_THROW({ OrderFilter filter; });
 }
 
-TEST_F(FiltersTest, OrderFilterEmptyMatchesNothing) {
+TEST_F(FiltersTest, OrderFilterEmptyMatchesNothing)
+{
     OrderFilter filter;
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
 
     // Empty filter behavior depends on implementation
     // Typically matches everything or nothing
@@ -99,7 +104,8 @@ TEST_F(FiltersTest, OrderFilterEmptyMatchesNothing) {
     delete order;
 }
 
-TEST_F(FiltersTest, OrderFilterRelease) {
+TEST_F(FiltersTest, OrderFilterRelease)
+{
     OrderFilter filter;
 
     // Add some filters
@@ -114,36 +120,39 @@ TEST_F(FiltersTest, OrderFilterRelease) {
 // Status Filter Tests
 // =============================================================================
 
-TEST_F(FiltersTest, OrderStatusEqualFilterMatches) {
+TEST_F(FiltersTest, OrderStatusEqualFilterMatches)
+{
     OrderFilter filter;
     filter.addFilter(new OrderStatusEqualFilter(NEW_ORDSTATUS));
 
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
     EXPECT_TRUE(filter.match(*order));
 
     delete order;
     filter.release();
 }
 
-TEST_F(FiltersTest, OrderStatusEqualFilterNoMatch) {
+TEST_F(FiltersTest, OrderStatusEqualFilterNoMatch)
+{
     OrderFilter filter;
     filter.addFilter(new OrderStatusEqualFilter(NEW_ORDSTATUS));
 
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, FILLED_ORDSTATUS);
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, FILLED_ORDSTATUS);
     EXPECT_FALSE(filter.match(*order));
 
     delete order;
     filter.release();
 }
 
-TEST_F(FiltersTest, OrderStatusInFilter) {
-    std::set<OrderStatus> statuses = {NEW_ORDSTATUS, PARTFILL_ORDSTATUS};
+TEST_F(FiltersTest, OrderStatusInFilter)
+{
+    std::set<OrderStatus> statuses = { NEW_ORDSTATUS, PARTFILL_ORDSTATUS };
     OrderFilter filter;
     filter.addFilter(new OrderStatusInFilter(statuses));
 
-    OrderEntry* newOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
-    OrderEntry* partFillOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, PARTFILL_ORDSTATUS);
-    OrderEntry* filledOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, FILLED_ORDSTATUS);
+    OrderEntry *newOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
+    OrderEntry *partFillOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, PARTFILL_ORDSTATUS);
+    OrderEntry *filledOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, FILLED_ORDSTATUS);
 
     EXPECT_TRUE(filter.match(*newOrder));
     EXPECT_TRUE(filter.match(*partFillOrder));
@@ -159,12 +168,13 @@ TEST_F(FiltersTest, OrderStatusInFilter) {
 // Side Filter Tests
 // =============================================================================
 
-TEST_F(FiltersTest, SideEqualFilterMatchesBuy) {
+TEST_F(FiltersTest, SideEqualFilterMatchesBuy)
+{
     OrderFilter filter;
     filter.addFilter(new SideEqualFilter(BUY_SIDE));
 
-    OrderEntry* buyOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
-    OrderEntry* sellOrder = createTestOrder(instrId_, SELL_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
+    OrderEntry *buyOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
+    OrderEntry *sellOrder = createTestOrder(instrId_, SELL_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
 
     EXPECT_TRUE(filter.match(*buyOrder));
     EXPECT_FALSE(filter.match(*sellOrder));
@@ -174,12 +184,13 @@ TEST_F(FiltersTest, SideEqualFilterMatchesBuy) {
     filter.release();
 }
 
-TEST_F(FiltersTest, SideEqualFilterMatchesSell) {
+TEST_F(FiltersTest, SideEqualFilterMatchesSell)
+{
     OrderFilter filter;
     filter.addFilter(new SideEqualFilter(SELL_SIDE));
 
-    OrderEntry* buyOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
-    OrderEntry* sellOrder = createTestOrder(instrId_, SELL_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
+    OrderEntry *buyOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
+    OrderEntry *sellOrder = createTestOrder(instrId_, SELL_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
 
     EXPECT_FALSE(filter.match(*buyOrder));
     EXPECT_TRUE(filter.match(*sellOrder));
@@ -193,12 +204,13 @@ TEST_F(FiltersTest, SideEqualFilterMatchesSell) {
 // Order Type Filter Tests
 // =============================================================================
 
-TEST_F(FiltersTest, OrderTypeEqualFilterLimit) {
+TEST_F(FiltersTest, OrderTypeEqualFilterLimit)
+{
     OrderFilter filter;
     filter.addFilter(new OrderTypeEqualFilter(LIMIT_ORDERTYPE));
 
-    OrderEntry* limitOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
-    OrderEntry* marketOrder = createTestOrder(instrId_, BUY_SIDE, MARKET_ORDERTYPE, 0.0, 100, NEW_ORDSTATUS);
+    OrderEntry *limitOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
+    OrderEntry *marketOrder = createTestOrder(instrId_, BUY_SIDE, MARKET_ORDERTYPE, 0.0, 100, NEW_ORDSTATUS);
 
     EXPECT_TRUE(filter.match(*limitOrder));
     EXPECT_FALSE(filter.match(*marketOrder));
@@ -212,26 +224,27 @@ TEST_F(FiltersTest, OrderTypeEqualFilterLimit) {
 // Composite Filter Tests (AND Logic)
 // =============================================================================
 
-TEST_F(FiltersTest, MultipleFiltersAndLogic) {
+TEST_F(FiltersTest, MultipleFiltersAndLogic)
+{
     OrderFilter filter;
     filter.addFilter(new SideEqualFilter(BUY_SIDE));
     filter.addFilter(new OrderStatusEqualFilter(NEW_ORDSTATUS));
     filter.addFilter(new OrderTypeEqualFilter(LIMIT_ORDERTYPE));
 
     // All conditions match
-    OrderEntry* matchingOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
+    OrderEntry *matchingOrder = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
     EXPECT_TRUE(filter.match(*matchingOrder));
 
     // Wrong side
-    OrderEntry* wrongSide = createTestOrder(instrId_, SELL_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
+    OrderEntry *wrongSide = createTestOrder(instrId_, SELL_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
     EXPECT_FALSE(filter.match(*wrongSide));
 
     // Wrong status
-    OrderEntry* wrongStatus = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, FILLED_ORDSTATUS);
+    OrderEntry *wrongStatus = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, FILLED_ORDSTATUS);
     EXPECT_FALSE(filter.match(*wrongStatus));
 
     // Wrong type
-    OrderEntry* wrongType = createTestOrder(instrId_, BUY_SIDE, MARKET_ORDERTYPE, 0.0, 100, NEW_ORDSTATUS);
+    OrderEntry *wrongType = createTestOrder(instrId_, BUY_SIDE, MARKET_ORDERTYPE, 0.0, 100, NEW_ORDSTATUS);
     EXPECT_FALSE(filter.match(*wrongType));
 
     delete matchingOrder;
@@ -245,12 +258,13 @@ TEST_F(FiltersTest, MultipleFiltersAndLogic) {
 // Edge Cases
 // =============================================================================
 
-TEST_F(FiltersTest, EmptySetFilter) {
+TEST_F(FiltersTest, EmptySetFilter)
+{
     std::set<OrderStatus> emptySet;
     OrderFilter filter;
     filter.addFilter(new OrderStatusInFilter(emptySet));
 
-    OrderEntry* order = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, LIMIT_ORDERTYPE, 100.0, 100, NEW_ORDSTATUS);
 
     // Empty set should not match anything
     EXPECT_FALSE(filter.match(*order));
