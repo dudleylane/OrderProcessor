@@ -140,8 +140,8 @@ private:
     // on shared MSM/event-vector members.
 public:
     typedef std::vector<DeferedEventBase *> DeferedEventsT;
-private:
 
+private:
     /// Pool for TransactionScope objects to eliminate heap allocations
     std::unique_ptr<ACID::TransactionScopePool> scopePool_;
 };
