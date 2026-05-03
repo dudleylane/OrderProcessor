@@ -131,13 +131,16 @@ private:
     bool testStateMachine_;
     bool testStateMachineCheckResult_;
 
-    std::unique_ptr<OrdState::OrderState> stateMachine_;
-    OrdState::OrderStatePersistence initialSMState_;
-
     OrderMatcher matcher_;
 
+    // stateMachine_, initialSMState_, and events_ moved to anonymous-
+    // namespace ProcessorThreadState in Processor.cpp.  They are
+    // per-TBB-worker state, not Processor state — multiple workers
+    // dispatch into Processor::process() concurrently and would race
+    // on shared MSM/event-vector members.
+public:
     typedef std::vector<DeferedEventBase *> DeferedEventsT;
-    DeferedEventsT events_;
+private:
 
     /// Pool for TransactionScope objects to eliminate heap allocations
     std::unique_ptr<ACID::TransactionScopePool> scopePool_;
