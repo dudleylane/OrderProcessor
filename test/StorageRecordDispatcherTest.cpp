@@ -62,7 +62,6 @@ public:
         }
         for (auto *raw : rawDatas_)
         {
-            delete raw->data_;
             delete raw;
         }
         for (auto *clr : clearings_)
@@ -453,12 +452,8 @@ TEST_F(StorageRecordDispatcherTest, LoadRawDataRecord)
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
     dispatcher_->startLoad();
 
-    RawDataEntry val;
-    char cbuf[32] = "RawDataValue_";
+    RawDataEntry val(STRING_RAWDATATYPE, "RawDataValue_", 13);
     val.id_ = IdT(1111, 6789);
-    val.data_ = cbuf;
-    val.length_ = 13;
-    val.type_ = STRING_RAWDATATYPE;
 
     std::string buf = createRecordTypePrefix(StorageRecordDispatcher::RAWDATA_RECORDTYPE);
     IdT id;
@@ -569,12 +564,8 @@ TEST_F(StorageRecordDispatcherTest, LoadMultipleRecordTypes)
 
     // Load RawData
     {
-        RawDataEntry val;
-        char cbuf[32] = "RawDataValue_";
+        RawDataEntry val(STRING_RAWDATATYPE, "RawDataValue_", 13);
         val.id_ = IdT(1111, 6789);
-        val.data_ = cbuf;
-        val.length_ = 13;
-        val.type_ = STRING_RAWDATATYPE;
 
         std::string buf = createRecordTypePrefix(StorageRecordDispatcher::RAWDATA_RECORDTYPE);
         IdT id;
@@ -699,12 +690,8 @@ TEST_F(StorageRecordDispatcherTest, SaveRawDataRecord)
 {
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
 
-    RawDataEntry val;
-    char cbuf[32] = "RawDataValue_";
+    RawDataEntry val(STRING_RAWDATATYPE, "RawDataValue_", 13);
     val.id_ = IdT(1114, 6789);
-    val.data_ = cbuf;
-    val.length_ = 13;
-    val.type_ = STRING_RAWDATATYPE;
 
     std::string expectedBuf = createRecordTypePrefix(StorageRecordDispatcher::RAWDATA_RECORDTYPE);
     IdT id;
@@ -779,12 +766,8 @@ TEST_F(StorageRecordDispatcherTest, SaveMultipleRecordTypes)
 
     // Save RawData
     {
-        RawDataEntry val;
-        char cbuf[32] = "rawdata1";
+        RawDataEntry val(STRING_RAWDATATYPE, "rawdata1", 8);
         val.id_ = IdT(2004, 1);
-        val.data_ = cbuf;
-        val.length_ = 8;
-        val.type_ = STRING_RAWDATATYPE;
         dispatcher_->save(val);
     }
 

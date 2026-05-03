@@ -114,6 +114,12 @@ struct RawDataEntry
 
     RawDataEntry();
     RawDataEntry(RawDataType type, const char *data, u32 len);
+    ~RawDataEntry();
+
+    RawDataEntry(const RawDataEntry &other);
+    RawDataEntry &operator=(const RawDataEntry &other);
+    RawDataEntry(RawDataEntry &&other) noexcept;
+    RawDataEntry &operator=(RawDataEntry &&other) noexcept;
 };
 bool operator<(const RawDataEntry &lft, const RawDataEntry &rght);
 
