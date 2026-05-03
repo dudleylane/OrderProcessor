@@ -51,6 +51,66 @@ RawDataEntry::RawDataEntry(RawDataType type, const char *data, u32 len) : type_(
     memcpy(data_, data, len);
 }
 
+RawDataEntry::~RawDataEntry()
+{
+    delete[] data_;
+}
+
+RawDataEntry::RawDataEntry(const RawDataEntry &other)
+    : id_(other.id_), type_(other.type_), data_(nullptr), length_(other.length_)
+{
+    if (other.data_ != nullptr)
+    {
+        data_ = new char[length_];
+        memcpy(data_, other.data_, length_);
+    }
+}
+
+RawDataEntry &RawDataEntry::operator=(const RawDataEntry &other)
+{
+    if (this == &other)
+    {
+        return *this;
+    }
+    char *newData = nullptr;
+    if (other.data_ != nullptr)
+    {
+        newData = new char[other.length_];
+        memcpy(newData, other.data_, other.length_);
+    }
+    delete[] data_;
+    id_ = other.id_;
+    type_ = other.type_;
+    data_ = newData;
+    length_ = other.length_;
+    return *this;
+}
+
+RawDataEntry::RawDataEntry(RawDataEntry &&other) noexcept
+    : id_(other.id_), type_(other.type_), data_(other.data_), length_(other.length_)
+{
+    other.data_ = nullptr;
+    other.length_ = 0;
+    other.type_ = INVALID_RAWDATATYPE;
+}
+
+RawDataEntry &RawDataEntry::operator=(RawDataEntry &&other) noexcept
+{
+    if (this == &other)
+    {
+        return *this;
+    }
+    delete[] data_;
+    id_ = other.id_;
+    type_ = other.type_;
+    data_ = other.data_;
+    length_ = other.length_;
+    other.data_ = nullptr;
+    other.length_ = 0;
+    other.type_ = INVALID_RAWDATATYPE;
+    return *this;
+}
+
 IdT::IdT(const u64 &id, const u32 &date) : id_(id), date_(date) {}
 
 void IdT::reset()

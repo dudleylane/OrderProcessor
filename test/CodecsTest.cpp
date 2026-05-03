@@ -240,15 +240,11 @@ TEST_F(CodecsTest, RawDataCodecEmpty)
 
 TEST_F(CodecsTest, RawDataCodecFilled)
 {
-    RawDataEntry val;
+    RawDataEntry val(STRING_RAWDATATYPE, "data_", 5);
     val.id_ = IdT(1234, 6789);
     std::string buf;
     IdT id;
     u32 version = 0;
-    val.type_ = STRING_RAWDATATYPE;
-    char b[64] = "data_";
-    val.data_ = &b[0];
-    val.length_ = 5;
     RawDataCodec::encode(val, &buf, &id, &version);
 
     EXPECT_FALSE(buf.empty());
@@ -261,7 +257,6 @@ TEST_F(CodecsTest, RawDataCodecFilled)
     EXPECT_EQ(decVal.type_, val.type_);
     EXPECT_EQ(decVal.length_, val.length_);
     EXPECT_EQ(0, memcmp(decVal.data_, val.data_, val.length_));
-    delete[] decVal.data_;
 }
 
 class OrderCodecTest : public ::testing::Test
