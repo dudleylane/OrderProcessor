@@ -527,7 +527,8 @@ void Processor::removeDeferedEventsFrom(size_t startIndex)
     {
         delete threadState().events[i];
     }
-    threadState().events.erase(threadState().events.begin() + static_cast<std::ptrdiff_t>(startIndex), threadState().events.end());
+    threadState().events.erase(threadState().events.begin() + static_cast<std::ptrdiff_t>(startIndex),
+                               threadState().events.end());
 }
 
 void Processor::onEvent(DeferedEventBase *evnt)
