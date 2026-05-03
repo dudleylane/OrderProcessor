@@ -44,6 +44,32 @@ struct ScopeArenaGuard
     ScopeArenaGuard(const ScopeArenaGuard &) = delete;
     ScopeArenaGuard &operator=(const ScopeArenaGuard &) = delete;
 };
+
+// Per-thread Processor workspace.  Multiple TBB workers concurrently call
+// Processor::process() and dispatch into onEvent on the same Processor
+// instance.  Sharing the state machine and deferred-event vector across
+// workers races (TSan: StateMachine.cpp:62/65, vector ops).  Each thread
+// gets its own MSM and event vector; the MSM is reset per event via
+// setPersistance, so per-thread reuse is correct.
+struct ProcessorThreadState
+{
+    std::unique_ptr<OrdState::OrderState> stateMachine;
+    OrdState::OrderStatePersistence initialSMState;
+    std::vector<DeferedEventBase *> events;
+
+    ProcessorThreadState()
+    {
+        stateMachine = std::make_unique<OrdState::OrderState>();
+        stateMachine->start();
+        initialSMState = stateMachine->getPersistence();
+    }
+};
+
+ProcessorThreadState &threadState()
+{
+    thread_local ProcessorThreadState s;
+    return s;
+}
 } // namespace
 
 Processor::Processor(void)
@@ -76,10 +102,6 @@ void Processor::init(const ProcessorParams &params)
     assert(nullptr != inQueue_);
     assert(nullptr != transactMgr_);
 
-    stateMachine_ = std::make_unique<OrderState>();
-    stateMachine_->start();
-    initialSMState_ = stateMachine_->getPersistence();
-
     matcher_.init(this);
 }
 
@@ -96,7 +118,7 @@ void Processor::onEvent(const std::string & /*source*/, const OrderEvent &evnt)
     {
         throw std::runtime_error("Processor::onEvent(OrderEvent): order pointer is null!");
     }
-    if (!events_.empty()) [[unlikely]]
+    if (!threadState().events.empty()) [[unlikely]]
     {
         throw std::runtime_error("Processor::onEvent(OrderEvent): events queue is not empty!");
     }
@@ -114,12 +136,12 @@ void Processor::onEvent(const std::string & /*source*/, const OrderEvent &evnt)
     evnt2Proc.orderBook_ = orderBook_;
 
     // restore state of the state machine
-    assert(nullptr != stateMachine_);
-    stateMachine_->setPersistance(initialSMState_);
+    assert(nullptr != threadState().stateMachine);
+    threadState().stateMachine->setPersistance(threadState().initialSMState);
     // process event
-    stateMachine_->process_event(evnt2Proc);
+    threadState().stateMachine->process_event(evnt2Proc);
     // save state machine state into the order
-    OrderStatePersistence smState = stateMachine_->getPersistence();
+    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
 
@@ -161,12 +183,12 @@ void Processor::onEvent(const std::string & /*source*/, const OrderCancelEvent &
     evnt2Proc.orderBook_ = orderBook_;
 
     // restore state machine from order and process event
-    assert(nullptr != stateMachine_);
-    stateMachine_->setPersistance(ord->stateMachinePersistance());
-    stateMachine_->process_event(evnt2Proc);
+    assert(nullptr != threadState().stateMachine);
+    threadState().stateMachine->setPersistance(ord->stateMachinePersistance());
+    threadState().stateMachine->process_event(evnt2Proc);
 
     // save updated state back to order
-    OrderStatePersistence smState = stateMachine_->getPersistence();
+    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
 
@@ -200,12 +222,12 @@ void Processor::onEvent(const std::string & /*source*/, const OrderReplaceEvent 
         evnt2Proc.orderBook_ = orderBook_;
 
         // use initial state for new replacement order
-        assert(nullptr != stateMachine_);
-        stateMachine_->setPersistance(initialSMState_);
-        stateMachine_->process_event(evnt2Proc);
+        assert(nullptr != threadState().stateMachine);
+        threadState().stateMachine->setPersistance(threadState().initialSMState);
+        threadState().stateMachine->process_event(evnt2Proc);
 
         // save state machine state into the replacement order
-        OrderStatePersistence smState = stateMachine_->getPersistence();
+        OrderStatePersistence smState = threadState().stateMachine->getPersistence();
         assert(nullptr != smState.orderData_);
         smState.orderData_->setStateMachinePersistance(smState);
     }
@@ -226,12 +248,12 @@ void Processor::onEvent(const std::string & /*source*/, const OrderReplaceEvent 
         evnt2Proc.transaction_ = scope.get();
         evnt2Proc.orderStorage_ = orderStorage_;
 
-        assert(nullptr != stateMachine_);
-        stateMachine_->setPersistance(ord->stateMachinePersistance());
-        stateMachine_->process_event(evnt2Proc);
+        assert(nullptr != threadState().stateMachine);
+        threadState().stateMachine->setPersistance(ord->stateMachinePersistance());
+        threadState().stateMachine->process_event(evnt2Proc);
 
         // save updated state back to order
-        OrderStatePersistence smState = stateMachine_->getPersistence();
+        OrderStatePersistence smState = threadState().stateMachine->getPersistence();
         assert(nullptr != smState.orderData_);
         smState.orderData_->setStateMachinePersistance(smState);
     }
@@ -269,8 +291,8 @@ void Processor::onEvent(const std::string & /*source*/, const COP::Queues::Order
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
 
     // restore state machine from order
-    assert(nullptr != stateMachine_);
-    stateMachine_->setPersistance(ord->stateMachinePersistance());
+    assert(nullptr != threadState().stateMachine);
+    threadState().stateMachine->setPersistance(ord->stateMachinePersistance());
 
     // process the appropriate state change event
     switch (evnt.changeType_)
@@ -282,7 +304,7 @@ void Processor::onEvent(const std::string & /*source*/, const COP::Queues::Order
         evnt2Proc.transaction_ = scope.get();
         evnt2Proc.orderStorage_ = orderStorage_;
         evnt2Proc.orderBook_ = orderBook_;
-        stateMachine_->process_event(evnt2Proc);
+        threadState().stateMachine->process_event(evnt2Proc);
     }
     break;
     case OrderChangeStateEvent::RESUME:
@@ -292,7 +314,7 @@ void Processor::onEvent(const std::string & /*source*/, const COP::Queues::Order
         evnt2Proc.transaction_ = scope.get();
         evnt2Proc.orderStorage_ = orderStorage_;
         evnt2Proc.orderBook_ = orderBook_;
-        stateMachine_->process_event(evnt2Proc);
+        threadState().stateMachine->process_event(evnt2Proc);
     }
     break;
     case OrderChangeStateEvent::FINISH:
@@ -302,7 +324,7 @@ void Processor::onEvent(const std::string & /*source*/, const COP::Queues::Order
         evnt2Proc.transaction_ = scope.get();
         evnt2Proc.orderStorage_ = orderStorage_;
         evnt2Proc.orderBook_ = orderBook_;
-        stateMachine_->process_event(evnt2Proc);
+        threadState().stateMachine->process_event(evnt2Proc);
     }
     break;
     default:
@@ -310,7 +332,7 @@ void Processor::onEvent(const std::string & /*source*/, const COP::Queues::Order
     }
 
     // save updated state back to order
-    OrderStatePersistence smState = stateMachine_->getPersistence();
+    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
 
@@ -326,7 +348,7 @@ void Processor::onEvent(const std::string & /*source*/, const COP::Queues::Order
 
 void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt)
 {
-    assert(events_.empty());
+    assert(threadState().events.empty());
     PooledTransactionScope scope(scopePool_.get());
     ScopeArenaGuard arenaGuard(scope.get());
 
@@ -350,10 +372,10 @@ void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt
         evnt2Proc.transaction_ = scope.get();
         evnt2Proc.orderStorage_ = orderStorage_;
 
-        assert(nullptr != stateMachine_);
-        stateMachine_->setPersistance(ord->stateMachinePersistance());
+        assert(nullptr != threadState().stateMachine);
+        threadState().stateMachine->setPersistance(ord->stateMachinePersistance());
         // process event
-        stateMachine_->process_event(evnt2Proc);
+        threadState().stateMachine->process_event(evnt2Proc);
     }
     break;
     case ProcessEvent::ON_EXEC_REPLACE:
@@ -364,10 +386,10 @@ void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt
         evnt2Proc.transaction_ = scope.get();
         evnt2Proc.orderStorage_ = orderStorage_;
 
-        assert(nullptr != stateMachine_);
-        stateMachine_->setPersistance(ord->stateMachinePersistance());
+        assert(nullptr != threadState().stateMachine);
+        threadState().stateMachine->setPersistance(ord->stateMachinePersistance());
         // process event
-        stateMachine_->process_event(evnt2Proc);
+        threadState().stateMachine->process_event(evnt2Proc);
     }
     break;
     case ProcessEvent::ON_REPLACE_REJECTED:
@@ -378,10 +400,10 @@ void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt
         evnt2Proc.transaction_ = scope.get();
         evnt2Proc.orderStorage_ = orderStorage_;
 
-        assert(nullptr != stateMachine_);
-        stateMachine_->setPersistance(ord->stateMachinePersistance());
+        assert(nullptr != threadState().stateMachine);
+        threadState().stateMachine->setPersistance(ord->stateMachinePersistance());
         // process event in state machine
-        stateMachine_->process_event(evnt2Proc);
+        threadState().stateMachine->process_event(evnt2Proc);
     }
     break;
     default:
@@ -389,7 +411,7 @@ void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt
     };
 
     // save state into the order
-    OrderStatePersistence smState = stateMachine_->getPersistence();
+    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
 
@@ -427,8 +449,8 @@ void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
 
     // restore state machine from order
-    assert(nullptr != stateMachine_);
-    stateMachine_->setPersistance(ord->stateMachinePersistance());
+    assert(nullptr != threadState().stateMachine);
+    threadState().stateMachine->setPersistance(ord->stateMachinePersistance());
 
     // process the appropriate timer event
     switch (evnt.timerType_)
@@ -440,7 +462,7 @@ void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
         evnt2Proc.transaction_ = scope.get();
         evnt2Proc.orderStorage_ = orderStorage_;
         evnt2Proc.orderBook_ = orderBook_;
-        stateMachine_->process_event(evnt2Proc);
+        threadState().stateMachine->process_event(evnt2Proc);
     }
     break;
     case TimerEvent::DAY_END:
@@ -450,7 +472,7 @@ void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
         evnt2Proc.transaction_ = scope.get();
         evnt2Proc.orderStorage_ = orderStorage_;
         evnt2Proc.orderBook_ = orderBook_;
-        stateMachine_->process_event(evnt2Proc);
+        threadState().stateMachine->process_event(evnt2Proc);
     }
     break;
     case TimerEvent::DAY_START:
@@ -460,7 +482,7 @@ void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
         evnt2Proc.transaction_ = scope.get();
         evnt2Proc.orderStorage_ = orderStorage_;
         evnt2Proc.orderBook_ = orderBook_;
-        stateMachine_->process_event(evnt2Proc);
+        threadState().stateMachine->process_event(evnt2Proc);
     }
     break;
     default:
@@ -468,7 +490,7 @@ void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
     }
 
     // save updated state back to order
-    OrderStatePersistence smState = stateMachine_->getPersistence();
+    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
 
@@ -485,27 +507,27 @@ void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
 void Processor::addDeferedEvent(DeferedEventBase *evnt)
 {
     assert(nullptr != evnt);
-    events_.push_back(evnt);
+    threadState().events.push_back(evnt);
 }
 
 size_t Processor::deferedEventCount() const
 {
-    return events_.size();
+    return threadState().events.size();
 }
 
 void Processor::removeDeferedEventsFrom(size_t startIndex)
 {
-    if (startIndex >= events_.size())
+    if (startIndex >= threadState().events.size())
     {
         return;
     }
 
     // Delete events from startIndex to end
-    for (size_t i = startIndex; i < events_.size(); ++i)
+    for (size_t i = startIndex; i < threadState().events.size(); ++i)
     {
-        delete events_[i];
+        delete threadState().events[i];
     }
-    events_.erase(events_.begin() + static_cast<std::ptrdiff_t>(startIndex), events_.end());
+    threadState().events.erase(threadState().events.begin() + static_cast<std::ptrdiff_t>(startIndex), threadState().events.end());
 }
 
 void Processor::onEvent(DeferedEventBase *evnt)
@@ -524,10 +546,10 @@ void Processor::onEvent(DeferedEventBase *evnt)
 void Processor::processDeferedEvent()
 {
     /// Defered events may enqueue another chain of defered events - need to process them also.
-    while (!events_.empty())
+    while (!threadState().events.empty())
     {
         DeferedEventsT tmp;
-        swap(tmp, events_);
+        swap(tmp, threadState().events);
         try
         {
             for (DeferedEventsT::iterator it = tmp.begin(); it != tmp.end(); ++it)
@@ -550,7 +572,7 @@ void Processor::processDeferedEvent()
             // Clear any partial-chain events enqueued before the exception
             // to prevent processing inconsistent state
             DeferedEventsT partial;
-            swap(partial, events_);
+            swap(partial, threadState().events);
             for (DeferedEventsT::iterator it = partial.begin(); it != partial.end(); ++it)
             {
                 delete *it;
@@ -568,10 +590,10 @@ void Processor::process(onTradeExecution &evnt, OrderEntry *order, const ACID::C
     // write lock on the order for state machine processing
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, true);
 
-    stateMachine_->setPersistance(order->stateMachinePersistance());
-    stateMachine_->process_event(evnt);
+    threadState().stateMachine->setPersistance(order->stateMachinePersistance());
+    threadState().stateMachine->process_event(evnt);
 
-    OrderStatePersistence smState = stateMachine_->getPersistence();
+    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
 }
@@ -584,10 +606,10 @@ void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, con
     // write lock on the order for state machine processing
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, true);
 
-    stateMachine_->setPersistance(order->stateMachinePersistance());
-    stateMachine_->process_event(evnt);
+    threadState().stateMachine->setPersistance(order->stateMachinePersistance());
+    threadState().stateMachine->process_event(evnt);
 
-    OrderStatePersistence smState = stateMachine_->getPersistence();
+    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
 }
@@ -613,9 +635,9 @@ void Processor::process(const ACID::TransactionId &id, ACID::Transaction *tr)
 
 void Processor::clearDeferedEvents()
 {
-    for (DeferedEventsT::iterator it = events_.begin(); it != events_.end(); ++it)
+    for (DeferedEventsT::iterator it = threadState().events.begin(); it != threadState().events.end(); ++it)
     {
         delete *it;
     }
-    events_.clear();
+    threadState().events.clear();
 }
