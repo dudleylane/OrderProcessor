@@ -97,7 +97,12 @@ struct LoggerImpl
 
     ~LoggerImpl()
     {
-        spdlog::drop("exchange");
+        // Join the async worker thread and clear the global registry before
+        // any shared_ptr<logger> member destructs.  Otherwise the worker can
+        // still be touching the logger's refcount while the unique_ptr<Logger>
+        // tear-down releases its shared_ptr, racing on the atomic in
+        // _Sp_counted_base::_M_release (TSan: see Logger.cpp:101 race).
+        spdlog::shutdown();
     }
 
     void setFlag(bool enabled, char flag)
