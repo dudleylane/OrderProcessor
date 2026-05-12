@@ -9,19 +9,12 @@ on:
 jobs:
   clang-format:
     name: clang-format dry-run
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/centos/centos:stream10
+    # Self-hosted runner on the dev box.  No centos:stream10 container
+    # needed — clang-format-22 is already installed on the host (same
+    # version CI used to install via `dnf install -y clang-tools-extra`).
+    runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install clang-tools
-        # CentOS Stream 10 ships clang-tools-extra (which provides
-        # clang-format) at LLVM 22.x — same major as the dev
-        # environment, so format output stays in sync without pinning.
-        shell: bash
-        run: |
-          dnf install -y clang-tools-extra git
 
       - name: Verify .clang-format conformance
         shell: bash

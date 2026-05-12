@@ -9,14 +9,16 @@ on:
 jobs:
   build-and-test:
     name: Release build + ctest
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/centos/centos:stream10
-    # Activate gcc-toolset-15 by putting its binaries first on PATH and
-    # adding its libraries to LD_LIBRARY_PATH.  No `source enable` script
-    # exists at the standard path on Stream 10 — env vars achieve the
-    # same effect across every step without wrapping each command.
+    # Self-hosted runner on the dev box.  The same toolchain CI used to
+    # install via `dnf install` is already on this host: gcc-toolset-15
+    # at /opt/rh/gcc-toolset-15, cmake, ninja, tbb-devel, spdlog-devel,
+    # boost-devel, lmdb-devel, numactl-devel.  BUILD_FIX is OFF
+    # because the QuickFIX hardened fork is not in any standard repo;
+    # BUILD_PG is OFF because libpqxx is optional.
+    runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
     env:
+      # Activate gcc-toolset-15 the same way the container path did:
+      # put its binaries first on PATH, its libs first on LD_LIBRARY_PATH.
       PATH: /opt/rh/gcc-toolset-15/root/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       LD_LIBRARY_PATH: /opt/rh/gcc-toolset-15/root/usr/lib64
       CC: /opt/rh/gcc-toolset-15/root/usr/bin/gcc
@@ -24,30 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build tools (dnf)
-        # Match the dev environment documented in CLAUDE.md:
-        # CentOS Stream 10 + gcc-toolset-15.  CRB enables -devel packages
-        # held back from base; EPEL ships some build-time deps.  TBB,
-        # spdlog, Boost, LMDB, libnuma cover the project's hard
-        # dependencies (CMakeLists.txt:46-70).  BUILD_FIX is OFF in CI
-        # because the QuickFIX hardened fork is not in any standard
-        # repo.  BUILD_PG is OFF because libpqxx is optional.
-        shell: bash
-        run: |
-          dnf install -y dnf-plugins-core epel-release
-          dnf config-manager --set-enabled crb
-          dnf install -y \
-            gcc-toolset-15 gcc-toolset-15-libatomic-devel \
-            cmake ninja-build pkgconfig git \
-            tbb-devel spdlog-devel boost-devel \
-            lmdb-devel numactl-devel
-
       - name: Configure
-        # FetchContent pulls GoogleTest, Google Benchmark and
-        # nlohmann/json at configure time — needs network access (default
-        # in GitHub-hosted runners).  Tests, benchmarks, and the
-        # WebSocket app are all on so the bulk of the codebase is
-        # exercised by the build.
         shell: bash
         run: |
           cmake -B build -G Ninja \
