@@ -23,9 +23,7 @@ on:
 jobs:
   benchmark:
     name: Run benchmark regression
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/centos/centos:stream10
+    runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
     env:
       PATH: /opt/rh/gcc-toolset-15/root/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       LD_LIBRARY_PATH: /opt/rh/gcc-toolset-15/root/usr/lib64
@@ -33,17 +31,6 @@ jobs:
       CXX: /opt/rh/gcc-toolset-15/root/usr/bin/g++
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install build tools (dnf)
-        shell: bash
-        run: |
-          dnf install -y dnf-plugins-core epel-release
-          dnf config-manager --set-enabled crb
-          dnf install -y \
-            gcc-toolset-15 gcc-toolset-15-libatomic-devel \
-            cmake ninja-build pkgconfig git python3 \
-            tbb-devel spdlog-devel boost-devel \
-            lmdb-devel numactl-devel
 
       - name: Run benchmark regression
         # scripts/benchmark-regression.sh handles configure, build, run,

@@ -9,9 +9,7 @@ on:
 jobs:
   sanitizer:
     name: ${{ matrix.sanitizer }}${{ matrix.allow_failure && ' (advisory)' || '' }}
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/centos/centos:stream10
+    runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
     continue-on-error: ${{ matrix.allow_failure }}
     strategy:
       fail-fast: false
@@ -56,24 +54,6 @@ jobs:
       CXX: /opt/rh/gcc-toolset-15/root/usr/bin/g++
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install build tools (dnf)
-        # gcc-toolset-15 plus the -lib*-devel packages give the
-        # sanitizer runtimes that CMake's find_package(Threads)
-        # try_compile needs once sanitizer flags are in
-        # CMAKE_CXX_FLAGS — without them, try_compile silently fails.
-        shell: bash
-        run: |
-          dnf install -y dnf-plugins-core epel-release
-          dnf config-manager --set-enabled crb
-          dnf install -y \
-            gcc-toolset-15 gcc-toolset-15-libatomic-devel \
-            gcc-toolset-15-libasan-devel \
-            gcc-toolset-15-libubsan-devel \
-            gcc-toolset-15-libtsan-devel \
-            cmake ninja-build pkgconfig git \
-            tbb-devel spdlog-devel boost-devel \
-            lmdb-devel numactl-devel
 
       - name: Configure
         # Debug build keeps assertions on so invariant violations fire
