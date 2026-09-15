@@ -176,6 +176,19 @@ void NLinkTree::clear()
     }
 }
 
+void NLinkTree::values(std::vector<V> *vals) const
+{
+    assert(nullptr != vals);
+    vals->reserve(vals->size() + keys_.size());
+    for (KParamsT::const_iterator it = keys_.begin(); it != keys_.end(); ++it)
+    {
+        if ((nullptr != it->second) && (nullptr != it->second->node_))
+        {
+            vals->push_back(it->second->node_->value_);
+        }
+    }
+}
+
 bool NLinkTree::add(const K &key, const V &value, const DependObjs &depend, int *readyToExecuteAdded)
 {
     assert((keys_.empty()) || (keys_.rbegin()->first < key));

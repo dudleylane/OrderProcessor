@@ -24,6 +24,15 @@ TransactionMgr::~TransactionMgr(void)
 {
     assert(!started_);
     transactionTree_.dumpTree();
+
+    // The manager owns every transaction added and not yet removed; the tree frees only its own nodes.
+    std::vector<Transaction *> pending;
+    transactionTree_.values(&pending);
+    transactionTree_.clear();
+    for (size_t i = 0; i < pending.size(); ++i)
+    {
+        delete pending[i];
+    }
 }
 
 void TransactionMgr::attach(TransactionObserver *obs)
