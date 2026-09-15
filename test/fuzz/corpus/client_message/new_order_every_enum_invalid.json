@@ -1,0 +1,1 @@
+{"type": "new_order", "data": {"symbol": "", "side": "LONG", "ordType": "ICEBERG", "tif": "NEVER", "currency": "GBP", "capacity": "ROBOT"}}
