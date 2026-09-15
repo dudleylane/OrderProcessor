@@ -12,9 +12,8 @@ jobs:
     # Self-hosted runner on the dev box.  The same toolchain CI used to
     # install via `dnf install` is already on this host: gcc-toolset-15
     # at /opt/rh/gcc-toolset-15, cmake, ninja, tbb-devel, spdlog-devel,
-    # boost-devel, lmdb-devel, numactl-devel.  BUILD_FIX is OFF
-    # because the QuickFIX hardened fork is not in any standard repo;
-    # BUILD_PG is OFF because libpqxx is optional.
+    # boost-devel, lmdb-devel, numactl-devel.  BUILD_PG is OFF because
+    # libpqxx is optional.
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
     env:
       # Activate gcc-toolset-15 the same way the container path did:
@@ -34,8 +33,7 @@ jobs:
             -DBUILD_TESTS=ON \
             -DBUILD_BENCHMARKS=ON \
             -DBUILD_APP=ON \
-            -DBUILD_PG=OFF \
-            -DBUILD_FIX=OFF
+            -DBUILD_PG=OFF
 
       - name: Build
         shell: bash
