@@ -21,6 +21,7 @@
 
 using namespace COP;
 using namespace COP::Store;
+using namespace test;
 using test::DummyOrderSaver;
 
 namespace
@@ -242,8 +243,10 @@ protected:
     void SetUp() override
     {
         FileStorage::init();
-        testFile_ = "testStorage.dat";
-        brokenFile_ = "testBrokenStorage.dat";
+        // Unique per test case: ctest runs every test from the same working directory, so fixed
+        // relative names collide when the suite runs in parallel.
+        testFile_ = uniqueTestPath("storage") + ".dat";
+        brokenFile_ = uniqueTestPath("broken") + ".dat";
     }
 
     void TearDown() override

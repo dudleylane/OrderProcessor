@@ -17,9 +17,11 @@
 #include <filesystem>
 
 #include "LMDBStorage.h"
+#include "TestAux.h"
 
 using namespace COP;
 using namespace COP::Store;
+using namespace test;
 
 namespace
 {
@@ -76,7 +78,9 @@ class LMDBStorageTest : public ::testing::Test
 protected:
     void SetUp() override
     {
-        testDir_ = "test_lmdb_storage";
+        // ctest runs every test from the same working directory, so a fixed relative path is shared by
+        // all tests of a parallel run: one case would delete another's database. Give each case its own.
+        testDir_ = uniqueTestPath("lmdb");
         cleanup();
     }
 
