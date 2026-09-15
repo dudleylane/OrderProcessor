@@ -46,3 +46,4 @@ dist/
 
 # Docker environment secrets
 docker/.env
+build-*/
