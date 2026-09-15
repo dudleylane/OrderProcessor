@@ -63,6 +63,8 @@ struct ParsedReplaceOrder
 struct ParsedClientMessage
 {
     std::string type;
+    // Why the message was rejected; set only when type == "error"
+    std::string error;
     // For subscribe/unsubscribe
     std::string symbol;
     // Parsed data (only one is valid depending on type)
@@ -72,7 +74,8 @@ struct ParsedClientMessage
     ParsedReplaceOrder replaceOrder;
 };
 
-/// Never throws: malformed or mistyped JSON yields type == "error".
+/// Never throws. Malformed or mistyped JSON, or a numeric field outside its type's range, yields
+/// type == "error" with the reason in error.
 ParsedClientMessage parseClientMessage(const std::string &json);
 
 } // namespace App
