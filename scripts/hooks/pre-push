@@ -81,6 +81,11 @@ fi
 if ! grep -q '^CMAKE_BUILD_TYPE:STRING=Release$' "$BUILD_DIR/CMakeCache.txt"; then
     refuse "$BUILD_DIR is not a Release build; CI tests Release. Point BUILD_DIR at one."
 fi
+# ctest exits 0 when it finds no tests, so a BUILD_TESTS=OFF directory would
+# pass the gate vacuously. Refuse it here, before the slow build step.
+if ! ctest --test-dir "$BUILD_DIR" -N 2>/dev/null | grep -qE '^Total Tests: [1-9]'; then
+    refuse "$BUILD_DIR registers no tests (BUILD_TESTS=OFF?); ctest would pass vacuously"
+fi
 cmake --build "$BUILD_DIR" -j"$(nproc)" || refuse "build failed"
 
 # 2. Tests, serial, as in CI.
