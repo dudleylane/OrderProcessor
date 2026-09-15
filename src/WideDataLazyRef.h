@@ -82,7 +82,7 @@ public:
     };
 
 private:
-    mutable T val_;
+    mutable T val_{};
     SourceIdT id_;
     mutable std::atomic<bool> loaded_;
     mutable std::mutex mtx_;
