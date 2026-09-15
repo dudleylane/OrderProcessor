@@ -18,6 +18,7 @@
 #include <map>
 #include <flat_map>
 #include <list>
+#include <vector>
 
 #include "AllocateCache.h"
 #include "TypesDef.h"
@@ -107,6 +108,8 @@ public:
     bool isCurrentValid() const;
 
     void clear();
+    /// appends the value of every key still in the tree; values are not owned by the tree
+    void values(std::vector<V> *vals) const;
 
     void dumpTree();
 
