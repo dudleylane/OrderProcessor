@@ -44,6 +44,8 @@ class InstrumentSymbolFilter : public InstrumentElementFilter
 public:
     InstrumentSymbolFilter(Impl::StringFilter *filter);
     ~InstrumentSymbolFilter();
+    InstrumentSymbolFilter(const InstrumentSymbolFilter &) = delete;
+    InstrumentSymbolFilter &operator=(const InstrumentSymbolFilter &) = delete;
     virtual bool match(const InstrumentEntry &params) const;
     virtual bool getInstrumentEntry(InstrumentEntry *val) const;
 
@@ -55,6 +57,9 @@ class InstrumentSecurityIdFilter : public InstrumentElementFilter
 {
 public:
     InstrumentSecurityIdFilter(Impl::StringFilter *filter);
+    ~InstrumentSecurityIdFilter();
+    InstrumentSecurityIdFilter(const InstrumentSecurityIdFilter &) = delete;
+    InstrumentSecurityIdFilter &operator=(const InstrumentSecurityIdFilter &) = delete;
     virtual bool match(const InstrumentEntry &params) const;
     virtual bool getInstrumentEntry(InstrumentEntry *val) const;
 
@@ -66,6 +71,9 @@ class InstrumentSecurityIdSourceFilter : public InstrumentElementFilter
 {
 public:
     InstrumentSecurityIdSourceFilter(Impl::StringFilter *filter);
+    ~InstrumentSecurityIdSourceFilter();
+    InstrumentSecurityIdSourceFilter(const InstrumentSecurityIdSourceFilter &) = delete;
+    InstrumentSecurityIdSourceFilter &operator=(const InstrumentSecurityIdSourceFilter &) = delete;
     virtual bool match(const InstrumentEntry &params) const;
     virtual bool getInstrumentEntry(InstrumentEntry *val) const;
 
@@ -116,6 +124,9 @@ class AccountAccountFilter : public AccountElementFilter
 {
 public:
     AccountAccountFilter(Impl::StringFilter *filter);
+    ~AccountAccountFilter();
+    AccountAccountFilter(const AccountAccountFilter &) = delete;
+    AccountAccountFilter &operator=(const AccountAccountFilter &) = delete;
     virtual bool match(const AccountEntry &params) const;
 
 private:
@@ -126,6 +137,9 @@ class AccountFirmFilter : public AccountElementFilter
 {
 public:
     AccountFirmFilter(Impl::StringFilter *filter);
+    ~AccountFirmFilter();
+    AccountFirmFilter(const AccountFirmFilter &) = delete;
+    AccountFirmFilter &operator=(const AccountFirmFilter &) = delete;
     virtual bool match(const AccountEntry &params) const;
 
 private:
@@ -187,6 +201,9 @@ class ClearingFirmFilter : public ClearingElementFilter
 {
 public:
     ClearingFirmFilter(Impl::StringFilter *filter);
+    ~ClearingFirmFilter();
+    ClearingFirmFilter(const ClearingFirmFilter &) = delete;
+    ClearingFirmFilter &operator=(const ClearingFirmFilter &) = delete;
     virtual bool match(const ClearingEntry &params) const;
 
 private:

@@ -50,6 +50,11 @@ bool InstrumentSymbolFilter::getInstrumentEntry(InstrumentEntry *val) const
 
 InstrumentSecurityIdFilter::InstrumentSecurityIdFilter(Impl::StringFilter *filter) : filter_(filter) {}
 
+InstrumentSecurityIdFilter::~InstrumentSecurityIdFilter()
+{
+    delete filter_;
+}
+
 bool InstrumentSecurityIdFilter::match(const InstrumentEntry &params) const
 {
     return filter_->filter(params.securityId_);
@@ -62,6 +67,11 @@ bool InstrumentSecurityIdFilter::getInstrumentEntry(InstrumentEntry *val) const
 }
 
 InstrumentSecurityIdSourceFilter::InstrumentSecurityIdSourceFilter(Impl::StringFilter *filter) : filter_(filter) {}
+
+InstrumentSecurityIdSourceFilter::~InstrumentSecurityIdSourceFilter()
+{
+    delete filter_;
+}
 
 bool InstrumentSecurityIdSourceFilter::match(const InstrumentEntry &params) const
 {
@@ -132,12 +142,22 @@ bool AccountIdFilter::match(const AccountEntry &params) const
 
 AccountAccountFilter::AccountAccountFilter(Impl::StringFilter *filter) : filter_(filter) {}
 
+AccountAccountFilter::~AccountAccountFilter()
+{
+    delete filter_;
+}
+
 bool AccountAccountFilter::match(const AccountEntry &params) const
 {
     return filter_->filter(params.account_);
 }
 
 AccountFirmFilter::AccountFirmFilter(Impl::StringFilter *filter) : filter_(filter) {}
+
+AccountFirmFilter::~AccountFirmFilter()
+{
+    delete filter_;
+}
 
 bool AccountFirmFilter::match(const AccountEntry &params) const
 {
@@ -202,6 +222,11 @@ bool ClearingIdFilter::match(const ClearingEntry &params) const
 }
 
 ClearingFirmFilter::ClearingFirmFilter(Impl::StringFilter *filter) : filter_(filter) {}
+
+ClearingFirmFilter::~ClearingFirmFilter()
+{
+    delete filter_;
+}
 
 bool ClearingFirmFilter::match(const ClearingEntry &params) const
 {
