@@ -102,7 +102,7 @@ struct onExternalOrderRejected : public OrderStateEvent
     }
 
     OrderEntry *order_;
-    std::string_view reason_;
+    std::string reason_;
 };
 
 struct onRecvRplOrderRejected : public OrderStateEvent
@@ -116,14 +116,14 @@ struct onRecvRplOrderRejected : public OrderStateEvent
 
     OrderEntry *order_;
 
-    std::string_view reason_;
+    std::string reason_;
 };
 struct onRplOrderRejected : public OrderStateEvent
 {
     onRplOrderRejected() {}
     onRplOrderRejected(const OrderStateEvent &evnt, std::string_view reason) : OrderStateEvent(evnt), reason_(reason) {}
 
-    std::string_view reason_;
+    std::string reason_;
 };
 struct onTradeExecution : public OrderStateEvent
 {
@@ -167,7 +167,7 @@ struct onOrderRejected : public OrderStateEvent
     explicit onOrderRejected(const OrderStateEvent &evnt) : OrderStateEvent(evnt) {}
     onOrderRejected(const OrderStateEvent &evnt, std::string_view reason) : OrderStateEvent(evnt), reason_(reason) {}
 
-    std::string_view reason_;
+    std::string reason_;
 };
 
 struct onRecvOrderRejected : public OrderStateEvent
@@ -180,7 +180,7 @@ struct onRecvOrderRejected : public OrderStateEvent
     }
 
     OrderEntry *order_;
-    std::string_view reason_;
+    std::string reason_;
 };
 
 struct onReplaceRejected : public OrderStateEvent
