@@ -58,6 +58,10 @@ target_sources(orderProcessorTest
 
         # Doc-code consistency enforcement
         DocConsistencyTest.cpp
+
+        # WebSocket client-message parser (built from app/, which the test target does not link)
+        ClientMessageParserTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/ClientMessageParser.cpp
 )
 
 target_include_directories(orderProcessorTest
@@ -65,6 +69,7 @@ target_include_directories(orderProcessorTest
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/mocks
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/app
 )
 
 if(BUILD_PG)

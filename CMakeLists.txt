@@ -82,6 +82,15 @@ endif()
 # FetchContent for external dependencies
 include(FetchContent)
 
+# nlohmann/json is needed by the app, the fuzz targets, and the parser unit tests, so it is fetched
+# before the test target is created.
+if(BUILD_APP OR BUILD_FUZZ OR BUILD_TESTS)
+    FetchContent_Declare(json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG v3.11.3)
+    FetchContent_MakeAvailable(json)
+endif()
+
 if(BUILD_TESTS)
     FetchContent_Declare(
         googletest
@@ -100,6 +109,7 @@ if(BUILD_TESTS)
             orderEngine
             GTest::gtest
             GTest::gmock
+            nlohmann_json::nlohmann_json
     )
 
     include(GoogleTest)
@@ -135,13 +145,6 @@ if(BUILD_BENCHMARKS)
         COMMENT "Running benchmark regression tests against stored baseline..."
         USES_TERMINAL
     )
-endif()
-
-if(BUILD_APP OR BUILD_FUZZ)
-    FetchContent_Declare(json
-        GIT_REPOSITORY https://github.com/nlohmann/json.git
-        GIT_TAG v3.11.3)
-    FetchContent_MakeAvailable(json)
 endif()
 
 if(BUILD_APP)

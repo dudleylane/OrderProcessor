@@ -80,6 +80,12 @@ void WsSession::handleMessage(const std::string &msgStr)
 {
     auto msg = parseClientMessage(msgStr);
 
+    if (msg.type == "error")
+    {
+        send(serializeError("Invalid message: " + msg.error));
+        return;
+    }
+
     if (msg.type == "new_order")
     {
         auto &no = msg.newOrder;
