@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include "DataModelDef.h"
 #include "OrderBookImpl.h"
+#include "ClientMessageParser.h"
 
 namespace COP
 {
@@ -50,51 +51,6 @@ struct SystemMetrics
 };
 
 std::string serializeMetricsUpdate(const SystemMetrics &metrics);
-
-struct ParsedNewOrder
-{
-    std::string symbol;
-    Side side;
-    OrderType ordType;
-    double price;
-    double stopPx;
-    unsigned int orderQty;
-    unsigned int minQty;
-    TimeInForce tif;
-    std::string account;
-    Currency currency;
-    Capacity capacity;
-};
-
-struct ParsedCancelOrder
-{
-    u64 orderId;
-    std::string clOrderId;
-};
-
-struct ParsedReplaceOrder
-{
-    u64 orderId;
-    double price;
-    unsigned int orderQty;
-    TimeInForce tif;
-    bool hasPrice;
-    bool hasQty;
-    bool hasTif;
-};
-
-struct ParsedClientMessage
-{
-    std::string type;
-    // For subscribe/unsubscribe
-    std::string symbol;
-    // Parsed data (only one is valid depending on type)
-    ParsedNewOrder newOrder;
-    ParsedCancelOrder cancelOrder;
-    ParsedReplaceOrder replaceOrder;
-};
-
-ParsedClientMessage parseClientMessage(const std::string &json);
 
 } // namespace App
 } // namespace COP

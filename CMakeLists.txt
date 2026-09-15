@@ -15,6 +15,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(BUILD_TESTS "Build unit tests" ON)
 option(BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(BUILD_APP "Build production WebSocket server" ON)
+option(BUILD_FUZZ "Build fuzz targets in test/fuzz (libFuzzer with Clang, corpus replay otherwise)" OFF)
 
 # Compiler flags
 add_compile_options(-msse2 -fexceptions)
@@ -136,12 +137,14 @@ if(BUILD_BENCHMARKS)
     )
 endif()
 
-if(BUILD_APP)
+if(BUILD_APP OR BUILD_FUZZ)
     FetchContent_Declare(json
         GIT_REPOSITORY https://github.com/nlohmann/json.git
         GIT_TAG v3.11.3)
     FetchContent_MakeAvailable(json)
+endif()
 
+if(BUILD_APP)
     add_executable(orderProcessorServer)
     add_subdirectory(app)
     target_link_libraries(orderProcessorServer PRIVATE
@@ -149,6 +152,13 @@ if(BUILD_APP)
 
     add_executable(seedData app/seed_data.cpp)
     target_link_libraries(seedData PRIVATE orderEngine pthread)
+endif()
+
+if(BUILD_FUZZ)
+    # enable_testing() otherwise runs only under BUILD_TESTS; without it the
+    # corpus-replay add_test registers nothing and ctest passes vacuously.
+    enable_testing()
+    add_subdirectory(test/fuzz)
 endif()
 
 # Installation

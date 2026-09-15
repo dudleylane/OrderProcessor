@@ -1,0 +1,1 @@
+{"type": "new_order", "data": {"symbol": 123, "side": 7, "ordType": true, "price": "abc", "orderQty": "many", "tif": null, "account": [], "currency": {}, "capacity": 1.5}}
