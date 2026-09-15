@@ -260,6 +260,9 @@ class DestinationFilter : public OrderElementFilter
 {
 public:
     DestinationFilter(Impl::StringFilter *flt);
+    ~DestinationFilter();
+    DestinationFilter(const DestinationFilter &) = delete;
+    DestinationFilter &operator=(const DestinationFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -270,6 +273,9 @@ class SourceFilter : public OrderEntryFilter
 {
 public:
     SourceFilter(Impl::StringFilter *flt);
+    ~SourceFilter();
+    SourceFilter(const SourceFilter &) = delete;
+    SourceFilter &operator=(const SourceFilter &) = delete;
     virtual bool match(const OrderEntry &params) const;
 
 private:
@@ -280,6 +286,9 @@ class PxFilter : public OrderElementFilter
 {
 public:
     PxFilter(Impl::PriceFilter *flt);
+    ~PxFilter();
+    PxFilter(const PxFilter &) = delete;
+    PxFilter &operator=(const PxFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -290,6 +299,9 @@ class StopPxFilter : public OrderElementFilter
 {
 public:
     StopPxFilter(Impl::PriceFilter *flt);
+    ~StopPxFilter();
+    StopPxFilter(const StopPxFilter &) = delete;
+    StopPxFilter &operator=(const StopPxFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -300,6 +312,9 @@ class AvgPxFilter : public OrderElementFilter
 {
 public:
     AvgPxFilter(Impl::PriceFilter *flt);
+    ~AvgPxFilter();
+    AvgPxFilter(const AvgPxFilter &) = delete;
+    AvgPxFilter &operator=(const AvgPxFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -310,6 +325,9 @@ class DayAvgPxFilter : public OrderElementFilter
 {
 public:
     DayAvgPxFilter(Impl::PriceFilter *flt);
+    ~DayAvgPxFilter();
+    DayAvgPxFilter(const DayAvgPxFilter &) = delete;
+    DayAvgPxFilter &operator=(const DayAvgPxFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -320,6 +338,9 @@ class MinQtyFilter : public OrderElementFilter
 {
 public:
     MinQtyFilter(Impl::QuantityFilter *flt);
+    ~MinQtyFilter();
+    MinQtyFilter(const MinQtyFilter &) = delete;
+    MinQtyFilter &operator=(const MinQtyFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -330,6 +351,9 @@ class OrderQtyFilter : public OrderElementFilter
 {
 public:
     OrderQtyFilter(Impl::QuantityFilter *flt);
+    ~OrderQtyFilter();
+    OrderQtyFilter(const OrderQtyFilter &) = delete;
+    OrderQtyFilter &operator=(const OrderQtyFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -340,6 +364,9 @@ class LeavesQtyFilter : public OrderElementFilter
 {
 public:
     LeavesQtyFilter(Impl::QuantityFilter *flt);
+    ~LeavesQtyFilter();
+    LeavesQtyFilter(const LeavesQtyFilter &) = delete;
+    LeavesQtyFilter &operator=(const LeavesQtyFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -350,6 +377,9 @@ class CumQtyFilter : public OrderElementFilter
 {
 public:
     CumQtyFilter(Impl::QuantityFilter *flt);
+    ~CumQtyFilter();
+    CumQtyFilter(const CumQtyFilter &) = delete;
+    CumQtyFilter &operator=(const CumQtyFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -360,6 +390,9 @@ class DayOrderQtyFilter : public OrderElementFilter
 {
 public:
     DayOrderQtyFilter(Impl::QuantityFilter *flt);
+    ~DayOrderQtyFilter();
+    DayOrderQtyFilter(const DayOrderQtyFilter &) = delete;
+    DayOrderQtyFilter &operator=(const DayOrderQtyFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -370,6 +403,9 @@ class DayCumQtyFilter : public OrderElementFilter
 {
 public:
     DayCumQtyFilter(Impl::QuantityFilter *flt);
+    ~DayCumQtyFilter();
+    DayCumQtyFilter(const DayCumQtyFilter &) = delete;
+    DayCumQtyFilter &operator=(const DayCumQtyFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -380,6 +416,9 @@ class ExpireTimeFilter : public OrderElementFilter
 {
 public:
     ExpireTimeFilter(Impl::DateTimeFilter *flt);
+    ~ExpireTimeFilter();
+    ExpireTimeFilter(const ExpireTimeFilter &) = delete;
+    ExpireTimeFilter &operator=(const ExpireTimeFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -390,6 +429,9 @@ class SettlDateFilter : public OrderElementFilter
 {
 public:
     SettlDateFilter(Impl::DateTimeFilter *flt);
+    ~SettlDateFilter();
+    SettlDateFilter(const SettlDateFilter &) = delete;
+    SettlDateFilter &operator=(const SettlDateFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -400,6 +442,9 @@ class CreationTimeFilter : public OrderElementFilter
 {
 public:
     CreationTimeFilter(Impl::DateTimeFilter *flt);
+    ~CreationTimeFilter();
+    CreationTimeFilter(const CreationTimeFilter &) = delete;
+    CreationTimeFilter &operator=(const CreationTimeFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
@@ -410,6 +455,9 @@ class LastUpdateTimeFilter : public OrderElementFilter
 {
 public:
     LastUpdateTimeFilter(Impl::DateTimeFilter *flt);
+    ~LastUpdateTimeFilter();
+    LastUpdateTimeFilter(const LastUpdateTimeFilter &) = delete;
+    LastUpdateTimeFilter &operator=(const LastUpdateTimeFilter &) = delete;
     virtual bool match(const OrderParams &params) const;
 
 private:
