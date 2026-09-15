@@ -166,6 +166,16 @@ cd build && ctest --output-on-failure
 ./orderProcessorTest --gtest_filter="ProcessorTest.*"
 ```
 
+### Local pre-push gate
+
+A tracked hook runs the build, `ctest -j1`, and the clang-format check before every push and refuses the push if any fails. Enable it once per clone:
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
+Bypass deliberately with `git push --no-verify` and record why in the commit message.
+
 ### Benchmarks
 
 ```bash
