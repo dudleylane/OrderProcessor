@@ -214,12 +214,22 @@ bool InstructionsInFilter::match(const OrderParams &params) const
 
 DestinationFilter::DestinationFilter(Impl::StringFilter *flt) : filter_(flt) {}
 
+DestinationFilter::~DestinationFilter()
+{
+    delete filter_;
+}
+
 bool DestinationFilter::match(const OrderParams &params) const
 {
     return filter_->filter(params.destination_.get());
 }
 
 SourceFilter::SourceFilter(Impl::StringFilter *flt) : filter_(flt) {}
+
+SourceFilter::~SourceFilter()
+{
+    delete filter_;
+}
 
 bool SourceFilter::match(const OrderEntry &params) const
 {
@@ -228,12 +238,22 @@ bool SourceFilter::match(const OrderEntry &params) const
 
 PxFilter::PxFilter(Impl::PriceFilter *flt) : filter_(flt) {}
 
+PxFilter::~PxFilter()
+{
+    delete filter_;
+}
+
 bool PxFilter::match(const OrderParams &params) const
 {
     return filter_->filter(params.price_);
 }
 
 StopPxFilter::StopPxFilter(Impl::PriceFilter *flt) : filter_(flt) {}
+
+StopPxFilter::~StopPxFilter()
+{
+    delete filter_;
+}
 
 bool StopPxFilter::match(const OrderParams &params) const
 {
@@ -242,12 +262,22 @@ bool StopPxFilter::match(const OrderParams &params) const
 
 AvgPxFilter::AvgPxFilter(Impl::PriceFilter *flt) : filter_(flt) {}
 
+AvgPxFilter::~AvgPxFilter()
+{
+    delete filter_;
+}
+
 bool AvgPxFilter::match(const OrderParams &params) const
 {
     return filter_->filter(params.avgPx_);
 }
 
 DayAvgPxFilter::DayAvgPxFilter(Impl::PriceFilter *flt) : filter_(flt) {}
+
+DayAvgPxFilter::~DayAvgPxFilter()
+{
+    delete filter_;
+}
 
 bool DayAvgPxFilter::match(const OrderParams &params) const
 {
@@ -256,12 +286,22 @@ bool DayAvgPxFilter::match(const OrderParams &params) const
 
 MinQtyFilter::MinQtyFilter(Impl::QuantityFilter *flt) : filter_(flt) {}
 
+MinQtyFilter::~MinQtyFilter()
+{
+    delete filter_;
+}
+
 bool MinQtyFilter::match(const OrderParams &params) const
 {
     return filter_->filter(params.minQty_);
 }
 
 OrderQtyFilter::OrderQtyFilter(Impl::QuantityFilter *flt) : filter_(flt) {}
+
+OrderQtyFilter::~OrderQtyFilter()
+{
+    delete filter_;
+}
 
 bool OrderQtyFilter::match(const OrderParams &params) const
 {
@@ -270,12 +310,22 @@ bool OrderQtyFilter::match(const OrderParams &params) const
 
 LeavesQtyFilter::LeavesQtyFilter(Impl::QuantityFilter *flt) : filter_(flt) {}
 
+LeavesQtyFilter::~LeavesQtyFilter()
+{
+    delete filter_;
+}
+
 bool LeavesQtyFilter::match(const OrderParams &params) const
 {
     return filter_->filter(params.leavesQty_);
 }
 
 CumQtyFilter::CumQtyFilter(Impl::QuantityFilter *flt) : filter_(flt) {}
+
+CumQtyFilter::~CumQtyFilter()
+{
+    delete filter_;
+}
 
 bool CumQtyFilter::match(const OrderParams &params) const
 {
@@ -284,12 +334,22 @@ bool CumQtyFilter::match(const OrderParams &params) const
 
 DayOrderQtyFilter::DayOrderQtyFilter(Impl::QuantityFilter *flt) : filter_(flt) {}
 
+DayOrderQtyFilter::~DayOrderQtyFilter()
+{
+    delete filter_;
+}
+
 bool DayOrderQtyFilter::match(const OrderParams &params) const
 {
     return filter_->filter(params.dayOrderQty_);
 }
 
 DayCumQtyFilter::DayCumQtyFilter(Impl::QuantityFilter *flt) : filter_(flt) {}
+
+DayCumQtyFilter::~DayCumQtyFilter()
+{
+    delete filter_;
+}
 
 bool DayCumQtyFilter::match(const OrderParams &params) const
 {
@@ -298,12 +358,22 @@ bool DayCumQtyFilter::match(const OrderParams &params) const
 
 ExpireTimeFilter::ExpireTimeFilter(Impl::DateTimeFilter *flt) : filter_(flt) {}
 
+ExpireTimeFilter::~ExpireTimeFilter()
+{
+    delete filter_;
+}
+
 bool ExpireTimeFilter::match(const OrderParams &params) const
 {
     return filter_->filter(params.expireTime_);
 }
 
 SettlDateFilter::SettlDateFilter(Impl::DateTimeFilter *flt) : filter_(flt) {}
+
+SettlDateFilter::~SettlDateFilter()
+{
+    delete filter_;
+}
 
 bool SettlDateFilter::match(const OrderParams &params) const
 {
@@ -312,12 +382,22 @@ bool SettlDateFilter::match(const OrderParams &params) const
 
 CreationTimeFilter::CreationTimeFilter(Impl::DateTimeFilter *flt) : filter_(flt) {}
 
+CreationTimeFilter::~CreationTimeFilter()
+{
+    delete filter_;
+}
+
 bool CreationTimeFilter::match(const OrderParams &params) const
 {
     return filter_->filter(params.creationTime_);
 }
 
 LastUpdateTimeFilter::LastUpdateTimeFilter(Impl::DateTimeFilter *flt) : filter_(flt) {}
+
+LastUpdateTimeFilter::~LastUpdateTimeFilter()
+{
+    delete filter_;
+}
 
 bool LastUpdateTimeFilter::match(const OrderParams &params) const
 {

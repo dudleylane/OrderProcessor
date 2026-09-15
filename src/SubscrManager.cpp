@@ -34,7 +34,23 @@ SubscrManager::SubscrManager(void)
     subscrCounter_.store(1);
 }
 
-SubscrManager::~SubscrManager(void) {}
+SubscrManager::~SubscrManager(void)
+{
+    // The manager owns the filters of every subscription still registered. removeSubscriptions() swaps a
+    // handler's list out of subscriptionsByHandler_ before freeing it, so each remaining filter is freed once.
+    for (SubscriptionsByHandlerT::const_iterator hit = subscriptionsByHandler_.begin();
+         hit != subscriptionsByHandler_.end(); ++hit)
+    {
+        for (SubscriptionsListT::const_iterator it = hit->second.begin(); it != hit->second.end(); ++it)
+        {
+            if ((ORDER_SUBSCRIPTION == it->type_) && (nullptr != it->subscription_.order_))
+            {
+                it->subscription_.order_->release();
+                delete it->subscription_.order_;
+            }
+        }
+    }
+}
 
 void SubscrManager::addSubscription(const std::string &name, OrderFilter *filter, const SubscriberIdT &handlerId)
 {
