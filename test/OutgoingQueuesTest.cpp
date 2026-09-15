@@ -13,6 +13,9 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <deque>
+#include <memory>
+#include <mutex>
 
 #include "TestFixtures.h"
 #include "TestAux.h"
@@ -44,18 +47,25 @@ protected:
         SingletonFixture::TearDown();
     }
 
-    // Helper to create a mock execution for ExecReportEvent
+    // Helper to create a mock execution for ExecReportEvent. OutgoingQueues does not own an event's
+    // execution, so the fixture keeps each one alive for the test and frees it afterwards.
     ExecutionEntry *createMockExecution()
     {
-        auto exec = new ExecutionEntry();
+        auto exec = std::make_unique<ExecutionEntry>();
         exec->execId_ = IdT(1, execCounter_++);
         exec->type_ = NEW_EXECTYPE;
-        return exec;
+        std::lock_guard<std::mutex> guard(executionsLock_);
+        executions_.push_back(std::move(exec));
+        return executions_.back().get();
     }
 
 protected:
     std::unique_ptr<OutgoingQueues> queues_;
     static std::atomic<u64> execCounter_;
+
+private:
+    std::mutex executionsLock_;
+    std::deque<std::unique_ptr<ExecutionEntry>> executions_;
 };
 
 std::atomic<u64> OutgoingQueuesTest::execCounter_{ 1 };
