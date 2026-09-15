@@ -82,7 +82,7 @@ struct AccountEntry
     StringT account_;
     StringT firm_;
     IdT id_;
-    AccountType type_;
+    AccountType type_ = INVALID_ACCOUNTTYPE;
 
     bool isValid(std::string *invalid) const;
 };
