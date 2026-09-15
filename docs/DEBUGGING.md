@@ -72,31 +72,34 @@ nm build/orderProcessorBench | grep -c 'TransactionScopePool'
 
 ### Fuzzing
 
-Use libFuzzer harnesses for all untrusted input boundaries (message parsing, config loading, FIX/ITCH decoders):
-
-```cpp
-// test/fuzz/fuzz_event_parser.cpp
-#include <cstdint>
-#include <cstddef>
-
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    // Parse untrusted input
-    return 0;
-}
-```
+The WebSocket client-message parser (`app/ClientMessageParser.cpp`, the only place untrusted client input is parsed) has a libFuzzer target under `test/fuzz/`. It is built from that one translation unit plus nlohmann::json, with no engine link, so it builds under Clang even though the engine itself does not on this platform (the el10 spdlog 1.14 / fmt 11 pair fails Clang's consteval check inside spdlog's own headers). Always build it with `--target fuzzClientMessage`; a plain `cmake --build` would try to compile the engine too.
 
 ```bash
-# Build with libFuzzer + ASan (Clang only)
-cmake -B build-fuzz -G Ninja -DCMAKE_CXX_COMPILER=clang++ \
-  -DCMAKE_CXX_FLAGS="-fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer" \
-  -DCMAKE_BUILD_TYPE=Debug
+# Coverage-guided campaign (Clang + libFuzzer)
+GCC15=/opt/rh/gcc-toolset-15/root/usr
+cmake -B build-fuzz -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_APP=OFF -DBUILD_FUZZ=ON \
+  -DCMAKE_CXX_FLAGS="--gcc-install-dir=$GCC15/lib/gcc/x86_64-redhat-linux/15 -fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+  -DCMAKE_EXE_LINKER_FLAGS="--gcc-install-dir=$GCC15/lib/gcc/x86_64-redhat-linux/15 -fsanitize=address,undefined"
+cmake --build build-fuzz --target fuzzClientMessage
+mkdir -p /tmp/fuzz-work /tmp/fuzz-artifacts
+LD_LIBRARY_PATH=$GCC15/lib64 UBSAN_OPTIONS=print_stacktrace=1 \
+  ./build-fuzz/test/fuzz/fuzzClientMessage -max_total_time=600 -max_len=8192 -timeout=10 \
+  -artifact_prefix=/tmp/fuzz-artifacts/ /tmp/fuzz-work test/fuzz/corpus/client_message
 
-# Run fuzzer
-./build-fuzz/test/fuzz/fuzz_event_parser corpus/ -max_len=4096 -jobs=$(nproc)
-
-# AFL++ alternative (for longer campaigns)
-afl-fuzz -i seeds/ -o findings/ -- ./build-fuzz/test/fuzz/fuzz_event_parser @@
+# One-shot replay of the seed corpus (any compiler; under GCC the target links a standalone driver)
+cmake -B build-fuzz-gcc -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_APP=OFF -DBUILD_FUZZ=ON \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+cmake --build build-fuzz-gcc --target fuzzClientMessage
+ctest --test-dir build-fuzz-gcc -R FuzzCorpus --output-on-failure
 ```
+
+- Pass a scratch directory first and the tracked seed directory second: libFuzzer writes every new unit into the first directory, and `test/fuzz/corpus/` must stay as committed.
+- Clang's `-fsanitize=undefined` includes `float-cast-overflow`; GCC's does not. The seeds `negative_and_huge_numbers.json` and `orderid_beyond_u64.json` fail only under Clang until the parser validates numeric ranges before narrowing (open issue: parser numeric narrowing).
+- To add a seed, drop a file into `test/fuzz/corpus/client_message/`; the ctest entry picks it up on reconfigure. Crashes land under `-artifact_prefix`; commit a minimised reproducer to the corpus together with the fix.
+- Contract under test: `parseClientMessage()` returns for every input and never throws. `WsSession::handleMessage()` calls it from a Beast read handler with no try/catch, so anything escaping would take the server down; the harness turns an escaping exception into an abort.
 
 ### cppcheck
 

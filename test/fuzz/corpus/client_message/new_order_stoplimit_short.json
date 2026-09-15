@@ -1,0 +1,1 @@
+{"type": "new_order", "data": {"symbol": "MSFT", "side": "SELL_SHORT", "ordType": "STOPLIMIT", "price": 300.5, "stopPx": 299.0, "orderQty": 25, "minQty": 5, "tif": "GTC", "account": "ACC2", "currency": "EUR", "capacity": "RISKLESS_PRINCIPAL"}}

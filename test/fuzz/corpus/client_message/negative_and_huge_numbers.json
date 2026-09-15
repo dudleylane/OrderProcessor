@@ -1,0 +1,1 @@
+{"type": "new_order", "data": {"symbol": "AAPL", "side": "BUY", "ordType": "LIMIT", "price": -1, "orderQty": -5, "minQty": 1e+30, "stopPx": 1e+308}}

@@ -71,6 +71,7 @@ target_sources(orderProcessorTest
         ${CMAKE_SOURCE_DIR}/app/WsSession.cpp
         ${CMAKE_SOURCE_DIR}/app/SessionManager.cpp
         ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
+        ${CMAKE_SOURCE_DIR}/app/ClientMessageParser.cpp
 )
 
 target_include_directories(orderProcessorTest

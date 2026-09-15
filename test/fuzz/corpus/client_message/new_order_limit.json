@@ -1,0 +1,1 @@
+{"type": "new_order", "data": {"symbol": "AAPL", "side": "BUY", "ordType": "LIMIT", "price": 150.25, "stopPx": 0, "orderQty": 100, "minQty": 0, "tif": "DAY", "account": "ACC1", "currency": "USD", "capacity": "AGENCY"}}
