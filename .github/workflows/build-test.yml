@@ -43,10 +43,8 @@ jobs:
         run: cmake --build build -j"$(nproc)"
 
       - name: Test
-        # -j1: LMDBStorageTest cases share LMDB file paths and fail under
-        # parallel ctest (5 of 24 fail with -j$(nproc); all 507 pass
-        # serially).  Filing/fixing the test isolation is a separate
-        # task; until then, serial runs keep CI green without masking
-        # real regressions.
+        # Tests run in parallel: fixtures that touch the filesystem build
+        # per-test-case paths (test::uniqueTestPath), so no two cases share
+        # a file or directory.
         shell: bash
-        run: ctest --test-dir build --output-on-failure -j1
+        run: ctest --test-dir build --output-on-failure -j"$(nproc)"

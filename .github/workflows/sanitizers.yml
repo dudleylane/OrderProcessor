@@ -79,10 +79,11 @@ jobs:
         run: cmake --build build -j"$(nproc)"
 
       - name: Test
-        # Sanitizers slow tests significantly; -j1 also avoids the
-        # LMDBStorageTest parallel-isolation flake that would
-        # otherwise mask real sanitizer output.  --timeout 600
-        # accommodates the 5-15x slowdown.
+        # -j1: sanitizer runs are 5-15x slower and memory-hungry, and a
+        # serial run keeps each report attributable to one test.  The
+        # test isolation that once forced -j1 here is fixed (#10), so
+        # this is a sanitizer-specific choice now.  --timeout 600
+        # accommodates the slowdown.
         shell: bash
         env:
           ASAN_OPTIONS: "abort_on_error=1:halt_on_error=1:detect_leaks=1"

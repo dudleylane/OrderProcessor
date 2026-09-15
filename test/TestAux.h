@@ -15,6 +15,11 @@
 #include <string>
 #include <deque>
 #include <memory>
+#include <filesystem>
+
+#include <unistd.h>
+
+#include <gtest/gtest.h>
 
 #include "DataModelDef.h"
 #include "TransactionDef.h"
@@ -24,6 +29,27 @@
 
 namespace test
 {
+
+// =============================================================================
+// Filesystem Paths
+// =============================================================================
+
+/**
+ * Returns a path unique to the running test case, under the system temp directory.
+ *
+ * ctest runs every test from the same working directory, so a fixed relative path is shared by all
+ * tests of a parallel run. Fixtures that touch the filesystem build their paths from this instead.
+ */
+inline std::string uniqueTestPath(const std::string &tag)
+{
+    std::string name = "unknown";
+    if (const auto *info = ::testing::UnitTest::GetInstance()->current_test_info())
+    {
+        name = std::string(info->test_suite_name()) + "_" + info->name();
+    }
+    const std::filesystem::path dir = std::filesystem::temp_directory_path();
+    return (dir / ("op_" + tag + "_" + name + "_" + std::to_string(::getpid()))).string();
+}
 
 // =============================================================================
 // Legacy Assertion Helper (for migration from legacy tests)
