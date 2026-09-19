@@ -17,7 +17,8 @@
 # Environment:
 #   BUILD_DIR     Release build directory (default: <repo>/build). Configured
 #                 on first use if it does not exist.
-#   CLANG_FORMAT  clang-format binary (default: clang-format).
+#   CLANG_FORMAT  clang-format binary (default: clang-format-22, the version
+#                 format.yml pins, so the hook and CI check the same thing).
 #
 # Delete-only pushes (every local SHA zero) are exempt: nothing new is
 # published by them.
@@ -37,7 +38,7 @@ fi
 
 ROOT="$(git rev-parse --show-toplevel)"
 BUILD_DIR="${BUILD_DIR:-$ROOT/build}"
-CLANG_FORMAT="${CLANG_FORMAT:-clang-format}"
+CLANG_FORMAT="${CLANG_FORMAT:-clang-format-22}"
 
 # Same toolchain activation as the CI workflows.
 TOOLSET=/opt/rh/gcc-toolset-15/root/usr
