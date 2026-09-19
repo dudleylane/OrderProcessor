@@ -47,7 +47,10 @@ class TaskManager : public ExecTaskManager, public ACID::TransactionObserver, pu
 {
 public:
     explicit TaskManager(const TaskManagerParams &params);
-    ~TaskManager(void);
+    /// Waits for every task this manager started before tearing down (#21). Explicitly noexcept: the
+    /// task_group member's destructor is noexcept(false), which would otherwise loosen the specification
+    /// of the overridden ExecTaskManager destructor.
+    ~TaskManager(void) noexcept;
 
     static void init(int workerAmount = 0);
     static void destroy();
@@ -128,7 +131,8 @@ private:
     mutable oneapi::tbb::mutex eventLock_;
 
     static std::unique_ptr<oneapi::tbb::global_control> scheduler_;
-    static oneapi::tbb::task_group taskGroup_;
+    /// Tasks started by this manager. Per instance, so ~TaskManager can wait for exactly its own tasks (#21).
+    oneapi::tbb::task_group taskGroup_;
 
     ACID::TransactionManager *transactMgr_;
     ACID::TransactionIterator *transactIt_;
