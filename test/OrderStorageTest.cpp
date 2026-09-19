@@ -448,3 +448,44 @@ TEST_F(OrderStorageTest, MixedConcurrentWritesAndReads)
 }
 
 } // namespace
+
+// =============================================================================
+// Publication lock (#13): a new order stays locked until its creator releases it
+// =============================================================================
+
+TEST_F(OrderStorageTest, SaveWithPublishGuardLocksNewOrderUntilReleased)
+{
+    auto order = createCorrectOrder();
+    COP::Store::PublishGuard guard;
+
+    OrderEntry *saved = storage()->save(*order, IdTGenerator::instance(), &guard);
+    ASSERT_NE(nullptr, saved);
+    EXPECT_TRUE(guard.holds());
+    // Another thread that located the order could not read it yet
+    EXPECT_FALSE(saved->entryMutex_.try_lock_shared());
+
+    guard.release();
+    EXPECT_FALSE(guard.holds());
+    ASSERT_TRUE(saved->entryMutex_.try_lock());
+    saved->entryMutex_.unlock();
+}
+
+TEST_F(OrderStorageTest, SaveWithoutPublishGuardLeavesOrderUnlocked)
+{
+    auto order = createCorrectOrder();
+    OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
+    ASSERT_NE(nullptr, saved);
+    ASSERT_TRUE(saved->entryMutex_.try_lock());
+    saved->entryMutex_.unlock();
+}
+
+TEST_F(OrderStorageTest, FailedSaveDoesNotLeaveAGuardHeld)
+{
+    auto order = createCorrectOrder();
+    storage()->save(*order, IdTGenerator::instance());
+
+    COP::Store::PublishGuard guard;
+    // Same ClOrderId: rejected before the clone is created, so nothing is locked
+    EXPECT_THROW(storage()->save(*order, IdTGenerator::instance(), &guard), std::runtime_error);
+    EXPECT_FALSE(guard.holds());
+}

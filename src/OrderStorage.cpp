@@ -86,7 +86,7 @@ OrderEntry *OrderDataStorage::locateByOrderId(const IdT &orderId) const
     return it->second;
 }
 
-OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *idGenerator)
+OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *idGenerator, PublishGuard *publishGuard)
 {
     if (aux::ExchLogger::instance()->isNoteOn())
     {
@@ -118,6 +118,15 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
         {
             cp->orderId_ = idGenerator->getId();
         }
+        // Lock the clone before it becomes reachable, so the caller can finish initialising it (status,
+        // state machine persistence) before any other thread sees it. Nobody else can hold this entry's
+        // lock yet, so taking it inside orderRwLock_ cannot deadlock.
+        if (nullptr != publishGuard)
+        {
+            assert(!publishGuard->holds());
+            cp->entryMutex_.lock();
+            publishGuard->locked_ = cp.get();
+        }
         int st = 0;
         try
         {
@@ -136,6 +145,10 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
                 [[fallthrough]];
             case 1:
                 ordersById_.erase(cp->orderId_);
+            }
+            if ((nullptr != publishGuard) && (cp.get() == publishGuard->locked_))
+            {
+                publishGuard->release();
             }
             throw;
         }
