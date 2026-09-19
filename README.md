@@ -187,20 +187,23 @@ Export to JSON for comparison:
 ./orderProcessorBench --benchmark_out=results.json --benchmark_out_format=json
 ```
 
-### Benchmark Regression Testing
+### Comparing Benchmarks Before and After a Change
+
+`scripts/benchmark-regression.sh` compares a run against a baseline you record yourself. A baseline is only meaningful on the machine that produced it, so none is committed.
 
 ```bash
-# Create a baseline
-./scripts/benchmark-regression.sh --update-baseline
+# Record "before" on this machine, pinned to an isolated core
+./scripts/benchmark-regression.sh --update-baseline --pinned 3
 
-# Run regression check against baseline (fails if >5% regression)
-./scripts/benchmark-regression.sh --no-build
-
-# Or via CMake target
-cmake --build . --target benchmark-regression
+# Make your change, rebuild, then compare against it
+./scripts/benchmark-regression.sh --no-build --pinned 3
 ```
 
-Options: `--threshold N` (default 5%), `--repetitions N` (default 3), `--filter REGEX`.
+It reports every benchmark that moved more than the threshold, and exits non-zero if any regressed.
+
+Options: `--threshold N` (default 5%), `--repetitions N` (default 3), `--filter REGEX`, `--pinned CORES`, `--baseline FILE`, `--build-dir DIR`, `--no-build`.
+
+The run prints the machine, kernel, CPU, governor, compiler and commit it measured, and warns when the CPU governor or missing real-time privileges make the numbers noisy. Re-record the baseline after any toolchain, kernel or hardware change.
 
 ### Performance Results (Release Build)
 
@@ -396,7 +399,7 @@ OrderProcessor/
 │   ├── init-db/            # PostgreSQL schema initialization
 │   └── .env.example        # PostgreSQL credentials template
 ├── scripts/                # Tooling
-│   └── benchmark-regression.sh  # Automated benchmark regression testing
+│   └── benchmark-regression.sh  # Before/after benchmark comparison
 ├── docs/                   # Architecture documentation
 │   └── ARCHITECTURE.md     # Comprehensive architecture document
 ├── CMakeLists.txt          # Root build configuration
