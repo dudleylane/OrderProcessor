@@ -12,6 +12,9 @@ jobs:
     # Self-hosted runner on the dev box.  No centos:stream10 container
     # needed — clang-format-22 is already installed on the host (same
     # version CI used to install via `dnf install -y clang-tools-extra`).
+    # Called by its versioned name because this job inherits the runner's
+    # PATH: an unversioned clang-format earlier on it (pip installs 23.x
+    # into ~/.local/bin) would win, and 23.1.0 flags master as unformatted.
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
     steps:
       - uses: actions/checkout@v4
@@ -21,4 +24,4 @@ jobs:
         run: |
           find src test app bench \
                \( -name '*.h' -o -name '*.cpp' \) -print0 \
-            | xargs -0 clang-format --dry-run -Werror
+            | xargs -0 clang-format-22 --dry-run -Werror
