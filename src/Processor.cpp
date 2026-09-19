@@ -134,6 +134,9 @@ void Processor::onEvent(const std::string & /*source*/, const OrderEvent &evnt)
     evnt2Proc.transaction_ = scope.get();
     evnt2Proc.orderStorage_ = orderStorage_;
     evnt2Proc.orderBook_ = orderBook_;
+    // save() locks the new order before publishing it; released below once its state is written (#13)
+    Store::PublishGuard publishGuard;
+    evnt2Proc.publishGuard_ = &publishGuard;
 
     // restore state of the state machine
     assert(nullptr != threadState().stateMachine);
@@ -144,6 +147,9 @@ void Processor::onEvent(const std::string & /*source*/, const OrderEvent &evnt)
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    // The order is fully initialised: let other threads that located it proceed. Released before
+    // addTransaction(), because the transaction and deferred events lock this entry themselves.
+    publishGuard.release();
 
     // enqueue transaction, prepared by state machine
     assert(nullptr != transactMgr_);
@@ -220,6 +226,9 @@ void Processor::onEvent(const std::string & /*source*/, const OrderReplaceEvent 
         evnt2Proc.transaction_ = scope.get();
         evnt2Proc.orderStorage_ = orderStorage_;
         evnt2Proc.orderBook_ = orderBook_;
+        // save() locks the replacement order before publishing it; released once its state is written (#13)
+        Store::PublishGuard publishGuard;
+        evnt2Proc.publishGuard_ = &publishGuard;
 
         // use initial state for new replacement order
         assert(nullptr != threadState().stateMachine);
@@ -230,6 +239,7 @@ void Processor::onEvent(const std::string & /*source*/, const OrderReplaceEvent 
         OrderStatePersistence smState = threadState().stateMachine->getPersistence();
         assert(nullptr != smState.orderData_);
         smState.orderData_->setStateMachinePersistance(smState);
+        publishGuard.release();
     }
     else
     {

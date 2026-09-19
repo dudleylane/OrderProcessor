@@ -22,7 +22,8 @@ class OrderBook;
 namespace Store
 {
 class OrderDataStorage;
-}
+class PublishGuard;
+} // namespace Store
 
 namespace ACID
 {
@@ -45,9 +46,13 @@ struct OrderStateEvent
 
     OrderBook *orderBook_;
 
+    /// When set, OrderDataStorage::save() locks a newly created order until the caller releases it (#13)
+    Store::PublishGuard *publishGuard_;
+
     OrderStateEvent()
         : generator_(nullptr), orderStorage_(nullptr), transaction_(nullptr), testStateMachine_(false),
-          testStateMachineCheckResult_(true), orderId_(), order4StateMachine_(nullptr), orderBook_(nullptr)
+          testStateMachineCheckResult_(true), orderId_(), order4StateMachine_(nullptr), orderBook_(nullptr),
+          publishGuard_(nullptr)
     {
     }
 
@@ -55,14 +60,15 @@ struct OrderStateEvent
                     OrderBook *orderBook, bool testStateMachine, bool testStateMachineCheckResult)
         : generator_(generator), orderStorage_(orderStorage), orderId_(orderId), testStateMachine_(testStateMachine),
           testStateMachineCheckResult_(testStateMachineCheckResult), order4StateMachine_(nullptr),
-          transaction_(nullptr), orderBook_(orderBook)
+          transaction_(nullptr), orderBook_(orderBook), publishGuard_(nullptr)
     {
     }
 
     OrderStateEvent(const OrderStateEvent &evnt)
         : generator_(evnt.generator_), orderStorage_(evnt.orderStorage_), orderId_(evnt.orderId_),
           testStateMachine_(evnt.testStateMachine_), testStateMachineCheckResult_(evnt.testStateMachineCheckResult_),
-          order4StateMachine_(nullptr), transaction_(evnt.transaction_), orderBook_(evnt.orderBook_)
+          order4StateMachine_(nullptr), transaction_(evnt.transaction_), orderBook_(evnt.orderBook_),
+          publishGuard_(evnt.publishGuard_)
     {
     }
 };
