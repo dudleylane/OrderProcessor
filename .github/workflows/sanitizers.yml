@@ -27,22 +27,14 @@ jobs:
             cxxflags: "-fsanitize=address,undefined -fno-omit-frame-pointer -g"
             ldflags: "-fsanitize=address,undefined"
             allow_failure: false
-          # TSan is advisory.  Two classes of races remain after the
-          # per-thread Processor MSM fix (commit f08abb6 / ab86f3a):
-          #   1. Order-publication races (DataModelDef.cpp:275/282,
-          #      OrderMatcher.cpp:44/63/241) — OrderStorage::save
-          #      publishes a cloned OrderEntry mid-MSM-action, before
-          #      onEvent line 146 sets its initial stateMachinePersistance.
-          #      Real bug; fix requires structural reorder of order
-          #      publication vs initialization.
-          #   2. TBB handoff false positives (TaskManager lambda body,
-          #      TransactionScope::executeTransaction, TrOperations
-          #      execute methods) — TBB task_group::run() and
-          #      concurrent_queue provide happens-before edges that
-          #      TSan does not model.
-          # Keeping the report visible (not suppressed) but not gating,
-          # so format/build/asan_ubsan can stay green while the
-          # publication-ordering redesign is scheduled.
+          # TSan runs against a TSan-instrumented oneTBB (built below),
+          # because the system libtbb is not instrumented: TSan could not
+          # see the task scheduler's handoffs and reported every task
+          # hand-over as a race (320 reports at 60 sites locally).  With
+          # it instrumented, what remains is real (#13).
+          # Still advisory: the remaining reports are one lifetime race,
+          # TaskManager destroyed while a task's tail still touches it.
+          # Make this job gating once that is fixed.
           - sanitizer: tsan
             cxxflags: "-fsanitize=thread -fno-omit-frame-pointer -g"
             ldflags: "-fsanitize=thread"
@@ -55,6 +47,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Build TSan-instrumented oneTBB (cached)
+        # Same oneTBB version as the system tbb-devel, built with
+        # -fsanitize=thread by the job's compiler and installed under the
+        # runner's home.  Rebuilt only when the version or compiler changes.
+        if: matrix.sanitizer == 'tsan'
+        shell: bash
+        run: |
+          TBB_VERSION=v2021.11.0
+          PREFIX="$HOME/.cache/orderprocessor/onetbb-$TBB_VERSION-tsan-gcc$(g++ -dumpfullversion)"
+          if [ ! -f "$PREFIX/lib64/cmake/TBB/TBBConfig.cmake" ]; then
+            SRC=$(mktemp -d)
+            git clone -q --depth 1 --branch "$TBB_VERSION" https://github.com/uxlfoundation/oneTBB.git "$SRC"
+            cmake -S "$SRC" -B "$SRC/build" -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+              -DTBB_SANITIZE=thread -DTBB_TEST=OFF -DTBB_EXAMPLES=OFF -DTBB_STRICT=OFF \
+              -DCMAKE_INSTALL_PREFIX="$PREFIX"
+            cmake --build "$SRC/build" -j"$(nproc)"
+            cmake --install "$SRC/build"
+            rm -rf "$SRC"
+          fi
+          echo "TBB_TSAN_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+
       - name: Configure
         # Debug build keeps assertions on so invariant violations fire
         # under sanitizers.  CMAKE_EXE_LINKER_FLAGS and
@@ -63,6 +76,10 @@ jobs:
         # libtsan.so present.
         shell: bash
         run: |
+          TBB_PREFIX_ARG=()
+          if [ -n "${TBB_TSAN_PREFIX:-}" ]; then
+            TBB_PREFIX_ARG=(-DCMAKE_PREFIX_PATH="$TBB_TSAN_PREFIX")
+          fi
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DBUILD_TESTS=ON \
@@ -70,6 +87,7 @@ jobs:
             -DBUILD_APP=ON \
             -DBUILD_PG=OFF \
             -DBUILD_FIX=OFF \
+            "${TBB_PREFIX_ARG[@]}" \
             -DCMAKE_CXX_FLAGS="${{ matrix.cxxflags }}" \
             -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.ldflags }}" \
             -DCMAKE_SHARED_LINKER_FLAGS="${{ matrix.ldflags }}"
@@ -77,6 +95,17 @@ jobs:
       - name: Build
         shell: bash
         run: cmake --build build -j"$(nproc)"
+
+      - name: Check the tests load the instrumented oneTBB
+        # The instrumented library is libtbb_debug.so.12; if the binary
+        # resolved the system libtbb.so.12 instead, TSan would silently be
+        # blind to the scheduler again.
+        if: matrix.sanitizer == 'tsan'
+        shell: bash
+        run: |
+          ldd build/orderProcessorTest | grep -E 'libtbb'
+          ldd build/orderProcessorTest | grep -q "libtbb_debug.so.12 => $TBB_TSAN_PREFIX/" \
+            || { echo "orderProcessorTest does not load the instrumented oneTBB from $TBB_TSAN_PREFIX" >&2; exit 1; }
 
       - name: Test
         # -j1: sanitizer runs are 5-15x slower and memory-hungry, and a
