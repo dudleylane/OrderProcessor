@@ -28,6 +28,43 @@ class IdTValueGenerator;
 namespace Store
 {
 
+/// Keeps a newly saved order's entry lock until its creator has finished initialising it.
+///
+/// OrderDataStorage::save() makes an order reachable through locateByOrderId() and
+/// locateByClOrderId() while the state machine action that created it is still running; the
+/// creator then sets its status and state machine persistence. Passing a guard makes save()
+/// write-lock the order before it is inserted into the lookup maps, so any other thread that finds
+/// it blocks until release(). See #13.
+class PublishGuard
+{
+public:
+    PublishGuard() = default;
+    ~PublishGuard()
+    {
+        release();
+    }
+    PublishGuard(const PublishGuard &) = delete;
+    PublishGuard &operator=(const PublishGuard &) = delete;
+
+    /// Unlocks the order, if one is held. Call once the order is fully initialised.
+    void release() noexcept
+    {
+        if (nullptr != locked_)
+        {
+            locked_->entryMutex_.unlock();
+            locked_ = nullptr;
+        }
+    }
+    bool holds() const noexcept
+    {
+        return nullptr != locked_;
+    }
+
+private:
+    friend class OrderDataStorage;
+    OrderEntry *locked_ = nullptr;
+};
+
 class OrderDataStorage
 {
 public:
@@ -39,7 +76,9 @@ public:
 public:
     OrderEntry *locateByClOrderId(const RawDataEntry &clOrderId) const;
     OrderEntry *locateByOrderId(const IdT &orderId) const;
-    OrderEntry *save(const OrderEntry &order, IdTValueGenerator *idGenerator);
+    /// With a guard, the new order is write-locked before it becomes reachable; the caller releases
+    /// the guard once the order is fully initialised.
+    OrderEntry *save(const OrderEntry &order, IdTValueGenerator *idGenerator, PublishGuard *publishGuard = nullptr);
     void restore(OrderEntry *order);
 
     template <typename Fn> void forEachOrder(Fn &&fn) const

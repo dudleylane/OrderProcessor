@@ -119,7 +119,7 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
     // generate id for the order
     assert(nullptr != evnt.generator_);
     assert(nullptr != evnt.orderStorage_);
-    *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_);
+    *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
     (*orderData)->status_ = NEW_ORDSTATUS;
 
     if (MARKET_ORDERTYPE == (*orderData)->ordType_)
@@ -169,7 +169,7 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onRplOrderRe
     // generate id for the order
     assert(nullptr != evnt.generator_);
     assert(nullptr != evnt.orderStorage_);
-    *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_);
+    *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
 
     (*orderData)->origOrderId_ = origOrder->orderId_;
     (*orderData)->status_ = PENDINGREPLACE_ORDSTATUS;
@@ -194,7 +194,7 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvOrderRe
     assert(nullptr != evnt.orderStorage_);
     try
     {
-        *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_);
+        *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
     }
     catch (const std::exception &) //save could fails if ClOrderId already exists, just continue reject it
     {
@@ -212,7 +212,7 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvRplOrde
     assert(nullptr != evnt.orderStorage_);
     try
     {
-        *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_);
+        *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
     }
     catch (const std::exception &) //save could fails if ClOrderId already exists, just continue reject it
     {
@@ -242,7 +242,7 @@ void OrdStateImpl::processAccept(OrderEntry **orderData, OrdState::onExternalOrd
 
     assert(nullptr != evnt.generator_);
     assert(nullptr != evnt.orderStorage_);
-    *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_);
+    *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
 
     std::unique_ptr<Operation> op(new MatchOrderTrOperation(evnt.order_));
     evnt.transaction_->addOperation(op);
@@ -266,7 +266,7 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onExternalOrd
     assert(nullptr != evnt.orderStorage_);
     try
     {
-        *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_);
+        *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
     }
     catch (const std::exception &) //save could fails if ClOrderId already exists, just continue reject it
     {
