@@ -25,7 +25,6 @@ using namespace COP::Tasks;
 using namespace COP::Queues;
 
 std::unique_ptr<oneapi::tbb::global_control> TaskManager::scheduler_;
-oneapi::tbb::task_group TaskManager::taskGroup_;
 
 /// Global atomic counter for distributing TBB workers across CPU cores.
 /// Each TBB worker thread pins itself to the next core on first task pickup.
@@ -67,10 +66,35 @@ TaskManager::TaskManager(const TaskManagerParams &params)
     aux::ExchLogger::instance()->note("TaskManager created.");
 }
 
-TaskManager::~TaskManager(void)
+TaskManager::~TaskManager(void) noexcept
 {
+    // Detach before waiting, so that no producer can start another task once the wait is over. This does
+    // not cut the drain short: a task's tail calls onReadyToExecute() and onNewEvent() on this manager
+    // directly, and both poll (the transaction iterator, the event queues) rather than waiting to be
+    // notified through these observers (#21).
     assert(nullptr != transactMgr_);
     transactMgr_->detach();
+    assert(nullptr != inQueues_);
+    inQueues_->detach();
+
+    // Wait for every task this manager started, including tasks their tails spawned. A task returns its
+    // processor to the pool before its last statements (onReadyToExecute() or onNewEvent(), then a counter
+    // increment), so waitUntilTransactionsFinished() can report done while a task still uses `this`. The
+    // wait must precede the clearing below: the tails also read transactIt_ and transactMgr_ (#21).
+    // wait() rethrows a task's exception once every task has finished; a destructor cannot propagate it.
+    try
+    {
+        taskGroup_.wait();
+    }
+    catch (const std::exception &ex)
+    {
+        aux::ExchLogger::instance()->error(std::string("TaskManager: a task failed before shutdown: ") + ex.what());
+    }
+    catch (...)
+    {
+        aux::ExchLogger::instance()->error(std::string("TaskManager: a task failed before shutdown"));
+    }
+
     transactIt_ = nullptr;
     transactMgr_ = nullptr;
     if (lastAvailableTransactProcessor_.load() != totalAvailableTransactProcessor_.load())
@@ -121,7 +145,7 @@ void TaskManager::init(int workerAmount)
 
 void TaskManager::destroy()
 {
-    taskGroup_.wait();
+    // Each TaskManager waits for its own tasks in its destructor; this only releases the scheduler limit.
     scheduler_.reset();
     aux::ExchLogger::instance()->note("TaskManager deinitialized.");
 }
