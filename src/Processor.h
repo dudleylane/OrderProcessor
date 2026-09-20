@@ -96,6 +96,11 @@ public:
     /// reimplemented from TransactionProcessor
     virtual void process(const ACID::TransactionId &id, ACID::Transaction *tr);
 
+private:
+    /// Appends the operation that persists the order when the transaction commits (#20).
+    void persistOrder(ACID::Scope *transaction, const OrderEntry &order);
+
+public:
 public:
     /// reimplemented from DeferedEventFunctor
     virtual void process(OrdState::onTradeExecution &evnt, OrderEntry *order, const ACID::Context &cnxt);

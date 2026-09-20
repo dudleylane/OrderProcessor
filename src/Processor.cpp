@@ -16,6 +16,7 @@
 #include "TransactionDef.h"
 #include "StateMachine.h"
 #include "TransactionScope.h"
+#include "TrOperations.h"
 #include "DataModelDef.h"
 #include "OrderStorage.h"
 
@@ -147,6 +148,9 @@ void Processor::onEvent(const std::string & /*source*/, const OrderEvent &evnt)
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    // Persist the order as part of this transaction (#20): appended after the operations that
+    // change the book and the executions, so the persisted record is the order's final state.
+    persistOrder(scope.get(), *smState.orderData_);
     // The order is fully initialised: let other threads that located it proceed. Released before
     // addTransaction(), because the transaction and deferred events lock this entry themselves.
     publishGuard.release();
@@ -197,6 +201,9 @@ void Processor::onEvent(const std::string & /*source*/, const OrderCancelEvent &
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    // Persist the order as part of this transaction (#20): appended after the operations that
+    // change the book and the executions, so the persisted record is the order's final state.
+    persistOrder(scope.get(), *smState.orderData_);
 
     ordLock.release();
 
@@ -239,6 +246,9 @@ void Processor::onEvent(const std::string & /*source*/, const OrderReplaceEvent 
         OrderStatePersistence smState = threadState().stateMachine->getPersistence();
         assert(nullptr != smState.orderData_);
         smState.orderData_->setStateMachinePersistance(smState);
+        // Persist the order as part of this transaction (#20): appended after the operations that
+        // change the book and the executions, so the persisted record is the order's final state.
+        persistOrder(scope.get(), *smState.orderData_);
         publishGuard.release();
     }
     else
@@ -266,6 +276,9 @@ void Processor::onEvent(const std::string & /*source*/, const OrderReplaceEvent 
         OrderStatePersistence smState = threadState().stateMachine->getPersistence();
         assert(nullptr != smState.orderData_);
         smState.orderData_->setStateMachinePersistance(smState);
+        // Persist the order as part of this transaction (#20): appended after the operations that
+        // change the book and the executions, so the persisted record is the order's final state.
+        persistOrder(scope.get(), *smState.orderData_);
     }
 
     // enqueue transaction
@@ -345,6 +358,9 @@ void Processor::onEvent(const std::string & /*source*/, const COP::Queues::Order
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    // Persist the order as part of this transaction (#20): appended after the operations that
+    // change the book and the executions, so the persisted record is the order's final state.
+    persistOrder(scope.get(), *smState.orderData_);
 
     ordLock.release();
 
@@ -424,6 +440,9 @@ void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    // Persist the order as part of this transaction (#20): appended after the operations that
+    // change the book and the executions, so the persisted record is the order's final state.
+    persistOrder(scope.get(), *smState.orderData_);
 
     ordLock.release();
 
@@ -503,6 +522,9 @@ void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    // Persist the order as part of this transaction (#20): appended after the operations that
+    // change the book and the executions, so the persisted record is the order's final state.
+    persistOrder(scope.get(), *smState.orderData_);
 
     ordLock.release();
 
@@ -539,6 +561,13 @@ void Processor::removeDeferedEventsFrom(size_t startIndex)
     }
     threadState().events.erase(threadState().events.begin() + static_cast<std::ptrdiff_t>(startIndex),
                                threadState().events.end());
+}
+
+void Processor::persistOrder(ACID::Scope *transaction, const OrderEntry &order)
+{
+    assert(nullptr != transaction);
+    std::unique_ptr<ACID::Operation> op(new ACID::PersistOrderTrOperation(order));
+    transaction->addOperation(op);
 }
 
 void Processor::onEvent(DeferedEventBase *evnt)
@@ -607,6 +636,9 @@ void Processor::process(onTradeExecution &evnt, OrderEntry *order, const ACID::C
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    // Persist the order as part of this transaction (#20): appended after the operations that
+    // change the book and the executions, so the persisted record is the order's final state.
+    persistOrder(evnt.transaction_, *smState.orderData_);
 }
 
 void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, const ACID::Context & /*cnxt*/)
@@ -623,6 +655,9 @@ void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, con
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    // Persist the order as part of this transaction (#20): appended after the operations that
+    // change the book and the executions, so the persisted record is the order's final state.
+    persistOrder(evnt.transaction_, *smState.orderData_);
 }
 
 void Processor::process(const ACID::TransactionId &id, ACID::Transaction *tr)
