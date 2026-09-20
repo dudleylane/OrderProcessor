@@ -48,6 +48,7 @@ public:
     ~TestTransactionContext();
 
     void addOperation(std::unique_ptr<COP::ACID::Operation> &op) override;
+    void addOperationFirst(std::unique_ptr<COP::ACID::Operation> &op) override;
     void removeLastOperation() override;
     size_t startNewStage() override;
     void removeStage(const size_t &id) override;

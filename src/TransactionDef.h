@@ -171,6 +171,10 @@ public:
     /// add operation into the transaction
     virtual void addOperation(std::unique_ptr<Operation> &op) = 0;
 
+    /// add operation at the front, so it executes before every operation added so far. Persisting
+    /// uses this: an execution report must not reach a client before the order is durable (#28).
+    virtual void addOperationFirst(std::unique_ptr<Operation> &op) = 0;
+
     /// removes last operation from transaction scope
     virtual void removeLastOperation() = 0;
 

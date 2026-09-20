@@ -68,6 +68,7 @@ public:
 public:
     /// reimplemented from Scope
     virtual void addOperation(std::unique_ptr<Operation> &op);
+    virtual void addOperationFirst(std::unique_ptr<Operation> &op);
     virtual void removeLastOperation();
     virtual size_t startNewStage();
     virtual void removeStage(const size_t &id);
