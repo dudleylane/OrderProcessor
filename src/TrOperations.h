@@ -123,6 +123,27 @@ private:
     const OrderEntry &order_;
 };
 
+/// Writes the order to storage as part of the transaction that changed it (#20). Appended after the
+/// operations that change the book and the executions, so it persists the final state of the order.
+/// Rollback erases the version it wrote, which is why OrderSaver::save() returns one.
+class PersistOrderTrOperation final : public Operation
+{
+public:
+    explicit PersistOrderTrOperation(const OrderEntry &order);
+    ~PersistOrderTrOperation();
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    PersistOrderTrOperation(const PersistOrderTrOperation &);
+    PersistOrderTrOperation &operator=(const PersistOrderTrOperation &);
+
+    const OrderEntry &order_;
+    u32 version_;
+    bool written_;
+};
+
 class RemoveFromOrderBookTrOperation final : public Operation
 {
 public:

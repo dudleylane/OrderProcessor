@@ -12,6 +12,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include <memory>
 #include <set>
 
@@ -23,6 +24,7 @@
 #include "OrderStorage.h"
 #include "DeferedEvents.h"
 #include "OrderMatcher.h"
+#include "mocks/MockOrderBook.h"
 
 using namespace COP;
 using namespace COP::ACID;
@@ -465,3 +467,45 @@ TEST_F(ExecReportOperationTest, CreateReplaceExecReport_Rollback_IsNoOp)
 }
 
 } // namespace
+
+// =============================================================================
+// PersistOrderTrOperation Tests (#20)
+// =============================================================================
+
+TEST_F(MatchOrderOperationTest, PersistOrderWritesAVersion)
+{
+    // The order reaches storage when the transaction commits, not while the state machine action
+    // that changed it is still running (#20).
+    MockOrderSaver saver;
+    OrderStorage::instance()->attach(&saver);
+    Context ctx = createContext();
+    PersistOrderTrOperation op(*buyOrder_);
+
+    EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_))).WillOnce(::testing::Return(7u));
+    op.execute(ctx);
+}
+
+TEST_F(MatchOrderOperationTest, PersistOrderRollbackErasesTheVersionItWrote)
+{
+    // Rollback is exact: it erases the version this operation appended and leaves earlier ones.
+    MockOrderSaver saver;
+    OrderStorage::instance()->attach(&saver);
+    Context ctx = createContext();
+    PersistOrderTrOperation op(*buyOrder_);
+
+    EXPECT_CALL(saver, save(::testing::_)).WillOnce(::testing::Return(7u));
+    op.execute(ctx);
+
+    EXPECT_CALL(saver, erase(buyOrder_->orderId_, 7u)).Times(1);
+    op.rollback(ctx);
+}
+
+TEST_F(MatchOrderOperationTest, PersistOrderRollbackWritesNothingWithoutASaver)
+{
+    // With no saver attached (tests, and the load passes) nothing is written, so nothing is erased.
+    Context ctx = createContext();
+    PersistOrderTrOperation op(*buyOrder_);
+
+    op.execute(ctx);
+    op.rollback(ctx);
+}
