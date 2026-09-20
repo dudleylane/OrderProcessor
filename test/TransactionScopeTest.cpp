@@ -600,3 +600,48 @@ TEST_F(TransactionScopeTest, ArenaArenaSizeConstant)
 }
 
 } // namespace
+
+// =============================================================================
+// addOperationFirst (#28)
+// =============================================================================
+
+TEST_F(TransactionScopeTest, AddOperationFirstExecutesBeforeOperationsAddedEarlier)
+{
+    // Persisting is appended after the state machine has built the transaction, but has to run
+    // before the operations that publish execution reports (#28).
+    TransactionScope scope;
+    std::unique_ptr<Operation> later(new TrackingOperation(2, &execOrder_, &rollbackOrder_));
+    scope.addOperation(later);
+    std::unique_ptr<Operation> front(new TrackingOperation(1, &execOrder_, &rollbackOrder_));
+    scope.addOperationFirst(front);
+
+    Context ctx = createContext();
+    EXPECT_TRUE(scope.executeTransaction(ctx));
+
+    ASSERT_EQ(2u, execOrder_.size());
+    EXPECT_EQ(1, execOrder_[0]);
+    EXPECT_EQ(2, execOrder_[1]);
+}
+
+TEST_F(TransactionScopeTest, AddOperationFirstKeepsStageBoundariesCorrect)
+{
+    // Stage boundaries are indices, so a front insert shifts them; removeStage must still drop that
+    // stage's operations and nothing else.
+    TransactionScope scope;
+    std::unique_ptr<Operation> first(new TrackingOperation(1, &execOrder_, &rollbackOrder_));
+    scope.addOperation(first);
+    const size_t stage = scope.startNewStage();
+    std::unique_ptr<Operation> staged(new TrackingOperation(2, &execOrder_, &rollbackOrder_));
+    scope.addOperation(staged);
+    std::unique_ptr<Operation> front(new TrackingOperation(3, &execOrder_, &rollbackOrder_));
+    scope.addOperationFirst(front);
+
+    scope.removeStage(stage);
+
+    Context ctx = createContext();
+    EXPECT_TRUE(scope.executeTransaction(ctx));
+
+    ASSERT_EQ(2u, execOrder_.size());
+    EXPECT_EQ(3, execOrder_[0]);
+    EXPECT_EQ(1, execOrder_[1]);
+}

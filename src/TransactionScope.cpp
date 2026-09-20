@@ -149,6 +149,17 @@ void TransactionScope::addOperation(std::unique_ptr<Operation> &op)
     operations_.push_back(op.release());
 }
 
+void TransactionScope::addOperationFirst(std::unique_ptr<Operation> &op)
+{
+    operations_.insert(operations_.begin(), op.get());
+    op.release();
+    // Stage boundaries are indices into operations_, so every one of them moves along by one.
+    for (StageBoundariesT::iterator it = stageBoundaries_.begin(); it != stageBoundaries_.end(); ++it)
+    {
+        ++(*it);
+    }
+}
+
 void TransactionScope::removeLastOperation()
 {
     if (operations_.empty())

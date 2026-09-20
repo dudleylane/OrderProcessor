@@ -76,6 +76,11 @@ void TestTransactionContext::addOperation(std::unique_ptr<Operation> &op)
     op_.push_back(op.release());
 }
 
+void TestTransactionContext::addOperationFirst(std::unique_ptr<Operation> &op)
+{
+    op_.insert(op_.begin(), op.release());
+}
+
 void TestTransactionContext::removeLastOperation()
 {
     if (!op_.empty())
