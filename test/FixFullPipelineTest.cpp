@@ -156,7 +156,7 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
     OrderBookImpl::InstrumentsT instruments;
     instruments.insert(instrId);
     auto orderBook = std::make_unique<OrderBookImpl>();
-    orderBook->init(instruments, &saver);
+    orderBook->init(instruments);
 
     // [IncomingQueues]
     auto inQueues = std::make_unique<IncomingQueues>();

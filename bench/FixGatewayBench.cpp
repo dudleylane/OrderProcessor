@@ -285,7 +285,7 @@ static void BM_SingleLegMatch(benchmark::State &state)
     OrderBookImpl::InstrumentsT instruments;
     instruments.insert(setup.instrId_);
     OrderBookImpl orderBook;
-    orderBook.init(instruments, &saver);
+    orderBook.init(instruments);
 
     IncomingQueues inQueues;
     NullOutQueues outQueues;
@@ -366,7 +366,7 @@ static void BM_FxSwapMatch(benchmark::State &state)
     OrderBookImpl::InstrumentsT instruments;
     instruments.insert(setup.instrId_);
     OrderBookImpl orderBook;
-    orderBook.init(instruments, &saver);
+    orderBook.init(instruments);
 
     IncomingQueues inQueues;
     NullOutQueues outQueues;
@@ -458,7 +458,7 @@ static void BM_FixEndToEndFillCycle(benchmark::State &state)
     OrderBookImpl::InstrumentsT instruments;
     instruments.insert(setup.instrId_);
     auto orderBook = std::make_unique<OrderBookImpl>();
-    orderBook->init(instruments, &saver);
+    orderBook->init(instruments);
 
     auto inQueues = std::make_unique<IncomingQueues>();
     auto outQueues = std::make_unique<NullOutQueues>();
