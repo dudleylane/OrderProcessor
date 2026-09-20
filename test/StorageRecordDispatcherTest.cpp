@@ -30,6 +30,9 @@
 #include "RawDataCodec.h"
 #include "OrderCodec.h"
 #include "OrderStorage.h"
+#include "LMDBStorage.h"
+
+#include <filesystem>
 
 using namespace COP;
 using namespace COP::Codec;
@@ -504,6 +507,9 @@ TEST_F(StorageRecordDispatcherTest, LoadOrderRecord)
 
     std::unique_ptr<OrderEntry> val(createTestOrder());
     val->orderId_ = IdT(1111, 6789);
+    val->status_ = NEW_ORDSTATUS;
+    val->orderQty_ = 100;
+    val->leavesQty_ = 100;
 
     std::string buf = createRecordTypePrefix(StorageRecordDispatcher::ORDER_RECORDTYPE);
     IdT id;
@@ -521,6 +527,74 @@ TEST_F(StorageRecordDispatcherTest, LoadOrderRecord)
     ASSERT_EQ(1u, orderBook_->orders_.size());
     ASSERT_NE(nullptr, orderBook_->orders_.at(0));
     EXPECT_TRUE(orderBook_->orders_.at(0)->compare(*val));
+    EXPECT_NE(nullptr, orderStorage_->locateByOrderId(id));
+}
+
+TEST_F(StorageRecordDispatcherTest, LoadTerminalOrderIsRestoredButNotBooked)
+{
+    // A terminal order must not come back resting in the book. Before #20 only pre-acceptance
+    // snapshots existed on disk, so every record was booked; now the final state is persisted.
+    dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+    dispatcher_->startLoad();
+
+    std::unique_ptr<OrderEntry> val(createTestOrder());
+    val->orderId_ = IdT(2222, 6789);
+    val->status_ = FILLED_ORDSTATUS;
+    val->orderQty_ = 100;
+    val->cumQty_ = 100;
+    val->leavesQty_ = 0;
+
+    std::string buf = createRecordTypePrefix(StorageRecordDispatcher::ORDER_RECORDTYPE);
+    IdT id;
+    u32 version = 0;
+    OrderCodec::encode(*val, &buf, &id, &version);
+    ASSERT_FALSE(buf.empty());
+
+    dispatcher_->onRecordLoaded(id, version, buf.c_str(), buf.size());
+    dispatcher_->finishLoad();
+
+    EXPECT_TRUE(orderBook_->orders_.empty());
+    OrderEntry *restored = orderStorage_->locateByOrderId(id);
+    ASSERT_NE(nullptr, restored);
+    EXPECT_EQ(FILLED_ORDSTATUS, restored->status_);
+    EXPECT_EQ(0, restored->leavesQty_);
+}
+
+TEST_F(StorageRecordDispatcherTest, LoadOrderKeepsTheNewestVersion)
+{
+    // The loader replays every version of a record. Only the newest may be restored, whatever order
+    // the versions arrive in (#20).
+    dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+    dispatcher_->startLoad();
+
+    std::unique_ptr<OrderEntry> val(createTestOrder());
+    val->orderId_ = IdT(3333, 6789);
+    val->status_ = NEW_ORDSTATUS;
+    val->orderQty_ = 100;
+    val->leavesQty_ = 100;
+
+    std::string first = createRecordTypePrefix(StorageRecordDispatcher::ORDER_RECORDTYPE);
+    IdT id;
+    u32 encodedVersion = 0;
+    OrderCodec::encode(*val, &first, &id, &encodedVersion);
+
+    val->status_ = PARTFILL_ORDSTATUS;
+    val->cumQty_ = 60;
+    val->leavesQty_ = 40;
+    std::string second = createRecordTypePrefix(StorageRecordDispatcher::ORDER_RECORDTYPE);
+    OrderCodec::encode(*val, &second, &id, &encodedVersion);
+
+    // newest first, to prove arrival order does not decide
+    dispatcher_->onRecordLoaded(id, 1, second.c_str(), second.size());
+    dispatcher_->onRecordLoaded(id, 0, first.c_str(), first.size());
+    dispatcher_->finishLoad();
+
+    OrderEntry *restored = orderStorage_->locateByOrderId(id);
+    ASSERT_NE(nullptr, restored);
+    EXPECT_EQ(PARTFILL_ORDSTATUS, restored->status_);
+    EXPECT_EQ(40, restored->leavesQty_);
+    EXPECT_EQ(60, restored->cumQty_);
+    EXPECT_EQ(1u, orderBook_->orders_.size());
 }
 
 // =============================================================================
@@ -799,3 +873,52 @@ TEST_F(StorageRecordDispatcherTest, SaveMultipleRecordTypes)
 }
 
 } // namespace
+
+// =============================================================================
+// Restart Round Trip (#20)
+// =============================================================================
+
+TEST_F(StorageRecordDispatcherTest, OrderSurvivesRestartWithItsFinalState)
+{
+    // The bug this covers: an order used to be written once, before acceptance, so a restart
+    // brought filled orders back as live resting orders and lost every fill (#20).
+    const std::string dir = test::uniqueTestPath("dispatcher-restart");
+    std::unique_ptr<OrderEntry> order(createTestOrder());
+    order->orderId_ = IdT(4444, 6789);
+    order->status_ = NEW_ORDSTATUS;
+    order->orderQty_ = 100;
+    order->leavesQty_ = 100;
+    const IdT orderId = order->orderId_;
+
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+
+        dispatcher_->save(*order); // resting
+        order->status_ = FILLED_ORDSTATUS;
+        order->cumQty_ = 100;
+        order->leavesQty_ = 0;
+        dispatcher_->save(*order); // filled: a second version, which save() would have rejected
+    }
+
+    {
+        // restart: a fresh dispatcher, storage and book over the same directory
+        OrderDataStorage storageAfter;
+        TestOrderBook bookAfter;
+        StorageRecordDispatcher dispatcherAfter;
+        LMDBStorage lmdbAfter;
+        dispatcherAfter.init(restore_.get(), &bookAfter, &lmdbAfter, &storageAfter);
+        lmdbAfter.load(dir, &dispatcherAfter);
+
+        OrderEntry *restored = storageAfter.locateByOrderId(orderId);
+        ASSERT_NE(nullptr, restored);
+        EXPECT_EQ(FILLED_ORDSTATUS, restored->status_);
+        EXPECT_EQ(0, restored->leavesQty_);
+        EXPECT_EQ(100, restored->cumQty_);
+        EXPECT_TRUE(bookAfter.orders_.empty());
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}

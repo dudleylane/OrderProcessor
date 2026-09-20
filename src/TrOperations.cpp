@@ -421,6 +421,31 @@ void AddToOrderBookTrOperation::rollback(const Context &cnxt)
     cnxt.orderBook_->remove(order_);
 }
 
+PersistOrderTrOperation::PersistOrderTrOperation(const OrderEntry &order)
+    : Operation(PERSIST_ORDER_TROPERATION, order.orderId_), order_(order), version_(0), written_(false)
+{
+}
+PersistOrderTrOperation::~PersistOrderTrOperation() {}
+
+void PersistOrderTrOperation::execute(const Context &cnxt)
+{
+    assert(nullptr != cnxt.orderStorage_);
+    // Read lock: this runs on a transaction worker while other threads may read the same order.
+    oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order_.entryMutex_, false);
+    written_ = cnxt.orderStorage_->persist(order_, &version_);
+}
+
+void PersistOrderTrOperation::rollback(const Context &cnxt)
+{
+    assert(nullptr != cnxt.orderStorage_);
+    if (written_)
+    {
+        // Exact undo: erase the version this operation appended, leaving earlier ones untouched.
+        cnxt.orderStorage_->unpersist(order_.orderId_, version_);
+        written_ = false;
+    }
+}
+
 RemoveFromOrderBookTrOperation::RemoveFromOrderBookTrOperation(const OrderEntry &order, const IdT &instrId)
     : Operation(REMOVE_ORDERBOOK_TROPERATION, order.orderId_, instrId), order_(order)
 {
