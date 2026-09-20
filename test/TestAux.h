@@ -105,7 +105,11 @@ public:
     DummyOrderSaver() = default;
     ~DummyOrderSaver() = default;
 
-    void save(const COP::OrderEntry &) override {}
+    COP::u32 save(const COP::OrderEntry &) override
+    {
+        return 0;
+    }
+    void erase(const COP::IdT &, COP::u32) override {}
 };
 
 // =============================================================================

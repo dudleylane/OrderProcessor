@@ -118,7 +118,7 @@ protected:
         instruments_.insert(instrumentId2_);
 
         orderBook_ = std::make_unique<COP::OrderBookImpl>();
-        orderBook_->init(instruments_, &orderSaver_);
+        orderBook_->init(instruments_);
     }
 
     void TearDown() override
@@ -157,7 +157,7 @@ protected:
         instruments_.insert(instrumentId2_);
 
         orderBook_ = std::make_unique<COP::OrderBookImpl>();
-        orderBook_->init(instruments_, &orderSaver_);
+        orderBook_->init(instruments_);
     }
 
     void TearDown() override

@@ -417,7 +417,10 @@ class OrderSaver
 {
 public:
     virtual ~OrderSaver() {};
-    virtual void save(const OrderEntry &order) = 0;
+    /// Persists the order as a new version of its record and returns that version.
+    virtual u32 save(const OrderEntry &order) = 0;
+    /// Erases one persisted version, undoing a save().
+    virtual void erase(const IdT &orderId, u32 version) = 0;
 };
 
 } // namespace COP
