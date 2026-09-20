@@ -38,14 +38,21 @@ jobs:
           # because the system libtbb is not instrumented: TSan could not
           # see the task scheduler's handoffs and reported every task
           # hand-over as a race (320 reports at 60 sites locally).  With
-          # it instrumented, what remains is real (#13).
-          # Still advisory: the remaining reports are one lifetime race,
-          # TaskManager destroyed while a task's tail still touches it.
-          # Make this job gating once that is fixed.
+          # it instrumented, what remains is real.
+          #
+          # Gating since #13: the two races the instrumented job found are
+          # fixed (order publication, aeeafa5; TaskManager lifetime,
+          # 726039d), and the suite is clean under this job's settings.
+          # A report here is a real race until proven otherwise, reasoned
+          # from source -- do not make this advisory again, and do not add
+          # a suppression for tbb:: frames: that would also hide races
+          # under TBB locks.  If this job goes red and the cause is not
+          # obvious, check the "Check the tests load the instrumented
+          # oneTBB" step first.
           - sanitizer: tsan
             cxxflags: "-fsanitize=thread -fno-omit-frame-pointer -g"
             ldflags: "-fsanitize=thread"
-            allow_failure: true
+            allow_failure: false
     env:
       PATH: /opt/rh/gcc-toolset-15/root/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       LD_LIBRARY_PATH: /opt/rh/gcc-toolset-15/root/usr/lib64
