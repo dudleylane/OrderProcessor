@@ -231,7 +231,7 @@ TEST_F(IntegrationTest, MarketOrderNotMatched)
     instr.insert(instrId1);
     SourceIdT instrId2 = addInstrument("bbb");
     instr.insert(instrId2);
-    books.init(instr, &saver);
+    books.init(instr);
 
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
@@ -303,7 +303,7 @@ TEST_F(IntegrationTest, LimitOrderAccepted)
     OrderBookImpl::InstrumentsT instr;
     SourceIdT instrId1 = addInstrument("test_instr");
     instr.insert(instrId1);
-    books.init(instr, &saver);
+    books.init(instr);
 
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
@@ -363,7 +363,7 @@ TEST_F(IntegrationTest, MatchingBuyAndSellOrders)
     OrderBookImpl::InstrumentsT instr;
     SourceIdT instrId1 = addInstrument("match_test");
     instr.insert(instrId1);
-    books.init(instr, &saver);
+    books.init(instr);
 
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
@@ -454,7 +454,7 @@ TEST_F(IntegrationTest, MultipleInstruments)
     SourceIdT instrId2 = addInstrument("GOOG");
     instrSet.insert(instrId1);
     instrSet.insert(instrId2);
-    books.init(instrSet, &saver);
+    books.init(instrSet);
 
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
@@ -530,7 +530,7 @@ TEST_F(IntegrationTest, QueueProcessesMultipleOrders)
     OrderBookImpl::InstrumentsT instrSet;
     SourceIdT instrId = addInstrument("queue_test");
     instrSet.insert(instrId);
-    books.init(instrSet, &saver);
+    books.init(instrSet);
 
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;

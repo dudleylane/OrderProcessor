@@ -100,7 +100,7 @@ protected:
 
         // Initialize order book
         orderBook_ = std::make_unique<OrderBookImpl>();
-        orderBook_->init(instruments, &saver_);
+        orderBook_->init(instruments);
 
         // Create test order - don't save to OrderStorage, just create it
         testOrder_ = test::createCorrectOrder(instrumentId_);
@@ -262,7 +262,7 @@ protected:
 
         // Initialize order book
         orderBook_ = std::make_unique<OrderBookImpl>();
-        orderBook_->init(instruments, &saver_);
+        orderBook_->init(instruments);
 
         // Initialize order matcher
         matcher_ = std::make_unique<OrderMatcher>();

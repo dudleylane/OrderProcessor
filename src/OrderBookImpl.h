@@ -48,7 +48,7 @@ public:
     OrderBookImpl(void);
     ~OrderBookImpl(void);
 
-    void init(const InstrumentsT &instr, OrderSaver *storage);
+    void init(const InstrumentsT &instr);
 
 public:
     virtual void add(const OrderEntry &order);
@@ -77,8 +77,6 @@ private:
     typedef std::map<IdT, OrdersGroup *> OrderGroupsByInstrumentT;
 
     OrderGroupsByInstrumentT orderGroups_;
-
-    OrderSaver *storage_;
 };
 
 } // namespace COP

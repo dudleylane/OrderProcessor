@@ -180,7 +180,7 @@ protected:
         OrderBookImpl::InstrumentsT instruments;
         instruments.insert(instrId1_);
         instruments.insert(instrId2_);
-        orderBook_->init(instruments, &orderSaver_);
+        orderBook_->init(instruments);
 
         // Initialize processor
         ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),

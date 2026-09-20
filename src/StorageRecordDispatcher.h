@@ -12,6 +12,9 @@
 
 #pragma once
 
+#include <map>
+#include <utility>
+
 #include "FileStorageDef.h"
 #include "DataModelDef.h"
 
@@ -62,7 +65,8 @@ public:
 
 public:
     /// reimplemented from OrderSaver
-    virtual void save(const OrderEntry &val);
+    virtual u32 save(const OrderEntry &val);
+    virtual void erase(const IdT &orderId, u32 version);
 
 #ifdef BUILD_PG
 public:
@@ -92,6 +96,11 @@ private:
     OrderBook *orderBook_;
     FileSaver *fileStorage_;
     OrderDataStorage *orderStorage_;
+
+    /// Orders seen during a load, newest version of each, restored in finishLoad(). The loader
+    /// replays every version of every record, so the newest cannot be picked until the load ends.
+    typedef std::map<IdT, std::pair<u32, OrderEntry *>> PendingOrdersT;
+    PendingOrdersT pendingOrders_;
 #ifdef BUILD_PG
     PG::PGWriteBehind *pgWriter_ = nullptr;
 #endif
