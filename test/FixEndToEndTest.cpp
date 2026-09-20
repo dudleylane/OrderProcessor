@@ -147,7 +147,7 @@ protected:
         instruments.insert(instrId_);
 
         orderBook_ = std::make_unique<OrderBookImpl>();
-        orderBook_->init(instruments, &saver_);
+        orderBook_->init(instruments);
 
         inQueues_ = std::make_unique<IncomingQueues>();
         outQueues_ = std::make_unique<CapturingOutQueues>();
