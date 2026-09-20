@@ -56,7 +56,7 @@ public:
         OrderBookImpl::InstrumentsT instruments;
         instruments.insert(instrId_);
         orderBook_ = std::make_unique<OrderBookImpl>();
-        orderBook_->init(instruments, &orderSaver_);
+        orderBook_->init(instruments);
     }
 
     ~OrderBookBenchmarkSetup()

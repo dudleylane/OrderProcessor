@@ -120,9 +120,19 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
     {
         std::unique_ptr<OrderEntry> order(
             Codec::OrderCodec::decode(id, version, buf + sizeof(type), size - sizeof(type)));
-        orderBook_->restore(*order.get());
-        orderStorage_->restore(order.get());
-        order.release();
+        // Keep the newest version only. Restoring here would replay every intermediate state, and
+        // OrderDataStorage::restore() rejects an order id it already holds.
+        PendingOrdersT::iterator it = pendingOrders_.find(id);
+        if (pendingOrders_.end() == it)
+        {
+            pendingOrders_.insert(PendingOrdersT::value_type(id, std::make_pair(version, order.release())));
+        }
+        else if (version >= it->second.first)
+        {
+            std::unique_ptr<OrderEntry> previous(it->second.second);
+            it->second.first = version;
+            it->second.second = order.release();
+        }
     }
     break;
     default:
@@ -130,7 +140,29 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
     };
 }
 
-void StorageRecordDispatcher::finishLoad() {}
+void StorageRecordDispatcher::finishLoad()
+{
+    for (PendingOrdersT::iterator it = pendingOrders_.begin(); it != pendingOrders_.end(); ++it)
+    {
+        std::unique_ptr<OrderEntry> order(it->second.second);
+        it->second.second = nullptr;
+        assert(nullptr != orderStorage_);
+        // app/main.cpp loads twice, once without an order book and once with it, so an order can
+        // already be in storage from the first pass. Restore it once, and book it on the pass that
+        // has a book.
+        OrderEntry *restored = orderStorage_->locateByOrderId(it->first);
+        if (nullptr == restored)
+        {
+            orderStorage_->restore(order.get());
+            restored = order.release();
+        }
+        if (nullptr != orderBook_)
+        {
+            orderBook_->restore(*restored);
+        }
+    }
+    pendingOrders_.clear();
+}
 
 void StorageRecordDispatcher::save(const InstrumentEntry &val)
 {
@@ -242,7 +274,7 @@ void StorageRecordDispatcher::save(const ExecutionsT &val)
     fileStorage_->save(id, buffer.c_str(), buffer.size());
 }
 
-void StorageRecordDispatcher::save(const OrderEntry &val)
+u32 StorageRecordDispatcher::save(const OrderEntry &val)
 {
     string buffer;
     {
@@ -254,11 +286,20 @@ void StorageRecordDispatcher::save(const OrderEntry &val)
     IdT id;
     u32 version;
     Codec::OrderCodec::encode(val, &buffer, &id, &version);
-    fileStorage_->save(id, buffer.c_str(), buffer.size());
+    // update() appends a new version and returns it; for an order written for the first time that
+    // version is 0. save() would reject the second write of an order that changed (issue #20).
+    const u32 written = fileStorage_->update(id, buffer.c_str(), buffer.size());
 #ifdef BUILD_PG
     if (pgWriter_)
     {
         pgWriter_->enqueue(PG::PGRequestBuilder::fromOrder(val));
     }
 #endif
+    return written;
+}
+
+void StorageRecordDispatcher::erase(const IdT &orderId, u32 version)
+{
+    assert(nullptr != fileStorage_);
+    fileStorage_->erase(orderId, version);
 }

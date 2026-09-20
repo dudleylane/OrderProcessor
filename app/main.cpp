@@ -156,8 +156,8 @@ int main(int argc, char *argv[])
     dispatcher->init(Store::WideDataStorage::instance(), orderBook.get(), lmdbStorage.get(),
                      Store::OrderStorage::instance());
 
-    // Init order book with loaded instruments — need the dispatcher as OrderSaver
-    orderBook->init(instrumentIds, dispatcher.get());
+    // Init order book with loaded instruments; the book itself does not persist orders (#20)
+    orderBook->init(instrumentIds);
 
     // Reload LMDB — this time orders will be restored into OrderBook
     lmdbStorage->load(cfg.dataDir, dispatcher.get());

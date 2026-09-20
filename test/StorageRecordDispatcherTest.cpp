@@ -183,9 +183,21 @@ public:
         records_.insert(RecordsT::value_type(id, Record(std::string(buf, size))));
     }
 
-    u32 update(const IdT & /*id*/, const char * /*buf*/, size_t /*size*/) override
+    u32 update(const IdT &id, const char *buf, size_t size) override
     {
-        return 0;
+        EXPECT_NE(nullptr, buf);
+        EXPECT_GT(size, 0u);
+        // Mirrors LMDBStorage::update(): each call appends a new version and returns it. Only the
+        // newest content is kept here, which is what the dispatcher tests look at.
+        RecordsT::iterator it = records_.find(id);
+        if (records_.end() == it)
+        {
+            records_.insert(RecordsT::value_type(id, Record(std::string(buf, size))));
+            return 0;
+        }
+        it->second.record_.assign(buf, size);
+        it->second.version_ += 1;
+        return it->second.version_;
     }
 
     u32 replace(const IdT & /*id*/, u32 /*version*/, const char * /*buf*/, size_t /*size*/) override
@@ -193,16 +205,24 @@ public:
         return 0;
     }
 
-    void erase(const IdT & /*id*/, u32 /*version*/) override {}
+    void erase(const IdT &id, u32 version) override
+    {
+        RecordsT::iterator it = records_.find(id);
+        if ((records_.end() != it) && (it->second.version_ == version))
+        {
+            records_.erase(it);
+        }
+    }
 
     void erase(const IdT & /*id*/) override {}
 
     struct Record
     {
         std::string record_;
+        u32 version_;
 
-        Record() : record_() {}
-        Record(const std::string &rec) : record_(rec) {}
+        Record() : record_(), version_(0) {}
+        Record(const std::string &rec, u32 version = 0) : record_(rec), version_(version) {}
     };
     typedef std::map<IdT, Record> RecordsT;
     RecordsT records_;
@@ -493,11 +513,14 @@ TEST_F(StorageRecordDispatcherTest, LoadOrderRecord)
 
     dispatcher_->onRecordLoaded(id, version, buf.c_str(), buf.size());
 
+    // Orders reach the book and the storage at finishLoad(), once the newest version of each is
+    // known: the loader replays every version of every record (#20).
+    EXPECT_TRUE(orderBook_->orders_.empty());
+    dispatcher_->finishLoad();
+
     ASSERT_EQ(1u, orderBook_->orders_.size());
     ASSERT_NE(nullptr, orderBook_->orders_.at(0));
     EXPECT_TRUE(orderBook_->orders_.at(0)->compare(*val));
-
-    dispatcher_->finishLoad();
 }
 
 // =============================================================================

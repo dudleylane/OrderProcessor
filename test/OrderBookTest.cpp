@@ -61,7 +61,7 @@ TEST_F(OrderBookTest, InitWithEmptyInstruments)
     DummyOrderSaver saver;
     OrderBookImpl books;
     OrderBookImpl::InstrumentsT emptyInstr;
-    books.init(emptyInstr, &saver);
+    books.init(emptyInstr);
     // Should not throw
     SUCCEED();
 }
