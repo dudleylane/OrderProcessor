@@ -204,7 +204,9 @@ u32 LMDBStorage::update(const IdT &id, const char *buf, size_t size)
     int rc = mdb_txn_begin(env_, nullptr, 0, &txn);
     checkLMDB(rc, "LMDBStorage::update mdb_txn_begin");
 
-    // Find the max version for this ID using a cursor
+    // Find the max version for this ID. The key is {id, version} compared byte-wise, so all versions
+    // of an id are contiguous: seek to the first one and walk just that range. Those bytes are not in
+    // numeric order (little-endian u32), so take the maximum by value rather than the last key.
     u32 newVersion = 0;
     MDB_cursor *cursor = nullptr;
     rc = mdb_cursor_open(txn, dbi_, &cursor);
@@ -214,20 +216,23 @@ u32 LMDBStorage::update(const IdT &id, const char *buf, size_t size)
         checkLMDB(rc, "LMDBStorage::update mdb_cursor_open");
     }
 
-    // Scan for existing versions of this ID
-    MDB_val curKey, curData;
-    rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_FIRST);
+    // Scan the existing versions of this ID
+    CompositeKey seekKey(id, 0);
+    MDB_val curKey = makeKey(seekKey);
+    MDB_val curData;
+    rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_SET_RANGE);
     while (rc == MDB_SUCCESS)
     {
         if (curKey.mv_size == sizeof(CompositeKey))
         {
             CompositeKey ck = readKey(curKey);
-            if (ck.id_ == id)
+            if (!(ck.id_ == id))
             {
-                if (ck.version_ >= newVersion)
-                {
-                    newVersion = ck.version_ + 1;
-                }
+                break;
+            }
+            if (ck.version_ >= newVersion)
+            {
+                newVersion = ck.version_ + 1;
             }
         }
         rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);

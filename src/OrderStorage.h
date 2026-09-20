@@ -73,6 +73,12 @@ public:
 
     void attach(OrderSaver *saver);
 
+    /// Writes a new persisted version of the order, out-param receives it. Returns false when no
+    /// saver is attached (tests, and the load passes), in which case nothing was written.
+    bool persist(const OrderEntry &order, u32 *version);
+    /// Erases one persisted version, undoing a persist().
+    void unpersist(const IdT &orderId, u32 version);
+
 public:
     OrderEntry *locateByClOrderId(const RawDataEntry &clOrderId) const;
     OrderEntry *locateByOrderId(const IdT &orderId) const;

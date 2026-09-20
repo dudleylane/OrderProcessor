@@ -66,7 +66,8 @@ public:
 class MockOrderSaver : public COP::OrderSaver
 {
 public:
-    MOCK_METHOD(void, save, (const COP::OrderEntry &order), (override));
+    MOCK_METHOD(COP::u32, save, (const COP::OrderEntry &order), (override));
+    MOCK_METHOD(void, erase, (const COP::IdT &orderId, COP::u32 version), (override));
 };
 
 /**

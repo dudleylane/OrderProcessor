@@ -94,7 +94,7 @@ private:
 
 } // namespace
 
-OrderBookImpl::OrderBookImpl(void) : storage_(nullptr) {}
+OrderBookImpl::OrderBookImpl(void) {}
 
 OrderBookImpl::~OrderBookImpl(void)
 {
@@ -106,12 +106,8 @@ OrderBookImpl::~OrderBookImpl(void)
     }
 }
 
-void OrderBookImpl::init(const InstrumentsT &instr, OrderSaver *storage)
+void OrderBookImpl::init(const InstrumentsT &instr)
 {
-    assert(nullptr != storage);
-    assert(nullptr == storage_);
-    storage_ = storage;
-
     for (InstrumentsT::const_iterator it = instr.begin(); it != instr.end(); ++it)
     {
         std::unique_ptr<OrdersGroup> grp(new OrdersGroup);
@@ -144,10 +140,6 @@ void OrderBookImpl::add(const OrderEntry &order)
         throw std::runtime_error("Unable to add order into book - side is not supported!");
     }
 
-    if (nullptr != storage_)
-    {
-        storage_->save(order);
-    }
     if (aux::ExchLogger::instance()->isNoteOn())
     {
         OBLogMessage msg(ADDORDER_FINAL_MSG, order.orderId_);
