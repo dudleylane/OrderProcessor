@@ -140,6 +140,32 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
     };
 }
 
+namespace
+{
+/// An order belongs in the book only while it can still trade. Before #20 every record was a
+/// pre-acceptance snapshot, so restoring all of them was right; now terminal states persist too.
+bool belongsInBook(const OrderEntry &order)
+{
+    if (MARKET_ORDERTYPE == order.ordType_)
+    {
+        return false;
+    }
+    switch (order.status_)
+    {
+    case FILLED_ORDSTATUS:
+    case CANCELED_ORDSTATUS:
+    case REJECTED_ORDSTATUS:
+    case EXPIRED_ORDSTATUS:
+    case DFD_ORDSTATUS:
+    case REPLACED_ORDSTATUS:
+        return false;
+    default:
+        break;
+    }
+    return 0 < order.leavesQty_;
+}
+} // namespace
+
 void StorageRecordDispatcher::finishLoad()
 {
     for (PendingOrdersT::iterator it = pendingOrders_.begin(); it != pendingOrders_.end(); ++it)
@@ -156,7 +182,7 @@ void StorageRecordDispatcher::finishLoad()
             orderStorage_->restore(order.get());
             restored = order.release();
         }
-        if (nullptr != orderBook_)
+        if ((nullptr != orderBook_) && belongsInBook(*restored))
         {
             orderBook_->restore(*restored);
         }

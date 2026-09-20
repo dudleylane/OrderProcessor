@@ -100,7 +100,8 @@ typedef enum OperationType
     CREATE_TRADE_EXECREPORT_TROPERATION,   // creates and enqueues Trade ExecutionReport for the changed order
     CREATE_REJECT_EXECREPORT_TROPERATION,  // creates and enqueues Reject ExecutionReport for the changed order
     CREATE_REPLACE_EXECREPORT_TROPERATION, // creates and enqueues replace ExecutionReport for the changed order
-    CREATE_CORRECT_EXECREPORT_TROPERATION  // creates and enqueues Correct ExecutionReport for the changed order
+    CREATE_CORRECT_EXECREPORT_TROPERATION, // creates and enqueues Correct ExecutionReport for the changed order
+    PERSIST_ORDER_TROPERATION              // writes a new persisted version of the changed order
 };
 
 struct Context
