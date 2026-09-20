@@ -148,8 +148,8 @@ void Processor::onEvent(const std::string & /*source*/, const OrderEvent &evnt)
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
-    // Persist the order as part of this transaction (#20): appended after the operations that
-    // change the book and the executions, so the persisted record is the order's final state.
+    // Persist the order as part of this transaction (#20), ahead of the operations that publish
+    // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(scope.get(), *smState.orderData_);
     // The order is fully initialised: let other threads that located it proceed. Released before
     // addTransaction(), because the transaction and deferred events lock this entry themselves.
@@ -201,8 +201,8 @@ void Processor::onEvent(const std::string & /*source*/, const OrderCancelEvent &
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
-    // Persist the order as part of this transaction (#20): appended after the operations that
-    // change the book and the executions, so the persisted record is the order's final state.
+    // Persist the order as part of this transaction (#20), ahead of the operations that publish
+    // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(scope.get(), *smState.orderData_);
 
     ordLock.release();
@@ -246,8 +246,8 @@ void Processor::onEvent(const std::string & /*source*/, const OrderReplaceEvent 
         OrderStatePersistence smState = threadState().stateMachine->getPersistence();
         assert(nullptr != smState.orderData_);
         smState.orderData_->setStateMachinePersistance(smState);
-        // Persist the order as part of this transaction (#20): appended after the operations that
-        // change the book and the executions, so the persisted record is the order's final state.
+        // Persist the order as part of this transaction (#20), ahead of the operations that publish
+        // execution reports, so an acknowledged change is already durable (#28).
         persistOrder(scope.get(), *smState.orderData_);
         publishGuard.release();
     }
@@ -276,8 +276,8 @@ void Processor::onEvent(const std::string & /*source*/, const OrderReplaceEvent 
         OrderStatePersistence smState = threadState().stateMachine->getPersistence();
         assert(nullptr != smState.orderData_);
         smState.orderData_->setStateMachinePersistance(smState);
-        // Persist the order as part of this transaction (#20): appended after the operations that
-        // change the book and the executions, so the persisted record is the order's final state.
+        // Persist the order as part of this transaction (#20), ahead of the operations that publish
+        // execution reports, so an acknowledged change is already durable (#28).
         persistOrder(scope.get(), *smState.orderData_);
     }
 
@@ -358,8 +358,8 @@ void Processor::onEvent(const std::string & /*source*/, const COP::Queues::Order
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
-    // Persist the order as part of this transaction (#20): appended after the operations that
-    // change the book and the executions, so the persisted record is the order's final state.
+    // Persist the order as part of this transaction (#20), ahead of the operations that publish
+    // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(scope.get(), *smState.orderData_);
 
     ordLock.release();
@@ -440,8 +440,8 @@ void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
-    // Persist the order as part of this transaction (#20): appended after the operations that
-    // change the book and the executions, so the persisted record is the order's final state.
+    // Persist the order as part of this transaction (#20), ahead of the operations that publish
+    // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(scope.get(), *smState.orderData_);
 
     ordLock.release();
@@ -522,8 +522,8 @@ void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
-    // Persist the order as part of this transaction (#20): appended after the operations that
-    // change the book and the executions, so the persisted record is the order's final state.
+    // Persist the order as part of this transaction (#20), ahead of the operations that publish
+    // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(scope.get(), *smState.orderData_);
 
     ordLock.release();
@@ -567,7 +567,10 @@ void Processor::persistOrder(ACID::Scope *transaction, const OrderEntry &order)
 {
     assert(nullptr != transaction);
     std::unique_ptr<ACID::Operation> op(new ACID::PersistOrderTrOperation(order));
-    transaction->addOperation(op);
+    // First, not last: CreateExecReportTrOperation publishes during execute and WsOutQueues
+    // broadcasts straight away, so persisting afterwards let a client see a fill before it was
+    // durable (#28). No operation mutates the fields the codec writes, so the record is the same.
+    transaction->addOperationFirst(op);
 }
 
 void Processor::onEvent(DeferedEventBase *evnt)
@@ -636,8 +639,8 @@ void Processor::process(onTradeExecution &evnt, OrderEntry *order, const ACID::C
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
-    // Persist the order as part of this transaction (#20): appended after the operations that
-    // change the book and the executions, so the persisted record is the order's final state.
+    // Persist the order as part of this transaction (#20), ahead of the operations that publish
+    // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(evnt.transaction_, *smState.orderData_);
 }
 
@@ -655,8 +658,8 @@ void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, con
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
-    // Persist the order as part of this transaction (#20): appended after the operations that
-    // change the book and the executions, so the persisted record is the order's final state.
+    // Persist the order as part of this transaction (#20), ahead of the operations that publish
+    // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(evnt.transaction_, *smState.orderData_);
 }
 

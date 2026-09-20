@@ -10,6 +10,8 @@
 */
 
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <string>
 #include <thread>
 #include <memory>
 #include <deque>
@@ -597,3 +599,78 @@ TEST_F(ProcessorTest, ProcessMultipleOrders_AllTransactionsExecuted)
 }
 
 } // namespace
+
+// =============================================================================
+// Durability ordering (#28)
+// =============================================================================
+
+namespace
+{
+/// Records the order in which the engine persists and publishes, in one sequence.
+class RecordingOutQueues final : public Queues::OutQueues
+{
+public:
+    explicit RecordingOutQueues(std::vector<std::string> *seq) : seq_(seq) {}
+
+    void push(const Queues::ExecReportEvent &, const std::string &) override
+    {
+        seq_->push_back("publish");
+    }
+    void push(const Queues::CancelRejectEvent &, const std::string &) override
+    {
+        seq_->push_back("publish");
+    }
+    void push(const Queues::BusinessRejectEvent &, const std::string &) override
+    {
+        seq_->push_back("publish");
+    }
+
+private:
+    std::vector<std::string> *seq_;
+};
+
+class RecordingOrderSaver final : public COP::OrderSaver
+{
+public:
+    explicit RecordingOrderSaver(std::vector<std::string> *seq) : seq_(seq), version_(0) {}
+
+    COP::u32 save(const COP::OrderEntry &) override
+    {
+        seq_->push_back("persist");
+        return version_++;
+    }
+    void erase(const COP::IdT &, COP::u32) override
+    {
+        seq_->push_back("erase");
+    }
+
+private:
+    std::vector<std::string> *seq_;
+    COP::u32 version_;
+};
+} // namespace
+
+TEST_F(ProcessorTest, OrderIsDurableBeforeItsExecutionReportIsPublished)
+{
+    // CreateExecReportTrOperation publishes during execute and WsOutQueues broadcasts straight
+    // away, so persisting last let a client see a change before it was durable - a window of about
+    // one LMDB write, which is milliseconds with fsync per commit (#28).
+    std::vector<std::string> sequence;
+    RecordingOrderSaver saver(&sequence);
+    RecordingOutQueues outQueues(&sequence);
+    OrderStorage::instance()->attach(&saver);
+
+    ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
+                           &outQueues, inQueues_.get(), transMgr_.get());
+    Processor processor;
+    processor.init(params);
+    transMgr_->proc_ = &processor;
+
+    auto order = test::createCorrectOrder(instrId1_);
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor.process();
+
+    ASSERT_FALSE(sequence.empty());
+    EXPECT_EQ("persist", sequence.front());
+    EXPECT_NE(std::find(sequence.begin(), sequence.end(), "publish"), sequence.end());
+}
