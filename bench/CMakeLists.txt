@@ -1,6 +1,7 @@
 target_sources(orderProcessorBench
     PRIVATE
         EventProcessingBench.cpp
+        ProcessorBench.cpp
         OrderMatchingBench.cpp
         StateMachineBench.cpp
         InterlockCacheBench.cpp

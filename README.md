@@ -207,16 +207,31 @@ The run prints the machine, kernel, CPU, governor, compiler and commit it measur
 
 ### Performance Results (Release Build)
 
-Benchmark results on 8-core CPU @ 3.8 GHz:
+Every row names the benchmark that produces it, so you can reproduce it:
+`./build/orderProcessorBench --benchmark_filter=BM_ProcessNewOrder`.
 
-| Benchmark | Time (ns) | Throughput |
-|-----------|-----------|------------|
-| EventProcessing | ~7,200 | ~139K ops/sec |
-| OrderMatching | ~7,300 | ~137K ops/sec |
-| StateMachineTransitions | ~9,100 | ~110K ops/sec |
-| InterlockCache | ~30-40 | ~25-33M ops/sec |
-| IncomingQueues Push | ~15 | ~66M ops/sec |
-| IncomingQueues Pop | ~15 | ~66M ops/sec |
+Measured on the dev box (4 cores / 8 threads, Release, `-O3 -march=native -flto`). Your machine will
+differ; these numbers are a shape, not a specification.
+
+| Benchmark | Time | Throughput | What it covers |
+|-----------|------|------------|----------------|
+| `BM_ProcessNewOrder` | ~2.4 µs | ~420K orders/sec | `Processor::onEvent` through the state machine, `OrderDataStorage::save`, the book, and the transaction, executed inline |
+| `BM_ProcessNewOrderWithMatch` | ~11.5 µs | ~88K orders/sec | the same, for an order that crosses: trade, deferred execution events, book removal |
+| `BM_ProcessCancelOrder` | ~1.1 µs | ~930K orders/sec | cancel of a resting order |
+| `BM_TaskManagerThroughput/4` | ~8.8 ms per 500 orders | ~57K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
+
+`BM_TaskManagerThroughput` takes the processor count as its argument: ~30K orders/sec at 2, ~57K at
+4, and no further gain at 8 on a 4-core machine.
+
+Two things these numbers deliberately exclude, both real in production:
+
+- **Logging.** The benchmarks turn notes off. `app/main.cpp` turns them on, and with them on a new
+  order costs about 27 µs instead of 2.4 µs: roughly 24 µs per order inside spdlog.
+- **Persistence.** No `OrderSaver` is attached, so nothing reaches LMDB. With the dispatcher wired
+  up, each order change costs an LMDB write, about 2 ms with fsync per commit (issue #20).
+
+For the queue, order book, state machine, arena and cache microbenchmarks, run the binary:
+`./build/orderProcessorBench --benchmark_list_tests` shows everything available.
 
 ---
 
