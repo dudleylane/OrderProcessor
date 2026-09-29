@@ -8,7 +8,9 @@
 #include "QueuesDef.h"
 #include "Logger.h"
 
+#include <atomic>
 #include <chrono>
+#include <exception>
 
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
@@ -17,6 +19,27 @@ using tcp = net::ip::tcp;
 
 using namespace COP;
 using namespace COP::App;
+
+namespace
+{
+/// Exceptions contained at the session boundary since the process started. Each is logged with its number,
+/// so the count stays visible in the log without a protocol field.
+std::atomic<u64> containedExceptions{ 0 };
+
+/// Longest prefix of a client's request that goes into the log.
+const size_t MAX_LOGGED_REQUEST = 256;
+
+void logContained(const char *where, const std::string &request, const char *what)
+{
+    const u64 n = containedExceptions.fetch_add(1, std::memory_order_relaxed) + 1;
+    std::string text = "WsSession: contained exception #" + std::to_string(n) + " in " + where + ": " + what;
+    if (!request.empty())
+    {
+        text += "; request: " + request.substr(0, MAX_LOGGED_REQUEST);
+    }
+    aux::ExchLogger::instance()->error(text);
+}
+} // namespace
 
 WsSession::WsSession(tcp::socket &&socket, SessionManager *sessionMgr, Store::WideParamsDataStorage *wideData,
                      Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues, IdTValueGenerator *idGen,
@@ -47,11 +70,25 @@ void WsSession::onAccept(beast::error_code ec)
 
     sessionMgr_->addSession(shared_from_this());
 
-    // Send initial state
-    send(serializeConnected());
-    send(serializeInstrumentList(wideData_));
-    send(serializeAccountList(wideData_));
-    send(serializeOrderSnapshot(orderStorage_));
+    // Send initial state. Handlers run inside io_context::run(), so an exception leaving one terminates the
+    // server (#36): contain it, tell the client, and keep the session open.
+    try
+    {
+        send(serializeConnected());
+        send(serializeInstrumentList(wideData_));
+        send(serializeAccountList(wideData_));
+        send(serializeOrderSnapshot(orderStorage_));
+    }
+    catch (const std::exception &ex)
+    {
+        logContained("initial state", std::string(), ex.what());
+        send(serializeError("Internal error: initial state is incomplete"));
+    }
+    catch (...)
+    {
+        logContained("initial state", std::string(), "unknown exception");
+        send(serializeError("Internal error: initial state is incomplete"));
+    }
 
     doRead();
 }
@@ -72,7 +109,22 @@ void WsSession::onRead(beast::error_code ec, std::size_t /*bytesTransferred*/)
     std::string msg = beast::buffers_to_string(buffer_.data());
     buffer_.consume(buffer_.size());
 
-    handleMessage(msg);
+    // One client's request must not take the server down (#36). Without this, an exception would leave
+    // io_context::run() and terminate the process, and this session would stop reading.
+    try
+    {
+        handleMessage(msg);
+    }
+    catch (const std::exception &ex)
+    {
+        logContained("request", msg, ex.what());
+        send(serializeError("Internal error: request not processed"));
+    }
+    catch (...)
+    {
+        logContained("request", msg, "unknown exception");
+        send(serializeError("Internal error: request not processed"));
+    }
     doRead();
 }
 
