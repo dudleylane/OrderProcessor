@@ -62,6 +62,12 @@ target_sources(orderProcessorTest
         # WebSocket client-message parser (built from app/, which the test target does not link)
         ClientMessageParserTest.cpp
         ${CMAKE_SOURCE_DIR}/app/ClientMessageParser.cpp
+
+        # WebSocket session, served on loopback (also built from app/)
+        WsSessionTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/WsSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/SessionManager.cpp
+        ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
 )
 
 target_include_directories(orderProcessorTest
