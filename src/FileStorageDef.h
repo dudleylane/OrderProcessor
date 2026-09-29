@@ -85,7 +85,6 @@ public:
     virtual void save(const RawDataEntry &val) = 0;
     virtual void save(const AccountEntry &val) = 0;
     virtual void save(const ClearingEntry &val) = 0;
-    virtual void save(const ExecutionsT &val) = 0;
 };
 
 } // namespace Store
