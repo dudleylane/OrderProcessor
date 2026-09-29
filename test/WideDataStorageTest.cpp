@@ -226,6 +226,22 @@ TEST_F(WideDataStorageTest, AddAndGetExecutions)
     ASSERT_NE(nullptr, retrieved);
 }
 
+TEST_F(WideDataStorageTest, RestoredExecutionListIsRegisteredOnceAndAdvancesIds)
+{
+    // A replacement shares its original's execution list, so a load can restore the same id twice (#33).
+    auto *first = new ExecutionsT();
+    storage()->restore(IdT(50, 1), first);
+    storage()->restore(IdT(50, 1), new ExecutionsT()); // deleted, neither registered nor leaked
+
+    ExecutionsT *retrieved = nullptr;
+    storage()->get(IdT(50, 1), &retrieved);
+    EXPECT_EQ(first, retrieved);
+
+    // an id handed out after a load must not reuse a restored one
+    SourceIdT next = storage()->add(new ExecutionsT());
+    EXPECT_GT(next.id_, 50u);
+}
+
 // =============================================================================
 // Concurrent Read Tests
 // =============================================================================

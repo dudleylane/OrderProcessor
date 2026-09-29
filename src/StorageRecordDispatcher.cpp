@@ -183,6 +183,14 @@ void StorageRecordDispatcher::finishLoad()
         {
             orderStorage_->restore(order.get());
             restored = order.release();
+            // Execution lists are not persisted (#33), so register an empty one under the id the order's
+            // record holds. Without it the order's first execution finds no list and throws.
+            const SourceIdT &executionsId = restored->executions_.getId();
+            if (executionsId.isValid())
+            {
+                assert(nullptr != storage_);
+                storage_->restore(executionsId, new ExecutionsT());
+            }
         }
         if ((nullptr != orderBook_) && belongsInBook(*restored))
         {
