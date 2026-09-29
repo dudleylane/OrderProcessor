@@ -364,12 +364,14 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
     // =========================================================================
     // TEARDOWN
     // =========================================================================
-    transMgr->stop();
+    // Stop the transaction manager only after ~TaskManager has waited for every task: processing an event
+    // adds a transaction and finishing one removes it, and both require a started manager.
     taskMgr->waitUntilTransactionsFinished(5);
     inQueues->detach();
     transMgr->detach();
 
     taskMgr.reset();
+    transMgr->stop();
     transMgr.reset();
     multiOut.reset();
     recordingOut.reset();

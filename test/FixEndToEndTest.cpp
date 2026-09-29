@@ -182,12 +182,14 @@ protected:
 
     void TearDown() override
     {
-        transMgr_->stop();
+        // Stop the transaction manager only after ~TaskManager has waited for every task: processing an event
+        // adds a transaction and finishing one removes it, and both require a started manager.
         taskMgr_->waitUntilTransactionsFinished(5);
         inQueues_->detach();
         transMgr_->detach();
 
         taskMgr_.reset();
+        transMgr_->stop();
         transMgr_.reset();
         outQueues_.reset();
         inQueues_.reset();
