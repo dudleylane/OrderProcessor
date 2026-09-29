@@ -75,7 +75,7 @@ public:
     MOCK_METHOD(void, restore, (RawDataEntry * val), (override));
     MOCK_METHOD(void, restore, (COP::AccountEntry * val), (override));
     MOCK_METHOD(void, restore, (COP::ClearingEntry * val), (override));
-    MOCK_METHOD(void, restore, (ExecutionsT * val), (override));
+    MOCK_METHOD(void, restore, (const IdT &id, ExecutionsT *val), (override));
 };
 
 } // namespace test
