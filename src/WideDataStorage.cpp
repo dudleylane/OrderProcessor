@@ -268,15 +268,14 @@ SourceIdT WideParamsDataStorage::add(ClearingEntry *val)
 
 SourceIdT WideParamsDataStorage::add(ExecutionsT *val)
 {
+    // Execution lists are not persisted. Each order gets an empty one that is only ever appended to in
+    // memory, and nothing reads them back. Writing them keyed every list by its size, so the second new
+    // order's list collided with the first and LMDBStorage::save threw (#33).
     SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
     {
         // Exclusive write lock
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
         executions_.insert(ExecutionListsT::value_type(id, val));
-    }
-    if (nullptr != storage_)
-    {
-        storage_->save(*val);
     }
     return id;
 }

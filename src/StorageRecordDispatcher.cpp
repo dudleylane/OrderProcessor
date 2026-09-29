@@ -115,6 +115,8 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
     case EXECUTION_RECORDTYPE:
         break;
     case EXECUTIONS_RECORDTYPE:
+        // Execution lists are no longer written (#33). A data directory from an earlier build may hold one such
+        // record, an empty list keyed (0,0); it is skipped.
         break;
     case ORDER_RECORDTYPE:
     {
@@ -279,25 +281,6 @@ void StorageRecordDispatcher::save(const ClearingEntry &val)
         pgWriter_->enqueue(PG::PGRequestBuilder::fromClearing(val));
     }
 #endif
-}
-
-void StorageRecordDispatcher::save(const ExecutionsT &val)
-{
-    string buffer;
-    {
-        char typebuf[36];
-        int t = StorageRecordDispatcher::EXECUTIONS_RECORDTYPE;
-        memcpy(typebuf, &t, sizeof(t));
-        buffer.append(typebuf, sizeof(t));
-    }
-    u64 count = val.size();
-    buffer.append(reinterpret_cast<const char *>(&count), sizeof(count));
-    for (const auto &entry : val)
-    {
-        entry.eventId_.serialize(buffer);
-    }
-    IdT id(count, 0);
-    fileStorage_->save(id, buffer.c_str(), buffer.size());
 }
 
 u32 StorageRecordDispatcher::save(const OrderEntry &val)
