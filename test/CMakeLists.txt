@@ -61,6 +61,12 @@ target_sources(orderProcessorTest
 
         # Doc-code consistency enforcement
         DocConsistencyTest.cpp
+
+        # WebSocket session, served on loopback (built from app/, which the test target does not link)
+        WsSessionTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/WsSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/SessionManager.cpp
+        ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
 )
 
 target_include_directories(orderProcessorTest
@@ -68,6 +74,7 @@ target_include_directories(orderProcessorTest
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/mocks
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/app
 )
 
 if(BUILD_FIX)
