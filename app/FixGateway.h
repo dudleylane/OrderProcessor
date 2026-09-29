@@ -68,6 +68,8 @@ public:
 private:
     /// builds the typed message for its MsgType and calls the matching handler
     void dispatch(const FIX::Message &msg, const FIX::SessionID &sid);
+    /// logs an exception a handler threw and answers the one message with a BusinessMessageReject
+    void rejectContained(const FIX::Message &msg, const FIX::SessionID &sid, const char *what);
 
     Queues::InQueues *inQueues_;
     Store::WideParamsDataStorage *wideData_;

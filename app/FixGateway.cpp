@@ -6,6 +6,9 @@
 #include "IdTGenerator.h"
 #include "Logger.h"
 
+#include <algorithm>
+#include <atomic>
+#include <exception>
 #include <vector>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
@@ -13,6 +16,16 @@
 using namespace COP;
 using namespace COP::App;
 using namespace COP::Store;
+
+namespace
+{
+/// Exceptions contained in fromApp() since the process started. Each is logged with its number, so the
+/// count stays visible in the log.
+std::atomic<u64> containedExceptions{ 0 };
+
+/// Longest prefix of an inbound message that goes into the log.
+const size_t MAX_LOGGED_MESSAGE = 256;
+} // namespace
 
 // =============================================================================
 // Construction
@@ -60,7 +73,56 @@ void FixGateway::fromAdmin(const FIX::Message & /*msg*/, const FIX::SessionID & 
 
 void FixGateway::fromApp(const FIX::Message &msg, const FIX::SessionID &sid)
 {
-    dispatch(msg, sid);
+    // QuickFIX calls this on the session's own thread and handles only FIX::Exception there: anything else
+    // leaves the thread and terminates the server (#36). Contain it and reject the one message instead.
+    try
+    {
+        dispatch(msg, sid);
+    }
+    catch (const FIX::Exception &)
+    {
+        // QuickFIX answers these itself with the right session-level reject
+        throw;
+    }
+    catch (const std::exception &ex)
+    {
+        rejectContained(msg, sid, ex.what());
+    }
+    catch (...)
+    {
+        rejectContained(msg, sid, "unknown exception");
+    }
+}
+
+void FixGateway::rejectContained(const FIX::Message &msg, const FIX::SessionID &sid, const char *what)
+{
+    const u64 n = containedExceptions.fetch_add(1, std::memory_order_relaxed) + 1;
+    std::string text = msg.toString();
+    std::replace(text.begin(), text.end(), '\x01', '|');
+    aux::ExchLogger::instance()->error("FixGateway: contained exception #" + std::to_string(n) + " from " +
+                                       sid.toString() + ": " + what +
+                                       "; message: " + text.substr(0, MAX_LOGGED_MESSAGE));
+    try
+    {
+        FIX44::BusinessMessageReject reject;
+        FIX::MsgSeqNum seqNum;
+        if (msg.getHeader().getFieldIfSet(seqNum))
+        {
+            reject.set(FIX::RefSeqNum(seqNum.getValue()));
+        }
+        FIX::MsgType msgType;
+        if (msg.getHeader().getFieldIfSet(msgType))
+        {
+            reject.set(FIX::RefMsgType(msgType.getValue()));
+        }
+        reject.set(FIX::BusinessRejectReason(FIX::BusinessRejectReason_OTHER));
+        reject.set(FIX::Text("Internal error: message not processed"));
+        FIX::Session::sendToTarget(reject, sid);
+    }
+    catch (const std::exception &ex)
+    {
+        aux::ExchLogger::instance()->error(std::string("FixGateway: could not send the reject: ") + ex.what());
+    }
 }
 
 void FixGateway::dispatch(const FIX::Message &msg, const FIX::SessionID &sid)

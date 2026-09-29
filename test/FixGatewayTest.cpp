@@ -24,6 +24,9 @@
 #include "TestFixtures.h"
 #include "TestAux.h"
 #include "MockQueues.h"
+#include "MockStorage.h"
+
+#include <stdexcept>
 
 using namespace COP;
 using namespace COP::App;
@@ -473,6 +476,26 @@ TEST_F(FixGatewayInboundTest, FromApp_UnsupportedTypeStillReachesQuickFix)
     FIX44::News news;
     news.set(FIX::Headline("not handled"));
     EXPECT_THROW(gateway_->fromApp(news, TEST_SID), FIX::UnsupportedMessageType);
+}
+
+// =============================================================================
+// Exception Containment Tests (#36)
+// =============================================================================
+
+TEST_F(FixGatewayInboundTest, FromApp_HandlerExceptionIsContained)
+{
+    // The bug this covers: an exception from a handler left fromApp() into QuickFIX's session thread,
+    // which handles only FIX::Exception, and terminated the server (#36). Storage failing on the order's
+    // first write stands in for any such exception. No session is logged on here, so the reject cannot be
+    // sent; that is logged, not thrown.
+    testing::NiceMock<MockDataSaver> saver;
+    ON_CALL(saver, save(testing::An<const RawDataEntry &>()))
+        .WillByDefault(testing::Throw(std::runtime_error("injected storage failure")));
+    WideDataStorage::instance()->bindStorage(&saver);
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+
+    const FIX::Message generic(makeNewOrderSingle("ORD-EXC", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100));
+    EXPECT_NO_THROW(gateway_->fromApp(generic, TEST_SID));
 }
 
 // =============================================================================
