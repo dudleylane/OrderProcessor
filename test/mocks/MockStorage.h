@@ -62,7 +62,6 @@ public:
     MOCK_METHOD(void, save, (const RawDataEntry &val), (override));
     MOCK_METHOD(void, save, (const COP::AccountEntry &val), (override));
     MOCK_METHOD(void, save, (const COP::ClearingEntry &val), (override));
-    MOCK_METHOD(void, save, (const ExecutionsT &val), (override));
 };
 
 /**
