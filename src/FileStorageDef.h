@@ -71,7 +71,9 @@ public:
     virtual void restore(RawDataEntry *val) = 0;
     virtual void restore(AccountEntry *val) = 0;
     virtual void restore(ClearingEntry *val) = 0;
-    virtual void restore(ExecutionsT *val) = 0;
+    /// registers an execution list under the given id and takes ownership of it; deletes val if a list
+    /// with that id is already registered
+    virtual void restore(const IdT &id, ExecutionsT *val) = 0;
 };
 
 /// saves entities into the storage

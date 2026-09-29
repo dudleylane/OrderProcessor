@@ -341,7 +341,19 @@ void WideParamsDataStorage::restore(ClearingEntry *val)
     }
 }
 
-void WideParamsDataStorage::restore(ExecutionsT * /*val*/)
+void WideParamsDataStorage::restore(const IdT &id, ExecutionsT *val)
 {
-    ///todo: implement
+    // Atomically update subscrCounter_ with exponential backoff
+    casUpdateWithBackoff(subscrCounter_, id.id_ + 1);
+    bool inserted = false;
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        inserted = executions_.insert(ExecutionListsT::value_type(id, val)).second;
+    }
+    if (!inserted)
+    {
+        // a replacement shares its original's list, so both orders restore the same id
+        delete val;
+    }
 }

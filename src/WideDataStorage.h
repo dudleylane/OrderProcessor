@@ -60,7 +60,7 @@ public:
     virtual void restore(RawDataEntry *val);
     virtual void restore(AccountEntry *val);
     virtual void restore(ClearingEntry *val);
-    virtual void restore(ExecutionsT *val);
+    virtual void restore(const IdT &id, ExecutionsT *val);
 
 private:
     /// Reader-writer lock for read-heavy reference data access

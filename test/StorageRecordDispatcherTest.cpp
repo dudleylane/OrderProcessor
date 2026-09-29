@@ -71,6 +71,10 @@ public:
         {
             delete clr;
         }
+        for (auto &lst : executionLists_)
+        {
+            delete lst.second;
+        }
     }
 
     void restore(InstrumentEntry *val) override
@@ -103,9 +107,10 @@ public:
         clearings_.push_back(val);
     }
 
-    void restore(ExecutionsT *val) override
+    void restore(const IdT &id, ExecutionsT *val) override
     {
-        // Not used in tests
+        ASSERT_NE(nullptr, val);
+        executionLists_.push_back(std::make_pair(id, val));
     }
 
 public:
@@ -113,6 +118,7 @@ public:
     std::deque<AccountEntry *> accounts_;
     std::deque<ClearingEntry *> clearings_;
     std::deque<RawDataEntry *> rawDatas_;
+    std::deque<std::pair<IdT, ExecutionsT *>> executionLists_;
 
     struct IdString
     {
@@ -971,6 +977,75 @@ TEST_F(StorageRecordDispatcherTest, ExecutionListRecordFromAnEarlierBuildIsSkipp
         WideDataStorage::instance()->bindStorage(dispatcher_.get());
 
         EXPECT_NO_THROW(WideDataStorage::instance()->add(new ExecutionsT()));
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_F(StorageRecordDispatcherTest, RestoredOrderGetsAnEmptyExecutionList)
+{
+    // Execution lists are not persisted, so finishLoad() registers an empty one under the id the order's
+    // record holds (#33).
+    dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+    dispatcher_->startLoad();
+
+    std::unique_ptr<OrderEntry> val(createTestOrder());
+    val->orderId_ = IdT(1111, 6789);
+    val->status_ = NEW_ORDSTATUS;
+    val->orderQty_ = 100;
+    val->leavesQty_ = 100;
+
+    std::string buf = createRecordTypePrefix(StorageRecordDispatcher::ORDER_RECORDTYPE);
+    IdT id;
+    u32 version = 0;
+    OrderCodec::encode(*val, &buf, &id, &version);
+    dispatcher_->onRecordLoaded(id, version, buf.c_str(), buf.size());
+    dispatcher_->finishLoad();
+
+    ASSERT_EQ(1u, restore_->executionLists_.size());
+    EXPECT_EQ(val->executions_.getId(), restore_->executionLists_.at(0).first);
+    ASSERT_NE(nullptr, restore_->executionLists_.at(0).second);
+    EXPECT_TRUE(restore_->executionLists_.at(0).second->empty());
+}
+
+TEST_F(StorageRecordDispatcherTest, RestoredOrderCanRecordAnExecution)
+{
+    // Nothing used to register a list under the id a restored order's record holds, so the order's first
+    // execution after a restart threw "execution list not found" (#33). createTestOrder()'s list id is
+    // registered nowhere, which is exactly a restored order's position.
+    const std::string dir = test::uniqueTestPath("dispatcher-restored-execlist");
+    std::unique_ptr<OrderEntry> order(createTestOrder());
+    order->status_ = NEW_ORDSTATUS;
+    order->orderQty_ = 100;
+    order->leavesQty_ = 100;
+    const IdT orderId = order->orderId_;
+    const SourceIdT listId = order->executions_.getId();
+
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(WideDataStorage::instance(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        dispatcher_->save(*order);
+    }
+
+    {
+        // restart: a fresh dispatcher, storage and book over the same directory
+        OrderDataStorage storageAfter;
+        TestOrderBook bookAfter;
+        StorageRecordDispatcher dispatcherAfter;
+        LMDBStorage lmdbAfter;
+        dispatcherAfter.init(WideDataStorage::instance(), &bookAfter, &lmdbAfter, &storageAfter);
+        lmdbAfter.load(dir, &dispatcherAfter);
+
+        OrderEntry *restored = storageAfter.locateByOrderId(orderId);
+        ASSERT_NE(nullptr, restored);
+        EXPECT_NO_THROW(restored->addExecution(IdT(9001, 1)));
+
+        ExecutionsT *list = nullptr;
+        EXPECT_NO_THROW(WideDataStorage::instance()->get(listId, &list));
+        ASSERT_NE(nullptr, list);
+        EXPECT_EQ(1u, list->size());
     }
 
     std::error_code ec;
