@@ -12,6 +12,7 @@
 #include <quickfix/fix44/NewOrderMultileg.h>
 #include <quickfix/fix44/OrderCancelRequest.h>
 #include <quickfix/fix44/OrderCancelReplaceRequest.h>
+#include <quickfix/fix44/News.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
 #include "FixGateway.h"
@@ -410,6 +411,68 @@ TEST_F(FixGatewayInboundTest, MakeSourceString_Format)
 {
     std::string source = FixGateway::makeSourceString(TEST_SID);
     EXPECT_EQ("FIX:CLIENT_A->ORDER_PROCESSOR", source);
+}
+
+// =============================================================================
+// Inbound Dispatch Tests
+// =============================================================================
+
+TEST_F(FixGatewayInboundTest, FromApp_RoutesAGenericNewOrderSingle)
+{
+    // The session hands fromApp() a plain FIX::Message, as here. FIX44::MessageCracker cast it to
+    // NewOrderSingle through a temporary FIX44::Message, which UBSan reports as a member call on an object
+    // of the wrong type; dispatch() builds the typed message instead.
+    OrderEntry *capturedOrder = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                capturedOrder = evt.order_;
+            }));
+
+    const FIX::Message generic(makeNewOrderSingle("ORD-GEN", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100));
+    gateway_->fromApp(generic, TEST_SID);
+
+    ASSERT_NE(nullptr, capturedOrder);
+    EXPECT_EQ(BUY_SIDE, capturedOrder->side_);
+    EXPECT_DOUBLE_EQ(10.25, capturedOrder->price_);
+    EXPECT_EQ(100u, capturedOrder->orderQty_);
+
+    delete capturedOrder;
+}
+
+TEST_F(FixGatewayInboundTest, FromApp_RoutesAGenericCancelRequest)
+{
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    ASSERT_NE(nullptr, saved);
+    const auto &clOrd = saved->clOrderId_.get();
+
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderCancelEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderCancelEvent &evt)
+            {
+                EXPECT_EQ(saved->orderId_, evt.id_);
+            }));
+
+    FIX44::OrderCancelRequest cancelMsg;
+    cancelMsg.set(FIX::OrigClOrdID(std::string(clOrd.data_, clOrd.length_)));
+    cancelMsg.set(FIX::ClOrdID("CANCEL-GEN"));
+    cancelMsg.set(FIX::Side(FIX::Side_BUY));
+    cancelMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    cancelMsg.set(FIX::Symbol("aaa"));
+
+    gateway_->fromApp(FIX::Message(cancelMsg), TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, FromApp_UnsupportedTypeStillReachesQuickFix)
+{
+    // QuickFIX turns UnsupportedMessageType into the right reject, so a type the gateway does not handle
+    // must still throw it.
+    FIX44::News news;
+    news.set(FIX::Headline("not handled"));
+    EXPECT_THROW(gateway_->fromApp(news, TEST_SID), FIX::UnsupportedMessageType);
 }
 
 // =============================================================================

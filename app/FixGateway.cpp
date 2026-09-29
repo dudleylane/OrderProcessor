@@ -60,7 +60,39 @@ void FixGateway::fromAdmin(const FIX::Message & /*msg*/, const FIX::SessionID & 
 
 void FixGateway::fromApp(const FIX::Message &msg, const FIX::SessionID &sid)
 {
-    crack(msg, sid);
+    dispatch(msg, sid);
+}
+
+void FixGateway::dispatch(const FIX::Message &msg, const FIX::SessionID &sid)
+{
+    // Build the handler's message type from the generic message rather than casting to it. The session hands
+    // over a FIX::Message; FIX44::MessageCracker::crack() takes a FIX44::Message, so it received a temporary
+    // copy and cast that to NewOrderSingle and the rest, types it is not: undefined behaviour on every inbound
+    // message, which UBSan reports. Constructing the typed message costs the same single copy.
+    FIX::MsgType msgType;
+    msg.getHeader().getField(msgType);
+    const std::string &type = msgType.getValue();
+    if (FIX::MsgType_NewOrderSingle == type)
+    {
+        onMessage(FIX44::NewOrderSingle(msg), sid);
+    }
+    else if (FIX::MsgType_NewOrderMultileg == type)
+    {
+        onMessage(FIX44::NewOrderMultileg(msg), sid);
+    }
+    else if (FIX::MsgType_OrderCancelRequest == type)
+    {
+        onMessage(FIX44::OrderCancelRequest(msg), sid);
+    }
+    else if (FIX::MsgType_OrderCancelReplaceRequest == type)
+    {
+        onMessage(FIX44::OrderCancelReplaceRequest(msg), sid);
+    }
+    else
+    {
+        // as the cracker's default handler did; QuickFIX answers with the reject for an unsupported type
+        throw FIX::UnsupportedMessageType();
+    }
 }
 
 // =============================================================================

@@ -5,7 +5,6 @@
 #include <quickfix/Application.h>
 #include <unordered_map>
 #include <oneapi/tbb/spin_rw_mutex.h>
-#include <quickfix/MessageCracker.h>
 #include <quickfix/SessionID.h>
 #include <quickfix/Session.h>
 #include <quickfix/fix44/NewOrderSingle.h>
@@ -34,7 +33,7 @@ class OrderDataStorage;
 namespace App
 {
 
-class FixGateway : public FIX::Application, public FIX44::MessageCracker
+class FixGateway : public FIX::Application
 {
 public:
     FixGateway(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
@@ -49,7 +48,7 @@ public:
     void fromAdmin(const FIX::Message &, const FIX::SessionID &) override;
     void fromApp(const FIX::Message &, const FIX::SessionID &) override;
 
-    // MessageCracker overrides (inbound)
+    // Inbound handlers, called by fromApp() for the message types it dispatches
     void onMessage(const FIX44::NewOrderSingle &, const FIX::SessionID &);
     void onMessage(const FIX44::NewOrderMultileg &, const FIX::SessionID &);
     void onMessage(const FIX44::OrderCancelRequest &, const FIX::SessionID &);
@@ -67,6 +66,9 @@ public:
     static std::string makeSourceString(const FIX::SessionID &sid);
 
 private:
+    /// builds the typed message for its MsgType and calls the matching handler
+    void dispatch(const FIX::Message &msg, const FIX::SessionID &sid);
+
     Queues::InQueues *inQueues_;
     Store::WideParamsDataStorage *wideData_;
     Store::OrderDataStorage *orderStorage_;
