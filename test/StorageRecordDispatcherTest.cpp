@@ -922,3 +922,57 @@ TEST_F(StorageRecordDispatcherTest, OrderSurvivesRestartWithItsFinalState)
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
 }
+
+// =============================================================================
+// Execution Lists (#33)
+// =============================================================================
+
+TEST_F(StorageRecordDispatcherTest, EveryNewExecutionListCanBeAdded)
+{
+    // The bug this covers: every new list was written under the key IdT(list size, 0), so the second
+    // order's empty list collided with the first, LMDBStorage::save threw, and the server terminated (#33).
+    const std::string dir = test::uniqueTestPath("dispatcher-execlists");
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        WideDataStorage::instance()->bindStorage(dispatcher_.get());
+
+        SourceIdT first;
+        SourceIdT second;
+        EXPECT_NO_THROW(first = WideDataStorage::instance()->add(new ExecutionsT()));
+        EXPECT_NO_THROW(second = WideDataStorage::instance()->add(new ExecutionsT()));
+        EXPECT_NE(first, second);
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_F(StorageRecordDispatcherTest, ExecutionListRecordFromAnEarlierBuildIsSkipped)
+{
+    // A data directory from a build before #33 holds the one list record that build managed to write:
+    // an empty list keyed (0,0). Loading must skip it, and the next list must not collide with it.
+    const std::string dir = test::uniqueTestPath("dispatcher-old-execlist");
+    {
+        StorageRecordDispatcher seeder;
+        LMDBStorage lmdb;
+        seeder.init(restore_.get(), nullptr, &lmdb, orderStorage_.get());
+        lmdb.load(dir, &seeder);
+        std::string record = createRecordTypePrefix(StorageRecordDispatcher::EXECUTIONS_RECORDTYPE);
+        u64 count = 0;
+        record.append(reinterpret_cast<const char *>(&count), sizeof(count));
+        lmdb.save(IdT(0, 0), record.data(), record.size());
+    }
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        EXPECT_NO_THROW(lmdb.load(dir, dispatcher_.get()));
+        WideDataStorage::instance()->bindStorage(dispatcher_.get());
+
+        EXPECT_NO_THROW(WideDataStorage::instance()->add(new ExecutionsT()));
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}

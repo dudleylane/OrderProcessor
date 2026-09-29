@@ -61,7 +61,6 @@ public:
     virtual void save(const RawDataEntry &val);
     virtual void save(const AccountEntry &val);
     virtual void save(const ClearingEntry &val);
-    virtual void save(const ExecutionsT &val);
 
 public:
     /// reimplemented from OrderSaver
