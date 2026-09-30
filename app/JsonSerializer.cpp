@@ -10,33 +10,39 @@ using json = nlohmann::json;
 namespace
 {
 
+// An order holds an unset id for each reference it does not have: a new order's origClOrderId, an account the
+// client left out. Resolving an unset id throws, so these are read only when set (#35). Only clOrderId and the
+// instrument always resolve: OrderDataStorage requires the first and the OrderEntry constructor loads the second.
+
+/// Set means not the default id. Not IdT::isValid(): WideDataStorage gives string ids a zero date, which
+/// isValid() rejects, so a set source or destination would read as unset.
+template <typename T> bool isSet(const WideDataLazyRef<T> &ref)
+{
+    return SourceIdT() != ref.getId();
+}
+
+std::string rawDataText(const WideDataLazyRef<RawDataEntry> &ref)
+{
+    if (!isSet(ref))
+    {
+        return std::string();
+    }
+    const RawDataEntry &raw = ref.get();
+    return (raw.data_ && raw.length_ > 0) ? std::string(raw.data_, raw.length_) : std::string();
+}
+
+StringT stringOrEmpty(const WideDataLazyRef<StringT> &ref)
+{
+    return isSet(ref) ? ref.get() : StringT();
+}
+
 json orderToJson(const OrderEntry &order)
 {
     json j;
     j["orderId"] = order.orderId_.id_;
     j["origOrderId"] = order.origOrderId_.id_;
-
-    // clOrderId from RawDataEntry
-    const auto &clOrd = order.clOrderId_.get();
-    if (clOrd.data_ && clOrd.length_ > 0)
-    {
-        j["clOrderId"] = std::string(clOrd.data_, clOrd.length_);
-    }
-    else
-    {
-        j["clOrderId"] = "";
-    }
-
-    const auto &origClOrd = order.origClOrderId_.get();
-    if (origClOrd.data_ && origClOrd.length_ > 0)
-    {
-        j["origClOrderId"] = std::string(origClOrd.data_, origClOrd.length_);
-    }
-    else
-    {
-        j["origClOrderId"] = "";
-    }
-
+    j["clOrderId"] = rawDataText(order.clOrderId_);
+    j["origClOrderId"] = rawDataText(order.origClOrderId_);
     j["symbol"] = order.instrument_.get().symbol_;
     j["side"] = toJsonString(order.side_);
     j["ordType"] = toJsonString(order.ordType_);
@@ -51,9 +57,9 @@ json orderToJson(const OrderEntry &order)
     j["tif"] = toJsonString(order.tif_);
     j["capacity"] = toJsonString(order.capacity_);
     j["currency"] = toJsonString(order.currency_);
-    j["account"] = order.account_.get().account_;
-    j["destination"] = order.destination_.get();
-    j["source"] = order.source_.get();
+    j["account"] = isSet(order.account_) ? order.account_.get().account_ : StringT();
+    j["destination"] = stringOrEmpty(order.destination_);
+    j["source"] = stringOrEmpty(order.source_);
     j["creationTime"] = order.creationTime_;
     j["lastUpdateTime"] = order.lastUpdateTime_;
     j["expireTime"] = order.expireTime_;

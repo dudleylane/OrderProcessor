@@ -217,4 +217,24 @@ TEST_F(WsSessionTest, InitialStateThatThrowsIsAnsweredAndTheSessionKeepsReading)
     EXPECT_TRUE(stillAnswers(client));
 }
 
+TEST_F(WsSessionTest, SnapshotIncludesAnOrderWithUnsetReferences)
+{
+    // The live form of #35: once any order existed, a new connection's snapshot threw, because a new order's
+    // origClOrderId (and an account the client left out) is unset. Before #36 that terminated the server.
+    SourceIdT clOrderId = WideDataStorage::instance()->add(new RawDataEntry(STRING_RAWDATATYPE, "CL-7", 4));
+    SourceIdT instrument = WideDataStorage::instance()->findInstrumentBySymbol("AAPL");
+    auto *order = new OrderEntry(SourceIdT(), SourceIdT(), clOrderId, SourceIdT(), instrument, SourceIdT(), SourceIdT(),
+                                 SourceIdT());
+    order->orderId_ = IdT(7, 1);
+    OrderStorage::instance()->restore(order);
+
+    Client client;
+    connect(client);
+    auto snapshot = readUntil(client, "order_snapshot");
+    ASSERT_TRUE(snapshot.has_value()) << "no snapshot; escaped: " << escaped();
+    ASSERT_EQ(1u, (*snapshot)["data"].size());
+    EXPECT_EQ("CL-7", (*snapshot)["data"][0].value("clOrderId", "?"));
+    EXPECT_TRUE(stillAnswers(client));
+}
+
 } // namespace
