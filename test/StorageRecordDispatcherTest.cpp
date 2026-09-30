@@ -1051,3 +1051,99 @@ TEST_F(StorageRecordDispatcherTest, RestoredOrderCanRecordAnExecution)
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
 }
+
+// =============================================================================
+// Load Order (#49)
+// =============================================================================
+
+TEST_F(StorageRecordDispatcherTest, OrderRecordBeforeItsInstrumentIsRestored)
+{
+    // LMDB visits keys in byte order, so an order's record can come before its instrument's (#49). Decoding the
+    // order right then built an OrderEntry, whose constructor loads the instrument, and that threw "instrument not
+    // found": the server could not start.
+    std::unique_ptr<OrderEntry> order(createTestOrder());
+    order->orderId_ = IdT(4444, 6789);
+    order->status_ = NEW_ORDSTATUS;
+    order->orderQty_ = 100;
+    order->leavesQty_ = 100;
+
+    std::string orderRecord = createRecordTypePrefix(StorageRecordDispatcher::ORDER_RECORDTYPE);
+    IdT orderId;
+    u32 orderVersion = 0;
+    OrderCodec::encode(*order, &orderRecord, &orderId, &orderVersion);
+
+    InstrumentEntry instrument;
+    WideDataStorage::instance()->get(order->instrument_.getId(), &instrument);
+    std::string instrumentRecord = createRecordTypePrefix(StorageRecordDispatcher::INSTRUMENT_RECORDTYPE);
+    IdT instrumentId;
+    u32 instrumentVersion = 0;
+    InstrumentCodec::encode(instrument, &instrumentRecord, &instrumentId, &instrumentVersion);
+
+    RawDataEntry clOrderId;
+    WideDataStorage::instance()->get(order->clOrderId_.getId(), &clOrderId);
+    std::string rawRecord = createRecordTypePrefix(StorageRecordDispatcher::RAWDATA_RECORDTYPE);
+    IdT rawId;
+    u32 rawVersion = 0;
+    RawDataCodec::encode(clOrderId, &rawRecord, &rawId, &rawVersion);
+
+    // restart: nothing is restored yet when the order's record arrives
+    WideDataStorage::destroy();
+    WideDataStorage::create();
+    dispatcher_->init(WideDataStorage::instance(), orderBook_.get(), saver_.get(), orderStorage_.get());
+    dispatcher_->startLoad();
+    EXPECT_NO_THROW(dispatcher_->onRecordLoaded(orderId, orderVersion, orderRecord.data(), orderRecord.size()));
+    dispatcher_->onRecordLoaded(rawId, rawVersion, rawRecord.data(), rawRecord.size());
+    dispatcher_->onRecordLoaded(instrumentId, instrumentVersion, instrumentRecord.data(), instrumentRecord.size());
+    ASSERT_NO_THROW(dispatcher_->finishLoad());
+
+    OrderEntry *restored = orderStorage_->locateByOrderId(orderId);
+    ASSERT_NE(nullptr, restored);
+    EXPECT_EQ(instrument.symbol_, restored->instrument_.get().symbol_);
+}
+
+TEST_F(StorageRecordDispatcherTest, OrderWhoseKeySortsBeforeItsInstrumentSurvivesRestart)
+{
+    // The same through LMDB itself: keys compare as raw little-endian bytes, so order id 256 (00 01 ...) sorts
+    // before instrument id 1 (01 00 ...). Once ids reached 256 the server could not restart (#49).
+    const std::string dir = test::uniqueTestPath("dispatcher-load-order");
+    const IdT orderId(256, 20260930);
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        WideDataStorage::instance()->bindStorage(dispatcher_.get());
+
+        SourceIdT instrumentId = addInstrument("AAPL", "US0378331005", "ISIN");
+        SourceIdT clOrderId = addTestRawData("CL-256");
+        ASSERT_EQ(1u, instrumentId.id_);
+        OrderEntry order(SourceIdT(), SourceIdT(), clOrderId, SourceIdT(), instrumentId, SourceIdT(), SourceIdT(),
+                         SourceIdT());
+        order.orderId_ = orderId;
+        order.status_ = NEW_ORDSTATUS;
+        order.side_ = BUY_SIDE;
+        order.ordType_ = LIMIT_ORDERTYPE;
+        order.orderQty_ = 100;
+        order.leavesQty_ = 100;
+        dispatcher_->save(order);
+    }
+
+    {
+        // restart: fresh reference data, storage, book and dispatcher over the same directory
+        WideDataStorage::destroy();
+        WideDataStorage::create();
+        OrderDataStorage storageAfter;
+        TestOrderBook bookAfter;
+        StorageRecordDispatcher dispatcherAfter;
+        LMDBStorage lmdbAfter;
+        dispatcherAfter.init(WideDataStorage::instance(), &bookAfter, &lmdbAfter, &storageAfter);
+        ASSERT_NO_THROW(lmdbAfter.load(dir, &dispatcherAfter));
+
+        OrderEntry *restored = storageAfter.locateByOrderId(orderId);
+        ASSERT_NE(nullptr, restored);
+        EXPECT_EQ("AAPL", restored->instrument_.get().symbol_);
+        EXPECT_EQ(1u, bookAfter.orders_.size());
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}

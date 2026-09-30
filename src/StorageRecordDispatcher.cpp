@@ -120,20 +120,14 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
         break;
     case ORDER_RECORDTYPE:
     {
-        std::unique_ptr<OrderEntry> order(
-            Codec::OrderCodec::decode(id, version, buf + sizeof(type), size - sizeof(type)));
-        // Keep the newest version only. Restoring here would replay every intermediate state, and
-        // OrderDataStorage::restore() rejects an order id it already holds.
+        // Keep the newest version only, and keep it encoded. Restoring here would replay every intermediate
+        // state, and OrderDataStorage::restore() rejects an order id it already holds. Decoding here would build
+        // an OrderEntry, whose constructor loads the instrument, and LMDB visits keys in byte order, so an order
+        // can come before its instrument's record (#49); finishLoad() decodes once every record is restored.
         PendingOrdersT::iterator it = pendingOrders_.find(id);
-        if (pendingOrders_.end() == it)
+        if ((pendingOrders_.end() == it) || (version >= it->second.first))
         {
-            pendingOrders_.insert(PendingOrdersT::value_type(id, std::make_pair(version, order.release())));
-        }
-        else if (version >= it->second.first)
-        {
-            std::unique_ptr<OrderEntry> previous(it->second.second);
-            it->second.first = version;
-            it->second.second = order.release();
+            pendingOrders_[id] = std::make_pair(version, std::string(buf + sizeof(type), size - sizeof(type)));
         }
     }
     break;
@@ -172,8 +166,9 @@ void StorageRecordDispatcher::finishLoad()
 {
     for (PendingOrdersT::iterator it = pendingOrders_.begin(); it != pendingOrders_.end(); ++it)
     {
-        std::unique_ptr<OrderEntry> order(it->second.second);
-        it->second.second = nullptr;
+        const std::string &record = it->second.second;
+        std::unique_ptr<OrderEntry> order(
+            Codec::OrderCodec::decode(it->first, it->second.first, record.data(), record.size()));
         assert(nullptr != orderStorage_);
         // app/main.cpp loads twice, once without an order book and once with it, so an order can
         // already be in storage from the first pass. Restore it once, and book it on the pass that

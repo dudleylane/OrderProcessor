@@ -13,6 +13,7 @@
 #pragma once
 
 #include <map>
+#include <string>
 #include <utility>
 
 #include "FileStorageDef.h"
@@ -96,9 +97,10 @@ private:
     FileSaver *fileStorage_;
     OrderDataStorage *orderStorage_;
 
-    /// Orders seen during a load, newest version of each, restored in finishLoad(). The loader
-    /// replays every version of every record, so the newest cannot be picked until the load ends.
-    typedef std::map<IdT, std::pair<u32, OrderEntry *>> PendingOrdersT;
+    /// Orders seen during a load: the newest version of each and its record, still encoded. The loader
+    /// replays every version of every record, so the newest cannot be picked until the load ends, and
+    /// decoding waits for finishLoad() too: an order's instrument may not be restored yet (#49).
+    typedef std::map<IdT, std::pair<u32, std::string>> PendingOrdersT;
     PendingOrdersT pendingOrders_;
 #ifdef BUILD_PG
     PG::PGWriteBehind *pgWriter_ = nullptr;
