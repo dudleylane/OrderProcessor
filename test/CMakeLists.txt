@@ -64,6 +64,7 @@ target_sources(orderProcessorTest
 
         # WebSocket session, served on loopback (built from app/, which the test target does not link)
         WsSessionTest.cpp
+        JsonSerializerTest.cpp
         ${CMAKE_SOURCE_DIR}/app/WsSession.cpp
         ${CMAKE_SOURCE_DIR}/app/SessionManager.cpp
         ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
