@@ -144,6 +144,12 @@ if(BUILD_APP)
 
     add_executable(seedData app/seed_data.cpp)
     target_link_libraries(seedData PRIVATE orderEngine pthread)
+
+    if(BUILD_TESTS)
+        # Run seedData itself, so the Debug and sanitizer CI jobs see an abort in its own code (#41). The
+        # directory persists in the build tree, so later runs exercise the already-seeded path too.
+        add_test(NAME SeedDataRunsCleanly COMMAND seedData ${CMAKE_CURRENT_BINARY_DIR}/seed-data-test)
+    endif()
 endif()
 
 if(BUILD_FUZZ)
