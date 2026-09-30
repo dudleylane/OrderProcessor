@@ -100,13 +100,13 @@ int main(int argc, char *argv[])
 
     std::cout << "\nSeeded " << instrCount << " instruments and " << acctCount << " accounts into " << dataDir << "\n";
 
-    // 5. Cleanup
-    Store::WideDataStorage::instance()->bindStorage(nullptr);
-    dispatcher.reset();
-    lmdbStorage.reset();
-
+    // 5. Cleanup. WideDataStorage goes first, while the dispatcher it is bound to still exists: it never calls
+    // its saver while being destroyed, and a bound storage cannot be unbound, since bindStorage() binds once and
+    // asserts against nullptr (#41).
     IdTGenerator::destroy();
     Store::WideDataStorage::destroy();
+    dispatcher.reset();
+    lmdbStorage.reset();
     aux::ExchLogger::destroy();
 
     return 0;
