@@ -292,16 +292,18 @@ int main(int argc, char *argv[])
     metricsPublisher.reset();
     server.reset();
 
-    transactMgr->stop();
     taskMgr->waitUntilTransactionsFinished(5);
 
     // Detach observers
     inQueues->detach();
     transactMgr->detach();
 
-    // TaskManager destructor owns and deletes all processors (uses logger)
+    // TaskManager destructor owns and deletes all processors (uses logger), and waits for every task it started
     taskMgr.reset();
 
+    // Only now stop the transaction manager: until ~TaskManager has waited for every task, an event still being
+    // processed adds a transaction and a finishing one removes itself, and both require a started manager (#37).
+    transactMgr->stop();
     transactMgr.reset();
 #ifdef BUILD_FIX
     multiOutQueues.reset();
