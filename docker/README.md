@@ -125,11 +125,15 @@ SELECT * FROM executions ORDER BY exec_time DESC LIMIT 10;
 
 ### Seed Test Data
 
-The `seedData` utility is included in the server image. To populate reference data:
+The `seedData` utility is included in the server image. The server reads reference data only when it starts, so seed with it stopped:
 
 ```bash
-docker compose exec oms-server seedData --data-dir /data
+docker compose stop oms-server
+docker compose run --rm --no-deps --entrypoint seedData oms-server --data-dir /data
+docker compose start oms-server
 ```
+
+`seedData` skips instruments and accounts that already exist, so running it again is safe. On a fresh volume, you can also run the `run` line before the first `docker compose up`.
 
 ### Shell Access
 
