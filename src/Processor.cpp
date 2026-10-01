@@ -109,8 +109,17 @@ void Processor::init(const ProcessorParams &params)
 bool Processor::process()
 {
     assert(nullptr != inQueue_);
-    bool rez = inQueue_->pop(this);
-    return rez;
+    try
+    {
+        return inQueue_->pop(this);
+    }
+    catch (...)
+    {
+        // An event that throws part-way can leave deferred events on this worker, and the next new order here would
+        // then fail on them. The caller, TaskManager, logs the exception and carries on (#57).
+        clearDeferedEvents();
+        throw;
+    }
 }
 
 void Processor::onEvent(const std::string & /*source*/, const OrderEvent &evnt)
@@ -164,23 +173,21 @@ void Processor::onEvent(const std::string & /*source*/, const OrderEvent &evnt)
     processDeferedEvent();
 }
 
-void Processor::onEvent(const std::string & /*source*/, const OrderCancelEvent &evnt)
+void Processor::onEvent(const std::string &source, const OrderCancelEvent &evnt)
 {
-    if (!evnt.id_.isValid()) [[unlikely]]
+    // A cancel for an order that does not exist is the client's mistake: reject it rather than throw (#57)
+    OrderEntry *ord = evnt.id_.isValid() ? orderStorage_->locateByOrderId(evnt.id_) : nullptr;
+    if (nullptr == ord) [[unlikely]]
     {
-        throw std::runtime_error("Processor::onEvent(OrderCancelEvent): order id is invalid!");
+        CancelRejectEvent reject;
+        reject.id_ = evnt.id_;
+        outQueues_->push(reject, source);
+        return;
     }
+    [[assume(ord != nullptr)]];
 
     PooledTransactionScope scope(scopePool_.get());
     ScopeArenaGuard arenaGuard(scope.get());
-
-    // locate the order to cancel
-    OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-    if (nullptr == ord) [[unlikely]]
-    {
-        throw std::runtime_error("Processor::onEvent(OrderCancelEvent): unable to locate order!");
-    }
-    [[assume(ord != nullptr)]];
 
     // write lock on the order for state machine processing
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
@@ -674,7 +681,15 @@ void Processor::process(const ACID::TransactionId &id, ACID::Transaction *tr)
 
     if (success) [[likely]]
     {
-        processDeferedEvent();
+        try
+        {
+            processDeferedEvent();
+        }
+        catch (...)
+        {
+            clearDeferedEvents(); // as in process(): leave nothing behind for this worker's next transaction (#57)
+            throw;
+        }
     }
     else
     {
