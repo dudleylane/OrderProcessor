@@ -80,6 +80,8 @@ oms-server:
 | `--workers` | 0 | Worker thread count (0 = auto-detect) |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
 | `--huge-pages` | off | Enable huge page allocation (requires host configuration) |
+| `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
+| `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
 
 ## Common Operations
 
@@ -133,7 +135,7 @@ docker compose run --rm --no-deps --entrypoint seedData oms-server --data-dir /d
 docker compose start oms-server
 ```
 
-`seedData` skips instruments and accounts that already exist, so running it again is safe. On a fresh volume, you can also run the `run` line before the first `docker compose up`.
+`seedData` seeds instruments, accounts and the server's clearing firm, and skips any that already exist, so running it again is safe. On a fresh volume, you can also run the `run` line before the first `docker compose up`.
 
 ### Shell Access
 

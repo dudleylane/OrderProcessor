@@ -33,7 +33,8 @@ class WsServer : public std::enable_shared_from_this<WsServer>
 public:
     WsServer(boost::asio::io_context &ioc, boost::asio::ip::tcp::endpoint endpoint, SessionManager *sessionMgr,
              Store::WideParamsDataStorage *wideData, Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues,
-             IdTValueGenerator *idGen, OrderBookImpl *orderBook);
+             IdTValueGenerator *idGen, OrderBookImpl *orderBook, SourceIdT defaultClearingId,
+             SourceIdT defaultAccountId);
 
     void run();
 
@@ -49,6 +50,8 @@ private:
     Queues::InQueues *inQueues_;
     IdTValueGenerator *idGen_;
     OrderBookImpl *orderBook_;
+    SourceIdT defaultClearingId_; // passed to every session; see WsSession (#34)
+    SourceIdT defaultAccountId_;
 };
 
 } // namespace App

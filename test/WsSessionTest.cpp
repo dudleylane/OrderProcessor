@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <atomic>
 #include <boost/asio.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/websocket.hpp>
@@ -20,7 +21,9 @@
 #include <string>
 #include <thread>
 
+#include "MockQueues.h"
 #include "MockStorage.h"
+#include "TestAux.h"
 #include "DataModelDef.h"
 #include "IdTGenerator.h"
 #include "IncomingQueues.h"
@@ -58,6 +61,9 @@ protected:
         instr->securityId_ = "US0378331005";
         instr->securityIdSource_ = "ISIN";
         WideDataStorage::instance()->add(instr);
+        accountId_ = test::addAccount("TRADING-1");
+        otherAccountId_ = test::addAccount("CLIENT-A");
+        clearingId_ = test::addClearing("HOUSE-CLEARING");
 
         endpoint_ = acceptor_.local_endpoint();
         acceptor_.async_accept(
@@ -67,7 +73,8 @@ protected:
                 {
                     std::make_shared<App::WsSession>(std::move(socket), &sessionMgr_, WideDataStorage::instance(),
                                                      OrderStorage::instance(), &inQueues_, IdTGenerator::instance(),
-                                                     nullptr)
+                                                     nullptr, useDefaultClearing_ ? clearingId_ : SourceIdT(),
+                                                     useDefaultAccount_ ? accountId_ : SourceIdT())
                         ->run();
                 }
             });
@@ -156,6 +163,27 @@ protected:
         return std::nullopt;
     }
 
+    /// Takes a copy of the order the session queued, polling until the timeout, since the session runs on its own
+    /// thread. A zero timeout polls once. Returns null when nothing was queued.
+    std::unique_ptr<OrderEntry> takeQueuedOrder(std::chrono::milliseconds timeout = REPLY_TIMEOUT)
+    {
+        std::unique_ptr<OrderEntry> order;
+        testing::NiceMock<test::MockInQueueProcessor> processor;
+        // pop() deletes the event's order after dispatch, so keep a copy
+        ON_CALL(processor, onEvent(testing::_, testing::An<const Queues::OrderEvent &>()))
+            .WillByDefault(
+                [&order](const std::string &, const Queues::OrderEvent &evnt)
+                {
+                    order.reset(evnt.order_->clone());
+                });
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (!inQueues_.pop(&processor) && std::chrono::steady_clock::now() < deadline)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return order;
+    }
+
     /// The session still reads and answers: an unknown type gets the ordinary error reply.
     static bool stillAnswers(Client &client)
     {
@@ -171,6 +199,13 @@ protected:
     App::SessionManager sessionMgr_;
     Queues::IncomingQueues inQueues_;
     testing::NiceMock<test::MockDataSaver> saver_;
+
+    SourceIdT accountId_;
+    SourceIdT otherAccountId_;
+    SourceIdT clearingId_;
+    // What the next session gets as the server's defaults. Set before connecting; read on the server thread.
+    std::atomic<bool> useDefaultClearing_{ true };
+    std::atomic<bool> useDefaultAccount_{ true };
 
     std::mutex escapedLock_;
     std::string escaped_;
@@ -235,6 +270,70 @@ TEST_F(WsSessionTest, SnapshotIncludesAnOrderWithUnsetReferences)
     ASSERT_EQ(1u, (*snapshot)["data"].size());
     EXPECT_EQ("CL-7", (*snapshot)["data"][0].value("clOrderId", "?"));
     EXPECT_TRUE(stillAnswers(client));
+}
+
+TEST_F(WsSessionTest, OrderThatNamesNoAccountGetsTheServerDefaults)
+{
+    // The bug this covers: every order the session built failed OrderEntry::isValid(), so the engine rejected it. It
+    // had no clearing firm, no account when the client named none, no settlement type and no update time (#34).
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
+                 R"("price":150.25,"orderQty":100,"tif":"DAY","currency":"USD","capacity":"AGENCY"}})");
+    std::unique_ptr<OrderEntry> order = takeQueuedOrder();
+    ASSERT_NE(nullptr, order) << "no order queued; escaped: " << escaped();
+    EXPECT_EQ(clearingId_, order->clearing_.getId());
+    EXPECT_EQ(accountId_, order->account_.getId());
+    std::string invalid;
+    EXPECT_TRUE(order->isValid(&invalid)) << invalid;
+}
+
+TEST_F(WsSessionTest, OrderThatNamesAnAccountKeepsIt)
+{
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"new_order","data":{"symbol":"AAPL","side":"SELL","ordType":"LIMIT","price":151.5,)"
+                 R"("orderQty":50,"tif":"DAY","account":"CLIENT-A","currency":"USD","capacity":"AGENCY"}})");
+    std::unique_ptr<OrderEntry> order = takeQueuedOrder();
+    ASSERT_NE(nullptr, order) << "no order queued; escaped: " << escaped();
+    EXPECT_EQ(otherAccountId_, order->account_.getId());
+    EXPECT_EQ(clearingId_, order->clearing_.getId());
+    std::string invalid;
+    EXPECT_TRUE(order->isValid(&invalid)) << invalid;
+}
+
+TEST_F(WsSessionTest, OrderIsRefusedWhenTheServerHasNoClearingFirm)
+{
+    useDefaultClearing_ = false;
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","price":150.25,)"
+                 R"("orderQty":100,"tif":"DAY","account":"TRADING-1","currency":"USD","capacity":"AGENCY"}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "no error reply; escaped: " << escaped();
+    EXPECT_EQ("Order refused: the server has no clearing firm", reply->value("message", ""));
+    EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0)));
+}
+
+TEST_F(WsSessionTest, OrderThatNamesNoAccountIsRefusedWhenTheServerHasNoDefaultAccount)
+{
+    useDefaultAccount_ = false;
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
+                 R"("price":150.25,"orderQty":100,"tif":"DAY","currency":"USD","capacity":"AGENCY"}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "no error reply; escaped: " << escaped();
+    EXPECT_EQ("Order refused: it names no account, and the server has no default account", reply->value("message", ""));
+    EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0)));
 }
 
 } // namespace

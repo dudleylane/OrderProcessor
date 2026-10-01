@@ -26,6 +26,7 @@
 #include "MetricsPublisher.h"
 #include "CpuAffinity.h"
 #include "HugePages.h"
+#include "ServerDefaults.h"
 
 using namespace COP;
 
@@ -39,6 +40,8 @@ struct Config
     int workers = 0;
     int cpuAffinityStart = -1; // -1 = disabled, >= 0 = pin starting from this core
     bool hugePages = false;
+    std::string clearingFirm = App::DEFAULT_CLEARING_FIRM; // the clearing firm on every order (#34)
+    std::string defaultAccount = App::DEFAULT_ACCOUNT;     // the account of an order that names none (#34)
 };
 
 Config parseArgs(int argc, char *argv[])
@@ -66,6 +69,14 @@ Config parseArgs(int argc, char *argv[])
         else if (arg == "--huge-pages")
         {
             cfg.hugePages = true;
+        }
+        else if (arg == "--clearing-firm" && i + 1 < argc)
+        {
+            cfg.clearingFirm = argv[++i];
+        }
+        else if (arg == "--default-account" && i + 1 < argc)
+        {
+            cfg.defaultAccount = argv[++i];
         }
     }
     return cfg;
@@ -154,6 +165,21 @@ int main(int argc, char *argv[])
 
     aux::ExchLogger::instance()->note("Phase 2 LMDB load complete (orders restored)");
 
+    // Resolve the defaults that WebSocket orders need (#34). Without them the server still starts, as it does on an
+    // unseeded directory, but its sessions refuse the orders that need them. seedData provides both.
+    const SourceIdT defaultClearingId = Store::WideDataStorage::instance()->findClearingByFirm(cfg.clearingFirm);
+    if (!defaultClearingId.isValid())
+    {
+        aux::ExchLogger::instance()->warn("Clearing firm '" + cfg.clearingFirm + "' is not in " + cfg.dataDir +
+                                          "; orders will be refused until it is seeded and the server restarted");
+    }
+    const SourceIdT defaultAccountId = Store::WideDataStorage::instance()->findAccountByName(cfg.defaultAccount);
+    if (!defaultAccountId.isValid())
+    {
+        aux::ExchLogger::instance()->warn("Default account '" + cfg.defaultAccount + "' is not in " + cfg.dataDir +
+                                          "; orders that name no account will be refused");
+    }
+
     // 5. Bind dispatcher as saver for WideDataStorage
     Store::WideDataStorage::instance()->bindStorage(dispatcher.get());
     Store::OrderStorage::instance()->attach(dispatcher.get());
@@ -209,7 +235,7 @@ int main(int argc, char *argv[])
     auto server = std::make_shared<App::WsServer>(
         ioc, boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("0.0.0.0"), cfg.port), sessionMgr.get(),
         Store::WideDataStorage::instance(), Store::OrderStorage::instance(), inQueues.get(), IdTGenerator::instance(),
-        orderBook.get());
+        orderBook.get(), defaultClearingId, defaultAccountId);
     server->run();
 
     // 10b. Create MetricsPublisher for system monitoring
