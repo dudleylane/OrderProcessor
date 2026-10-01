@@ -14,9 +14,11 @@ using namespace COP::App;
 
 WsServer::WsServer(net::io_context &ioc, tcp::endpoint endpoint, SessionManager *sessionMgr,
                    Store::WideParamsDataStorage *wideData, Store::OrderDataStorage *orderStorage,
-                   Queues::InQueues *inQueues, IdTValueGenerator *idGen, OrderBookImpl *orderBook)
+                   Queues::InQueues *inQueues, IdTValueGenerator *idGen, OrderBookImpl *orderBook,
+                   SourceIdT defaultClearingId, SourceIdT defaultAccountId)
     : acceptor_(ioc), ioc_(ioc), sessionMgr_(sessionMgr), wideData_(wideData), orderStorage_(orderStorage),
-      inQueues_(inQueues), idGen_(idGen), orderBook_(orderBook)
+      inQueues_(inQueues), idGen_(idGen), orderBook_(orderBook), defaultClearingId_(defaultClearingId),
+      defaultAccountId_(defaultAccountId)
 {
     beast::error_code ec;
 
@@ -63,7 +65,7 @@ void WsServer::onAccept(beast::error_code ec, tcp::socket socket)
     }
 
     auto session = std::make_shared<WsSession>(std::move(socket), sessionMgr_, wideData_, orderStorage_, inQueues_,
-                                               idGen_, orderBook_);
+                                               idGen_, orderBook_, defaultClearingId_, defaultAccountId_);
     session->run();
 
     doAccept();

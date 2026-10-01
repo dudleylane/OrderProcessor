@@ -88,6 +88,7 @@ private:
 
     std::map<StringT, SourceIdT> instrumentsBySymbol_;
     std::map<StringT, SourceIdT> accountsByName_;
+    std::map<StringT, SourceIdT> clearingsByFirm_;
 
 public:
     template <typename Fn> void forEachInstrument(Fn &&fn) const
@@ -124,6 +125,17 @@ public:
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
         auto it = accountsByName_.find(name);
         if (it == accountsByName_.end())
+        {
+            return SourceIdT();
+        }
+        return it->second;
+    }
+
+    SourceIdT findClearingByFirm(const StringT &firm) const
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+        auto it = clearingsByFirm_.find(firm);
+        if (it == clearingsByFirm_.end())
         {
             return SourceIdT();
         }

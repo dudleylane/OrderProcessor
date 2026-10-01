@@ -43,9 +43,10 @@ void logContained(const char *where, const std::string &request, const char *wha
 
 WsSession::WsSession(tcp::socket &&socket, SessionManager *sessionMgr, Store::WideParamsDataStorage *wideData,
                      Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues, IdTValueGenerator *idGen,
-                     OrderBookImpl *orderBook)
+                     OrderBookImpl *orderBook, SourceIdT defaultClearingId, SourceIdT defaultAccountId)
     : ws_(std::move(socket)), sessionMgr_(sessionMgr), wideData_(wideData), orderStorage_(orderStorage),
-      inQueues_(inQueues), idGen_(idGen), orderBook_(orderBook)
+      inQueues_(inQueues), idGen_(idGen), orderBook_(orderBook), defaultClearingId_(defaultClearingId),
+      defaultAccountId_(defaultAccountId)
 {
 }
 
@@ -144,8 +145,8 @@ void WsSession::handleMessage(const std::string &msgStr)
             return;
         }
 
-        // Look up account (optional)
-        SourceIdT acctId;
+        // Look up the account; an order that names none goes to the server's default account (#34)
+        SourceIdT acctId = defaultAccountId_;
         if (!no.account.empty())
         {
             acctId = wideData_->findAccountByName(no.account);
@@ -155,6 +156,18 @@ void WsSession::handleMessage(const std::string &msgStr)
                 return;
             }
         }
+        else if (!acctId.isValid())
+        {
+            send(serializeError("Order refused: it names no account, and the server has no default account"));
+            return;
+        }
+
+        // Every order clears through the server's clearing firm (#34)
+        if (!defaultClearingId_.isValid())
+        {
+            send(serializeError("Order refused: the server has no clearing firm"));
+            return;
+        }
 
         // Create clOrderId RawDataEntry
         std::string clOrdStr = "WS-" + std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
@@ -163,9 +176,8 @@ void WsSession::handleMessage(const std::string &msgStr)
         auto *clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
         SourceIdT clOrdId = Store::WideDataStorage::instance()->add(clOrdRaw);
 
-        // Empty IDs for optional fields
+        // Empty ID for the unset origClOrderId
         SourceIdT emptyId;
-        SourceIdT clearingId;
 
         // Allocate execution list
         auto *execList = new ExecutionsT();
@@ -180,7 +192,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         auto *destStr = new StringT("Internal");
         SourceIdT destId = Store::WideDataStorage::instance()->add(destStr);
 
-        auto *order = new OrderEntry(srcId, destId, clOrdId, emptyId, instrId, acctId, clearingId, execListId);
+        auto *order = new OrderEntry(srcId, destId, clOrdId, emptyId, instrId, acctId, defaultClearingId_, execListId);
         order->side_ = no.side;
         order->ordType_ = no.ordType;
         order->price_ = no.price;
@@ -191,10 +203,13 @@ void WsSession::handleMessage(const std::string &msgStr)
         order->tif_ = no.tif;
         order->currency_ = no.currency;
         order->capacity_ = no.capacity;
+        // The protocol has no settlement type, and an order without one settles regular, as in FIX (#34)
+        order->settlType_ = _0_SETTLTYPE;
         order->status_ = RECEIVEDNEW_ORDSTATUS;
         order->creationTime_ = static_cast<DateTimeT>(
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
                 .count());
+        order->lastUpdateTime_ = order->creationTime_;
 
         Queues::OrderEvent evt(order);
         inQueues_->push("WebSocket", evt);
