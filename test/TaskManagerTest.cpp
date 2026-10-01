@@ -51,8 +51,9 @@ public:
         ++execReportCount_;
     }
 
-    void push(const CancelRejectEvent &, const std::string &) override
+    void push(const CancelRejectEvent &evnt, const std::string &) override
     {
+        lastCancelRejectOrderId_ = evnt.id_.id_;
         ++cancelRejectCount_;
     }
 
@@ -69,6 +70,28 @@ public:
     std::atomic<int> execReportCount_;
     std::atomic<int> cancelRejectCount_;
     std::atomic<int> businessRejectCount_;
+    std::atomic<u64> lastCancelRejectOrderId_{ 0 };
+};
+
+/// Throws instead of processing the first transaction it is given, and hands later ones to a real processor. It owns
+/// that processor, since TaskManager deletes this one.
+class ThrowOnceTransactionProcessor : public TransactionProcessor
+{
+public:
+    explicit ThrowOnceTransactionProcessor(std::unique_ptr<Processor> processor) : processor_(std::move(processor)) {}
+
+    void process(const TransactionId &id, Transaction *tr) override
+    {
+        if (!thrown_.exchange(true))
+        {
+            throw std::runtime_error("injected transaction failure");
+        }
+        processor_->process(id, tr);
+    }
+
+private:
+    std::unique_ptr<Processor> processor_;
+    std::atomic<bool> thrown_{ false };
 };
 
 // =============================================================================
@@ -339,6 +362,89 @@ TEST_F(TaskManagerTest, ProcessMixedBuySellOrders)
 
     // Should have generated execution reports for all orders
     EXPECT_GE(outQueues_->totalEvents(), numPairs * 2);
+}
+
+// =============================================================================
+// Failure Containment Tests (#57)
+// =============================================================================
+
+TEST_F(TaskManagerTest, CancelOfAnUnknownOrderIsRejectedAndProcessingContinues)
+{
+    // The bug this covers: a cancel for an order that does not exist threw out of its task. That cancelled the task
+    // group, so no later event was processed until restart (#57).
+    auto manager = createTaskManager(1, 1);
+
+    inQueues_->push("test", OrderCancelEvent(IdT(999, 1), "no such order"));
+    inQueues_->push("test", OrderCancelEvent(IdT(), "invalid id"));
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_EQ(2, outQueues_->cancelRejectCount_.load());
+    OrderEntry *saved = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, saved);
+    EXPECT_EQ(NEW_ORDSTATUS, saved->status_);
+    EXPECT_EQ(0, manager->tasksFailed());
+}
+
+TEST_F(TaskManagerTest, CancelRejectNamesTheOrder)
+{
+    auto manager = createTaskManager(1, 1);
+
+    inQueues_->push("test", OrderCancelEvent(IdT(999, 1), "no such order"));
+
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_EQ(1, outQueues_->cancelRejectCount_.load());
+    EXPECT_EQ(999u, outQueues_->lastCancelRejectOrderId_.load());
+}
+
+TEST_F(TaskManagerTest, EventThatThrowsDoesNotStopProcessing)
+{
+    // Any exception out of an event task is contained: it is logged and counted, and later events still run (#57).
+    // A state change for an order that does not exist still throws.
+    auto manager = createTaskManager(1, 1);
+
+    inQueues_->push("test", OrderChangeStateEvent(IdT(999, 1), OrderChangeStateEvent::SUSPEND));
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    OrderEntry *saved = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, saved);
+    EXPECT_EQ(NEW_ORDSTATUS, saved->status_);
+    EXPECT_EQ(1, manager->tasksFailed());
+}
+
+TEST_F(TaskManagerTest, TransactionThatThrowsDoesNotStopProcessing)
+{
+    // A transaction task's exception is contained too, and finishTransaction() still runs, so the transactions
+    // ordered after it are not blocked (#57).
+    TaskManagerParams params;
+    params.transactMgr_ = transMgr_.get();
+    params.inQueues_ = inQueues_.get();
+    auto evntProc = std::make_unique<Processor>();
+    evntProc->init(*procParams_);
+    params.evntProcessors_.push_back(evntProc.release());
+    auto trProc = std::make_unique<Processor>();
+    trProc->init(*procParams_);
+    params.transactProcessors_.push_back(new ThrowOnceTransactionProcessor(std::move(trProc)));
+    auto manager = std::make_unique<TaskManager>(params);
+
+    // Both orders are on one instrument, so the second order's transaction runs after the first's
+    for (int i = 0; i < 2; ++i)
+    {
+        auto order = createCorrectOrder(instrumentId1_);
+        assignClOrderId(order.get());
+        inQueues_->push("test", OrderEvent(order.release()));
+    }
+
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_EQ(1, manager->tasksFailed());
+    EXPECT_GE(outQueues_->execReportCount_.load(), 1);
 }
 
 } // namespace

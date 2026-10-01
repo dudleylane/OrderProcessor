@@ -124,8 +124,15 @@ public:
     {
         return totalAvailableTransactProcessor_.load(std::memory_order_relaxed);
     }
+    /// Tasks whose exception was logged and contained, rather than stopping this manager (#57)
+    int tasksFailed() const noexcept
+    {
+        return failed_.load(std::memory_order_relaxed);
+    }
 
 private:
+    void taskFailed(const char *kind, const char *what);
+
     mutable oneapi::tbb::mutex lock_;
     mutable oneapi::tbb::mutex transactLock_;
     mutable oneapi::tbb::mutex eventLock_;
@@ -159,6 +166,8 @@ private:
     CacheAlignedAtomic<int> createdTr_;
     CacheAlignedAtomic<int> processedTr_;
     CacheAlignedAtomic<int> finishedTr_;
+
+    CacheAlignedAtomic<int> failed_;
 };
 
 } // namespace Tasks

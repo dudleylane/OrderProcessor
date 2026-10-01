@@ -33,7 +33,7 @@ static std::atomic<int> g_nextWorkerCore{ 0 };
 TaskManager::TaskManager(const TaskManagerParams &params)
     : transactMgr_(nullptr), transactIt_(nullptr), cpuAffinityStart_(-1), lastAvailableTransactProcessor_(0),
       lastAvailableEvntProcessor_(0), totalAvailableTransactProcessor_(0), totalAvailableEvntProcessor_(0), created_(0),
-      processed_(0), finished_(0), createdTr_(0), processedTr_(0), finishedTr_(0)
+      processed_(0), finished_(0), createdTr_(0), processedTr_(0), finishedTr_(0), failed_(0)
 {
     assert(nullptr != params.transactMgr_);
     transactMgr_ = params.transactMgr_;
@@ -229,7 +229,20 @@ void TaskManager::onReadyToExecute()
 
             assert(nullptr != tr);
             assert(nullptr != proc);
-            proc->process(id, tr);
+            // As for events below (#57): a throw would stop all processing, and would skip finishTransaction(), so
+            // the transactions ordered after this one would never run.
+            try
+            {
+                proc->process(id, tr);
+            }
+            catch (const std::exception &ex)
+            {
+                taskFailed("transaction", ex.what());
+            }
+            catch (...)
+            {
+                taskFailed("transaction", "unknown exception");
+            }
             taskProcessedTr();
 
             finishTransaction(id, tr, proc);
@@ -288,7 +301,22 @@ void TaskManager::onNewEvent()
             }
 
             assert(nullptr != proc);
-            bool rez = proc->process();
+            // A throw out of this task would cancel taskGroup_, so that no later task ran, and would keep this
+            // processor out of the pool: one bad event stopped all processing until restart (#57). The event that
+            // threw has been consumed, so log it and carry on with the next.
+            bool rez = true;
+            try
+            {
+                rez = proc->process();
+            }
+            catch (const std::exception &ex)
+            {
+                taskFailed("event", ex.what());
+            }
+            catch (...)
+            {
+                taskFailed("event", "unknown exception");
+            }
             taskProcessed();
 
             finishEvent(proc);
@@ -306,6 +334,21 @@ void TaskManager::finishEvent(Queues::InQueueProcessor *proc)
     oneapi::tbb::mutex::scoped_lock lock(eventLock_);
     int v = lastAvailableEvntProcessor_.fetch_add(1);
     evntProcessors_[v + 1] = proc;
+}
+
+void TaskManager::taskFailed(const char *kind, const char *what)
+{
+    const int failed = failed_.fetch_add(1, std::memory_order_relaxed) + 1;
+    // Runs inside a task's catch handler, where a throw would undo the containment (#57). Losing one log line, e.g.
+    // to bad_alloc, is the lesser harm; the count above still records the failure.
+    try
+    {
+        aux::ExchLogger::instance()->error("TaskManager: contained exception #" + std::to_string(failed) + " in " +
+                                           kind + " task: " + what);
+    }
+    catch (...)
+    {
+    }
 }
 
 void TaskManager::taskCreated()
