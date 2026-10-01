@@ -258,6 +258,7 @@ SourceIdT WideParamsDataStorage::add(ClearingEntry *val)
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
         clearings_.insert(ClearingsT::value_type(id, val));
         val->id_ = id;
+        clearingsByFirm_[val->firm_] = id;
     }
     if (nullptr != storage_)
     {
@@ -338,6 +339,7 @@ void WideParamsDataStorage::restore(ClearingEntry *val)
         // Exclusive write lock
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
         clearings_.insert(ClearingsT::value_type(val->id_, val));
+        clearingsByFirm_[val->firm_] = val->id_;
     }
 }
 
