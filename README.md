@@ -117,6 +117,8 @@ Server options:
 | `--workers` | 0 | Worker thread count (0 = auto) |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
 | `--huge-pages` | off | Enable huge page allocation |
+| `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
+| `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
 
 ### Docker Compose (Full Stack)
 
@@ -324,6 +326,8 @@ The server communicates with clients via JSON messages over WebSocket. All messa
 | `replace_order` | `{orderId, price?, orderQty?, tif?}` | Modify an existing order |
 | `subscribe_book` | `{symbol}` | Subscribe to order book updates for a symbol |
 | `unsubscribe_book` | `{symbol}` | Unsubscribe from order book updates |
+
+Every order clears through the server's clearing firm (`--clearing-firm`), and an order with no `account` goes to the server's default account (`--default-account`). `seedData` seeds both. If either is missing from the data directory, the server logs a warning at startup and answers each order that needs it with an `error` message.
 
 ### Key Data Types
 

@@ -10,6 +10,7 @@
 #include "LMDBStorage.h"
 #include "StorageRecordDispatcher.h"
 #include "SeedDataArgs.h"
+#include "ServerDefaults.h"
 
 using namespace COP;
 
@@ -92,6 +93,7 @@ int main(int argc, char *argv[])
         const char *firm;
         AccountType type;
     };
+    // TRADING-1 is the server's default account, App::DEFAULT_ACCOUNT (#34)
     AcctDef accounts[] = {
         { "TRADING-1", "Apex Capital", PRINCIPAL_ACCOUNTTYPE }, { "TRADING-2", "Apex Capital", PRINCIPAL_ACCOUNTTYPE },
         { "CLIENT-A", "Summit Partners", AGENCY_ACCOUNTTYPE },  { "CLIENT-B", "Meridian Fund", AGENCY_ACCOUNTTYPE },
@@ -115,9 +117,25 @@ int main(int argc, char *argv[])
         acctCount++;
     }
 
-    std::cout << "\nSeeded " << instrCount << " instruments and " << acctCount << " accounts into " << dataDir << "\n";
+    // 5. Add the clearing firm the server puts on every order (#34)
+    int clearingCount = 0;
+    if (Store::WideDataStorage::instance()->findClearingByFirm(App::DEFAULT_CLEARING_FIRM).isValid())
+    {
+        std::cout << "  Clearing firm " << App::DEFAULT_CLEARING_FIRM << " already exists, skipping\n";
+    }
+    else
+    {
+        auto *clearing = new ClearingEntry();
+        clearing->firm_ = App::DEFAULT_CLEARING_FIRM;
+        SourceIdT id = Store::WideDataStorage::instance()->add(clearing);
+        std::cout << "  Added clearing firm: " << App::DEFAULT_CLEARING_FIRM << " (id=" << id.id_ << ")\n";
+        clearingCount++;
+    }
 
-    // 5. Cleanup. WideDataStorage goes first, while the dispatcher it is bound to still exists: it never calls
+    std::cout << "\nSeeded " << instrCount << " instruments, " << acctCount << " accounts and " << clearingCount
+              << " clearing firms into " << dataDir << "\n";
+
+    // 6. Cleanup. WideDataStorage goes first, while the dispatcher it is bound to still exists: it never calls
     // its saver while being destroyed, and a bound storage cannot be unbound, since bindStorage() binds once and
     // asserts against nullptr (#41).
     IdTGenerator::destroy();

@@ -192,6 +192,28 @@ TEST_F(WideDataStorageTest, AddAndGetClearing)
     EXPECT_EQ("ClearingFirm", retrieved.firm_);
 }
 
+TEST_F(WideDataStorageTest, FindClearingByFirm)
+{
+    // The server resolves its clearing firm by name at startup (#34).
+    auto clearing = new ClearingEntry();
+    clearing->firm_ = "ClearingFirm";
+    SourceIdT id = storage()->add(clearing);
+
+    EXPECT_EQ(id, storage()->findClearingByFirm("ClearingFirm"));
+    EXPECT_EQ(SourceIdT(), storage()->findClearingByFirm("NoSuchFirm"));
+}
+
+TEST_F(WideDataStorageTest, FindRestoredClearingByFirm)
+{
+    // The server's clearing firm is loaded from the data directory, not added.
+    auto clearing = new ClearingEntry();
+    clearing->firm_ = "RestoredFirm";
+    clearing->id_ = IdT(77, 1);
+    storage()->restore(clearing);
+
+    EXPECT_EQ(IdT(77, 1), storage()->findClearingByFirm("RestoredFirm"));
+}
+
 // =============================================================================
 // RawData Tests
 // =============================================================================
