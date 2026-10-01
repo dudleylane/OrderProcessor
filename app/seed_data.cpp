@@ -1,22 +1,39 @@
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "Logger.h"
 #include "WideDataStorage.h"
 #include "IdTGenerator.h"
 #include "LMDBStorage.h"
 #include "StorageRecordDispatcher.h"
+#include "SeedDataArgs.h"
 
 using namespace COP;
 
+namespace
+{
+const char *const USAGE = "usage: seedData [--data-dir DIR | DIR]   (default ./data)\n";
+}
+
 int main(int argc, char *argv[])
 {
-    std::string dataDir = "./data";
-    if (argc > 1)
+    const std::vector<std::string> args(argv + 1, argv + argc);
+    if ((1 == args.size()) && (("--help" == args[0]) || ("-h" == args[0])))
     {
-        dataDir = argv[1];
+        std::cout << USAGE;
+        return 0;
     }
+    std::string error;
+    const std::optional<std::string> parsed = App::parseSeedDataArgs(args, &error);
+    if (!parsed)
+    {
+        std::cerr << "seedData: " << error << "\n" << USAGE;
+        return 2;
+    }
+    const std::string dataDir = *parsed;
 
     // 1. Create singletons
     aux::ExchLogger::create();
