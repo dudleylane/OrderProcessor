@@ -120,6 +120,11 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
         break;
     case ORDER_RECORDTYPE:
     {
+        if (nullptr == orderStorage_)
+        {
+            // a load for reference data only has nowhere to restore orders (#50)
+            break;
+        }
         // Keep the newest version only, and keep it encoded. Restoring here would replay every intermediate
         // state, and OrderDataStorage::restore() rejects an order id it already holds. Decoding here would build
         // an OrderEntry, whose constructor loads the instrument, and LMDB visits keys in byte order, so an order

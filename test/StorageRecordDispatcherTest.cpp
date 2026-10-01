@@ -1147,3 +1147,36 @@ TEST_F(StorageRecordDispatcherTest, OrderWhoseKeySortsBeforeItsInstrumentSurvive
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
 }
+
+// =============================================================================
+// Reference-Data-Only Load (#50)
+// =============================================================================
+
+TEST_F(StorageRecordDispatcherTest, OrderRecordsAreSkippedWithoutOrderStorage)
+{
+    // seedData loads for reference data only and passes no OrderDataStorage. Order records were buffered anyway and
+    // finishLoad() dereferenced the missing storage, so seedData crashed on any directory that held orders (#50).
+    std::unique_ptr<OrderEntry> order(createTestOrder());
+    order->orderId_ = IdT(4444, 6789);
+    std::string orderRecord = createRecordTypePrefix(StorageRecordDispatcher::ORDER_RECORDTYPE);
+    IdT orderId;
+    u32 orderVersion = 0;
+    OrderCodec::encode(*order, &orderRecord, &orderId, &orderVersion);
+
+    InstrumentEntry instrument;
+    WideDataStorage::instance()->get(order->instrument_.getId(), &instrument);
+    std::string instrumentRecord = createRecordTypePrefix(StorageRecordDispatcher::INSTRUMENT_RECORDTYPE);
+    IdT instrumentId;
+    u32 instrumentVersion = 0;
+    InstrumentCodec::encode(instrument, &instrumentRecord, &instrumentId, &instrumentVersion);
+
+    dispatcher_->init(restore_.get(), nullptr, saver_.get(), nullptr);
+    dispatcher_->startLoad();
+    dispatcher_->onRecordLoaded(orderId, orderVersion, orderRecord.data(), orderRecord.size());
+    dispatcher_->onRecordLoaded(instrumentId, instrumentVersion, instrumentRecord.data(), instrumentRecord.size());
+    EXPECT_NO_THROW(dispatcher_->finishLoad());
+
+    // the reference data still loads
+    ASSERT_EQ(1u, restore_->instruments_.size());
+    EXPECT_EQ(instrument.symbol_, restore_->instruments_.at(0)->symbol_);
+}
