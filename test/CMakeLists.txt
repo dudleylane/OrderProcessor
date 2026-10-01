@@ -66,6 +66,9 @@ target_sources(orderProcessorTest
         # WebSocket session, served on loopback (also built from app/)
         WsSessionTest.cpp
         JsonSerializerTest.cpp
+
+        # seedData's argument parsing (header-only, in app/)
+        SeedDataArgsTest.cpp
         ${CMAKE_SOURCE_DIR}/app/WsSession.cpp
         ${CMAKE_SOURCE_DIR}/app/SessionManager.cpp
         ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
