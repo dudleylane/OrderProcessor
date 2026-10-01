@@ -225,7 +225,8 @@ void WsSession::handleMessage(const std::string &msgStr)
             return;
         }
 
-        SourceIdT acctId;
+        // As for new_order: the server's default account and clearing firm (#34)
+        SourceIdT acctId = defaultAccountId_;
         if (!so.account.empty())
         {
             acctId = wideData_->findAccountByName(so.account);
@@ -235,6 +236,16 @@ void WsSession::handleMessage(const std::string &msgStr)
                 return;
             }
         }
+        else if (!acctId.isValid())
+        {
+            send(serializeError("Order refused: it names no account, and the server has no default account"));
+            return;
+        }
+        if (!defaultClearingId_.isValid())
+        {
+            send(serializeError("Order refused: the server has no clearing firm"));
+            return;
+        }
 
         std::string clOrdStr = "WS-" + std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
                                                           std::chrono::system_clock::now().time_since_epoch())
@@ -243,7 +254,6 @@ void WsSession::handleMessage(const std::string &msgStr)
         SourceIdT clOrdId = Store::WideDataStorage::instance()->add(clOrdRaw);
 
         SourceIdT emptyId;
-        SourceIdT clearingId;
 
         auto *execList = new ExecutionsT();
         SourceIdT execListId = Store::WideDataStorage::instance()->add(execList);
@@ -254,7 +264,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         auto *destStr = new StringT("Internal");
         SourceIdT destId = Store::WideDataStorage::instance()->add(destStr);
 
-        auto *order = new OrderEntry(srcId, destId, clOrdId, emptyId, instrId, acctId, clearingId, execListId);
+        auto *order = new OrderEntry(srcId, destId, clOrdId, emptyId, instrId, acctId, defaultClearingId_, execListId);
         order->side_ = so.side;
         order->ordType_ = FXSWAP_ORDERTYPE;
         order->price_ = so.nearPrice;

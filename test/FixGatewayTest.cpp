@@ -135,8 +135,12 @@ protected:
     {
         ProcessorFixture::SetUp();
         mockInQueues_ = std::make_unique<MockInQueues>();
-        gateway_ =
-            std::make_unique<FixGateway>(mockInQueues_.get(), WideDataStorage::instance(), OrderStorage::instance());
+        // The server's defaults, as main.cpp resolves them (#34); without them every order would be refused
+        defaultAccountId_ = test::addAccount("TRADING-1");
+        otherAccountId_ = test::addAccount("CLIENT-A");
+        defaultClearingId_ = test::addClearing("HOUSE-CLEARING");
+        gateway_ = std::make_unique<FixGateway>(mockInQueues_.get(), WideDataStorage::instance(),
+                                                OrderStorage::instance(), defaultClearingId_, defaultAccountId_);
     }
 
     void TearDown() override
@@ -166,9 +170,42 @@ protected:
         return msg;
     }
 
+    /// An FX swap built as NewOrderMultileg_FxSwap_PushesToQueue builds it; it names no account
+    FIX44::NewOrderMultileg makeFxSwap(const std::string &clOrdId)
+    {
+        FIX::UtcTimeStamp now;
+        FIX44::NewOrderMultileg msg;
+        msg.set(FIX::ClOrdID(clOrdId));
+        msg.set(FIX::Side(FIX::Side_BUY));
+        msg.set(FIX::TransactTime(now));
+        msg.set(FIX::OrdType(FIX::OrdType_FOREX_SWAP));
+        msg.set(FIX::Symbol("aaa"));
+        msg.set(FIX::OrderQty(1000000));
+        msg.set(FIX::Currency("USD"));
+
+        FIX44::NewOrderMultileg::NoLegs nearLeg;
+        nearLeg.set(FIX::LegSymbol("aaa"));
+        nearLeg.set(FIX::LegSide(FIX::Side_BUY));
+        nearLeg.set(FIX::LegPrice(1.2650));
+        nearLeg.set(FIX::LegSettlDate("1000"));
+        msg.addGroup(nearLeg);
+
+        FIX44::NewOrderMultileg::NoLegs farLeg;
+        farLeg.set(FIX::LegSymbol("aaa"));
+        farLeg.set(FIX::LegSide(FIX::Side_SELL));
+        farLeg.set(FIX::LegPrice(1.2680));
+        farLeg.set(FIX::LegSettlDate("2000"));
+        msg.addGroup(farLeg);
+
+        return msg;
+    }
+
 protected:
     std::unique_ptr<MockInQueues> mockInQueues_;
     std::unique_ptr<FixGateway> gateway_;
+    SourceIdT defaultAccountId_;
+    SourceIdT otherAccountId_;
+    SourceIdT defaultClearingId_;
 };
 
 TEST_F(FixGatewayInboundTest, NewOrderSingle_PushesToQueue)
@@ -225,6 +262,109 @@ TEST_F(FixGatewayInboundTest, NewOrderSingle_UnknownSymbol_NoPush)
 
     auto msg = makeNewOrderSingle("ORD003", "NONEXISTENT", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100);
     gateway_->onMessage(msg, TEST_SID);
+}
+
+// =============================================================================
+// Server defaults (#34)
+// =============================================================================
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_WithoutAccount_GetsTheServerDefaults)
+{
+    // The bug this covers: FIX orders carried no clearing firm, and no account when they named none, so the engine
+    // rejected every one (#34).
+    OrderEntry *capturedOrder = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                capturedOrder = evt.order_;
+            }));
+
+    auto msg = makeNewOrderSingle("ORD101", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100);
+    gateway_->onMessage(msg, TEST_SID);
+
+    ASSERT_NE(nullptr, capturedOrder);
+    EXPECT_EQ(defaultAccountId_, capturedOrder->account_.getId());
+    EXPECT_EQ(defaultClearingId_, capturedOrder->clearing_.getId());
+    std::string invalid;
+    EXPECT_TRUE(capturedOrder->isValid(&invalid)) << invalid;
+
+    delete capturedOrder;
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_NamingAnAccount_KeepsIt)
+{
+    OrderEntry *capturedOrder = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                capturedOrder = evt.order_;
+            }));
+
+    auto msg = makeNewOrderSingle("ORD102", "aaa", FIX::Side_SELL, FIX::OrdType_LIMIT, 10.50, 50);
+    msg.set(FIX::Account("CLIENT-A"));
+    gateway_->onMessage(msg, TEST_SID);
+
+    ASSERT_NE(nullptr, capturedOrder);
+    EXPECT_EQ(otherAccountId_, capturedOrder->account_.getId());
+    EXPECT_EQ(defaultClearingId_, capturedOrder->clearing_.getId());
+
+    delete capturedOrder;
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_RefusedWhenTheServerHasNoClearingFirm)
+{
+    // Refused at the gateway, with a BusinessMessageReject to the sender, instead of being rejected by the engine.
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    FixGateway gateway(mockInQueues_.get(), WideDataStorage::instance(), OrderStorage::instance(), SourceIdT(),
+                       defaultAccountId_);
+
+    auto msg = makeNewOrderSingle("ORD103", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100);
+    msg.set(FIX::Account("CLIENT-A"));
+    gateway.onMessage(msg, TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_WithoutAccount_RefusedWhenTheServerHasNoDefaultAccount)
+{
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    FixGateway gateway(mockInQueues_.get(), WideDataStorage::instance(), OrderStorage::instance(), defaultClearingId_,
+                       SourceIdT());
+
+    auto msg = makeNewOrderSingle("ORD104", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100);
+    gateway.onMessage(msg, TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_WithoutAccount_GetsTheServerDefaults)
+{
+    OrderEntry *capturedOrder = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                capturedOrder = evt.order_;
+            }));
+
+    auto msg = makeFxSwap("SWAP-101");
+    gateway_->onMessage(msg, TEST_SID);
+
+    ASSERT_NE(nullptr, capturedOrder);
+    EXPECT_EQ(defaultAccountId_, capturedOrder->account_.getId());
+    EXPECT_EQ(defaultClearingId_, capturedOrder->clearing_.getId());
+    std::string invalid;
+    EXPECT_TRUE(capturedOrder->isValid(&invalid)) << invalid;
+
+    delete capturedOrder;
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_RefusedWhenTheServerHasNoClearingFirm)
+{
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    FixGateway gateway(mockInQueues_.get(), WideDataStorage::instance(), OrderStorage::instance(), SourceIdT(),
+                       defaultAccountId_);
+
+    auto msg = makeFxSwap("SWAP-102");
+    gateway.onMessage(msg, TEST_SID);
 }
 
 TEST_F(FixGatewayInboundTest, CancelRequest_PushesToQueue)

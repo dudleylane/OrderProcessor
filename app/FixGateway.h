@@ -37,7 +37,8 @@ class FixGateway : public FIX::Application
 {
 public:
     FixGateway(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
-               Store::OrderDataStorage *orderStorage, SourceIdT defaultClearingId = SourceIdT());
+               Store::OrderDataStorage *orderStorage, SourceIdT defaultClearingId = SourceIdT(),
+               SourceIdT defaultAccountId = SourceIdT());
 
     // Application interface
     void onCreate(const FIX::SessionID &) override;
@@ -70,6 +71,8 @@ private:
     void dispatch(const FIX::Message &msg, const FIX::SessionID &sid);
     /// logs an exception a handler threw and answers the one message with a BusinessMessageReject
     void rejectContained(const FIX::Message &msg, const FIX::SessionID &sid, const char *what);
+    /// answers the one message with a BusinessMessageReject to its sender, quoting its MsgSeqNum, MsgType and ClOrdID
+    void rejectMessage(const FIX::Message &msg, const FIX::SessionID &sid, int reason, const std::string &text);
 
     Queues::InQueues *inQueues_;
     Store::WideParamsDataStorage *wideData_;
@@ -79,6 +82,7 @@ private:
     mutable oneapi::tbb::spin_rw_mutex sessionMapLock_;
 
     SourceIdT defaultClearingId_; // pre-resolved clearing for FIX orders
+    SourceIdT defaultAccountId_;  // pre-resolved account for FIX orders that name none (#34)
 
 public:
     // FIX → internal enum conversions (public static for testability)

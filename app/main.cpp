@@ -175,8 +175,8 @@ int main(int argc, char *argv[])
 
     aux::ExchLogger::instance()->note("Phase 2 LMDB load complete (orders restored)");
 
-    // Resolve the defaults that WebSocket orders need (#34). Without them the server still starts, as it does on an
-    // unseeded directory, but its sessions refuse the orders that need them. seedData provides both.
+    // Resolve the defaults that WebSocket and FIX orders need (#34). Without them the server still starts, as it does
+    // on an unseeded directory, but refuses the orders that need them. seedData provides both.
     const SourceIdT defaultClearingId = Store::WideDataStorage::instance()->findClearingByFirm(cfg.clearingFirm);
     if (!defaultClearingId.isValid())
     {
@@ -207,9 +207,9 @@ int main(int argc, char *argv[])
 
     if (!cfg.fixCfg.empty())
     {
-        fixServer = std::make_unique<App::FixServer>(inQueues.get(), Store::WideDataStorage::instance(),
-                                                     Store::OrderStorage::instance(),
-                                                     SourceIdT()); // default clearing ID
+        fixServer =
+            std::make_unique<App::FixServer>(inQueues.get(), Store::WideDataStorage::instance(),
+                                             Store::OrderStorage::instance(), defaultClearingId, defaultAccountId);
 
         multiOutQueues = std::make_unique<App::MultiOutQueues>();
         multiOutQueues->addDelegate(wsOutQueues.get());
