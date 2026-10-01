@@ -46,6 +46,8 @@ public:
     StorageRecordDispatcher(void);
     virtual ~StorageRecordDispatcher(void);
 
+    /// orderBook and orderStorage may be null. Without an order book, restored orders are not booked; without order
+    /// storage, order records are skipped, for a load that needs only reference data (seedData, #50).
     void init(DataStorageRestore *storage, OrderBook *orderBook, FileSaver *fileStorage,
               OrderDataStorage *orderStorage);
 
