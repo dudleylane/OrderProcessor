@@ -336,4 +336,38 @@ TEST_F(WsSessionTest, OrderThatNamesNoAccountIsRefusedWhenTheServerHasNoDefaultA
     EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0)));
 }
 
+TEST_F(WsSessionTest, SwapOrderThatNamesNoAccountGetsTheServerDefaults)
+{
+    // On this branch new_swap_order builds orders too, so it needs the same defaults as new_order (#34).
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,"farPrice":1.087,)"
+                 R"("settlDate":1000,"farSettlDate":2000,"orderQty":1000000,"currency":"USD","capacity":"AGENCY"}})");
+    std::unique_ptr<OrderEntry> order = takeQueuedOrder();
+    ASSERT_NE(nullptr, order) << "no order queued; escaped: " << escaped();
+    EXPECT_EQ(FXSWAP_ORDERTYPE, order->ordType_);
+    EXPECT_EQ(accountId_, order->account_.getId());
+    EXPECT_EQ(clearingId_, order->clearing_.getId());
+    std::string invalid;
+    EXPECT_TRUE(order->isValid(&invalid)) << invalid;
+}
+
+TEST_F(WsSessionTest, SwapOrderIsRefusedWhenTheServerHasNoClearingFirm)
+{
+    useDefaultClearing_ = false;
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,"farPrice":1.087,)"
+                 R"("settlDate":1000,"farSettlDate":2000,"orderQty":1000000,"account":"TRADING-1","currency":"USD",)"
+                 R"("capacity":"AGENCY"}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "no error reply; escaped: " << escaped();
+    EXPECT_EQ("Order refused: the server has no clearing firm", reply->value("message", ""));
+    EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0)));
+}
+
 } // namespace

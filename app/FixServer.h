@@ -26,7 +26,7 @@ class FixServer
 {
 public:
     FixServer(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData, Store::OrderDataStorage *orderStorage,
-              SourceIdT defaultClearingId);
+              SourceIdT defaultClearingId, SourceIdT defaultAccountId);
     ~FixServer();
 
     /// Start the FIX acceptor (ThreadedSocketAcceptor).

@@ -32,8 +32,9 @@ const size_t MAX_LOGGED_MESSAGE = 256;
 // =============================================================================
 
 FixGateway::FixGateway(Queues::InQueues *inQueues, WideParamsDataStorage *wideData, OrderDataStorage *orderStorage,
-                       SourceIdT defaultClearingId)
-    : inQueues_(inQueues), wideData_(wideData), orderStorage_(orderStorage), defaultClearingId_(defaultClearingId)
+                       SourceIdT defaultClearingId, SourceIdT defaultAccountId)
+    : inQueues_(inQueues), wideData_(wideData), orderStorage_(orderStorage), defaultClearingId_(defaultClearingId),
+      defaultAccountId_(defaultAccountId)
 {
 }
 
@@ -102,6 +103,11 @@ void FixGateway::rejectContained(const FIX::Message &msg, const FIX::SessionID &
     aux::ExchLogger::instance()->error("FixGateway: contained exception #" + std::to_string(n) + " from " +
                                        sid.toString() + ": " + what +
                                        "; message: " + text.substr(0, MAX_LOGGED_MESSAGE));
+    rejectMessage(msg, sid, FIX::BusinessRejectReason_OTHER, "Internal error: message not processed");
+}
+
+void FixGateway::rejectMessage(const FIX::Message &msg, const FIX::SessionID &sid, int reason, const std::string &text)
+{
     try
     {
         FIX44::BusinessMessageReject reject;
@@ -115,8 +121,13 @@ void FixGateway::rejectContained(const FIX::Message &msg, const FIX::SessionID &
         {
             reject.set(FIX::RefMsgType(msgType.getValue()));
         }
-        reject.set(FIX::BusinessRejectReason(FIX::BusinessRejectReason_OTHER));
-        reject.set(FIX::Text("Internal error: message not processed"));
+        FIX::ClOrdID clOrdId;
+        if (msg.getFieldIfSet(clOrdId))
+        {
+            reject.set(FIX::BusinessRejectRefID(clOrdId.getValue()));
+        }
+        reject.set(FIX::BusinessRejectReason(reason));
+        reject.set(FIX::Text(text));
         FIX::Session::sendToTarget(reject, sid);
     }
     catch (const std::exception &ex)
@@ -216,11 +227,25 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
         return;
     }
 
-    // Lookup account (optional)
-    SourceIdT acctId;
+    // Look up the account; an order that names none goes to the server's default account (#34)
+    SourceIdT acctId = defaultAccountId_;
     if (!acctStr.empty())
     {
         acctId = wideData_->findAccountByName(acctStr);
+    }
+    else if (!acctId.isValid())
+    {
+        rejectMessage(msg, sid, FIX::BusinessRejectReason_CONDITIONALLY_REQUIRED_FIELD_MISSING,
+                      "Order refused: it names no account, and the server has no default account");
+        return;
+    }
+
+    // Every order clears through the server's clearing firm (#34)
+    if (!defaultClearingId_.isValid())
+    {
+        rejectMessage(msg, sid, FIX::BusinessRejectReason_APPLICATION_NOT_AVAILABLE,
+                      "Order refused: the server has no clearing firm");
+        return;
     }
 
     // Create clOrderId as RawDataEntry
@@ -406,10 +431,23 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
         msg.get(account);
         acctStr = account.getString();
     }
-    SourceIdT acctId;
+    // As for NewOrderSingle: the server's default account and clearing firm (#34)
+    SourceIdT acctId = defaultAccountId_;
     if (!acctStr.empty())
     {
         acctId = wideData_->findAccountByName(acctStr);
+    }
+    else if (!acctId.isValid())
+    {
+        rejectMessage(msg, sid, FIX::BusinessRejectReason_CONDITIONALLY_REQUIRED_FIELD_MISSING,
+                      "Order refused: it names no account, and the server has no default account");
+        return;
+    }
+    if (!defaultClearingId_.isValid())
+    {
+        rejectMessage(msg, sid, FIX::BusinessRejectReason_APPLICATION_NOT_AVAILABLE,
+                      "Order refused: the server has no clearing firm");
+        return;
     }
 
     FIX::Currency currency;

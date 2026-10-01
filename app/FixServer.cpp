@@ -25,10 +25,11 @@ struct FixServer::Impl
 };
 
 FixServer::FixServer(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
-                     Store::OrderDataStorage *orderStorage, SourceIdT defaultClearingId)
+                     Store::OrderDataStorage *orderStorage, SourceIdT defaultClearingId, SourceIdT defaultAccountId)
     : impl_(std::make_unique<Impl>())
 {
-    impl_->gateway = std::make_unique<FixGateway>(inQueues, wideData, orderStorage, defaultClearingId);
+    impl_->gateway =
+        std::make_unique<FixGateway>(inQueues, wideData, orderStorage, defaultClearingId, defaultAccountId);
     impl_->fixOutQueues = std::make_unique<FixOutQueues>(impl_->gateway.get(), orderStorage);
 }
 
