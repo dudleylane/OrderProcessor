@@ -26,6 +26,7 @@ public:
     void push(const Queues::ExecReportEvent &evnt, const std::string &target) override;
     void push(const Queues::CancelRejectEvent &evnt, const std::string &target) override;
     void push(const Queues::BusinessRejectEvent &evnt, const std::string &target) override;
+    void push(const Queues::OrderRejectEvent &evnt, const std::string &target) override;
 
 private:
     SessionManager *sessionMgr_;
