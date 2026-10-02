@@ -566,6 +566,10 @@ void OrdStateImpl::processCanceled(OrderEntry *orderData, OrdState::onExecCancel
         std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
         evnt.transaction_->addOperation(op1);
     }
+    // Nothing is left to fill. Set here rather than when the removal above runs, because the order stays in the book
+    // until then: the matcher skips an order with no leaves, and a trade already matched against it is refused,
+    // since processComplete() finds fewer leaves than the trade (#73).
+    orderData->leavesQty_ = 0;
 }
 
 void OrdStateImpl::processCanceled(OrderEntry *orderData, OrdState::onInternalCancel const &evnt)

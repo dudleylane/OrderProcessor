@@ -95,6 +95,21 @@ TEST_F(JsonSerializerTest, RejectedReplaceReportCarriesItsReason)
     EXPECT_FALSE(msg["data"].contains("origOrderId"));
 }
 
+TEST_F(JsonSerializerTest, CancelRejectSaysWhy)
+{
+    // Each reason the engine gives for refusing a cancel reads differently in cancel_reject (#73)
+    Queues::CancelRejectEvent reject;
+    reject.reason_ = Queues::CancelRejectEvent::UNKNOWN_ORDER;
+    EXPECT_EQ("Cancel rejected: unknown order", App::cancelRejectReason(reject));
+    reject.reason_ = Queues::CancelRejectEvent::TOO_LATE;
+    reject.ordStatus_ = FILLED_ORDSTATUS;
+    EXPECT_EQ("Cancel rejected: too late, the order is FILLED", App::cancelRejectReason(reject));
+    reject.reason_ = Queues::CancelRejectEvent::PENDING;
+    EXPECT_EQ("Cancel rejected: a replace of the order is pending", App::cancelRejectReason(reject));
+    reject.reason_ = Queues::CancelRejectEvent::OTHER;
+    EXPECT_EQ("Cancel rejected", App::cancelRejectReason(reject));
+}
+
 TEST_F(JsonSerializerTest, OrderWithUnsetReferencesSerializes)
 {
     // The bug this covers: orderToJson resolved every reference, and a new order's origClOrderId is unset, so

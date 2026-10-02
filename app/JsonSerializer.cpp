@@ -217,6 +217,21 @@ std::string App::serializeCancelReject(u64 orderId, const std::string &reason)
     return j.dump();
 }
 
+std::string App::cancelRejectReason(const Queues::CancelRejectEvent &evnt)
+{
+    switch (evnt.reason_)
+    {
+    case Queues::CancelRejectEvent::UNKNOWN_ORDER:
+        return "Cancel rejected: unknown order";
+    case Queues::CancelRejectEvent::TOO_LATE:
+        return "Cancel rejected: too late, the order is " + std::string(toJsonString(evnt.ordStatus_));
+    case Queues::CancelRejectEvent::PENDING:
+        return "Cancel rejected: a replace of the order is pending";
+    default:
+        return "Cancel rejected";
+    }
+}
+
 std::string App::serializeBusinessReject(u64 refId, const std::string &reason)
 {
     json j;

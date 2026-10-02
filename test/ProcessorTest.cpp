@@ -29,6 +29,7 @@
 #include "IdTGenerator.h"
 #include "OrderStorage.h"
 #include "OrderBookImpl.h"
+#include "StateMachine.h"
 
 using namespace COP;
 using namespace COP::Queues;
@@ -429,10 +430,38 @@ TEST_F(ProcessorTest, ProcessCancelEvent)
 
     processor_->process();
 
-    // The order should be in a cancellation state (GoingCancel)
+    // Cancelled outright: until #73 the order only reached Pending Cancel, and stayed in the book
     savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, savedOrder);
-    // Order transitions to GoingCancel state after receiving cancel
+    EXPECT_EQ(CANCELED_ORDSTATUS, savedOrder->status_);
+    EXPECT_EQ(0u, savedOrder->leavesQty_);
+}
+
+TEST_F(ProcessorTest, CancelCompletesAPendingCancelLeftByAnOlderServer)
+{
+    // Until #73 a cancel left the order in GoingCancel, and persisted it so: such an order, restored from an older
+    // data directory, must still be cancellable, or every later cancel would be refused as one already pending.
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor_->process();
+    OrderEntry *saved = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, saved);
+
+    int goingCancel = 0;
+    while ("GoingCancel" != OrdState::OrderState::getStateName(goingCancel)) // throws past the last state
+    {
+        ++goingCancel;
+    }
+    OrdState::OrderStatePersistence persisted = saved->stateMachinePersistance();
+    persisted.stateZone2Id_ = goingCancel;
+    saved->setStateMachinePersistance(persisted);
+
+    inQueues_->push("test", OrderCancelEvent(saved->orderId_, "again"));
+    processor_->process();
+
+    EXPECT_EQ(CANCELED_ORDSTATUS, saved->status_);
+    EXPECT_EQ(0u, saved->leavesQty_);
 }
 
 // =============================================================================

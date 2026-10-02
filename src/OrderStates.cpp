@@ -450,7 +450,7 @@ template <class FSM> void NoCnlReplace::on_entry(onCancelRejected const &evnt, F
         return;
     }
     std::unique_ptr<Operation> op(
-        new CancelRejectTrOperation(evnt.order4StateMachine_->status_, *evnt.order4StateMachine_));
+        new CancelRejectTrOperation(*evnt.order4StateMachine_, COP::Queues::CancelRejectEvent::TOO_LATE));
     evnt.transaction_->addOperation(op);
 }
 
@@ -461,7 +461,7 @@ template <class FSM> void NoCnlReplace::on_entry(onReplaceRejected const &evnt, 
         return;
     }
     std::unique_ptr<Operation> op(
-        new CancelRejectTrOperation(evnt.order4StateMachine_->status_, *evnt.order4StateMachine_));
+        new CancelRejectTrOperation(*evnt.order4StateMachine_, COP::Queues::CancelRejectEvent::OTHER));
     evnt.transaction_->addOperation(op);
 }
 

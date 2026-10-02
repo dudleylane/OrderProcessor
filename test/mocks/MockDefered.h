@@ -29,6 +29,10 @@ public:
     MOCK_METHOD(void, process,
                 (COP::OrdState::onInternalCancel & evnt, COP::OrderEntry *order, const COP::ACID::Context &cnxt),
                 (override));
+    MOCK_METHOD(void, process,
+                (COP::OrdState::onExecCancel & evnt, COP::OrderEntry *order, const std::string &requester,
+                 const COP::ACID::Context &cnxt),
+                (override));
 };
 
 /**

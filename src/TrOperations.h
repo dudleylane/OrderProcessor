@@ -12,10 +12,12 @@
 
 #pragma once
 
+#include <string>
 #include <string_view>
 #include "TransactionDef.h"
 #include "DataModelDef.h"
 #include "OrderStateEvents.h"
+#include "QueuesDef.h"
 
 namespace COP
 {
@@ -191,10 +193,13 @@ private:
     T event_;
 };
 
+/// Tells the requester that a cancel or replace of the order was refused, and why. With no requester given, it tells
+/// the order's own source, as for its execution reports.
 class CancelRejectTrOperation final : public Operation
 {
 public:
-    CancelRejectTrOperation(OrderStatus status, const OrderEntry &order);
+    CancelRejectTrOperation(const OrderEntry &order, Queues::CancelRejectEvent::Reason reason,
+                            const std::string &requester = std::string());
     ~CancelRejectTrOperation();
 
     void execute(const Context &cnxt) override;
@@ -202,6 +207,25 @@ public:
 
 private:
     OrderStatus status_;
+    Queues::CancelRejectEvent::Reason reason_;
+    std::string requester_;
+};
+
+/// Hands a client's cancel to the processor as a deferred event, so it is decided after every transaction before it on
+/// the order or its instrument has run, together with the fills those caused (#73).
+class CancelOrderTrOperation final : public Operation
+{
+public:
+    CancelOrderTrOperation(OrderEntry *order, const std::string &requester);
+    ~CancelOrderTrOperation();
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    OrderEntry *order_;
+    std::string requester_;
+    size_t eventCountBefore_;
 };
 
 class MatchOrderTrOperation final : public Operation

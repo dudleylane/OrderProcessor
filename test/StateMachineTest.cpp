@@ -568,6 +568,82 @@ TEST_F(StateMachineTest, NoCnlReplace_To_GoingCancel_OnCancelReceived)
     p.checkStates("New", "GoingCancel");
 }
 
+TEST_F(StateMachineTest, NoCnlReplace_To_CnclReplaced_OnExecCancel)
+{
+    // A client's cancel is decided at once, so it goes straight from NoCnlReplace to CnclReplaced (#73)
+    TestTransactionContext trCntxt;
+    OrderStateWrapper p;
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+
+    assignClOrderId(order.get());
+    p.start();
+
+    onOrderReceived recvevnt;
+    recvevnt.order_ = order.get();
+    recvevnt.generator_ = IdTGenerator::instance();
+    recvevnt.transaction_ = &trCntxt;
+    recvevnt.orderStorage_ = OrderStorage::instance();
+    p.processEvent(recvevnt);
+    p.checkStates("New", "NoCnlReplace");
+    trCntxt.clear();
+
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    ASSERT_NE(nullptr, ord);
+    ord->leavesQty_ = ord->orderQty_;
+
+    onExecCancel cancel;
+    cancel.orderId_ = ord->orderId_;
+    cancel.generator_ = IdTGenerator::instance();
+    cancel.transaction_ = &trCntxt;
+    cancel.orderStorage_ = OrderStorage::instance();
+
+    p.processEvent(cancel);
+    p.checkStates("New", "CnclReplaced");
+    EXPECT_EQ(CANCELED_ORDSTATUS, ord->status_);
+    EXPECT_EQ(0u, ord->leavesQty_);
+    EXPECT_TRUE(trCntxt.isOperationEnqueued(REMOVE_ORDERBOOK_TROPERATION));
+    EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_EXECREPORT_TROPERATION));
+}
+
+TEST_F(StateMachineTest, GoingCancel_To_CnclReplaced_OnExecCancel)
+{
+    // An order an older server left in GoingCancel still completes its cancel (#73)
+    TestTransactionContext trCntxt;
+    OrderStateWrapper p;
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+
+    assignClOrderId(order.get());
+    p.start();
+
+    onOrderReceived recvevnt;
+    recvevnt.order_ = order.get();
+    recvevnt.generator_ = IdTGenerator::instance();
+    recvevnt.transaction_ = &trCntxt;
+    recvevnt.orderStorage_ = OrderStorage::instance();
+    p.processEvent(recvevnt);
+    trCntxt.clear();
+
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    ASSERT_NE(nullptr, ord);
+
+    onCancelReceived received;
+    received.orderId_ = ord->orderId_;
+    received.generator_ = IdTGenerator::instance();
+    received.transaction_ = &trCntxt;
+    received.orderStorage_ = OrderStorage::instance();
+    p.processEvent(received);
+    p.checkStates("New", "GoingCancel");
+
+    onExecCancel cancel;
+    cancel.orderId_ = ord->orderId_;
+    cancel.generator_ = IdTGenerator::instance();
+    cancel.transaction_ = &trCntxt;
+    cancel.orderStorage_ = OrderStorage::instance();
+    p.processEvent(cancel);
+    p.checkStates("New", "CnclReplaced");
+    EXPECT_EQ(CANCELED_ORDSTATUS, ord->status_);
+}
+
 TEST_F(StateMachineTest, NoCnlReplace_To_GoingReplace_OnReplaceReceived)
 {
     TestTransactionContext trCntxt;

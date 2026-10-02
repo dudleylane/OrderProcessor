@@ -37,6 +37,7 @@ class TestDeferedEventFunctor : public DeferedEventFunctor
 public:
     std::vector<OrderEntry *> tradeExecutionOrders;
     std::vector<OrderEntry *> internalCancelOrders;
+    std::vector<std::pair<OrderEntry *, std::string>> cancelRequests;
 
     void process(OrdState::onTradeExecution & /*ev*/, OrderEntry *order, const Context & /*cnxt*/) override
     {
@@ -48,10 +49,17 @@ public:
         internalCancelOrders.push_back(order);
     }
 
+    void process(OrdState::onExecCancel & /*ev*/, OrderEntry *order, const std::string &requester,
+                 const Context & /*cnxt*/) override
+    {
+        cancelRequests.emplace_back(order, requester);
+    }
+
     void reset()
     {
         tradeExecutionOrders.clear();
         internalCancelOrders.clear();
+        cancelRequests.clear();
     }
 };
 
@@ -329,6 +337,21 @@ TEST_F(DeferedEventsTest, CancelOrderDeferedEventWithValidOrder)
 // =============================================================================
 // Functor Integration Tests
 // =============================================================================
+
+TEST_F(DeferedEventsTest, CancelRequestHandsTheOrderAndRequesterToTheFunctor)
+{
+    TestDeferedEventFunctor functor;
+    OrderEntry *order = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+    CancelRequestDeferedEvent event(order, "WebSocket");
+    Context context;
+
+    event.execute(&functor, context, nullptr);
+
+    ASSERT_EQ(1u, functor.cancelRequests.size());
+    EXPECT_EQ(order, functor.cancelRequests[0].first);
+    EXPECT_EQ("WebSocket", functor.cancelRequests[0].second);
+    delete order;
+}
 
 TEST_F(DeferedEventsTest, FunctorReset)
 {
