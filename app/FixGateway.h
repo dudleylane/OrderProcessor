@@ -95,6 +95,10 @@ public:
     static char fromOrdStatus(OrderStatus s);
     static char fromExecType(ExecType t);
     static char fromSide(Side s);
+
+    /// The ExecutionReport (35=8) for one of an order's execution reports; sendExecutionReport() sends it to the order's
+    /// session. Public and static so that tests can check it without a FIX session.
+    static FIX44::ExecutionReport buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order);
 };
 
 } // namespace App

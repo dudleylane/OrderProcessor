@@ -25,6 +25,10 @@ std::atomic<u64> containedExceptions{ 0 };
 
 /// Longest prefix of an inbound message that goes into the log.
 const size_t MAX_LOGGED_MESSAGE = 256;
+/// OrdRejReason (103) value 0, "Broker / Exchange option" in FIX 4.4. QuickFIX names it OrdRejReason_BROKER_CREDIT,
+/// its FIX 4.2 meaning. The engine's reject reasons are free text, so every reject goes out with this code and the
+/// reason itself in Text (58).
+const int ORD_REJ_REASON_BROKER_OPTION = 0;
 } // namespace
 
 // =============================================================================
@@ -595,6 +599,12 @@ void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntr
         sid = it->second;
     }
 
+    FIX44::ExecutionReport report = buildExecutionReport(exec, order);
+    FIX::Session::sendToTarget(report, sid);
+}
+
+FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order)
+{
     FIX44::ExecutionReport report(
         FIX::OrderID(std::to_string(order.orderId_.id_)), FIX::ExecID(std::to_string(exec->execId_.id_)),
         FIX::ExecType(fromExecType(exec->type_)), FIX::OrdStatus(fromOrdStatus(exec->orderStatus_)),
@@ -610,11 +620,23 @@ void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntr
     report.set(FIX::Symbol(order.instrument_.get().symbol_));
     report.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
 
-    if (exec->type_ == TRADE_EXECTYPE)
+    // Extra fields follow the report's class, as in the JSON serializer; reports are full copies since #56
+    if (auto *trade = dynamic_cast<const TradeExecEntry *>(exec))
     {
-        auto *trade = static_cast<const TradeExecEntry *>(exec);
         report.set(FIX::LastQty(trade->lastQty_));
         report.set(FIX::LastPx(trade->lastPx_));
+    }
+    // A reject says why: OrdRejReason (103) and the engine's reason in Text (58)
+    if (auto *reject = dynamic_cast<const RejectExecEntry *>(exec))
+    {
+        if (REJECT_EXECTYPE == exec->type_)
+        {
+            report.set(FIX::OrdRejReason(ORD_REJ_REASON_BROKER_OPTION));
+        }
+        if (!reject->rejectReason_.empty())
+        {
+            report.set(FIX::Text(reject->rejectReason_));
+        }
     }
 
     // FX Swap leg: populate NoLegs group with leg-specific fields, set
@@ -640,9 +662,8 @@ void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntr
         }
         legGroup.set(FIX::LegSide(legFixSide));
 
-        if (exec->type_ == TRADE_EXECTYPE)
+        if (auto *trade = dynamic_cast<const TradeExecEntry *>(exec))
         {
-            auto *trade = static_cast<const TradeExecEntry *>(exec);
             legGroup.set(FIX::LegLastPx(trade->lastPx_));
             // LegLastQty (tag 1418) has no typed class in QuickFIX's FIX 4.4 headers,
             // use untyped setField instead
@@ -664,7 +685,7 @@ void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntr
         report.setField(820, std::to_string(order.orderId_.id_) + "-" + std::to_string(exec->transactTime_));
     }
 
-    FIX::Session::sendToTarget(report, sid);
+    return report;
 }
 
 void FixGateway::sendCancelReject(const IdT &orderId, const std::string &clOrdId)
@@ -882,6 +903,8 @@ char FixGateway::fromExecType(ExecType t)
         return FIX::ExecType_CANCELED;
     case REJECT_EXECTYPE:
         return FIX::ExecType_REJECTED;
+    case CORRECT_EXECTYPE:
+        return FIX::ExecType_TRADE_CORRECT;
     case REPLACE_EXECTYPE:
         return FIX::ExecType_REPLACED;
     case EXPIRED_EXECTYPE:

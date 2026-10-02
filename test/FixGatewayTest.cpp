@@ -122,6 +122,7 @@ TEST_F(FixEnumTest, ExecTypeConversion)
     EXPECT_EQ(FIX::ExecType_REPLACED, FixGateway::fromExecType(REPLACE_EXECTYPE));
     EXPECT_EQ(FIX::ExecType_EXPIRED, FixGateway::fromExecType(EXPIRED_EXECTYPE));
     EXPECT_EQ(FIX::ExecType_PENDING_CANCEL, FixGateway::fromExecType(PEND_CANCEL_EXECTYPE));
+    EXPECT_EQ(FIX::ExecType_TRADE_CORRECT, FixGateway::fromExecType(CORRECT_EXECTYPE));
 }
 
 // =============================================================================
@@ -636,6 +637,105 @@ TEST_F(FixGatewayInboundTest, FromApp_HandlerExceptionIsContained)
 
     const FIX::Message generic(makeNewOrderSingle("ORD-EXC", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100));
     EXPECT_NO_THROW(gateway_->fromApp(generic, TEST_SID));
+}
+
+// =============================================================================
+// Outbound ExecutionReport content (#56)
+// =============================================================================
+
+/// A report as OrderDataStorage keeps it since #56: a full copy, with an exec id. Value-initialized, so the fields
+/// a test does not set (a correction's quantities, say) are zero rather than indeterminate.
+template <typename T> T makeReport(ExecType type, OrderStatus status)
+{
+    T report{};
+    report.type_ = type;
+    report.orderStatus_ = status;
+    report.orderId_ = IdT(7, 1);
+    report.execId_ = IdT(8, 1);
+    report.transactTime_ = 12345;
+    report.market_ = INTERNAL_EXECUTION;
+    return report;
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_RejectCarriesOrdRejReasonAndText)
+{
+    // A rejected order's report says why: 150=8, 39=8, OrdRejReason 103=0 (broker / exchange option, since the
+    // engine's reasons are free text) and the reason itself in Text (58)
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    auto reject = makeReport<RejectExecEntry>(REJECT_EXECTYPE, REJECTED_ORDSTATUS);
+    reject.rejectReason_ = "There is no market for this instrument!";
+
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&reject, *order);
+
+    FIX::ExecType execType;
+    report.get(execType);
+    EXPECT_EQ(FIX::ExecType_REJECTED, execType.getValue());
+    FIX::OrdStatus ordStatus;
+    report.get(ordStatus);
+    EXPECT_EQ(FIX::OrdStatus_REJECTED, ordStatus.getValue());
+    ASSERT_TRUE(report.isSetField(FIX::FIELD::OrdRejReason));
+    FIX::OrdRejReason ordRejReason;
+    report.get(ordRejReason);
+    EXPECT_EQ(0, ordRejReason.getValue());
+    ASSERT_TRUE(report.isSetField(FIX::FIELD::Text));
+    FIX::Text text;
+    report.get(text);
+    EXPECT_EQ("There is no market for this instrument!", text.getValue());
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_AcknowledgementCarriesNoRejectFields)
+{
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order);
+
+    FIX::ExecType execType;
+    report.get(execType);
+    EXPECT_EQ(FIX::ExecType_NEW, execType.getValue());
+    FIX::OrdStatus ordStatus;
+    report.get(ordStatus);
+    EXPECT_EQ(FIX::OrdStatus_NEW, ordStatus.getValue());
+    EXPECT_FALSE(report.isSetField(FIX::FIELD::OrdRejReason));
+    EXPECT_FALSE(report.isSetField(FIX::FIELD::Text));
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_TradeCarriesLastQtyAndLastPx)
+{
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+    trade.lastQty_ = 40;
+    trade.lastPx_ = 10.5;
+
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+
+    FIX::ExecType execType;
+    report.get(execType);
+    EXPECT_EQ(FIX::ExecType_TRADE, execType.getValue());
+    FIX::LastQty lastQty;
+    report.get(lastQty);
+    EXPECT_DOUBLE_EQ(40, lastQty.getValue());
+    FIX::LastPx lastPx;
+    report.get(lastPx);
+    EXPECT_DOUBLE_EQ(10.5, lastPx.getValue());
+    EXPECT_FALSE(report.isSetField(FIX::FIELD::Text));
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_CorrectionIsTradeCorrect)
+{
+    // Corrections used to fall through fromExecType's default and go out as ExecType NEW
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    auto correct = makeReport<ExecCorrectExecEntry>(CORRECT_EXECTYPE, PARTFILL_ORDSTATUS);
+
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&correct, *order);
+
+    FIX::ExecType execType;
+    report.get(execType);
+    EXPECT_EQ(FIX::ExecType_TRADE_CORRECT, execType.getValue());
 }
 
 // =============================================================================
