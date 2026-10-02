@@ -76,27 +76,25 @@ json execToJson(const ExecutionEntry *exec)
     j["market"] = exec->market_;
     j["transactTime"] = exec->transactTime_;
 
-    if (exec->type_ == TRADE_EXECTYPE)
+    // The extra fields follow the report's class, not type_: an order cancel is a plain ExecutionEntry with type CANCEL,
+    // and a rejected replace is a RejectExecEntry with type REPLACE (#56)
+    if (auto *trade = dynamic_cast<const TradeExecEntry *>(exec))
     {
-        auto *trade = static_cast<const TradeExecEntry *>(exec);
         j["lastQty"] = trade->lastQty_;
         j["lastPx"] = trade->lastPx_;
         j["currency"] = toJsonString(trade->currency_);
         j["tradeDate"] = trade->tradeDate_;
     }
-    else if (exec->type_ == REJECT_EXECTYPE)
+    else if (auto *reject = dynamic_cast<const RejectExecEntry *>(exec))
     {
-        auto *reject = static_cast<const RejectExecEntry *>(exec);
         j["rejectReason"] = reject->rejectReason_;
     }
-    else if (exec->type_ == REPLACE_EXECTYPE)
+    else if (auto *replace = dynamic_cast<const ReplaceExecEntry *>(exec))
     {
-        auto *replace = static_cast<const ReplaceExecEntry *>(exec);
         j["origOrderId"] = replace->origOrderId_.id_;
     }
-    else if (exec->type_ == CORRECT_EXECTYPE)
+    else if (auto *correct = dynamic_cast<const ExecCorrectExecEntry *>(exec))
     {
-        auto *correct = static_cast<const ExecCorrectExecEntry *>(exec);
         j["cumQty"] = correct->cumQty_;
         j["leavesQty"] = correct->leavesQty_;
         j["lastQty"] = correct->lastQty_;
@@ -106,9 +104,8 @@ json execToJson(const ExecutionEntry *exec)
         j["origOrderId"] = correct->origOrderId_.id_;
         j["execRefId"] = correct->execRefId_.id_;
     }
-    else if (exec->type_ == CANCEL_EXECTYPE)
+    else if (auto *cancel = dynamic_cast<const TradeCancelExecEntry *>(exec))
     {
-        auto *cancel = static_cast<const TradeCancelExecEntry *>(exec);
         j["execRefId"] = cancel->execRefId_.id_;
     }
 
