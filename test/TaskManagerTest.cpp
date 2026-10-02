@@ -15,6 +15,10 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <vector>
 
 #include "TestFixtures.h"
 #include "TestAux.h"
@@ -46,9 +50,44 @@ class TestOutQueues : public OutQueues
 public:
     TestOutQueues() : execReportCount_(0), cancelRejectCount_(0), businessRejectCount_(0) {}
 
-    void push(const ExecReportEvent &, const std::string &) override
+    /// What one execution report said when it was pushed; the report itself belongs to OrderStorage
+    struct RecordedReport
     {
+        ExecType type;
+        OrderStatus status;
+        IdT orderId;
+        DateTimeT transactTime;
+        std::string market;
+        std::string rejectReason; // set for a RejectExecEntry only
+    };
+
+    void push(const ExecReportEvent &evnt, const std::string &) override
+    {
+        RecordedReport report{ evnt.exec_->type_,         evnt.exec_->orderStatus_, evnt.exec_->orderId_,
+                               evnt.exec_->transactTime_, evnt.exec_->market_,      std::string() };
+        if (auto *reject = dynamic_cast<const RejectExecEntry *>(evnt.exec_))
+        {
+            report.rejectReason = reject->rejectReason_;
+        }
+        {
+            std::lock_guard<std::mutex> lock(reportsLock_);
+            reports_.push_back(report);
+        }
         ++execReportCount_;
+    }
+
+    /// The first recorded report of the given type, if any
+    std::optional<RecordedReport> report(ExecType type) const
+    {
+        std::lock_guard<std::mutex> lock(reportsLock_);
+        for (const auto &r : reports_)
+        {
+            if (type == r.type)
+            {
+                return r;
+            }
+        }
+        return std::nullopt;
     }
 
     void push(const CancelRejectEvent &evnt, const std::string &) override
@@ -71,6 +110,9 @@ public:
     std::atomic<int> cancelRejectCount_;
     std::atomic<int> businessRejectCount_;
     std::atomic<u64> lastCancelRejectOrderId_{ 0 };
+
+    mutable std::mutex reportsLock_;
+    std::vector<RecordedReport> reports_;
 };
 
 /// Throws instead of processing the first transaction it is given, and hands later ones to a real processor. It owns
@@ -362,6 +404,53 @@ TEST_F(TaskManagerTest, ProcessMixedBuySellOrders)
 
     // Should have generated execution reports for all orders
     EXPECT_GE(outQueues_->totalEvents(), numPairs * 2);
+}
+
+// =============================================================================
+// Execution Report Content (#56)
+// =============================================================================
+
+TEST_F(TaskManagerTest, NewOrderReportCarriesItsContent)
+{
+    // The bug this covers: OrderStorage kept a default-constructed copy of every report except a trade, and that copy
+    // is what clients received: no type, status, order id, time or market (#56).
+    auto manager = createTaskManager(1, 1);
+
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    OrderEntry *saved = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, saved);
+    auto ack = outQueues_->report(NEW_EXECTYPE);
+    ASSERT_TRUE(ack.has_value()) << "no NEW report";
+    EXPECT_EQ(NEW_ORDSTATUS, ack->status);
+    EXPECT_EQ(saved->orderId_, ack->orderId);
+    EXPECT_NE(0u, ack->transactTime);
+    EXPECT_EQ(INTERNAL_EXECUTION, ack->market);
+}
+
+TEST_F(TaskManagerTest, RejectReportCarriesItsReason)
+{
+    auto manager = createTaskManager(1, 1);
+
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    order->side_ = INVALID_SIDE; // fails OrderEntry::isValid(), so the engine rejects the order
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    OrderEntry *saved = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, saved);
+    EXPECT_EQ(REJECTED_ORDSTATUS, saved->status_);
+    auto reject = outQueues_->report(REJECT_EXECTYPE);
+    ASSERT_TRUE(reject.has_value()) << "no REJECT report";
+    EXPECT_EQ(REJECTED_ORDSTATUS, reject->status);
+    EXPECT_EQ(saved->orderId_, reject->orderId);
+    EXPECT_EQ("Invalid value of the side!", reject->rejectReason);
 }
 
 // =============================================================================

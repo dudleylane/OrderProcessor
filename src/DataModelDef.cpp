@@ -519,7 +519,7 @@ ExecParams::ExecParams()
 
 ExecParams::ExecParams(const ExecParams &param)
     : type_(param.type_), transactTime_(param.transactTime_), orderId_(param.orderId_), execId_(param.execId_),
-      orderStatus_(param.orderStatus_), execLegType_(param.execLegType_)
+      orderStatus_(param.orderStatus_), market_(param.market_), execLegType_(param.execLegType_)
 {
 }
 
@@ -533,9 +533,11 @@ ExecutionEntry::ExecutionEntry() : ExecParams() {}
 
 ExecutionEntry::ExecutionEntry(const ExecParams &param) : ExecParams(param) {}
 
+// OrderDataStorage::save() stores a clone of each report and pushes that clone to clients, so every clone() is a
+// full copy (#56)
 ExecutionEntry *ExecutionEntry::clone() const
 {
-    return new ExecutionEntry();
+    return new ExecutionEntry(*this);
 }
 
 TradeExecEntry::TradeExecEntry() {}
@@ -554,20 +556,20 @@ ExecutionEntry *TradeExecEntry::clone() const
 
 ExecutionEntry *RejectExecEntry::clone() const
 {
-    return new RejectExecEntry;
+    return new RejectExecEntry(*this);
 }
 
 ExecutionEntry *ExecCorrectExecEntry::clone() const
 {
-    return new ExecCorrectExecEntry;
+    return new ExecCorrectExecEntry(*this);
 }
 
 ExecutionEntry *ReplaceExecEntry::clone() const
 {
-    return new ReplaceExecEntry;
+    return new ReplaceExecEntry(*this);
 }
 
 ExecutionEntry *TradeCancelExecEntry::clone() const
 {
-    return new TradeCancelExecEntry;
+    return new TradeCancelExecEntry(*this);
 }
