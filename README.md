@@ -41,7 +41,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **FIX 4.4 Support:** Institutional clients connect via standard FIX protocol (`BUILD_FIX=ON`)
 - **QuickFIX/C++ Engine:** ThreadedSocketAcceptor with thread-per-session isolation
 - **Inbound:** NewOrderSingle (35=D), OrderCancelRequest (35=F), OrderCancelReplaceRequest (35=G)
-- **Outbound:** ExecutionReport (35=8), OrderCancelReject (35=9)
+- **Outbound:** ExecutionReport (35=8), OrderCancelReject (35=9). A rejected order's ExecutionReport (150=8, 39=8) carries OrdRejReason 103=0 (broker / exchange option) and the engine's reason in Text (58)
 - **Server Defaults:** FIX orders get the server's clearing firm and, when they carry no Account (1), its default account, as WebSocket orders do. If either is missing from the data directory, the gateway answers the order with a BusinessMessageReject (35=j; BusinessRejectReason 4 when there is no clearing firm, 5 when there is no account) instead of passing it to the engine
 - **Gateway Pattern:** Thin adapter — FIX messages translate to internal events at the boundary; core engine is protocol-agnostic
 - **MultiOutQueues:** Fan-out adapter routes execution reports to both WebSocket and FIX sessions simultaneously
