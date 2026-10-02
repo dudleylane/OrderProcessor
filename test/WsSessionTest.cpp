@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -334,6 +335,32 @@ TEST_F(WsSessionTest, OrderThatNamesNoAccountIsRefusedWhenTheServerHasNoDefaultA
     ASSERT_TRUE(reply.has_value()) << "no error reply; escaped: " << escaped();
     EXPECT_EQ("Order refused: it names no account, and the server has no default account", reply->value("message", ""));
     EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0)));
+}
+
+TEST_F(WsSessionTest, ClOrdIdsCarryASequenceNumber)
+{
+    // The server makes up each WebSocket order's ClOrdID. From the time in microseconds alone, two orders in the same
+    // microsecond got the same one, and the second is refused as a duplicate (#67); a sequence number keeps them apart.
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    const std::string order = R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
+                              R"("price":150.25,"orderQty":100,"tif":"DAY","currency":"USD","capacity":"AGENCY"}})";
+    send(client, order);
+    send(client, order);
+    std::unique_ptr<OrderEntry> first = takeQueuedOrder();
+    std::unique_ptr<OrderEntry> second = takeQueuedOrder();
+    ASSERT_NE(nullptr, first) << "escaped: " << escaped();
+    ASSERT_NE(nullptr, second) << "escaped: " << escaped();
+    const std::regex format("WS-[0-9]+-([0-9]+)");
+    const RawDataEntry &a = first->clOrderId_.get();
+    const RawDataEntry &b = second->clOrderId_.get();
+    const std::string firstId(a.data_, a.length_), secondId(b.data_, b.length_);
+    std::smatch firstMatch, secondMatch;
+    ASSERT_TRUE(std::regex_match(firstId, firstMatch, format)) << firstId;
+    ASSERT_TRUE(std::regex_match(secondId, secondMatch, format)) << secondId;
+    EXPECT_EQ(std::stoull(firstMatch[1]) + 1, std::stoull(secondMatch[1]));
 }
 
 } // namespace
