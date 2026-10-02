@@ -60,6 +60,41 @@ protected:
     SourceIdT destination_;
 };
 
+TEST_F(JsonSerializerTest, CancelReportCarriesNoTradeCancelFields)
+{
+    // The engine reports an order cancel as a plain ExecutionEntry. The serializer used to pick the class from type_
+    // and read a CANCEL report as a TradeCancelExecEntry, past the end of the object; the blank copies OrderStorage
+    // kept until #56 hid that.
+    std::unique_ptr<ExecutionEntry> report(new ExecutionEntry());
+    report->type_ = CANCEL_EXECTYPE;
+    report->orderStatus_ = CANCELED_ORDSTATUS;
+    report->orderId_ = IdT(7, 1);
+    report->execId_ = IdT(8, 1);
+    report->market_ = INTERNAL_EXECUTION;
+
+    nlohmann::json msg = nlohmann::json::parse(App::serializeExecReport(report.get()));
+    EXPECT_EQ("CANCEL", msg["data"].value("type", ""));
+    EXPECT_EQ(7u, msg["data"].value("orderId", 0u));
+    EXPECT_EQ(INTERNAL_EXECUTION, msg["data"].value("market", ""));
+    EXPECT_FALSE(msg["data"].contains("execRefId"));
+}
+
+TEST_F(JsonSerializerTest, RejectedReplaceReportCarriesItsReason)
+{
+    // A rejected replace is a RejectExecEntry with type REPLACE. Read as a ReplaceExecEntry, its reason's bytes became
+    // an origOrderId.
+    std::unique_ptr<RejectExecEntry> report(new RejectExecEntry());
+    report->type_ = REPLACE_EXECTYPE;
+    report->orderStatus_ = REJECTED_ORDSTATUS;
+    report->orderId_ = IdT(7, 1);
+    report->rejectReason_ = "too late to replace";
+
+    nlohmann::json msg = nlohmann::json::parse(App::serializeExecReport(report.get()));
+    EXPECT_EQ("REPLACE", msg["data"].value("type", ""));
+    EXPECT_EQ("too late to replace", msg["data"].value("rejectReason", ""));
+    EXPECT_FALSE(msg["data"].contains("origOrderId"));
+}
+
 TEST_F(JsonSerializerTest, OrderWithUnsetReferencesSerializes)
 {
     // The bug this covers: orderToJson resolved every reference, and a new order's origClOrderId is unset, so
