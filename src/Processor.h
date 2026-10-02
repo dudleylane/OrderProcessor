@@ -122,6 +122,8 @@ public:
 private:
     void processDeferedEvent();
     void clearDeferedEvents();
+    /// Tells the sender that its new order or replacement was refused without being stored (#67)
+    void rejectUnstoredOrder(const std::string &source, const OrderEntry &order, bool replacement);
 
 private:
     IdTValueGenerator *generator_;

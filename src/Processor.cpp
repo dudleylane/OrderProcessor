@@ -122,7 +122,7 @@ bool Processor::process()
     }
 }
 
-void Processor::onEvent(const std::string & /*source*/, const OrderEvent &evnt)
+void Processor::onEvent(const std::string &source, const OrderEvent &evnt)
 {
     if (nullptr == evnt.order_) [[unlikely]]
     {
@@ -156,6 +156,15 @@ void Processor::onEvent(const std::string & /*source*/, const OrderEvent &evnt)
     // save state machine state into the order
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
+    // save() always stores the order as a clone and returns that, so the machine ends on the incoming object only when
+    // storing failed: its ClOrdID is already in use. Then there is no stored order to persist or to report through a
+    // transaction, so the scope goes back to its pool unused and the sender is told directly (#67).
+    if (smState.orderData_ == evnt.order_) [[unlikely]]
+    {
+        publishGuard.release();
+        rejectUnstoredOrder(source, *evnt.order_, false);
+        return;
+    }
     smState.orderData_->setStateMachinePersistance(smState);
     // Persist the order as part of this transaction (#20), ahead of the operations that publish
     // execution reports, so an acknowledged change is already durable (#28).
@@ -222,7 +231,7 @@ void Processor::onEvent(const std::string &source, const OrderCancelEvent &evnt)
     processDeferedEvent();
 }
 
-void Processor::onEvent(const std::string & /*source*/, const OrderReplaceEvent &evnt)
+void Processor::onEvent(const std::string &source, const OrderReplaceEvent &evnt)
 {
     if (!evnt.id_.isValid()) [[unlikely]]
     {
@@ -252,6 +261,12 @@ void Processor::onEvent(const std::string & /*source*/, const OrderReplaceEvent 
         // save state machine state into the replacement order
         OrderStatePersistence smState = threadState().stateMachine->getPersistence();
         assert(nullptr != smState.orderData_);
+        if (smState.orderData_ == evnt.replacementOrder_) [[unlikely]] // not stored, as for a new order above (#67)
+        {
+            publishGuard.release();
+            rejectUnstoredOrder(source, *evnt.replacementOrder_, true);
+            return;
+        }
         smState.orderData_->setStateMachinePersistance(smState);
         // Persist the order as part of this transaction (#20), ahead of the operations that publish
         // execution reports, so an acknowledged change is already durable (#28).
@@ -704,4 +719,37 @@ void Processor::clearDeferedEvents()
         delete *it;
     }
     threadState().events.clear();
+}
+
+void Processor::rejectUnstoredOrder(const std::string &source, const OrderEntry &order, bool replacement)
+{
+    clearDeferedEvents();
+    auto text = [](const RawDataEntry &raw)
+    {
+        return (nullptr != raw.data_) ? std::string(raw.data_, raw.length_) : std::string();
+    };
+    OrderRejectEvent reject;
+    reject.replacement_ = replacement;
+    reject.side_ = order.side_;
+    reject.orderQty_ = order.orderQty_;
+    try
+    {
+        const RawDataEntry &clOrdId = order.clOrderId_.get();
+        reject.clOrderId_ = text(clOrdId);
+        // Only refused orders get here, so this second lookup costs nothing on the common path
+        reject.duplicateClOrderId_ = (nullptr != orderStorage_->locateByClOrderId(clOrdId));
+        if (replacement)
+        {
+            reject.origClOrderId_ = text(order.origClOrderId_.get());
+        }
+        reject.symbol_ = order.instrument_.get().symbol_;
+    }
+    catch (const std::exception &)
+    {
+        // a reference the order carries could not be resolved: report what is known
+    }
+    reject.reason_ = reject.duplicateClOrderId_ ? "Order refused: ClOrdID " + reject.clOrderId_ + " is already in use"
+                                                : std::string("Order refused: it could not be stored");
+    assert(nullptr != outQueues_);
+    outQueues_->push(reject, source);
 }

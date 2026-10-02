@@ -76,6 +76,19 @@ public:
         ++execReportCount_;
     }
 
+    void push(const OrderRejectEvent &evnt, const std::string &target) override
+    {
+        std::lock_guard<std::mutex> lock(reportsLock_);
+        orderRejects_.emplace_back(evnt, target);
+    }
+
+    /// The order rejects pushed so far, each with its target
+    std::vector<std::pair<OrderRejectEvent, std::string>> orderRejects() const
+    {
+        std::lock_guard<std::mutex> lock(reportsLock_);
+        return orderRejects_;
+    }
+
     /// The first recorded report of the given type, if any
     std::optional<RecordedReport> report(ExecType type) const
     {
@@ -113,6 +126,7 @@ public:
 
     mutable std::mutex reportsLock_;
     std::vector<RecordedReport> reports_;
+    std::vector<std::pair<OrderRejectEvent, std::string>> orderRejects_;
 };
 
 /// Throws instead of processing the first transaction it is given, and hands later ones to a real processor. It owns
@@ -451,6 +465,114 @@ TEST_F(TaskManagerTest, RejectReportCarriesItsReason)
     EXPECT_EQ(REJECTED_ORDSTATUS, reject->status);
     EXPECT_EQ(saved->orderId_, reject->orderId);
     EXPECT_EQ("Invalid value of the side!", reject->rejectReason);
+}
+
+// =============================================================================
+// Orders Refused Without Being Stored (#67)
+// =============================================================================
+
+TEST_F(TaskManagerTest, OrderWithAClOrdIdInUseIsRefusedWithoutBeingStored)
+{
+    // The bug this covers: such an order was rejected through a transaction although it was never stored, so the
+    // reject carried no order id. Debug aborted on TransactionScope's id assert; Release dereferenced null (#67).
+    auto manager = createTaskManager(1, 1);
+
+    auto first = createCorrectOrder(instrumentId1_);
+    assignClOrderId(first.get());
+    RawDataEntry clOrdId = first->clOrderId_.get();
+    const std::string clOrdText(clOrdId.data_, clOrdId.length_);
+    auto second = createCorrectOrder(instrumentId1_);
+    second->clOrderId_ = first->clOrderId_;
+    second->side_ = SELL_SIDE;
+    inQueues_->push("first-client", OrderEvent(first.release()));
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    inQueues_->push("second-client", OrderEvent(second.release()));
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+
+    OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, stored);
+    EXPECT_EQ(NEW_ORDSTATUS, stored->status_);
+    EXPECT_EQ(BUY_SIDE, stored->side_);
+    EXPECT_EQ(0, manager->tasksFailed());
+    auto rejects = outQueues_->orderRejects();
+    ASSERT_EQ(1u, rejects.size());
+    EXPECT_EQ("second-client", rejects[0].second);
+    EXPECT_EQ(clOrdText, rejects[0].first.clOrderId_);
+    EXPECT_FALSE(rejects[0].first.replacement_);
+    EXPECT_TRUE(rejects[0].first.duplicateClOrderId_);
+    EXPECT_EQ(SELL_SIDE, rejects[0].first.side_);
+    EXPECT_EQ(77u, rejects[0].first.orderQty_);
+    EXPECT_EQ("aaa", rejects[0].first.symbol_);
+    EXPECT_EQ("Order refused: ClOrdID " + clOrdText + " is already in use", rejects[0].first.reason_);
+}
+
+TEST_F(TaskManagerTest, ReplacementWithAClOrdIdInUseIsRefusedWithoutBeingStored)
+{
+    // A cancel/replace request's replacement can reuse a ClOrdID too: here, the original's own (#67). The replacement
+    // is a clone, so it carries the original's order id, and the old code rejected and persisted it under that id: the
+    // refused replacement's state became the newest version of the original's record.
+    struct RecordingSaver final : public COP::OrderSaver
+    {
+        struct Version
+        {
+            IdT orderId;
+            OrderStatus status;
+            QuantityT orderQty;
+        };
+        u32 save(const OrderEntry &order) override
+        {
+            std::lock_guard<std::mutex> lock(lock_);
+            versions_.push_back({ order.orderId_, order.status_, order.orderQty_ });
+            return static_cast<u32>(versions_.size());
+        }
+        void erase(const IdT &, u32) override {}
+        std::vector<Version> versions()
+        {
+            std::lock_guard<std::mutex> lock(lock_);
+            return versions_;
+        }
+        std::mutex lock_;
+        std::vector<Version> versions_;
+    } saver;
+    OrderStorage::instance()->attach(&saver);
+    auto manager = createTaskManager(1, 1);
+
+    auto original = createCorrectOrder(instrumentId1_);
+    assignClOrderId(original.get());
+    RawDataEntry clOrdId = original->clOrderId_.get();
+    const std::string clOrdText(clOrdId.data_, clOrdId.length_);
+    inQueues_->push("client", OrderEvent(original.release()));
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, stored);
+
+    // Built as the FIX gateway builds one, a clone of the original, but keeping the original's ClOrdID. Nothing frees
+    // a replacement order today (a separate leak); this one is refused, so nothing refers to it afterwards.
+    std::unique_ptr<OrderEntry> replacement(stored->clone());
+    replacement->origClOrderId_ = stored->clOrderId_;
+    replacement->orderQty_ = 50;
+    inQueues_->push("client", OrderReplaceEvent(stored->orderId_, replacement.get()));
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+
+    EXPECT_EQ(NEW_ORDSTATUS, stored->status_);
+    EXPECT_EQ(77u, stored->orderQty_);
+    EXPECT_EQ(0, manager->tasksFailed());
+    for (const auto &version : saver.versions())
+    {
+        if (stored->orderId_ == version.orderId)
+        {
+            EXPECT_EQ(NEW_ORDSTATUS, version.status) << "the refused replacement was persisted as the original";
+            EXPECT_EQ(77u, version.orderQty);
+        }
+    }
+    auto rejects = outQueues_->orderRejects();
+    ASSERT_EQ(1u, rejects.size());
+    EXPECT_EQ("client", rejects[0].second);
+    EXPECT_TRUE(rejects[0].first.replacement_);
+    EXPECT_TRUE(rejects[0].first.duplicateClOrderId_);
+    EXPECT_EQ(clOrdText, rejects[0].first.clOrderId_);
+    EXPECT_EQ(clOrdText, rejects[0].first.origClOrderId_);
+    EXPECT_EQ(50u, rejects[0].first.orderQty_);
 }
 
 // =============================================================================

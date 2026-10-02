@@ -26,6 +26,9 @@ namespace
 /// so the count stays visible in the log without a protocol field.
 std::atomic<u64> containedExceptions{ 0 };
 
+/// Numbers the ClOrdIDs this server makes up for WebSocket orders, so that two in the same microsecond differ (#67)
+std::atomic<u64> clOrderSequence{ 0 };
+
 /// Longest prefix of a client's request that goes into the log.
 const size_t MAX_LOGGED_REQUEST = 256;
 
@@ -175,10 +178,13 @@ void WsSession::handleMessage(const std::string &msgStr)
             return;
         }
 
-        // Create clOrderId RawDataEntry
-        std::string clOrdStr = "WS-" + std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
-                                                          std::chrono::system_clock::now().time_since_epoch())
-                                                          .count());
+        // Create clOrderId RawDataEntry. The sequence number keeps two orders made in the same microsecond apart: the
+        // client did not choose this ClOrdID, and one already in use is refused (#67).
+        std::string clOrdStr = "WS-" +
+                               std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
+                                                  std::chrono::system_clock::now().time_since_epoch())
+                                                  .count()) +
+                               "-" + std::to_string(clOrderSequence.fetch_add(1, std::memory_order_relaxed) + 1);
         auto *clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
         SourceIdT clOrdId = Store::WideDataStorage::instance()->add(clOrdRaw);
 

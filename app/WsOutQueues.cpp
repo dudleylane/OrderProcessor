@@ -5,6 +5,7 @@
 #include "OrderStorage.h"
 #include "OrderBookImpl.h"
 #include "Logger.h"
+#include "ExchUtils.h"
 
 using namespace COP;
 using namespace COP::App;
@@ -43,4 +44,16 @@ void WsOutQueues::push(const Queues::CancelRejectEvent &evnt, const std::string 
 void WsOutQueues::push(const Queues::BusinessRejectEvent &evnt, const std::string & /*target*/)
 {
     sessionMgr_->broadcast(serializeBusinessReject(evnt.id_.id_, "Business reject"));
+}
+
+void WsOutQueues::push(const Queues::OrderRejectEvent &evnt, const std::string & /*target*/)
+{
+    // The order was never stored, so it has no id: a REJECT report with orderId 0, and the reason (#67)
+    RejectExecEntry report;
+    report.type_ = REJECT_EXECTYPE;
+    report.orderStatus_ = REJECTED_ORDSTATUS;
+    report.transactTime_ = aux::currentDateTime();
+    report.market_ = INTERNAL_EXECUTION;
+    report.rejectReason_ = evnt.reason_;
+    sessionMgr_->broadcast(serializeExecReport(&report));
 }

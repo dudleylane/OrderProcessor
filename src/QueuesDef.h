@@ -100,6 +100,21 @@ struct BusinessRejectEvent : public EventBase
 {
 };
 
+/// A new order or a replacement the engine refused without storing it, so it has no order id and cannot be reported
+/// through a transaction: today, one whose ClOrdID is already in use (#67). It carries what the sender needs to
+/// recognise its order.
+struct OrderRejectEvent : public EventBase
+{
+    std::string clOrderId_;
+    std::string origClOrderId_; // the order a replacement was to replace; empty for a new order
+    std::string symbol_;
+    Side side_ = INVALID_SIDE;
+    QuantityT orderQty_ = 0;
+    bool replacement_ = false;        // a cancel/replace request's replacement, not a new order
+    bool duplicateClOrderId_ = false; // refused because its ClOrdID is already in use
+    std::string reason_;
+};
+
 struct ProcessEvent : public EventBase
 {
     enum EventType
@@ -203,6 +218,9 @@ public:
     virtual void push(const ExecReportEvent &evnt, const std::string &target) = 0;
     virtual void push(const CancelRejectEvent &evnt, const std::string &target) = 0;
     virtual void push(const BusinessRejectEvent &evnt, const std::string &target) = 0;
+    /// An order refused without being stored (#67); target is the order's source. Not pure, so that a queue which
+    /// never reaches clients may ignore it; one that does must override it.
+    virtual void push(const OrderRejectEvent & /*evnt*/, const std::string & /*target*/) {}
 };
 
 } // namespace Queues
