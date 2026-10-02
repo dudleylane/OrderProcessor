@@ -38,7 +38,7 @@ void WsOutQueues::push(const Queues::ExecReportEvent &evnt, const std::string & 
 
 void WsOutQueues::push(const Queues::CancelRejectEvent &evnt, const std::string & /*target*/)
 {
-    sessionMgr_->broadcast(serializeCancelReject(evnt.id_.id_, "Cancel rejected"));
+    sessionMgr_->broadcast(serializeCancelReject(evnt.id_.id_, cancelRejectReason(evnt)));
 }
 
 void WsOutQueues::push(const Queues::BusinessRejectEvent &evnt, const std::string & /*target*/)

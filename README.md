@@ -219,7 +219,7 @@ differ; these numbers are a shape, not a specification.
 |-----------|------|------------|----------------|
 | `BM_ProcessNewOrder` | ~2.4 µs | ~420K orders/sec | `Processor::onEvent` through the state machine, `OrderDataStorage::save`, the book, and the transaction, executed inline |
 | `BM_ProcessNewOrderWithMatch` | ~11.5 µs | ~88K orders/sec | the same, for an order that crosses: trade, deferred execution events, book removal |
-| `BM_ProcessCancelOrder` | ~1.1 µs | ~930K orders/sec | cancel of a resting order |
+| `BM_ProcessCancelOrder` | ~3.9 µs | ~255K orders/sec | cancel of a resting order, completed: decided after the order's earlier transactions, removed from the book, reported |
 | `BM_TaskManagerThroughput/4` | ~8.8 ms per 500 orders | ~57K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
 
 `BM_TaskManagerThroughput` takes the processor count as its argument: ~30K orders/sec at 2, ~57K at
@@ -228,7 +228,9 @@ differ; these numbers are a shape, not a specification.
 Two things these numbers deliberately exclude, both real in production:
 
 - **Logging.** The benchmarks turn notes off. `app/main.cpp` turns them on, and with them on a new
-  order costs about 27 µs instead of 2.4 µs: roughly 24 µs per order inside spdlog.
+  order costs about 27 µs instead of 2.4 µs: roughly 24 µs per order inside spdlog. Debug logging
+  stays on in both, so a row that removes an order from the book (a match that fills, a cancel)
+  includes `OrderBookImpl::remove`'s debug line: about a third of a cancel.
 - **Persistence.** No `OrderSaver` is attached, so nothing reaches LMDB. With the dispatcher wired
   up, each order change costs an LMDB write, about 2 ms with fsync per commit (issue #20).
 
@@ -312,7 +314,7 @@ The server communicates with clients via JSON messages over WebSocket. All messa
 | `order_update` | `Order` | On any order state change |
 | `execution_report` | `ExecutionReport` | On trade, reject, cancel, replace, correct |
 | `book_update` | `OrderBookSnapshot` | On book change (subscribed symbols only) |
-| `cancel_reject` | `{orderId, reason}` | When cancel request is rejected |
+| `cancel_reject` | `{orderId, reason}` | When a cancel is refused; `reason` says why: unknown order, too late (with the order's status), or a replace pending |
 | `business_reject` | `{refId, reason}` | On business logic rejection |
 | `metrics_update` | `SystemMetrics` | Every 1 second (broadcast to all) |
 | `error` | `{message}` | On server error |
@@ -322,7 +324,7 @@ The server communicates with clients via JSON messages over WebSocket. All messa
 | Type | Payload | Description |
 |------|---------|-------------|
 | `new_order` | `NewOrderRequest` | Submit a new order |
-| `cancel_order` | `{orderId, clOrderId?}` | Cancel an existing order |
+| `cancel_order` | `{orderId, clOrderId?}` | Cancel an existing order: answered with a `CANCELED` execution report, or a `cancel_reject` |
 | `replace_order` | `{orderId, price?, orderQty?, tif?}` | Modify an existing order |
 | `subscribe_book` | `{symbol}` | Subscribe to order book updates for a symbol |
 | `unsubscribe_book` | `{symbol}` | Unsubscribe from order book updates |

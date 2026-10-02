@@ -41,3 +41,20 @@ void CancelOrderDeferedEvent::execute(DeferedEventFunctor *func, const Context &
 
     func->process(evnt4Proc, order_, cnxt);
 }
+
+CancelRequestDeferedEvent::CancelRequestDeferedEvent(OrderEntry *ord, const std::string &requester)
+    : order_(ord), requester_(requester)
+{
+    assert(nullptr != order_);
+}
+
+void CancelRequestDeferedEvent::execute(DeferedEventFunctor *func, const Context &cnxt, ACID::Scope *scope)
+{
+    assert(nullptr != func);
+    assert(nullptr != order_);
+
+    onExecCancel evnt4Proc;
+    evnt4Proc.transaction_ = scope;
+
+    func->process(evnt4Proc, order_, requester_, cnxt);
+}

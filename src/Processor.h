@@ -105,6 +105,8 @@ public:
     /// reimplemented from DeferedEventFunctor
     virtual void process(OrdState::onTradeExecution &evnt, OrderEntry *order, const ACID::Context &cnxt);
     virtual void process(OrdState::onInternalCancel &evnt, OrderEntry *order, const ACID::Context &cnxt);
+    virtual void process(OrdState::onExecCancel &evnt, OrderEntry *order, const std::string &requester,
+                         const ACID::Context &cnxt);
 
 public:
     /// reimplemented from InQueueProcessor

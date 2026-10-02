@@ -521,31 +521,36 @@ COP (Concurrent Order Processor)
         │
         ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Processor.onEvent(OrderCancelEvent)                                      │
-│   • Locate order in OrderDataStorage                                    │
-│   • Validate cancel is allowed                                          │
+│ Processor.onEvent(OrderCancelEvent)                     (event worker)   │
+│   • Locate order in OrderDataStorage; unknown → CancelRejectEvent        │
+│   • Enqueue a transaction holding CancelOrderTrOperation, related to     │
+│     the order and its instrument                                         │
+└──────────────────────────────────────────────────────────────────────────┘
+        │  runs after every earlier transaction on the order or instrument,
+        │  and after the fills those transactions caused (#73)
+        ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ CancelOrderTrOperation.execute()                   (transaction worker)  │
+│   • Queue CancelRequestDeferedEvent                                      │
 └──────────────────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ OrderStateMachine.onCancelReceived()                                     │
-│   • Transition: NEW/PARTFILL → GOING_CANCEL                             │
-└──────────────────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│ OrderStateMachine.onExecCancel()                                         │
-│   • Transition: GOING_CANCEL → CNCL_REPLACED                            │
-│   • Create RemoveFromOrderBookTrOperation                               │
-│   • Create CreateExecReportTrOperation (CANCELED)                       │
+│ Processor.process(onExecCancel)                          (same worker)   │
+│   • Not live (FILLED, CANCELED, ...) → CancelRejectTrOperation           │
+│   • Live (NEW, PARTFILL, SUSPENDED, DFD) → OrderStateMachine             │
+│       onExecCancel: NO_CNL_REPLACE → CNCL_REPLACED, leavesQty = 0        │
+│       Create RemoveFromOrderBookTrOperation                              │
+│       Create CreateExecReportTrOperation (CANCELED)                      │
+│   • No transition (a replace pending) → CancelRejectTrOperation          │
 └──────────────────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ Transaction Execution:                                                   │
-│   • OrderBook.remove(order)                                             │
-│   • OutgoingQueues.push(ExecReport CANCELED)                            │
-│   • FileStorage.update(order)                                           │
+│   • PersistOrderTrOperation (first, #28)                                 │
+│   • OrderBook.remove(order)                                              │
+│   • OutQueues.push(ExecReport CANCELED), or the cancel reject            │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -697,7 +702,8 @@ COP (Concurrent Order Processor)
 | FILLED | onTradeCrctCncl | PARTFILL/NEW | Trade bust |
 | NO_CNL_REPLACE | onCancelReceived | GOING_CANCEL | Begin cancel |
 | NO_CNL_REPLACE | onReplaceReceived | GOING_REPLACE | Begin replace |
-| GOING_CANCEL | onExecCancel | CNCL_REPLACED | Remove from book |
+| NO_CNL_REPLACE | onExecCancel | CNCL_REPLACED | Client cancel, decided at once: remove from book, leaves 0 (#73) |
+| GOING_CANCEL | onExecCancel | CNCL_REPLACED | Remove from book (an order an older server left pending) |
 | GOING_CANCEL | onCancelRejected | NO_CNL_REPLACE | Cancel failed |
 | GOING_REPLACE | onExecReplace | CNCL_REPLACED | Update order |
 | GOING_REPLACE | onReplaceRejected | NO_CNL_REPLACE | Replace failed |

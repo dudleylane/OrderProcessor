@@ -32,6 +32,9 @@ public:
 
     virtual void process(OrdState::onTradeExecution &evnt, OrderEntry *order, const ACID::Context &cnxt) = 0;
     virtual void process(OrdState::onInternalCancel &evnt, OrderEntry *order, const ACID::Context &cnxt) = 0;
+    /// A client's cancel of the order; a refusal goes to the requester (#73)
+    virtual void process(OrdState::onExecCancel &evnt, OrderEntry *order, const std::string &requester,
+                         const ACID::Context &cnxt) = 0;
 };
 
 class DeferedEventBase
@@ -94,6 +97,17 @@ struct CancelOrderDeferedEvent : public DeferedEventBase
 
     CancelOrderDeferedEvent();
     explicit CancelOrderDeferedEvent(OrderEntry *ord);
+
+    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+};
+
+/// A client's cancel, queued by CancelOrderTrOperation once the transactions before it on the order are done (#73)
+struct CancelRequestDeferedEvent : public DeferedEventBase
+{
+    OrderEntry *order_;
+    std::string requester_;
+
+    CancelRequestDeferedEvent(OrderEntry *ord, const std::string &requester);
 
     virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
 };
