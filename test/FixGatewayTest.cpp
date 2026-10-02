@@ -844,6 +844,84 @@ TEST(FixOrderRejectTest, DuplicateReplacementGetsAnOrderCancelReject)
 }
 
 // =============================================================================
+// Cancels the engine refused (#73)
+// =============================================================================
+
+TEST(FixCancelRejectTest, CancelOfAFilledOrderIsTooLate)
+{
+    // An OrderCancelReject (35=9) answering the cancel request (434=1): too late to cancel (102=0), with the order's
+    // status (39=2) and why in Text (58)
+    Queues::CancelRejectEvent evnt;
+    evnt.reason_ = Queues::CancelRejectEvent::TOO_LATE;
+    evnt.ordStatus_ = FILLED_ORDSTATUS;
+    FIX44::OrderCancelReject reject = FixGateway::buildCancelReject(evnt, "7", "ORD-1", "ORD-1");
+
+    EXPECT_EQ("9", reject.getHeader().getField(FIX::FIELD::MsgType));
+    FIX::OrderID orderId;
+    reject.get(orderId);
+    EXPECT_EQ("7", orderId.getValue());
+    FIX::ClOrdID clOrdId;
+    reject.get(clOrdId);
+    EXPECT_EQ("ORD-1", clOrdId.getValue());
+    FIX::OrigClOrdID origClOrdId;
+    reject.get(origClOrdId);
+    EXPECT_EQ("ORD-1", origClOrdId.getValue());
+    FIX::OrdStatus ordStatus;
+    reject.get(ordStatus);
+    EXPECT_EQ(FIX::OrdStatus_FILLED, ordStatus.getValue());
+    FIX::CxlRejResponseTo responseTo;
+    reject.get(responseTo);
+    EXPECT_EQ(FIX::CxlRejResponseTo_ORDER_CANCEL_REQUEST, responseTo.getValue());
+    FIX::CxlRejReason cxlRejReason;
+    reject.get(cxlRejReason);
+    EXPECT_EQ(FIX::CxlRejReason_TOO_LATE_TO_CANCEL, cxlRejReason.getValue());
+    FIX::Text text;
+    reject.get(text);
+    EXPECT_EQ("Cancel rejected: too late, the order is FILLED", text.getValue());
+}
+
+TEST(FixCancelRejectTest, CancelOfAnUnknownOrderIsRejectedAsUnknown)
+{
+    // The gateway's own answer to an unknown OrigClOrdID: 102=1, and OrdStatus 8, since there is no order to report
+    Queues::CancelRejectEvent evnt;
+    FIX44::OrderCancelReject reject = FixGateway::buildCancelReject(evnt, "NONE", "CXL-2", "ORD-9");
+
+    FIX::OrderID orderId;
+    reject.get(orderId);
+    EXPECT_EQ("NONE", orderId.getValue());
+    FIX::ClOrdID clOrdId;
+    reject.get(clOrdId);
+    EXPECT_EQ("CXL-2", clOrdId.getValue());
+    FIX::OrigClOrdID origClOrdId;
+    reject.get(origClOrdId);
+    EXPECT_EQ("ORD-9", origClOrdId.getValue());
+    FIX::OrdStatus ordStatus;
+    reject.get(ordStatus);
+    EXPECT_EQ(FIX::OrdStatus_REJECTED, ordStatus.getValue());
+    FIX::CxlRejReason cxlRejReason;
+    reject.get(cxlRejReason);
+    EXPECT_EQ(FIX::CxlRejReason_UNKNOWN_ORDER, cxlRejReason.getValue());
+    FIX::Text text;
+    reject.get(text);
+    EXPECT_EQ("Cancel rejected: unknown order", text.getValue());
+}
+
+TEST(FixCancelRejectTest, PendingAndOtherReasonsMapToTheirCodes)
+{
+    Queues::CancelRejectEvent evnt;
+    evnt.ordStatus_ = NEW_ORDSTATUS;
+    FIX::CxlRejReason cxlRejReason;
+
+    evnt.reason_ = Queues::CancelRejectEvent::PENDING;
+    FixGateway::buildCancelReject(evnt, "7", "ORD-1", "ORD-1").get(cxlRejReason);
+    EXPECT_EQ(FIX::CxlRejReason_ORDER_ALREADY_IN_PENDING_STATUS, cxlRejReason.getValue());
+
+    evnt.reason_ = Queues::CancelRejectEvent::OTHER;
+    FixGateway::buildCancelReject(evnt, "7", "ORD-1", "ORD-1").get(cxlRejReason);
+    EXPECT_EQ(FIX::CxlRejReason_OTHER, cxlRejReason.getValue());
+}
+
+// =============================================================================
 // MultiOutQueues Tests
 // =============================================================================
 

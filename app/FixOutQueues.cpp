@@ -27,22 +27,10 @@ void FixOutQueues::push(const ExecReportEvent &evnt, const std::string & /*targe
     gateway_->sendExecutionReport(evnt.exec_, *order);
 }
 
-void FixOutQueues::push(const CancelRejectEvent &evnt, const std::string & /*target*/)
+void FixOutQueues::push(const CancelRejectEvent &evnt, const std::string &target)
 {
-    OrderEntry *order = orderStorage_->locateByOrderId(evnt.id_);
-    if (!order)
-    {
-        return;
-    }
-
-    const auto &clOrd = order->clOrderId_.get();
-    std::string clOrdStr;
-    if (clOrd.data_ && clOrd.length_ > 0)
-    {
-        clOrdStr.assign(clOrd.data_, clOrd.length_);
-    }
-
-    gateway_->sendCancelReject(evnt.id_, clOrdStr);
+    // target is the session that sent the cancel (#73); the gateway finds the order's ids itself
+    gateway_->sendCancelReject(evnt, target);
 }
 
 void FixOutQueues::push(const BusinessRejectEvent &evnt, const std::string & /*target*/)
