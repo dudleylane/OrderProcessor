@@ -294,6 +294,27 @@ protected:
         return clOrdId;
     }
 
+    /// Polls until the pool is idle, where waitUntilTransactionsFinished(N) takes at least two seconds: it sleeps a
+    /// second between its two checks. One passing check is not enough, because TaskManager hands a finished
+    /// transaction's processor back before it removes the transaction from TransactionMgr, which may then release its
+    /// children: for that instant the pool looks idle with work left. So the check must pass ten times in a row, 10 ms
+    /// apart, which also covers a thread descheduled inside that window for up to about 90 ms.
+    bool waitUntilIdle(TaskManager &manager, std::chrono::milliseconds timeout = std::chrono::seconds(10))
+    {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        int idleChecks = 0;
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            idleChecks = manager.waitUntilTransactionsFinished(0) ? idleChecks + 1 : 0;
+            if (10 == idleChecks)
+            {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return false;
+    }
+
 protected:
     std::unique_ptr<IncomingQueues> inQueues_;
     std::unique_ptr<TestOutQueues> outQueues_;
@@ -727,13 +748,13 @@ TEST_F(TaskManagerTest, CancelOfARestingOrderCompletesAndTheOrderStopsTrading)
     // unchanged, and a later order on the other side filled it (#73).
     auto manager = createTaskManager(1, 1);
     RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_TRUE(waitUntilIdle(*manager));
     OrderEntry *buy = OrderStorage::instance()->locateByClOrderId(buyId);
     ASSERT_NE(nullptr, buy);
 
     inQueues_->push("buyer", OrderCancelEvent(buy->orderId_, "user"));
     RawDataEntry sellId = pushOrder(SELL_SIDE, 10.0, 100, "seller");
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_TRUE(waitUntilIdle(*manager));
 
     EXPECT_EQ(CANCELED_ORDSTATUS, buy->status_);
     EXPECT_EQ(0u, buy->leavesQty_);
@@ -752,13 +773,13 @@ TEST_F(TaskManagerTest, CancelOfAPartiallyFilledOrderKeepsItsFills)
     auto manager = createTaskManager(1, 1);
     RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
     pushOrder(SELL_SIDE, 10.0, 40, "seller");
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_TRUE(waitUntilIdle(*manager));
     OrderEntry *buy = OrderStorage::instance()->locateByClOrderId(buyId);
     ASSERT_NE(nullptr, buy);
     ASSERT_EQ(PARTFILL_ORDSTATUS, buy->status_);
 
     inQueues_->push("buyer", OrderCancelEvent(buy->orderId_, "rest of it"));
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_TRUE(waitUntilIdle(*manager));
 
     EXPECT_EQ(CANCELED_ORDSTATUS, buy->status_);
     EXPECT_EQ(40u, buy->cumQty_);
@@ -772,14 +793,14 @@ TEST_F(TaskManagerTest, CancelOfAFilledOrderIsRejectedToTheRequester)
     auto manager = createTaskManager(1, 1);
     RawDataEntry sellId = pushOrder(SELL_SIDE, 20.0, 100, "seller");
     pushOrder(BUY_SIDE, 20.0, 100, "buyer");
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_TRUE(waitUntilIdle(*manager));
     OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(sellId);
     ASSERT_NE(nullptr, sell);
     ASSERT_EQ(FILLED_ORDSTATUS, sell->status_);
     const size_t reportsBefore = outQueues_->reportCountAll();
 
     inQueues_->push("requester", OrderCancelEvent(sell->orderId_, "too late"));
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_TRUE(waitUntilIdle(*manager));
 
     auto rejects = outQueues_->cancelRejects();
     ASSERT_EQ(1u, rejects.size());
@@ -797,13 +818,13 @@ TEST_F(TaskManagerTest, SecondCancelOfAnOrderIsRejected)
     // client got no answer at all (#73)
     auto manager = createTaskManager(1, 1);
     RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_TRUE(waitUntilIdle(*manager));
     OrderEntry *buy = OrderStorage::instance()->locateByClOrderId(buyId);
     ASSERT_NE(nullptr, buy);
 
     inQueues_->push("buyer", OrderCancelEvent(buy->orderId_, "first"));
     inQueues_->push("buyer", OrderCancelEvent(buy->orderId_, "second"));
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_TRUE(waitUntilIdle(*manager));
 
     EXPECT_EQ(1, outQueues_->reportCount(CANCEL_EXECTYPE, buy->orderId_));
     auto rejects = outQueues_->cancelRejects();
@@ -820,12 +841,12 @@ TEST_F(TaskManagerTest, CancelPersistsTheCancelledOrder)
     OrderStorage::instance()->attach(&saver);
     auto manager = createTaskManager(1, 1);
     RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_TRUE(waitUntilIdle(*manager));
     OrderEntry *buy = OrderStorage::instance()->locateByClOrderId(buyId);
     ASSERT_NE(nullptr, buy);
 
     inQueues_->push("buyer", OrderCancelEvent(buy->orderId_, "user"));
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    EXPECT_TRUE(waitUntilIdle(*manager));
 
     std::optional<RecordingSaver::Version> newest;
     for (const auto &version : saver.versions())
@@ -852,7 +873,7 @@ TEST_F(TaskManagerTest, CancelsRacingTradesLeaveBothSidesConsistent)
     {
         buyIds.push_back(pushOrder(BUY_SIDE, 10.0, 100, "buyer"));
     }
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(10));
+    EXPECT_TRUE(waitUntilIdle(*manager));
     std::vector<OrderEntry *> buys;
     for (const auto &id : buyIds)
     {
@@ -866,7 +887,7 @@ TEST_F(TaskManagerTest, CancelsRacingTradesLeaveBothSidesConsistent)
         inQueues_->push("buyer", OrderCancelEvent(buys[i]->orderId_, "race"));
         sellIds.push_back(pushOrder(SELL_SIDE, 10.0, 100, "seller"));
     }
-    EXPECT_TRUE(manager->waitUntilTransactionsFinished(20));
+    EXPECT_TRUE(waitUntilIdle(*manager, std::chrono::seconds(20)));
 
     const auto rejects = outQueues_->cancelRejects();
     u64 bought = 0;
