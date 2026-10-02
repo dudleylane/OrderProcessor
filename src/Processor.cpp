@@ -190,38 +190,19 @@ void Processor::onEvent(const std::string &source, const OrderCancelEvent &evnt)
     {
         CancelRejectEvent reject;
         reject.id_ = evnt.id_;
+        reject.reason_ = CancelRejectEvent::UNKNOWN_ORDER;
         outQueues_->push(reject, source);
         return;
     }
     [[assume(ord != nullptr)]];
 
+    // The cancel is decided on the transaction worker, by process(onExecCancel) below, once every transaction before
+    // this one on the order or its instrument has run, together with the fills it caused. Decided here, it could
+    // overtake a trade already matched against the order and leave the other side filled alone (#73).
     PooledTransactionScope scope(scopePool_.get());
     ScopeArenaGuard arenaGuard(scope.get());
-
-    // write lock on the order for state machine processing
-    oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
-
-    // create cancel received event
-    onCancelReceived evnt2Proc;
-    evnt2Proc.generator_ = generator_;
-    evnt2Proc.transaction_ = scope.get();
-    evnt2Proc.orderStorage_ = orderStorage_;
-    evnt2Proc.orderBook_ = orderBook_;
-
-    // restore state machine from order and process event
-    assert(nullptr != threadState().stateMachine);
-    threadState().stateMachine->setPersistance(ord->stateMachinePersistance());
-    threadState().stateMachine->process_event(evnt2Proc);
-
-    // save updated state back to order
-    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
-    assert(nullptr != smState.orderData_);
-    smState.orderData_->setStateMachinePersistance(smState);
-    // Persist the order as part of this transaction (#20), ahead of the operations that publish
-    // execution reports, so an acknowledged change is already durable (#28).
-    persistOrder(scope.get(), *smState.orderData_);
-
-    ordLock.release();
+    std::unique_ptr<Operation> op(new CancelOrderTrOperation(ord, source));
+    scope->addOperation(op);
 
     // enqueue transaction
     assert(nullptr != transactMgr_);
@@ -676,6 +657,45 @@ void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, con
 
     threadState().stateMachine->setPersistance(order->stateMachinePersistance());
     threadState().stateMachine->process_event(evnt);
+
+    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
+    assert(nullptr != smState.orderData_);
+    smState.orderData_->setStateMachinePersistance(smState);
+    // Persist the order as part of this transaction (#20), ahead of the operations that publish
+    // execution reports, so an acknowledged change is already durable (#28).
+    persistOrder(evnt.transaction_, *smState.orderData_);
+}
+
+void Processor::process(OrdState::onExecCancel &evnt, OrderEntry *order, const std::string &requester,
+                        const ACID::Context & /*cnxt*/)
+{
+    evnt.generator_ = generator_;
+    evnt.orderStorage_ = orderStorage_;
+    evnt.orderBook_ = orderBook_;
+
+    // write lock on the order for state machine processing
+    oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, true);
+
+    // Only a live order can be cancelled: one in the book, or suspended, or done for the day (#73)
+    const OrderStatus status = order->status_;
+    if ((NEW_ORDSTATUS != status) && (PARTFILL_ORDSTATUS != status) && (SUSPENDED_ORDSTATUS != status) &&
+        (DFD_ORDSTATUS != status))
+    {
+        std::unique_ptr<Operation> op(new CancelRejectTrOperation(*order, CancelRejectEvent::TOO_LATE, requester));
+        evnt.transaction_->addOperation(op);
+        return;
+    }
+
+    assert(nullptr != threadState().stateMachine);
+    threadState().stateMachine->setPersistance(order->stateMachinePersistance());
+    threadState().stateMachine->process_event(evnt);
+    if (CANCELED_ORDSTATUS != order->status_)
+    {
+        // No transition, and so nothing changed: a replace of the order is pending
+        std::unique_ptr<Operation> op(new CancelRejectTrOperation(*order, CancelRejectEvent::PENDING, requester));
+        evnt.transaction_->addOperation(op);
+        return;
+    }
 
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);

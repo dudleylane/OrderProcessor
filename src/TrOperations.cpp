@@ -464,8 +464,10 @@ void RemoveFromOrderBookTrOperation::rollback(const Context &cnxt)
     cnxt.orderBook_->add(order_);
 }
 
-CancelRejectTrOperation::CancelRejectTrOperation(OrderStatus status, const OrderEntry &order)
-    : Operation(CANCEL_REJECT_TROPERATION, order.orderId_), status_(status)
+CancelRejectTrOperation::CancelRejectTrOperation(const OrderEntry &order, CancelRejectEvent::Reason reason,
+                                                 const std::string &requester)
+    : Operation(CANCEL_REJECT_TROPERATION, order.orderId_), status_(order.status_), reason_(reason),
+      requester_(requester)
 {
 }
 
@@ -474,10 +476,51 @@ CancelRejectTrOperation::~CancelRejectTrOperation() {}
 void CancelRejectTrOperation::execute(const Context &cnxt)
 {
     assert(nullptr != cnxt.outQueues_);
-    cnxt.outQueues_->push(CancelRejectEvent(), "tgt");
+    CancelRejectEvent reject;
+    reject.id_ = getObjectId();
+    reject.reason_ = reason_;
+    reject.ordStatus_ = status_;
+    std::string target = requester_;
+    if (target.empty())
+    {
+        assert(nullptr != cnxt.orderStorage_);
+        OrderEntry *ord = cnxt.orderStorage_->locateByOrderId(getObjectId());
+        if (nullptr != ord)
+        {
+            oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, false);
+            target = ord->source_.get();
+        }
+    }
+    cnxt.outQueues_->push(reject, target);
 }
 
 void CancelRejectTrOperation::rollback(const Context &) {}
+
+CancelOrderTrOperation::CancelOrderTrOperation(OrderEntry *order, const std::string &requester)
+    : Operation(CANCEL_ORDER_TROPERATION, order->orderId_, order->instrument_.getId()), order_(order),
+      requester_(requester), eventCountBefore_(0)
+{
+}
+
+CancelOrderTrOperation::~CancelOrderTrOperation() {}
+
+void CancelOrderTrOperation::execute(const Context &cnxt)
+{
+    if (nullptr == cnxt.deferedEvents_) [[unlikely]]
+    {
+        throw std::runtime_error("CancelOrderTrOperation: no deferred event container to decide the cancel!");
+    }
+    eventCountBefore_ = cnxt.deferedEvents_->deferedEventCount();
+    cnxt.deferedEvents_->addDeferedEvent(new CancelRequestDeferedEvent(order_, requester_));
+}
+
+void CancelOrderTrOperation::rollback(const Context &cnxt)
+{
+    if (nullptr != cnxt.deferedEvents_)
+    {
+        cnxt.deferedEvents_->removeDeferedEventsFrom(eventCountBefore_);
+    }
+}
 
 MatchOrderTrOperation::MatchOrderTrOperation(OrderEntry *order)
     : Operation(MATCH_ORDER_TROPERATION, order->orderId_), order_(order), eventCountBefore_(0)
