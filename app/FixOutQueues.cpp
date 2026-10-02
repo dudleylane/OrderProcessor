@@ -54,4 +54,10 @@ void FixOutQueues::push(const BusinessRejectEvent &evnt, const std::string & /*t
     gateway_->sendBusinessReject(evnt.id_, "Business rule violation");
 }
 
+void FixOutQueues::push(const OrderRejectEvent &evnt, const std::string &target)
+{
+    // The order was never stored, so there is no order to look up: target is its source, which names the session (#67)
+    gateway_->sendOrderReject(evnt, target);
+}
+
 #endif // BUILD_FIX

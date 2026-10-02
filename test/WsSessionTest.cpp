@@ -397,4 +397,30 @@ TEST_F(WsSessionTest, ClOrdIdsCarryASequenceNumber)
     EXPECT_EQ(std::stoull(firstMatch[1]) + 1, std::stoull(secondMatch[1]));
 }
 
+TEST_F(WsSessionTest, SwapClOrdIdsCarryASequenceNumber)
+{
+    // new_swap_order makes up ClOrdIDs too, so it needs the same sequence number (#67)
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    const std::string swap = R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,)"
+                             R"("farPrice":1.087,"settlDate":1000,"farSettlDate":2000,"orderQty":1000000,)"
+                             R"("currency":"USD","capacity":"AGENCY"}})";
+    send(client, swap);
+    send(client, swap);
+    std::unique_ptr<OrderEntry> first = takeQueuedOrder();
+    std::unique_ptr<OrderEntry> second = takeQueuedOrder();
+    ASSERT_NE(nullptr, first) << "escaped: " << escaped();
+    ASSERT_NE(nullptr, second) << "escaped: " << escaped();
+    const std::regex format("WS-[0-9]+-([0-9]+)");
+    const RawDataEntry &a = first->clOrderId_.get();
+    const RawDataEntry &b = second->clOrderId_.get();
+    const std::string firstId(a.data_, a.length_), secondId(b.data_, b.length_);
+    std::smatch firstMatch, secondMatch;
+    ASSERT_TRUE(std::regex_match(firstId, firstMatch, format)) << firstId;
+    ASSERT_TRUE(std::regex_match(secondId, secondMatch, format)) << secondId;
+    EXPECT_EQ(std::stoull(firstMatch[1]) + 1, std::stoull(secondMatch[1]));
+}
+
 } // namespace

@@ -59,6 +59,8 @@ public:
     void sendExecutionReport(const ExecutionEntry *exec, const OrderEntry &order);
     void sendCancelReject(const IdT &orderId, const std::string &clOrdId);
     void sendBusinessReject(const IdT &refOrderId, const std::string &reason);
+    /// Refuses, to its sender, a new order or replacement the engine did not store (#67); source names the session
+    void sendOrderReject(const Queues::OrderRejectEvent &evnt, const std::string &source);
 
     // Session lookup
     bool hasFixSession(const std::string &source) const;
@@ -99,6 +101,14 @@ public:
     /// The ExecutionReport (35=8) for one of an order's execution reports; sendExecutionReport() sends it to the order's
     /// session. Public and static so that tests can check it without a FIX session.
     static FIX44::ExecutionReport buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order);
+    /// The ExecutionReport (35=8) rejecting a new order the engine refused without storing it (#67): OrderID NONE,
+    /// 150=8, 39=8, OrdRejReason 6 when its ClOrdID is already in use (else 0), and the reason in Text (58)
+    static FIX44::ExecutionReport buildOrderReject(const Queues::OrderRejectEvent &evnt);
+    /// The OrderCancelReject (35=9) answering a cancel/replace request whose replacement the engine refused (#67):
+    /// 434=2, CxlRejReason 6 when its ClOrdID is already in use (else 2), the reason in Text (58). origOrderId and
+    /// origStatus describe the order it was to replace.
+    static FIX44::OrderCancelReject buildReplaceReject(const Queues::OrderRejectEvent &evnt,
+                                                       const std::string &origOrderId, char origStatus);
 };
 
 } // namespace App

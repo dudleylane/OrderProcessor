@@ -253,9 +253,12 @@ void WsSession::handleMessage(const std::string &msgStr)
             return;
         }
 
-        std::string clOrdStr = "WS-" + std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
-                                                          std::chrono::system_clock::now().time_since_epoch())
-                                                          .count());
+        // As for new_order: a sequence number keeps ClOrdIDs made in the same microsecond apart (#67)
+        std::string clOrdStr = "WS-" +
+                               std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
+                                                  std::chrono::system_clock::now().time_since_epoch())
+                                                  .count()) +
+                               "-" + std::to_string(clOrderSequence.fetch_add(1, std::memory_order_relaxed) + 1);
         auto *clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
         SourceIdT clOrdId = Store::WideDataStorage::instance()->add(clOrdRaw);
 

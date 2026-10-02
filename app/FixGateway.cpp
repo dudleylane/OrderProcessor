@@ -29,6 +29,10 @@ const size_t MAX_LOGGED_MESSAGE = 256;
 /// its FIX 4.2 meaning. The engine's reject reasons are free text, so every reject goes out with this code and the
 /// reason itself in Text (58).
 const int ORD_REJ_REASON_BROKER_OPTION = 0;
+/// CxlRejReason (102) value 2, "Broker / Exchange option" in FIX 4.4 (QuickFIX: CxlRejReason_BROKER_CREDIT)
+const int CXL_REJ_REASON_BROKER_OPTION = 2;
+/// Numbers the ExecIDs of rejects for orders that were never stored, which have no execution of their own (#67)
+std::atomic<u64> orderRejectSequence{ 0 };
 } // namespace
 
 // =============================================================================
@@ -686,6 +690,84 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
     }
 
     return report;
+}
+
+void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std::string &source)
+{
+    FIX::SessionID sid;
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, false);
+        auto it = sessionMap_.find(source);
+        if (it == sessionMap_.end())
+        {
+            return; // not sent through a FIX session
+        }
+        sid = it->second;
+    }
+
+    try
+    {
+        if (evnt.replacement_)
+        {
+            // The original order is stored, and the reject describes it
+            std::string origOrderId = "NONE";
+            char origStatus = FIX::OrdStatus_NEW;
+            RawDataEntry rawKey(STRING_RAWDATATYPE, evnt.origClOrderId_.c_str(),
+                                static_cast<u32>(evnt.origClOrderId_.size()));
+            if (OrderEntry *orig = orderStorage_->locateByClOrderId(rawKey))
+            {
+                oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(orig->entryMutex_, false);
+                origOrderId = std::to_string(orig->orderId_.id_);
+                origStatus = fromOrdStatus(orig->status_);
+            }
+            FIX44::OrderCancelReject reject = buildReplaceReject(evnt, origOrderId, origStatus);
+            FIX::Session::sendToTarget(reject, sid);
+        }
+        else
+        {
+            FIX44::ExecutionReport report = buildOrderReject(evnt);
+            FIX::Session::sendToTarget(report, sid);
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        aux::ExchLogger::instance()->error(std::string("FixGateway: could not send the order reject: ") + ex.what());
+    }
+}
+
+FIX44::ExecutionReport FixGateway::buildOrderReject(const Queues::OrderRejectEvent &evnt)
+{
+    // The order was never stored, so it has no OrderID; its reject still needs an ExecID of its own
+    const u64 sequence = orderRejectSequence.fetch_add(1, std::memory_order_relaxed) + 1;
+    FIX44::ExecutionReport report(FIX::OrderID("NONE"), FIX::ExecID("R" + std::to_string(sequence)),
+                                  FIX::ExecType(FIX::ExecType_REJECTED), FIX::OrdStatus(FIX::OrdStatus_REJECTED),
+                                  FIX::Side(fromSide(evnt.side_)), FIX::LeavesQty(0), FIX::CumQty(0), FIX::AvgPx(0));
+    if (!evnt.clOrderId_.empty())
+    {
+        report.set(FIX::ClOrdID(evnt.clOrderId_));
+    }
+    if (!evnt.symbol_.empty())
+    {
+        report.set(FIX::Symbol(evnt.symbol_));
+    }
+    report.set(FIX::OrderQty(evnt.orderQty_));
+    report.set(
+        FIX::OrdRejReason(evnt.duplicateClOrderId_ ? FIX::OrdRejReason_DUPLICATE_ORDER : ORD_REJ_REASON_BROKER_OPTION));
+    report.set(FIX::Text(evnt.reason_));
+    report.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    return report;
+}
+
+FIX44::OrderCancelReject FixGateway::buildReplaceReject(const Queues::OrderRejectEvent &evnt,
+                                                        const std::string &origOrderId, char origStatus)
+{
+    FIX44::OrderCancelReject reject(FIX::OrderID(origOrderId), FIX::ClOrdID(evnt.clOrderId_),
+                                    FIX::OrigClOrdID(evnt.origClOrderId_), FIX::OrdStatus(origStatus),
+                                    FIX::CxlRejResponseTo(FIX::CxlRejResponseTo_ORDER_CANCEL_REPLACE_REQUEST));
+    reject.set(FIX::CxlRejReason(evnt.duplicateClOrderId_ ? FIX::CxlRejReason_DUPLICATE_CL_ORD_ID
+                                                          : CXL_REJ_REASON_BROKER_OPTION));
+    reject.set(FIX::Text(evnt.reason_));
+    return reject;
 }
 
 void FixGateway::sendCancelReject(const IdT &orderId, const std::string &clOrdId)

@@ -35,4 +35,12 @@ void MultiOutQueues::push(const BusinessRejectEvent &evnt, const std::string &ta
     }
 }
 
+void MultiOutQueues::push(const OrderRejectEvent &evnt, const std::string &target)
+{
+    for (auto *d : delegates_)
+    {
+        d->push(evnt, target);
+    }
+}
+
 #endif // BUILD_FIX

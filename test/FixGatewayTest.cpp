@@ -739,6 +739,111 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_CorrectionIsTradeCorrect)
 }
 
 // =============================================================================
+// Orders refused without being stored (#67)
+// =============================================================================
+
+/// An order the engine refused because its ClOrdID is already in use
+Queues::OrderRejectEvent makeOrderReject(bool replacement)
+{
+    Queues::OrderRejectEvent reject;
+    reject.clOrderId_ = "ORD-7";
+    reject.origClOrderId_ = replacement ? "ORD-1" : "";
+    reject.symbol_ = "aaa";
+    reject.side_ = SELL_SIDE;
+    reject.orderQty_ = 40;
+    reject.replacement_ = replacement;
+    reject.duplicateClOrderId_ = true;
+    reject.reason_ = "Order refused: ClOrdID ORD-7 is already in use";
+    return reject;
+}
+
+TEST(FixOrderRejectTest, DuplicateNewOrderGetsAnExecutionReportReject)
+{
+    // The FIX convention for a duplicate order: 150=8, 39=8, OrdRejReason 6, and the reason in Text (58). The order
+    // was never stored, so it has no OrderID.
+    FIX44::ExecutionReport report = FixGateway::buildOrderReject(makeOrderReject(false));
+
+    FIX::OrderID orderId;
+    report.get(orderId);
+    EXPECT_EQ("NONE", orderId.getValue());
+    FIX::ExecType execType;
+    report.get(execType);
+    EXPECT_EQ(FIX::ExecType_REJECTED, execType.getValue());
+    FIX::OrdStatus ordStatus;
+    report.get(ordStatus);
+    EXPECT_EQ(FIX::OrdStatus_REJECTED, ordStatus.getValue());
+    FIX::OrdRejReason ordRejReason;
+    report.get(ordRejReason);
+    EXPECT_EQ(FIX::OrdRejReason_DUPLICATE_ORDER, ordRejReason.getValue());
+    FIX::Text text;
+    report.get(text);
+    EXPECT_EQ("Order refused: ClOrdID ORD-7 is already in use", text.getValue());
+    FIX::ClOrdID clOrdId;
+    report.get(clOrdId);
+    EXPECT_EQ("ORD-7", clOrdId.getValue());
+    FIX::Side side;
+    report.get(side);
+    EXPECT_EQ(FIX::Side_SELL, side.getValue());
+    FIX::OrderQty orderQty;
+    report.get(orderQty);
+    EXPECT_DOUBLE_EQ(40, orderQty.getValue());
+    FIX::LeavesQty leavesQty;
+    report.get(leavesQty);
+    EXPECT_DOUBLE_EQ(0, leavesQty.getValue());
+    FIX::Symbol symbol;
+    report.get(symbol);
+    EXPECT_EQ("aaa", symbol.getValue());
+}
+
+TEST(FixOrderRejectTest, EachOrderRejectHasItsOwnExecId)
+{
+    FIX::ExecID first, second;
+    FixGateway::buildOrderReject(makeOrderReject(false)).get(first);
+    FixGateway::buildOrderReject(makeOrderReject(false)).get(second);
+    EXPECT_NE(first.getValue(), second.getValue());
+}
+
+TEST(FixOrderRejectTest, OrderRefusedForAnotherReasonUsesTheBrokerOptionCode)
+{
+    Queues::OrderRejectEvent evnt = makeOrderReject(false);
+    evnt.duplicateClOrderId_ = false;
+    FIX::OrdRejReason ordRejReason;
+    FixGateway::buildOrderReject(evnt).get(ordRejReason);
+    EXPECT_EQ(0, ordRejReason.getValue());
+}
+
+TEST(FixOrderRejectTest, DuplicateReplacementGetsAnOrderCancelReject)
+{
+    // A cancel/replace request is refused with an OrderCancelReject (35=9) that answers it (434=2), says why
+    // (CxlRejReason 6, duplicate ClOrdID; Text 58), and describes the order it was to replace
+    FIX44::OrderCancelReject reject =
+        FixGateway::buildReplaceReject(makeOrderReject(true), "12", FIX::OrdStatus_PARTIALLY_FILLED);
+
+    EXPECT_EQ("9", reject.getHeader().getField(FIX::FIELD::MsgType));
+    FIX::OrderID orderId;
+    reject.get(orderId);
+    EXPECT_EQ("12", orderId.getValue());
+    FIX::ClOrdID clOrdId;
+    reject.get(clOrdId);
+    EXPECT_EQ("ORD-7", clOrdId.getValue());
+    FIX::OrigClOrdID origClOrdId;
+    reject.get(origClOrdId);
+    EXPECT_EQ("ORD-1", origClOrdId.getValue());
+    FIX::OrdStatus ordStatus;
+    reject.get(ordStatus);
+    EXPECT_EQ(FIX::OrdStatus_PARTIALLY_FILLED, ordStatus.getValue());
+    FIX::CxlRejResponseTo responseTo;
+    reject.get(responseTo);
+    EXPECT_EQ(FIX::CxlRejResponseTo_ORDER_CANCEL_REPLACE_REQUEST, responseTo.getValue());
+    FIX::CxlRejReason cxlRejReason;
+    reject.get(cxlRejReason);
+    EXPECT_EQ(FIX::CxlRejReason_DUPLICATE_CL_ORD_ID, cxlRejReason.getValue());
+    FIX::Text text;
+    reject.get(text);
+    EXPECT_EQ("Order refused: ClOrdID ORD-7 is already in use", text.getValue());
+}
+
+// =============================================================================
 // MultiOutQueues Tests
 // =============================================================================
 
@@ -770,6 +875,21 @@ TEST_F(MultiOutQueuesTest, FansOutCancelReject)
     EXPECT_CALL(mock1, push(testing::An<const CancelRejectEvent &>(), _)).Times(1);
     EXPECT_CALL(mock2, push(testing::An<const CancelRejectEvent &>(), _)).Times(1);
     multi.push(evt, "target");
+}
+
+TEST_F(MultiOutQueuesTest, FansOutOrderReject)
+{
+    // Without its own push, MultiOutQueues would take OutQueues' empty default and FIX clients would hear nothing (#67)
+    MockOutQueues mock1, mock2;
+    MultiOutQueues multi;
+    multi.addDelegate(&mock1);
+    multi.addDelegate(&mock2);
+
+    OrderRejectEvent evt;
+    EXPECT_CALL(mock1, push(testing::An<const OrderRejectEvent &>(), "FIX:session")).Times(1);
+    EXPECT_CALL(mock2, push(testing::An<const OrderRejectEvent &>(), "FIX:session")).Times(1);
+    OutQueues &queues = multi; // the engine pushes through the interface
+    queues.push(evt, "FIX:session");
 }
 
 TEST_F(MultiOutQueuesTest, FansOutBusinessReject)
