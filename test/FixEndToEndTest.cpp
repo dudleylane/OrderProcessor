@@ -76,8 +76,12 @@ public:
         totalEvents_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    void push(const CancelRejectEvent &, const std::string &) override
+    void push(const CancelRejectEvent &evnt, const std::string &target) override
     {
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            cancelRejects_.emplace_back(evnt, target);
+        }
         totalEvents_.fetch_add(1, std::memory_order_relaxed);
     }
 
@@ -92,6 +96,12 @@ public:
         return reports_;
     }
 
+    std::deque<std::pair<CancelRejectEvent, std::string>> cancelRejects() const
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return cancelRejects_;
+    }
+
     int totalEvents() const
     {
         return totalEvents_.load(std::memory_order_relaxed);
@@ -100,6 +110,7 @@ public:
 private:
     mutable std::mutex mtx_;
     std::deque<CapturedExecReport> reports_;
+    std::deque<std::pair<CancelRejectEvent, std::string>> cancelRejects_;
     std::atomic<int> totalEvents_{ 0 };
 };
 
@@ -339,9 +350,10 @@ TEST_F(FixEndToEndTest, PartialFill)
     EXPECT_EQ(50u, buyOrder->leavesQty_);
 }
 
-TEST_F(FixEndToEndTest, CancelOrder_ViaFix_Queued)
+TEST_F(FixEndToEndTest, CancelOrder_ViaFix_Completes)
 {
-    // Submit and accept order
+    // The bug this covers: a FIX cancel only reached Pending Cancel (39=6). The order stayed in the book, and could
+    // still fill (#73).
     auto msg = makeNOS("FIX-CNL-001", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100);
     gateway_->onMessage(msg, fixSid_);
     waitForProcessing();
@@ -351,10 +363,6 @@ TEST_F(FixEndToEndTest, CancelOrder_ViaFix_Queued)
     ASSERT_NE(nullptr, order);
     EXPECT_EQ(NEW_ORDSTATUS, order->status_);
 
-    // Cancel via FIX — verify the cancel event is queued (the FixGateway
-    // translates it correctly); full cancel lifecycle involves the orthogonal
-    // cancel zone in the state machine which is tested in StateMachineTest
-    u32 sizeBefore = inQueues_->size();
     FIX::UtcTimeStamp now;
     FIX44::OrderCancelRequest cancelMsg;
     cancelMsg.set(FIX::OrigClOrdID("FIX-CNL-001"));
@@ -362,11 +370,53 @@ TEST_F(FixEndToEndTest, CancelOrder_ViaFix_Queued)
     cancelMsg.set(FIX::Side(FIX::Side_BUY));
     cancelMsg.set(FIX::TransactTime(now));
     cancelMsg.set(FIX::Symbol("EURUSD"));
-
     gateway_->onMessage(cancelMsg, fixSid_);
+    waitForProcessing();
 
-    // Cancel event was queued
-    EXPECT_GE(inQueues_->size(), sizeBefore);
+    EXPECT_EQ(CANCELED_ORDSTATUS, order->status_);
+    EXPECT_EQ(0u, order->leavesQty_);
+    int cancelReports = 0;
+    for (const auto &r : outQueues_->reports())
+    {
+        if ((order->orderId_ == r.orderId) && (CANCEL_EXECTYPE == r.execType))
+        {
+            ++cancelReports;
+            EXPECT_EQ(CANCELED_ORDSTATUS, r.orderStatus);
+            EXPECT_EQ("FIX:TRADER_A->ORDER_PROCESSOR", r.source);
+        }
+    }
+    EXPECT_EQ(1, cancelReports);
+    EXPECT_TRUE(outQueues_->cancelRejects().empty());
+}
+
+TEST_F(FixEndToEndTest, CancelOfAFilledOrder_ViaFix_IsRefusedToTheSender)
+{
+    // A cancel that comes too late is refused, to the session that sent it, with the order's status (#73)
+    gateway_->onMessage(makeNOS("FIX-CNL-S1", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    gateway_->onMessage(makeNOS("FIX-CNL-B1", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    RawDataEntry key(STRING_RAWDATATYPE, "FIX-CNL-S1", 10);
+    OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(key);
+    ASSERT_NE(nullptr, sell);
+    ASSERT_EQ(FILLED_ORDSTATUS, sell->status_);
+
+    FIX44::OrderCancelRequest cancelMsg;
+    cancelMsg.set(FIX::OrigClOrdID("FIX-CNL-S1"));
+    cancelMsg.set(FIX::ClOrdID("FIX-CNL-S2"));
+    cancelMsg.set(FIX::Side(FIX::Side_SELL));
+    cancelMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    cancelMsg.set(FIX::Symbol("EURUSD"));
+    gateway_->onMessage(cancelMsg, fixSid_);
+    waitForProcessing();
+
+    auto rejects = outQueues_->cancelRejects();
+    ASSERT_EQ(1u, rejects.size());
+    EXPECT_EQ(sell->orderId_, rejects[0].first.id_);
+    EXPECT_EQ(CancelRejectEvent::TOO_LATE, rejects[0].first.reason_);
+    EXPECT_EQ(FILLED_ORDSTATUS, rejects[0].first.ordStatus_);
+    EXPECT_EQ("FIX:TRADER_A->ORDER_PROCESSOR", rejects[0].second);
+    EXPECT_EQ(FILLED_ORDSTATUS, sell->status_);
 }
 
 TEST_F(FixEndToEndTest, SourceStringPreserved)

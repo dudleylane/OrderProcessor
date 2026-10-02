@@ -5,6 +5,7 @@
 #include "OrderStorage.h"
 #include "IdTGenerator.h"
 #include "Logger.h"
+#include "EnumStrings.h"
 
 #include <algorithm>
 #include <atomic>
@@ -33,6 +34,23 @@ const int ORD_REJ_REASON_BROKER_OPTION = 0;
 const int CXL_REJ_REASON_BROKER_OPTION = 2;
 /// Numbers the ExecIDs of rejects for orders that were never stored, which have no execution of their own (#67)
 std::atomic<u64> orderRejectSequence{ 0 };
+
+/// Why a cancel was refused, for Text (58). The words match App::cancelRejectReason(), which WebSocket clients get;
+/// that lives in JsonSerializer.cpp, which the FIX benchmark does not build.
+std::string cancelRejectText(const Queues::CancelRejectEvent &evnt)
+{
+    switch (evnt.reason_)
+    {
+    case Queues::CancelRejectEvent::UNKNOWN_ORDER:
+        return "Cancel rejected: unknown order";
+    case Queues::CancelRejectEvent::TOO_LATE:
+        return "Cancel rejected: too late, the order is " + std::string(toJsonString(evnt.ordStatus_));
+    case Queues::CancelRejectEvent::PENDING:
+        return "Cancel rejected: a replace of the order is pending";
+    default:
+        return "Cancel rejected";
+    }
+}
 } // namespace
 
 // =============================================================================
@@ -527,6 +545,21 @@ void FixGateway::onMessage(const FIX44::OrderCancelRequest &msg, const FIX::Sess
     if (!order)
     {
         aux::ExchLogger::instance()->error("FIX: Cancel - order not found: " + origClOrdStr);
+        // Answered here rather than by the engine, which only rejects an unknown order id (#57): here the request's
+        // own ClOrdID is known, so the reject can quote it (#73)
+        FIX::ClOrdID clOrdId;
+        msg.get(clOrdId);
+        Queues::CancelRejectEvent unknown; // UNKNOWN_ORDER, with no order status
+        try
+        {
+            FIX44::OrderCancelReject reject = buildCancelReject(unknown, "NONE", clOrdId.getString(), origClOrdStr);
+            FIX::Session::sendToTarget(reject, sid);
+        }
+        catch (const std::exception &ex)
+        {
+            aux::ExchLogger::instance()->error(std::string("FixGateway: could not send the cancel reject: ") +
+                                               ex.what());
+        }
         return;
     }
 
@@ -770,32 +803,70 @@ FIX44::OrderCancelReject FixGateway::buildReplaceReject(const Queues::OrderRejec
     return reject;
 }
 
-void FixGateway::sendCancelReject(const IdT &orderId, const std::string &clOrdId)
+FIX44::OrderCancelReject FixGateway::buildCancelReject(const Queues::CancelRejectEvent &evnt,
+                                                       const std::string &orderId, const std::string &clOrdId,
+                                                       const std::string &origClOrdId)
 {
-    // Find the session for this order — need to look up the order first
-    OrderEntry *order = orderStorage_->locateByOrderId(orderId);
-    if (!order)
+    const char status =
+        (INVALID_ORDSTATUS == evnt.ordStatus_) ? FIX::OrdStatus_REJECTED : fromOrdStatus(evnt.ordStatus_);
+    FIX44::OrderCancelReject reject(FIX::OrderID(orderId), FIX::ClOrdID(clOrdId), FIX::OrigClOrdID(origClOrdId),
+                                    FIX::OrdStatus(status),
+                                    FIX::CxlRejResponseTo(FIX::CxlRejResponseTo_ORDER_CANCEL_REQUEST));
+    int reason = FIX::CxlRejReason_OTHER;
+    switch (evnt.reason_)
     {
-        return;
+    case Queues::CancelRejectEvent::UNKNOWN_ORDER:
+        reason = FIX::CxlRejReason_UNKNOWN_ORDER;
+        break;
+    case Queues::CancelRejectEvent::TOO_LATE:
+        reason = FIX::CxlRejReason_TOO_LATE_TO_CANCEL;
+        break;
+    case Queues::CancelRejectEvent::PENDING:
+        reason = FIX::CxlRejReason_ORDER_ALREADY_IN_PENDING_STATUS;
+        break;
+    default:
+        break;
     }
+    reject.set(FIX::CxlRejReason(reason));
+    reject.set(FIX::Text(cancelRejectText(evnt)));
+    return reject;
+}
 
-    std::string source = order->source_.get();
+void FixGateway::sendCancelReject(const Queues::CancelRejectEvent &evnt, const std::string &target)
+{
+    // To the session that sent the cancel, which may not be the one that placed the order
     FIX::SessionID sid;
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, false);
-        auto it = sessionMap_.find(source);
+        auto it = sessionMap_.find(target);
         if (it == sessionMap_.end())
         {
-            return;
+            return; // not sent through a FIX session
         }
         sid = it->second;
     }
 
-    FIX44::OrderCancelReject reject(FIX::OrderID(std::to_string(orderId.id_)), FIX::ClOrdID(clOrdId),
-                                    FIX::OrigClOrdID(clOrdId), FIX::OrdStatus(fromOrdStatus(order->status_)),
-                                    FIX::CxlRejResponseTo(FIX::CxlRejResponseTo_ORDER_CANCEL_REQUEST));
-
-    FIX::Session::sendToTarget(reject, sid);
+    std::string orderId = "NONE";
+    std::string clOrdId = "NONE";
+    if (OrderEntry *order = orderStorage_->locateByOrderId(evnt.id_))
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, false);
+        orderId = std::to_string(order->orderId_.id_);
+        const RawDataEntry &clOrd = order->clOrderId_.get();
+        if ((nullptr != clOrd.data_) && (0 < clOrd.length_))
+        {
+            clOrdId.assign(clOrd.data_, clOrd.length_);
+        }
+    }
+    try
+    {
+        FIX44::OrderCancelReject reject = buildCancelReject(evnt, orderId, clOrdId, clOrdId);
+        FIX::Session::sendToTarget(reject, sid);
+    }
+    catch (const std::exception &ex)
+    {
+        aux::ExchLogger::instance()->error(std::string("FixGateway: could not send the cancel reject: ") + ex.what());
+    }
 }
 
 void FixGateway::sendBusinessReject(const IdT &refOrderId, const std::string &reason)
