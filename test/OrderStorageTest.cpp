@@ -447,6 +447,127 @@ TEST_F(OrderStorageTest, MixedConcurrentWritesAndReads)
     EXPECT_EQ(numReaders * numOps, totalReads.load());
 }
 
+// =============================================================================
+// Saved execution reports keep their fields (#56)
+// =============================================================================
+
+/// Sets every ExecParams field but the execId, so a test can check that the saved copy kept all of them
+void fillReport(ExecutionEntry &report, ExecType type, OrderStatus status)
+{
+    report.type_ = type;
+    report.transactTime_ = 12345;
+    report.orderId_ = IdT(42, 1);
+    report.orderStatus_ = status;
+    report.market_ = "XNAS";
+}
+
+void expectReport(const ExecutionEntry *saved, ExecType type, OrderStatus status)
+{
+    ASSERT_NE(nullptr, saved);
+    EXPECT_TRUE(saved->execId_.isValid());
+    EXPECT_EQ(type, saved->type_);
+    EXPECT_EQ(12345u, saved->transactTime_);
+    EXPECT_EQ(IdT(42, 1), saved->orderId_);
+    EXPECT_EQ(status, saved->orderStatus_);
+    EXPECT_EQ("XNAS", saved->market_);
+}
+
+TEST_F(OrderStorageTest, SavedReportKeepsItsFields)
+{
+    // The bug this covers: save() stored a default-constructed copy of every report except a trade, so the report
+    // pushed to clients had no type, status, order id, time or market (#56).
+    ExecutionEntry report;
+    fillReport(report, NEW_EXECTYPE, NEW_ORDSTATUS);
+
+    expectReport(storage()->save(report, IdTGenerator::instance()), NEW_EXECTYPE, NEW_ORDSTATUS);
+}
+
+TEST_F(OrderStorageTest, SavedRejectReportKeepsItsReason)
+{
+    RejectExecEntry report;
+    fillReport(report, REJECT_EXECTYPE, REJECTED_ORDSTATUS);
+    report.rejectReason_ = "Invalid value of the side!";
+
+    ExecutionEntry *saved = storage()->save(report, IdTGenerator::instance());
+    expectReport(saved, REJECT_EXECTYPE, REJECTED_ORDSTATUS);
+    auto *reject = dynamic_cast<RejectExecEntry *>(saved);
+    ASSERT_NE(nullptr, reject);
+    EXPECT_EQ("Invalid value of the side!", reject->rejectReason_);
+}
+
+TEST_F(OrderStorageTest, SavedReplaceReportKeepsTheOriginalOrder)
+{
+    ReplaceExecEntry report;
+    fillReport(report, REPLACE_EXECTYPE, REPLACED_ORDSTATUS);
+    report.origOrderId_ = IdT(77, 1);
+
+    ExecutionEntry *saved = storage()->save(report, IdTGenerator::instance());
+    expectReport(saved, REPLACE_EXECTYPE, REPLACED_ORDSTATUS);
+    auto *replace = dynamic_cast<ReplaceExecEntry *>(saved);
+    ASSERT_NE(nullptr, replace);
+    EXPECT_EQ(IdT(77, 1), replace->origOrderId_);
+}
+
+TEST_F(OrderStorageTest, SavedCorrectReportKeepsItsFields)
+{
+    ExecCorrectExecEntry report;
+    fillReport(report, CORRECT_EXECTYPE, PARTFILL_ORDSTATUS);
+    report.cumQty_ = 40;
+    report.leavesQty_ = 60;
+    report.lastQty_ = 40;
+    report.lastPx_ = 10.5;
+    report.currency_ = USD_CURRENCY;
+    report.tradeDate_ = 20261002;
+    report.origOrderId_ = IdT(5, 1);
+    report.execRefId_ = IdT(9, 1);
+
+    ExecutionEntry *saved = storage()->save(report, IdTGenerator::instance());
+    expectReport(saved, CORRECT_EXECTYPE, PARTFILL_ORDSTATUS);
+    auto *correct = dynamic_cast<ExecCorrectExecEntry *>(saved);
+    ASSERT_NE(nullptr, correct);
+    EXPECT_EQ(40u, correct->cumQty_);
+    EXPECT_EQ(60u, correct->leavesQty_);
+    EXPECT_EQ(40u, correct->lastQty_);
+    EXPECT_DOUBLE_EQ(10.5, correct->lastPx_);
+    EXPECT_EQ(USD_CURRENCY, correct->currency_);
+    EXPECT_EQ(20261002u, correct->tradeDate_);
+    EXPECT_EQ(IdT(5, 1), correct->origOrderId_);
+    EXPECT_EQ(IdT(9, 1), correct->execRefId_);
+}
+
+TEST_F(OrderStorageTest, SavedTradeCancelReportKeepsItsReference)
+{
+    TradeCancelExecEntry report;
+    fillReport(report, CANCEL_EXECTYPE, NEW_ORDSTATUS);
+    report.execRefId_ = IdT(9, 1);
+
+    ExecutionEntry *saved = storage()->save(report, IdTGenerator::instance());
+    expectReport(saved, CANCEL_EXECTYPE, NEW_ORDSTATUS);
+    auto *cancel = dynamic_cast<TradeCancelExecEntry *>(saved);
+    ASSERT_NE(nullptr, cancel);
+    EXPECT_EQ(IdT(9, 1), cancel->execRefId_);
+}
+
+TEST_F(OrderStorageTest, SavedTradeReportKeepsItsMarket)
+{
+    // Trades were always copied, but the ExecParams copy constructor dropped market_ (#56)
+    TradeExecEntry report;
+    fillReport(report, TRADE_EXECTYPE, FILLED_ORDSTATUS);
+    report.lastQty_ = 40;
+    report.lastPx_ = 10.5;
+    report.currency_ = USD_CURRENCY;
+    report.tradeDate_ = 20261002;
+
+    ExecutionEntry *saved = storage()->save(report, IdTGenerator::instance());
+    expectReport(saved, TRADE_EXECTYPE, FILLED_ORDSTATUS);
+    auto *trade = dynamic_cast<TradeExecEntry *>(saved);
+    ASSERT_NE(nullptr, trade);
+    EXPECT_EQ(40u, trade->lastQty_);
+    EXPECT_DOUBLE_EQ(10.5, trade->lastPx_);
+    EXPECT_EQ(USD_CURRENCY, trade->currency_);
+    EXPECT_EQ(20261002u, trade->tradeDate_);
+}
+
 } // namespace
 
 // =============================================================================
