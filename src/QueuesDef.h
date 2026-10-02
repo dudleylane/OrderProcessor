@@ -92,8 +92,19 @@ struct ExecReportEvent : public EventBase
     ExecutionEntry *exec_;
 };
 
+/// A cancel the engine refused. It says why in terms a gateway can map to its protocol (FIX CxlRejReason 102 and
+/// OrdStatus 39); the gateway writes the text (#73).
 struct CancelRejectEvent : public EventBase
 {
+    enum Reason
+    {
+        UNKNOWN_ORDER = 0, // no order has this id
+        TOO_LATE,          // the order is no longer live: filled, cancelled, replaced, expired or rejected
+        PENDING,           // a replace of the order is pending
+        OTHER              // refused for a reason the others don't name
+    };
+    Reason reason_ = UNKNOWN_ORDER;
+    OrderStatus ordStatus_ = INVALID_ORDSTATUS; // the order's status; INVALID_ORDSTATUS when the order is unknown
 };
 
 struct BusinessRejectEvent : public EventBase

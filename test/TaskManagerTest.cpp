@@ -12,6 +12,7 @@
 */
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <atomic>
 #include <thread>
 #include <chrono>
@@ -103,10 +104,49 @@ public:
         return std::nullopt;
     }
 
-    void push(const CancelRejectEvent &evnt, const std::string &) override
+    void push(const CancelRejectEvent &evnt, const std::string &target) override
     {
         lastCancelRejectOrderId_ = evnt.id_.id_;
+        {
+            std::lock_guard<std::mutex> lock(reportsLock_);
+            cancelRejects_.emplace_back(evnt, target);
+        }
         ++cancelRejectCount_;
+    }
+
+    /// The cancel rejects pushed so far, each with its target
+    std::vector<std::pair<CancelRejectEvent, std::string>> cancelRejects() const
+    {
+        std::lock_guard<std::mutex> lock(reportsLock_);
+        return cancelRejects_;
+    }
+
+    /// The types of the reports recorded for the order, in the order they were pushed
+    std::vector<ExecType> reportTypes(const IdT &orderId) const
+    {
+        std::lock_guard<std::mutex> lock(reportsLock_);
+        std::vector<ExecType> types;
+        for (const auto &r : reports_)
+        {
+            if (orderId == r.orderId)
+            {
+                types.push_back(r.type);
+            }
+        }
+        return types;
+    }
+
+    /// How many reports of the type were recorded for the order
+    int reportCount(ExecType type, const IdT &orderId) const
+    {
+        const auto types = reportTypes(orderId);
+        return static_cast<int>(std::count(types.begin(), types.end(), type));
+    }
+
+    size_t reportCountAll() const
+    {
+        std::lock_guard<std::mutex> lock(reportsLock_);
+        return reports_.size();
     }
 
     void push(const BusinessRejectEvent &, const std::string &) override
@@ -127,6 +167,33 @@ public:
     mutable std::mutex reportsLock_;
     std::vector<RecordedReport> reports_;
     std::vector<std::pair<OrderRejectEvent, std::string>> orderRejects_;
+    std::vector<std::pair<CancelRejectEvent, std::string>> cancelRejects_;
+};
+
+/// Records each order version the storage persists
+struct RecordingSaver final : public COP::OrderSaver
+{
+    struct Version
+    {
+        IdT orderId;
+        OrderStatus status;
+        QuantityT orderQty;
+        QuantityT leavesQty;
+    };
+    u32 save(const OrderEntry &order) override
+    {
+        std::lock_guard<std::mutex> lock(lock_);
+        versions_.push_back({ order.orderId_, order.status_, order.orderQty_, order.leavesQty_ });
+        return static_cast<u32>(versions_.size());
+    }
+    void erase(const IdT &, u32) override {}
+    std::vector<Version> versions()
+    {
+        std::lock_guard<std::mutex> lock(lock_);
+        return versions_;
+    }
+    std::mutex lock_;
+    std::vector<Version> versions_;
 };
 
 /// Throws instead of processing the first transaction it is given, and hands later ones to a real processor. It owns
@@ -211,6 +278,20 @@ protected:
         }
 
         return std::make_unique<TaskManager>(params);
+    }
+
+    /// Pushes a limit order from the source, and returns its ClOrdID to find it by once it is processed
+    RawDataEntry pushOrder(Side side, PriceT price, QuantityT qty, const std::string &source)
+    {
+        auto order = createCorrectOrder(instrumentId1_);
+        assignClOrderId(order.get());
+        order->side_ = side;
+        order->price_ = price;
+        order->orderQty_ = qty;
+        order->leavesQty_ = qty;
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push(source, OrderEvent(order.release()));
+        return clOrdId;
     }
 
 protected:
@@ -511,29 +592,7 @@ TEST_F(TaskManagerTest, ReplacementWithAClOrdIdInUseIsRefusedWithoutBeingStored)
     // A cancel/replace request's replacement can reuse a ClOrdID too: here, the original's own (#67). The replacement
     // is a clone, so it carries the original's order id, and the old code rejected and persisted it under that id: the
     // refused replacement's state became the newest version of the original's record.
-    struct RecordingSaver final : public COP::OrderSaver
-    {
-        struct Version
-        {
-            IdT orderId;
-            OrderStatus status;
-            QuantityT orderQty;
-        };
-        u32 save(const OrderEntry &order) override
-        {
-            std::lock_guard<std::mutex> lock(lock_);
-            versions_.push_back({ order.orderId_, order.status_, order.orderQty_ });
-            return static_cast<u32>(versions_.size());
-        }
-        void erase(const IdT &, u32) override {}
-        std::vector<Version> versions()
-        {
-            std::lock_guard<std::mutex> lock(lock_);
-            return versions_;
-        }
-        std::mutex lock_;
-        std::vector<Version> versions_;
-    } saver;
+    RecordingSaver saver;
     OrderStorage::instance()->attach(&saver);
     auto manager = createTaskManager(1, 1);
 
@@ -656,6 +715,195 @@ TEST_F(TaskManagerTest, TransactionThatThrowsDoesNotStopProcessing)
     EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
     EXPECT_EQ(1, manager->tasksFailed());
     EXPECT_GE(outQueues_->execReportCount_.load(), 1);
+}
+
+// =============================================================================
+// Cancel Tests (#73)
+// =============================================================================
+
+TEST_F(TaskManagerTest, CancelOfARestingOrderCompletesAndTheOrderStopsTrading)
+{
+    // The bug this covers: a cancel only reached Pending Cancel. The order stayed in the book with its status
+    // unchanged, and a later order on the other side filled it (#73).
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    OrderEntry *buy = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, buy);
+
+    inQueues_->push("buyer", OrderCancelEvent(buy->orderId_, "user"));
+    RawDataEntry sellId = pushOrder(SELL_SIDE, 10.0, 100, "seller");
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+
+    EXPECT_EQ(CANCELED_ORDSTATUS, buy->status_);
+    EXPECT_EQ(0u, buy->leavesQty_);
+    EXPECT_EQ(0u, buy->cumQty_);
+    EXPECT_EQ(1, outQueues_->reportCount(CANCEL_EXECTYPE, buy->orderId_));
+    EXPECT_EQ(0, outQueues_->reportCount(TRADE_EXECTYPE, buy->orderId_));
+    EXPECT_EQ(0, outQueues_->cancelRejectCount_.load());
+    OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(sellId);
+    ASSERT_NE(nullptr, sell);
+    EXPECT_EQ(NEW_ORDSTATUS, sell->status_) << "the sell traded with the cancelled buy";
+    EXPECT_EQ(0, manager->tasksFailed());
+}
+
+TEST_F(TaskManagerTest, CancelOfAPartiallyFilledOrderKeepsItsFills)
+{
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    pushOrder(SELL_SIDE, 10.0, 40, "seller");
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    OrderEntry *buy = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, buy);
+    ASSERT_EQ(PARTFILL_ORDSTATUS, buy->status_);
+
+    inQueues_->push("buyer", OrderCancelEvent(buy->orderId_, "rest of it"));
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+
+    EXPECT_EQ(CANCELED_ORDSTATUS, buy->status_);
+    EXPECT_EQ(40u, buy->cumQty_);
+    EXPECT_EQ(0u, buy->leavesQty_);
+    EXPECT_EQ(1, outQueues_->reportCount(CANCEL_EXECTYPE, buy->orderId_));
+}
+
+TEST_F(TaskManagerTest, CancelOfAFilledOrderIsRejectedToTheRequester)
+{
+    // The bug this covers: a cancel of a filled order got a Pending Cancel report, and no reject (#73)
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry sellId = pushOrder(SELL_SIDE, 20.0, 100, "seller");
+    pushOrder(BUY_SIDE, 20.0, 100, "buyer");
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(sellId);
+    ASSERT_NE(nullptr, sell);
+    ASSERT_EQ(FILLED_ORDSTATUS, sell->status_);
+    const size_t reportsBefore = outQueues_->reportCountAll();
+
+    inQueues_->push("requester", OrderCancelEvent(sell->orderId_, "too late"));
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+
+    auto rejects = outQueues_->cancelRejects();
+    ASSERT_EQ(1u, rejects.size());
+    EXPECT_EQ(sell->orderId_, rejects[0].first.id_);
+    EXPECT_EQ(CancelRejectEvent::TOO_LATE, rejects[0].first.reason_);
+    EXPECT_EQ(FILLED_ORDSTATUS, rejects[0].first.ordStatus_);
+    EXPECT_EQ("requester", rejects[0].second);
+    EXPECT_EQ(reportsBefore, outQueues_->reportCountAll()) << "a refused cancel sent a report";
+    EXPECT_EQ(FILLED_ORDSTATUS, sell->status_);
+}
+
+TEST_F(TaskManagerTest, SecondCancelOfAnOrderIsRejected)
+{
+    // The bug this covers: a second cancel found no transition, and the state machine swallowed the error, so the
+    // client got no answer at all (#73)
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    OrderEntry *buy = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, buy);
+
+    inQueues_->push("buyer", OrderCancelEvent(buy->orderId_, "first"));
+    inQueues_->push("buyer", OrderCancelEvent(buy->orderId_, "second"));
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+
+    EXPECT_EQ(1, outQueues_->reportCount(CANCEL_EXECTYPE, buy->orderId_));
+    auto rejects = outQueues_->cancelRejects();
+    ASSERT_EQ(1u, rejects.size());
+    EXPECT_EQ(buy->orderId_, rejects[0].first.id_);
+    EXPECT_EQ(CancelRejectEvent::TOO_LATE, rejects[0].first.reason_);
+    EXPECT_EQ(CANCELED_ORDSTATUS, rejects[0].first.ordStatus_);
+}
+
+TEST_F(TaskManagerTest, CancelPersistsTheCancelledOrder)
+{
+    // The cancelled state is what a restart restores, and restore does not re-rest a cancelled order
+    RecordingSaver saver;
+    OrderStorage::instance()->attach(&saver);
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    OrderEntry *buy = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, buy);
+
+    inQueues_->push("buyer", OrderCancelEvent(buy->orderId_, "user"));
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+
+    std::optional<RecordingSaver::Version> newest;
+    for (const auto &version : saver.versions())
+    {
+        if (buy->orderId_ == version.orderId)
+        {
+            newest = version;
+        }
+    }
+    ASSERT_TRUE(newest.has_value());
+    EXPECT_EQ(CANCELED_ORDSTATUS, newest->status);
+    EXPECT_EQ(0u, newest->leavesQty);
+}
+
+TEST_F(TaskManagerTest, CancelsRacingTradesLeaveBothSidesConsistent)
+{
+    // Cancels, and orders that would trade with the orders being cancelled, all processed concurrently. Each cancel
+    // must be answered once, a cancelled order must not trade after its cancel, and every fill must have its other
+    // side: decided as soon as it arrived, a cancel could overtake a trade already matched against the order (#73).
+    auto manager = createTaskManager(3, 3);
+    const int count = 40;
+    std::vector<RawDataEntry> buyIds;
+    for (int i = 0; i < count; ++i)
+    {
+        buyIds.push_back(pushOrder(BUY_SIDE, 10.0, 100, "buyer"));
+    }
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(10));
+    std::vector<OrderEntry *> buys;
+    for (const auto &id : buyIds)
+    {
+        buys.push_back(OrderStorage::instance()->locateByClOrderId(id));
+        ASSERT_NE(nullptr, buys.back());
+    }
+
+    std::vector<RawDataEntry> sellIds;
+    for (int i = 0; i < count; ++i)
+    {
+        inQueues_->push("buyer", OrderCancelEvent(buys[i]->orderId_, "race"));
+        sellIds.push_back(pushOrder(SELL_SIDE, 10.0, 100, "seller"));
+    }
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(20));
+
+    const auto rejects = outQueues_->cancelRejects();
+    u64 bought = 0;
+    for (OrderEntry *buy : buys)
+    {
+        bought += buy->cumQty_;
+        const int rejected = static_cast<int>(std::count_if(rejects.begin(), rejects.end(),
+                                                            [buy](const auto &r)
+                                                            {
+                                                                return buy->orderId_ == r.first.id_;
+                                                            }));
+        const auto types = outQueues_->reportTypes(buy->orderId_);
+        const int cancels = static_cast<int>(std::count(types.begin(), types.end(), CANCEL_EXECTYPE));
+        EXPECT_EQ(1, rejected + cancels) << "order " << buy->orderId_.id_ << " got no answer, or more than one";
+        if (0 < cancels)
+        {
+            EXPECT_EQ(CANCELED_ORDSTATUS, buy->status_) << "order " << buy->orderId_.id_;
+            EXPECT_EQ(0u, buy->leavesQty_) << "order " << buy->orderId_.id_;
+            const auto cancelled = std::find(types.begin(), types.end(), CANCEL_EXECTYPE);
+            EXPECT_EQ(types.end(), std::find(cancelled, types.end(), TRADE_EXECTYPE))
+                << "order " << buy->orderId_.id_ << " traded after it was cancelled";
+        }
+        else
+        {
+            // a live order's cancel always succeeds, so only a filled one can have been refused
+            EXPECT_EQ(FILLED_ORDSTATUS, buy->status_) << "order " << buy->orderId_.id_;
+        }
+    }
+    u64 sold = 0;
+    for (const auto &id : sellIds)
+    {
+        OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(id);
+        ASSERT_NE(nullptr, sell);
+        sold += sell->cumQty_;
+    }
+    EXPECT_EQ(bought, sold) << "a fill without its other side";
+    EXPECT_EQ(0, manager->tasksFailed());
 }
 
 } // namespace

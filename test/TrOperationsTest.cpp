@@ -82,6 +82,20 @@ public:
     std::vector<DeferedEventBase *> events_;
 };
 
+/// Records the cancel rejects pushed to it, each with its target
+class RecordingOutQueues : public Queues::OutQueues
+{
+public:
+    void push(const Queues::ExecReportEvent &, const std::string &) override {}
+    void push(const Queues::CancelRejectEvent &evnt, const std::string &target) override
+    {
+        rejects_.emplace_back(evnt, target);
+    }
+    void push(const Queues::BusinessRejectEvent &, const std::string &) override {}
+
+    std::vector<std::pair<Queues::CancelRejectEvent, std::string>> rejects_;
+};
+
 // =============================================================================
 // Test Fixture for OrderBook Operations
 // =============================================================================
@@ -471,6 +485,87 @@ TEST_F(ExecReportOperationTest, CreateReplaceExecReport_Rollback_IsNoOp)
 // =============================================================================
 // PersistOrderTrOperation Tests (#20)
 // =============================================================================
+
+// =============================================================================
+// Cancel Operations (#73)
+// =============================================================================
+
+TEST_F(MatchOrderOperationTest, CancelOrder_RelatesToTheOrderAndItsInstrument)
+{
+    // Related to the instrument as well as the order, so it runs after every earlier match on the instrument
+    CancelOrderTrOperation op(buyOrder_, "client");
+    EXPECT_EQ(buyOrder_->orderId_, op.getObjectId());
+    EXPECT_EQ(buyOrder_->instrument_.getId(), op.getRelatedId());
+}
+
+TEST_F(MatchOrderOperationTest, CancelOrder_Execute_QueuesTheRequest)
+{
+    CancelOrderTrOperation op(buyOrder_, "client");
+    Context ctx = createContext();
+
+    op.execute(ctx);
+
+    ASSERT_EQ(1u, deferedContainer_.deferedEventCount());
+    auto *request = dynamic_cast<CancelRequestDeferedEvent *>(deferedContainer_.events_[0]);
+    ASSERT_NE(nullptr, request);
+    EXPECT_EQ(buyOrder_, request->order_);
+    EXPECT_EQ("client", request->requester_);
+}
+
+TEST_F(MatchOrderOperationTest, CancelOrder_Rollback_RemovesOnlyItsRequest)
+{
+    deferedContainer_.addDeferedEvent(new CancelRequestDeferedEvent(sellOrder_, "earlier"));
+    CancelOrderTrOperation op(buyOrder_, "client");
+    Context ctx = createContext();
+
+    op.execute(ctx);
+    EXPECT_EQ(2u, deferedContainer_.deferedEventCount());
+    op.rollback(ctx);
+
+    ASSERT_EQ(1u, deferedContainer_.deferedEventCount());
+    auto *remaining = dynamic_cast<CancelRequestDeferedEvent *>(deferedContainer_.events_[0]);
+    ASSERT_NE(nullptr, remaining);
+    EXPECT_EQ(sellOrder_, remaining->order_);
+}
+
+TEST_F(MatchOrderOperationTest, CancelOrder_ExecuteWithoutAContainerThrows)
+{
+    CancelOrderTrOperation op(buyOrder_, "client");
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, nullptr, matcher_.get(), IdTGenerator::instance());
+    EXPECT_THROW(op.execute(ctx), std::runtime_error);
+}
+
+TEST_F(MatchOrderOperationTest, CancelReject_GoesToTheRequesterWithTheReasonAndStatus)
+{
+    RecordingOutQueues out;
+    buyOrder_->status_ = FILLED_ORDSTATUS;
+    CancelRejectTrOperation op(*buyOrder_, Queues::CancelRejectEvent::TOO_LATE, "requester");
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, &out, matcher_.get(), IdTGenerator::instance(),
+                &deferedContainer_);
+
+    op.execute(ctx);
+
+    ASSERT_EQ(1u, out.rejects_.size());
+    EXPECT_EQ(buyOrder_->orderId_, out.rejects_[0].first.id_);
+    EXPECT_EQ(Queues::CancelRejectEvent::TOO_LATE, out.rejects_[0].first.reason_);
+    EXPECT_EQ(FILLED_ORDSTATUS, out.rejects_[0].first.ordStatus_);
+    EXPECT_EQ("requester", out.rejects_[0].second);
+}
+
+TEST_F(MatchOrderOperationTest, CancelReject_WithoutARequesterGoesToTheOrdersSource)
+{
+    // The bug this covers: the reject named no order, and went to the made-up target "tgt" (#73)
+    RecordingOutQueues out;
+    CancelRejectTrOperation op(*buyOrder_, Queues::CancelRejectEvent::OTHER);
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, &out, matcher_.get(), IdTGenerator::instance(),
+                &deferedContainer_);
+
+    op.execute(ctx);
+
+    ASSERT_EQ(1u, out.rejects_.size());
+    EXPECT_EQ(buyOrder_->orderId_, out.rejects_[0].first.id_);
+    EXPECT_EQ("CLNT", out.rejects_[0].second);
+}
 
 TEST_F(MatchOrderOperationTest, PersistOrderWritesAVersion)
 {

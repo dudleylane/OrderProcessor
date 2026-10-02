@@ -306,7 +306,7 @@ The server communicates with clients via JSON messages over WebSocket. All messa
 | `order_update` | `Order` | On any order state change |
 | `execution_report` | `ExecutionReport` | On trade, reject, cancel, replace, correct |
 | `book_update` | `OrderBookSnapshot` | On book change (subscribed symbols only) |
-| `cancel_reject` | `{orderId, reason}` | When cancel request is rejected |
+| `cancel_reject` | `{orderId, reason}` | When a cancel is refused; `reason` says why: unknown order, too late (with the order's status), or a replace pending |
 | `business_reject` | `{refId, reason}` | On business logic rejection |
 | `metrics_update` | `SystemMetrics` | Every 1 second (broadcast to all) |
 | `error` | `{message}` | On server error |
@@ -316,7 +316,7 @@ The server communicates with clients via JSON messages over WebSocket. All messa
 | Type | Payload | Description |
 |------|---------|-------------|
 | `new_order` | `NewOrderRequest` | Submit a new order |
-| `cancel_order` | `{orderId, clOrderId?}` | Cancel an existing order |
+| `cancel_order` | `{orderId, clOrderId?}` | Cancel an existing order: answered with a `CANCELED` execution report, or a `cancel_reject` |
 | `replace_order` | `{orderId, price?, orderQty?, tif?}` | Modify an existing order |
 | `subscribe_book` | `{symbol}` | Subscribe to order book updates for a symbol |
 | `unsubscribe_book` | `{symbol}` | Unsubscribe from order book updates |

@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include "DataModelDef.h"
 #include "OrderBookImpl.h"
+#include "QueuesDef.h"
 
 namespace COP
 {
@@ -25,6 +26,8 @@ std::string serializeOrderUpdate(const OrderEntry &order);
 std::string serializeExecReport(const ExecutionEntry *exec);
 std::string serializeBookUpdate(const std::string &symbol, const BookSnapshot &snap);
 std::string serializeCancelReject(u64 orderId, const std::string &reason);
+/// Why a cancel was refused, in words for a cancel_reject's reason (#73)
+std::string cancelRejectReason(const Queues::CancelRejectEvent &evnt);
 std::string serializeBusinessReject(u64 refId, const std::string &reason);
 std::string serializeError(const std::string &message);
 
