@@ -604,6 +604,64 @@ COP (Concurrent Order Processor)
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 4.4 Order Replace Flow
+
+```
+┌─────────────────┐
+│ Replace Request │
+│   (FIX/API)     │
+└────────┬────────┘
+         │
+         ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ IncomingQueues.push(OrderReplaceEvent): the queue owns the replacement   │
+└──────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Processor.onEvent(OrderReplaceEvent)                    (event worker)   │
+│   • No replacement, or the original unknown → OrderRejectEvent           │
+│   • Enqueue a transaction holding ReplaceOrderTrOperation (a copy of     │
+│     the replacement), related to the original and its instrument         │
+└──────────────────────────────────────────────────────────────────────────┘
+         │  runs after every earlier transaction on the original or instrument,
+         │  and after the fills those transactions caused
+         ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ ReplaceOrderTrOperation.execute()                  (transaction worker)  │
+│   • Queue ReplaceRequestDeferedEvent (it takes the replacement)          │
+└──────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Processor.process(onReplace)                             (same worker)   │
+│   • Ask the book whether a market replacement has an order to trade      │
+│     with, before taking the original's lock (a matcher can hold the      │
+│     book's lock while it waits on an order)                              │
+│   • Lock the original. Not NEW/PARTFILL, or a cancel/replace pending,    │
+│     or the replacement changes instrument or side, or its quantity is    │
+│     not above the original's cumQty, or it is invalid, or it is a        │
+│     market order with nothing to trade with → refuse                     │
+│   • Replacement takes the original's cumQty, avgPx and executions;       │
+│     stored under a fresh id (a ClOrdID in use → refuse, #67)             │
+│   • Original:    onExecReplace: NO_CNL_REPLACE → CNCL_REPLACED,          │
+│                  RemoveFromOrderBook, leavesQty = 0, REPLACE report      │
+│   • Replacement: onReplace: RCVD_NEW → NEW (PARTFILL with fills),        │
+│                  MatchOrder, AddToOrderBook, REPLACE report              │
+│   • A refusal → RefuseReplaceTrOperation (OrderRejectEvent)              │
+└──────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Transaction Execution:                                                   │
+│   • PersistOrderTrOperation for both orders (first, #28)                 │
+│   • OrderBook.remove(original); MatchOrder(replacement), then            │
+│     OrderBook.add(replacement) unless it is a market order               │
+│   • OutQueues: REPLACE for the original (REPLACED) and the replacement,  │
+│     both naming the original in origOrderId; or the refusal              │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 5. State Machine Design
@@ -688,7 +746,9 @@ COP (Concurrent Order Processor)
 | INITIAL | onOrderReceived | RCVD_NEW | Create OrderEntry |
 | RCVD_NEW | onOrderReceived | NEW | Add to book, send ACK |
 | RCVD_NEW | onExternalOrderReject | REJECTED | Send REJECT |
-| RCVD_NEW | onRplOrderReceived | PEND_REPLACE | Queue replace |
+| RCVD_NEW | onRplOrderReceived | PEND_REPLACE | Queue replace (not driven since #74) |
+| RCVD_NEW | onReplace | NEW | An accepted replacement: into the book, matched (#74) |
+| RCVD_NEW | onReplace (original had fills) | PARTFILL | The same, carrying the original's fills (#74) |
 | NEW | onTradeExecution (partial) | PARTFILL | Create TRADE report |
 | NEW | onTradeExecution (full) | FILLED | Create TRADE report, remove from book |
 | NEW | onOrderRejected | REJECTED | Send REJECT |
@@ -701,12 +761,13 @@ COP (Concurrent Order Processor)
 | PARTFILL | onExpired | EXPIRED | Partial fill expiration |
 | FILLED | onTradeCrctCncl | PARTFILL/NEW | Trade bust |
 | NO_CNL_REPLACE | onCancelReceived | GOING_CANCEL | Begin cancel |
-| NO_CNL_REPLACE | onReplaceReceived | GOING_REPLACE | Begin replace |
+| NO_CNL_REPLACE | onReplaceReceived | GOING_REPLACE | Begin replace (not driven since #74) |
+| NO_CNL_REPLACE | onExecReplace | CNCL_REPLACED | The original of an accepted replace: out of the book, leaves 0 (#74) |
 | NO_CNL_REPLACE | onExecCancel | CNCL_REPLACED | Client cancel, decided at once: remove from book, leaves 0 (#73) |
 | GOING_CANCEL | onExecCancel | CNCL_REPLACED | Remove from book (an order an older server left pending) |
 | GOING_CANCEL | onCancelRejected | NO_CNL_REPLACE | Cancel failed |
-| GOING_REPLACE | onExecReplace | CNCL_REPLACED | Update order |
-| GOING_REPLACE | onReplaceRejected | NO_CNL_REPLACE | Replace failed |
+| GOING_REPLACE | onExecReplace | CNCL_REPLACED | Update order (not driven since #74) |
+| GOING_REPLACE | onReplaceRejected | NO_CNL_REPLACE | Replace failed (not driven since #74) |
 
 **Associated Test Cases:**
 

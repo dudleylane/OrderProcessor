@@ -43,6 +43,14 @@ void OrderStateWrapper::start()
     stateImpl_->state_.start();
 }
 
+void OrderStateWrapper::setOrderData(COP::OrderEntry *order)
+{
+    assert(nullptr != stateImpl_);
+    COP::OrdState::OrderStatePersistence persistence = stateImpl_->state_.getPersistence();
+    persistence.orderData_ = order;
+    stateImpl_->state_.setPersistance(persistence);
+}
+
 void OrderStateWrapper::checkStates(const std::string &fst, const std::string &scnd) const
 {
     assert(nullptr != stateImpl_);

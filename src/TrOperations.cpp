@@ -484,6 +484,50 @@ void CancelRejectTrOperation::execute(const Context &cnxt)
 
 void CancelRejectTrOperation::rollback(const Context &) {}
 
+ReplaceOrderTrOperation::ReplaceOrderTrOperation(OrderEntry *original, std::unique_ptr<OrderEntry> replacement,
+                                                 const std::string &requester)
+    : Operation(REPLACE_ORDER_TROPERATION, original->orderId_, original->instrument_.getId()), original_(original),
+      replacement_(std::move(replacement)), requester_(requester), eventCountBefore_(0)
+{
+}
+
+ReplaceOrderTrOperation::~ReplaceOrderTrOperation() {}
+
+void ReplaceOrderTrOperation::execute(const Context &cnxt)
+{
+    if ((nullptr == cnxt.deferedEvents_) || (nullptr == replacement_)) [[unlikely]]
+    {
+        throw std::runtime_error("ReplaceOrderTrOperation: no deferred event container, or no replacement, to decide!");
+    }
+    eventCountBefore_ = cnxt.deferedEvents_->deferedEventCount();
+    cnxt.deferedEvents_->addDeferedEvent(
+        new ReplaceRequestDeferedEvent(original_, std::move(replacement_), requester_));
+}
+
+void ReplaceOrderTrOperation::rollback(const Context &cnxt)
+{
+    if (nullptr != cnxt.deferedEvents_)
+    {
+        cnxt.deferedEvents_->removeDeferedEventsFrom(eventCountBefore_);
+    }
+}
+
+RefuseReplaceTrOperation::RefuseReplaceTrOperation(const OrderEntry &original, const OrderRejectEvent &refusal,
+                                                   const std::string &requester)
+    : Operation(REFUSE_REPLACE_TROPERATION, original.orderId_), refusal_(refusal), requester_(requester)
+{
+}
+
+RefuseReplaceTrOperation::~RefuseReplaceTrOperation() {}
+
+void RefuseReplaceTrOperation::execute(const Context &cnxt)
+{
+    assert(nullptr != cnxt.outQueues_);
+    cnxt.outQueues_->push(refusal_, requester_);
+}
+
+void RefuseReplaceTrOperation::rollback(const Context &) {}
+
 CancelOrderTrOperation::CancelOrderTrOperation(OrderEntry *order, const std::string &requester)
     : Operation(CANCEL_ORDER_TROPERATION, order->orderId_, order->instrument_.getId()), order_(order),
       requester_(requester), eventCountBefore_(0)

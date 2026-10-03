@@ -60,15 +60,25 @@ public:
         DateTimeT transactTime;
         std::string market;
         std::string rejectReason; // set for a RejectExecEntry only
+        IdT origOrderId;          // set for a ReplaceExecEntry only
     };
 
     void push(const ExecReportEvent &evnt, const std::string &) override
     {
-        RecordedReport report{ evnt.exec_->type_,         evnt.exec_->orderStatus_, evnt.exec_->orderId_,
-                               evnt.exec_->transactTime_, evnt.exec_->market_,      std::string() };
+        RecordedReport report{ evnt.exec_->type_,
+                               evnt.exec_->orderStatus_,
+                               evnt.exec_->orderId_,
+                               evnt.exec_->transactTime_,
+                               evnt.exec_->market_,
+                               std::string(),
+                               IdT() };
         if (auto *reject = dynamic_cast<const RejectExecEntry *>(evnt.exec_))
         {
             report.rejectReason = reject->rejectReason_;
+        }
+        if (auto *replace = dynamic_cast<const ReplaceExecEntry *>(evnt.exec_))
+        {
+            report.origOrderId = replace->origOrderId_;
         }
         {
             std::lock_guard<std::mutex> lock(reportsLock_);
@@ -134,6 +144,21 @@ public:
             }
         }
         return types;
+    }
+
+    /// The reports recorded for the order, in the order they were pushed
+    std::vector<RecordedReport> reportsFor(const IdT &orderId) const
+    {
+        std::lock_guard<std::mutex> lock(reportsLock_);
+        std::vector<RecordedReport> found;
+        for (const auto &r : reports_)
+        {
+            if (orderId == r.orderId)
+            {
+                found.push_back(r);
+            }
+        }
+        return found;
     }
 
     /// How many reports of the type were recorded for the order
@@ -292,6 +317,20 @@ protected:
         RawDataEntry clOrdId = order->clOrderId_.get();
         inQueues_->push(source, OrderEvent(order.release()));
         return clOrdId;
+    }
+
+    /// A replacement for the stored order, built as the WebSocket session builds one: the original with the changes, a
+    /// fresh id and a ClOrdID of its own, naming the original (#74). The queue owns it once pushed.
+    static OrderEntry *makeReplacement(const OrderEntry &original, PriceT price, QuantityT qty)
+    {
+        OrderEntry *replacement = original.clone();
+        replacement->orderId_ = IdT();
+        assignClOrderId(replacement);
+        replacement->origClOrderId_ = original.clOrderId_;
+        replacement->price_ = price;
+        replacement->orderQty_ = qty;
+        replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+        return replacement;
     }
 
     /// Polls until the pool is idle, where waitUntilTransactionsFinished(N) takes at least two seconds: it sleeps a
@@ -626,12 +665,12 @@ TEST_F(TaskManagerTest, ReplacementWithAClOrdIdInUseIsRefusedWithoutBeingStored)
     OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, stored);
 
-    // Built as the FIX gateway builds one, a clone of the original, but keeping the original's ClOrdID. Nothing frees
-    // a replacement order today (a separate leak); this one is refused, so nothing refers to it afterwards.
+    // Built as the FIX gateway builds one, a clone of the original, but keeping the original's ClOrdID. The queue owns
+    // it once pushed (#74).
     std::unique_ptr<OrderEntry> replacement(stored->clone());
     replacement->origClOrderId_ = stored->clOrderId_;
     replacement->orderQty_ = 50;
-    inQueues_->push("client", OrderReplaceEvent(stored->orderId_, replacement.get()));
+    inQueues_->push("client", OrderReplaceEvent(stored->orderId_, replacement.release()));
     EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
 
     EXPECT_EQ(NEW_ORDSTATUS, stored->status_);
@@ -914,6 +953,267 @@ TEST_F(TaskManagerTest, CancelsRacingTradesLeaveBothSidesConsistent)
         {
             // a live order's cancel always succeeds, so only a filled one can have been refused
             EXPECT_EQ(FILLED_ORDSTATUS, buy->status_) << "order " << buy->orderId_.id_;
+        }
+    }
+    u64 sold = 0;
+    for (const auto &id : sellIds)
+    {
+        OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(id);
+        ASSERT_NE(nullptr, sell);
+        sold += sell->cumQty_;
+    }
+    EXPECT_EQ(bought, sold) << "a fill without its other side";
+    EXPECT_EQ(0, manager->tasksFailed());
+}
+
+// =============================================================================
+// Replace Tests (#74)
+// =============================================================================
+
+TEST_F(TaskManagerTest, ReplaceOfARestingOrderCompletes)
+{
+    // The bug this covers: a replace could never complete. A correctly built replacement crashed the server, on a null
+    // order in processEvent_GenerateExecution, and nothing ever accepted one (#74).
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *original = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, original);
+
+    OrderEntry *replacement = makeReplacement(*original, 11.0, 80);
+    RawDataEntry replacementId = replacement->clOrderId_.get();
+    inQueues_->push("buyer", OrderReplaceEvent(original->orderId_, replacement));
+    EXPECT_TRUE(waitUntilIdle(*manager));
+
+    EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
+    EXPECT_EQ(0u, original->leavesQty_);
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live) << "the replacement was not stored";
+    EXPECT_NE(original->orderId_, live->orderId_);
+    EXPECT_EQ(original->orderId_, live->origOrderId_);
+    EXPECT_EQ(NEW_ORDSTATUS, live->status_);
+    EXPECT_DOUBLE_EQ(11.0, live->price_);
+    EXPECT_EQ(80u, live->orderQty_);
+    EXPECT_EQ(80u, live->leavesQty_);
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
+
+    // One REPLACE report each, both naming the original
+    const auto originalReports = outQueues_->reportsFor(original->orderId_);
+    ASSERT_EQ(2u, originalReports.size()); // NEW, then REPLACE
+    EXPECT_EQ(REPLACE_EXECTYPE, originalReports[1].type);
+    EXPECT_EQ(REPLACED_ORDSTATUS, originalReports[1].status);
+    EXPECT_EQ(original->orderId_, originalReports[1].origOrderId);
+    const auto liveReports = outQueues_->reportsFor(live->orderId_);
+    ASSERT_EQ(1u, liveReports.size());
+    EXPECT_EQ(REPLACE_EXECTYPE, liveReports[0].type);
+    EXPECT_EQ(NEW_ORDSTATUS, liveReports[0].status);
+    EXPECT_EQ(original->orderId_, liveReports[0].origOrderId);
+
+    // The book holds the replacement, at its new price, and only it trades
+    EXPECT_EQ(live->orderId_, orderBook_->getTop(instrumentId1_, BUY_SIDE));
+    pushOrder(SELL_SIDE, 11.0, 80, "seller");
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    EXPECT_EQ(FILLED_ORDSTATUS, live->status_);
+    EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
+    EXPECT_EQ(0u, original->cumQty_);
+    EXPECT_EQ(0, manager->tasksFailed());
+}
+
+TEST_F(TaskManagerTest, ReplaceOfAPartiallyFilledOrderKeepsItsFills)
+{
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    pushOrder(SELL_SIDE, 10.0, 40, "seller");
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *original = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, original);
+    ASSERT_EQ(PARTFILL_ORDSTATUS, original->status_);
+
+    OrderEntry *replacement = makeReplacement(*original, 10.0, 120);
+    RawDataEntry replacementId = replacement->clOrderId_.get();
+    inQueues_->push("buyer", OrderReplaceEvent(original->orderId_, replacement));
+    EXPECT_TRUE(waitUntilIdle(*manager));
+
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live) << "the replacement was not stored";
+    EXPECT_EQ(PARTFILL_ORDSTATUS, live->status_);
+    EXPECT_EQ(40u, live->cumQty_);
+    EXPECT_EQ(80u, live->leavesQty_);
+    EXPECT_EQ(original->executions_.getId(), live->executions_.getId());
+    const auto liveReports = outQueues_->reportsFor(live->orderId_);
+    ASSERT_EQ(1u, liveReports.size());
+    EXPECT_EQ(REPLACE_EXECTYPE, liveReports[0].type);
+    EXPECT_EQ(PARTFILL_ORDSTATUS, liveReports[0].status);
+    EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
+}
+
+TEST_F(TaskManagerTest, ReplaceToAQuantityNotAboveWhatIsFilledIsRefused)
+{
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    pushOrder(SELL_SIDE, 10.0, 40, "seller");
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *original = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, original);
+
+    OrderEntry *replacement = makeReplacement(*original, 10.0, 40);
+    RawDataEntry replacementId = replacement->clOrderId_.get();
+    inQueues_->push("requester", OrderReplaceEvent(original->orderId_, replacement));
+    EXPECT_TRUE(waitUntilIdle(*manager));
+
+    auto rejects = outQueues_->orderRejects();
+    ASSERT_EQ(1u, rejects.size());
+    EXPECT_EQ("requester", rejects[0].second);
+    EXPECT_TRUE(rejects[0].first.replacement_);
+    EXPECT_EQ(CancelRejectEvent::OTHER, rejects[0].first.refusal_);
+    EXPECT_EQ(PARTFILL_ORDSTATUS, rejects[0].first.origStatus_);
+    EXPECT_EQ("Replace refused: quantity 40 is not above the 40 already filled", rejects[0].first.reason_);
+    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByClOrderId(replacementId))
+        << "a refused replacement was stored";
+    EXPECT_EQ(PARTFILL_ORDSTATUS, original->status_);
+    EXPECT_EQ(60u, original->leavesQty_);
+}
+
+TEST_F(TaskManagerTest, ReplaceOfAFilledOrderIsRefusedAsTooLate)
+{
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry sellId = pushOrder(SELL_SIDE, 20.0, 100, "seller");
+    pushOrder(BUY_SIDE, 20.0, 100, "buyer");
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *original = OrderStorage::instance()->locateByClOrderId(sellId);
+    ASSERT_NE(nullptr, original);
+    ASSERT_EQ(FILLED_ORDSTATUS, original->status_);
+
+    inQueues_->push("seller", OrderReplaceEvent(original->orderId_, makeReplacement(*original, 21.0, 150)));
+    EXPECT_TRUE(waitUntilIdle(*manager));
+
+    auto rejects = outQueues_->orderRejects();
+    ASSERT_EQ(1u, rejects.size());
+    EXPECT_EQ(CancelRejectEvent::TOO_LATE, rejects[0].first.refusal_);
+    EXPECT_EQ(FILLED_ORDSTATUS, rejects[0].first.origStatus_);
+    EXPECT_EQ("Replace refused: too late, the order is no longer in the book", rejects[0].first.reason_);
+    EXPECT_EQ(FILLED_ORDSTATUS, original->status_);
+}
+
+TEST_F(TaskManagerTest, ReplaceOfAnUnknownOrderIsRefused)
+{
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *resting = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, resting);
+
+    inQueues_->push("buyer", OrderReplaceEvent(IdT(999, 1), makeReplacement(*resting, 11.0, 100)));
+    EXPECT_TRUE(waitUntilIdle(*manager));
+
+    auto rejects = outQueues_->orderRejects();
+    ASSERT_EQ(1u, rejects.size());
+    EXPECT_EQ(CancelRejectEvent::UNKNOWN_ORDER, rejects[0].first.refusal_);
+    EXPECT_EQ("Replace refused: unknown order", rejects[0].first.reason_);
+    EXPECT_EQ(NEW_ORDSTATUS, resting->status_);
+}
+
+TEST_F(TaskManagerTest, ReplacePersistsBothOrders)
+{
+    // What a restart restores: the original as replaced, and the replacement live
+    RecordingSaver saver;
+    OrderStorage::instance()->attach(&saver);
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *original = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, original);
+
+    OrderEntry *replacement = makeReplacement(*original, 11.0, 80);
+    RawDataEntry replacementId = replacement->clOrderId_.get();
+    inQueues_->push("buyer", OrderReplaceEvent(original->orderId_, replacement));
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+
+    std::optional<RecordingSaver::Version> originalNewest, liveNewest;
+    for (const auto &version : saver.versions())
+    {
+        if (original->orderId_ == version.orderId)
+        {
+            originalNewest = version;
+        }
+        if (live->orderId_ == version.orderId)
+        {
+            liveNewest = version;
+        }
+    }
+    ASSERT_TRUE(originalNewest.has_value());
+    EXPECT_EQ(REPLACED_ORDSTATUS, originalNewest->status);
+    EXPECT_EQ(0u, originalNewest->leavesQty);
+    ASSERT_TRUE(liveNewest.has_value());
+    EXPECT_EQ(NEW_ORDSTATUS, liveNewest->status);
+    EXPECT_EQ(80u, liveNewest->orderQty);
+}
+
+TEST_F(TaskManagerTest, ReplacesRacingTradesLeaveBothSidesConsistent)
+{
+    // Replaces, and orders that would trade with the orders being replaced, all processed concurrently. Each replace
+    // must be answered once, a replaced order must not trade after its replace, and every fill must have its other
+    // side, counting a replacement's fills with the original's it carries over (#74).
+    auto manager = createTaskManager(3, 3);
+    const int count = 30;
+    std::vector<RawDataEntry> buyIds;
+    for (int i = 0; i < count; ++i)
+    {
+        buyIds.push_back(pushOrder(BUY_SIDE, 10.0, 100, "buyer"));
+    }
+    EXPECT_TRUE(waitUntilIdle(*manager, std::chrono::seconds(20)));
+    std::vector<OrderEntry *> originals;
+    for (const auto &id : buyIds)
+    {
+        originals.push_back(OrderStorage::instance()->locateByClOrderId(id));
+        ASSERT_NE(nullptr, originals.back());
+    }
+
+    std::vector<RawDataEntry> replacementIds;
+    std::vector<RawDataEntry> sellIds;
+    for (int i = 0; i < count; ++i)
+    {
+        OrderEntry *replacement = makeReplacement(*originals[i], 10.0, 150);
+        replacementIds.push_back(replacement->clOrderId_.get());
+        inQueues_->push("buyer", OrderReplaceEvent(originals[i]->orderId_, replacement));
+        sellIds.push_back(pushOrder(SELL_SIDE, 10.0, 100, "seller"));
+    }
+    EXPECT_TRUE(waitUntilIdle(*manager, std::chrono::seconds(30)));
+
+    const auto rejects = outQueues_->orderRejects();
+    u64 bought = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        OrderEntry *original = originals[i];
+        const RawDataEntry &clOrd = original->clOrderId_.get();
+        const std::string originalClOrdId(clOrd.data_, clOrd.length_);
+        const int refused = static_cast<int>(std::count_if(rejects.begin(), rejects.end(),
+                                                           [&originalClOrdId](const auto &r)
+                                                           {
+                                                               return originalClOrdId == r.first.origClOrderId_;
+                                                           }));
+        OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementIds[i]);
+        EXPECT_EQ(1, refused + ((nullptr != live) ? 1 : 0))
+            << "order " << original->orderId_.id_ << " got no answer, or more than one";
+        if (nullptr != live)
+        {
+            EXPECT_EQ(REPLACED_ORDSTATUS, original->status_) << "order " << original->orderId_.id_;
+            EXPECT_EQ(0u, original->leavesQty_);
+            const auto types = outQueues_->reportTypes(original->orderId_);
+            const auto replaced = std::find(types.begin(), types.end(), REPLACE_EXECTYPE);
+            EXPECT_NE(types.end(), replaced);
+            EXPECT_EQ(types.end(), std::find(replaced, types.end(), TRADE_EXECTYPE))
+                << "order " << original->orderId_.id_ << " traded after it was replaced";
+            EXPECT_GE(live->cumQty_, original->cumQty_);
+            bought += live->cumQty_; // includes what the original filled
+        }
+        else
+        {
+            // a live order's replace always succeeds, so only a filled one can have been refused
+            EXPECT_EQ(FILLED_ORDSTATUS, original->status_) << "order " << original->orderId_.id_;
+            bought += original->cumQty_;
         }
     }
     u64 sold = 0;

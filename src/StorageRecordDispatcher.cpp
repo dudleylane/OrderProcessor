@@ -159,6 +159,7 @@ bool belongsInBook(const OrderEntry &order)
     case EXPIRED_ORDSTATUS:
     case DFD_ORDSTATUS:
     case REPLACED_ORDSTATUS:
+    case PENDINGREPLACE_ORDSTATUS: // a replacement that was never accepted (#74)
         return false;
     default:
         break;

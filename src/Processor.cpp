@@ -19,6 +19,7 @@
 #include "TrOperations.h"
 #include "DataModelDef.h"
 #include "OrderStorage.h"
+#include "Logger.h"
 
 using namespace std;
 using namespace COP;
@@ -214,75 +215,35 @@ void Processor::onEvent(const std::string &source, const OrderCancelEvent &evnt)
 
 void Processor::onEvent(const std::string &source, const OrderReplaceEvent &evnt)
 {
-    if (!evnt.id_.isValid()) [[unlikely]]
+    // The replace is decided on the transaction worker, by process(onReplace) below, once every transaction before this
+    // one on the original or its instrument has run, together with the fills it caused, as a cancel is (#73, #74). Here
+    // only what needs no decision is refused: a request with no replacement, or one for an order that doesn't exist.
+    OrderEntry *original = evnt.id_.isValid() ? orderStorage_->locateByOrderId(evnt.id_) : nullptr;
+    if ((nullptr == evnt.replacementOrder_) || (nullptr == original)) [[unlikely]]
     {
-        throw std::runtime_error("Processor::onEvent(OrderReplaceEvent): order id is invalid!");
+        OrderRejectEvent refusal;
+        if (nullptr == evnt.replacementOrder_)
+        {
+            refusal.replacement_ = true;
+            refusal.reason_ = "Replace refused: it carries no replacement order";
+        }
+        else
+        {
+            refusal = makeReplaceRefusal(*evnt.replacementOrder_, nullptr, CancelRejectEvent::UNKNOWN_ORDER,
+                                         "Replace refused: unknown order");
+        }
+        assert(nullptr != outQueues_);
+        outQueues_->push(refusal, source);
+        return;
     }
+    [[assume(original != nullptr)]];
 
+    // The queue frees the event's replacement after dispatch, so the operation keeps a copy
     PooledTransactionScope scope(scopePool_.get());
     ScopeArenaGuard arenaGuard(scope.get());
-
-    if (nullptr != evnt.replacementOrder_)
-    {
-        // New replacement order submission - process via state machine
-        onRplOrderReceived evnt2Proc(evnt.replacementOrder_);
-        evnt2Proc.generator_ = generator_;
-        evnt2Proc.transaction_ = scope.get();
-        evnt2Proc.orderStorage_ = orderStorage_;
-        evnt2Proc.orderBook_ = orderBook_;
-        // save() locks the replacement order before publishing it; released once its state is written (#13)
-        Store::PublishGuard publishGuard;
-        evnt2Proc.publishGuard_ = &publishGuard;
-
-        // use initial state for new replacement order
-        assert(nullptr != threadState().stateMachine);
-        threadState().stateMachine->setPersistance(threadState().initialSMState);
-        threadState().stateMachine->process_event(evnt2Proc);
-
-        // save state machine state into the replacement order
-        OrderStatePersistence smState = threadState().stateMachine->getPersistence();
-        assert(nullptr != smState.orderData_);
-        if (smState.orderData_ == evnt.replacementOrder_) [[unlikely]] // not stored, as for a new order above (#67)
-        {
-            publishGuard.release();
-            rejectUnstoredOrder(source, *evnt.replacementOrder_, true);
-            return;
-        }
-        smState.orderData_->setStateMachinePersistance(smState);
-        // Persist the order as part of this transaction (#20), ahead of the operations that publish
-        // execution reports, so an acknowledged change is already durable (#28).
-        persistOrder(scope.get(), *smState.orderData_);
-        publishGuard.release();
-    }
-    else
-    {
-        // Notify existing order about replace received (similar to ProcessEvent::ON_REPLACE_RECEVIED)
-        OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-        if (nullptr == ord) [[unlikely]]
-        {
-            throw std::runtime_error("Processor::onEvent(OrderReplaceEvent): unable to locate order!");
-        }
-
-        // write lock on the order for state machine processing
-        oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
-
-        onReplaceReceived evnt2Proc(evnt.id_);
-        evnt2Proc.generator_ = generator_;
-        evnt2Proc.transaction_ = scope.get();
-        evnt2Proc.orderStorage_ = orderStorage_;
-
-        assert(nullptr != threadState().stateMachine);
-        threadState().stateMachine->setPersistance(ord->stateMachinePersistance());
-        threadState().stateMachine->process_event(evnt2Proc);
-
-        // save updated state back to order
-        OrderStatePersistence smState = threadState().stateMachine->getPersistence();
-        assert(nullptr != smState.orderData_);
-        smState.orderData_->setStateMachinePersistance(smState);
-        // Persist the order as part of this transaction (#20), ahead of the operations that publish
-        // execution reports, so an acknowledged change is already durable (#28).
-        persistOrder(scope.get(), *smState.orderData_);
-    }
+    std::unique_ptr<Operation> op(
+        new ReplaceOrderTrOperation(original, std::unique_ptr<OrderEntry>(evnt.replacementOrder_->clone()), source));
+    scope->addOperation(op);
 
     // enqueue transaction
     assert(nullptr != transactMgr_);
@@ -705,6 +666,156 @@ void Processor::process(OrdState::onExecCancel &evnt, OrderEntry *order, const s
     persistOrder(evnt.transaction_, *smState.orderData_);
 }
 
+namespace
+{
+/// Whether the order's cancel/replace zone is at rest, read from its persisted state machine state
+bool noCancelOrReplacePending(const OrderEntry &order)
+{
+    const int zone2 = order.stateMachinePersistance().stateZone2Id_;
+    try
+    {
+        return (0 <= zone2) && ("NoCnlReplace" == OrderState::getStateName(zone2));
+    }
+    catch (const std::exception &)
+    {
+        return false; // a state the machine doesn't know: treat it as not at rest
+    }
+}
+} // namespace
+
+void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEntry &replacement,
+                        const std::string &requester, const ACID::Context & /*cnxt*/)
+{
+    evnt.generator_ = generator_;
+    evnt.orderStorage_ = orderStorage_;
+    evnt.orderBook_ = orderBook_;
+    // A refusal goes out through this transaction, in order with the original's other reports
+    auto refuse = [&](CancelRejectEvent::Reason refusal, const std::string &reason, bool duplicate)
+    {
+        OrderRejectEvent event = makeReplaceRefusal(replacement, original, refusal, reason);
+        event.duplicateClOrderId_ = duplicate;
+        std::unique_ptr<Operation> op(new RefuseReplaceTrOperation(*original, event, requester));
+        evnt.transaction_->addOperation(op);
+    };
+
+    // A market replacement needs an order to trade with. Asked before the original's lock is taken: a matcher can hold
+    // the book's lock while it waits on the original (#74).
+    const Side opposite = (BUY_SIDE == replacement.side_) ? SELL_SIDE : BUY_SIDE;
+    const bool noMarket = (MARKET_ORDERTYPE == replacement.ordType_) &&
+                          !orderBook_->getTop(replacement.instrument_.getId(), opposite).isValid();
+
+    // write lock on the original for the decision and its state machine
+    oneapi::tbb::spin_rw_mutex::scoped_lock origLock(original->entryMutex_, true);
+
+    // Only an order in the book can be replaced, with no cancel or replace of it pending
+    const OrderStatus status = original->status_;
+    if ((NEW_ORDSTATUS != status) && (PARTFILL_ORDSTATUS != status))
+    {
+        refuse(CancelRejectEvent::TOO_LATE, "Replace refused: too late, the order is no longer in the book", false);
+        return;
+    }
+    if (!noCancelOrReplacePending(*original))
+    {
+        refuse(CancelRejectEvent::PENDING, "Replace refused: a cancel or replace of the order is pending", false);
+        return;
+    }
+
+    // The replacement takes over what the original has done: its fills and its executions
+    replacement.orderId_ = IdT();
+    replacement.origOrderId_ = original->orderId_;
+    replacement.origClOrderId_ = original->clOrderId_;
+    replacement.executions_ = original->executions_;
+    replacement.cumQty_ = original->cumQty_;
+    replacement.avgPx_ = original->avgPx_;
+    replacement.status_ = RECEIVEDNEW_ORDSTATUS;
+    if ((replacement.instrument_.getId() != original->instrument_.getId()) || (replacement.side_ != original->side_))
+    {
+        refuse(CancelRejectEvent::OTHER, "Replace refused: a replace cannot change the instrument or the side", false);
+        return;
+    }
+    if (replacement.orderQty_ <= original->cumQty_)
+    {
+        refuse(CancelRejectEvent::OTHER,
+               "Replace refused: quantity " + std::to_string(replacement.orderQty_) + " is not above the " +
+                   std::to_string(original->cumQty_) + " already filled",
+               false);
+        return;
+    }
+    replacement.leavesQty_ = replacement.orderQty_ - original->cumQty_;
+    std::string invalid;
+    if (!replacement.isValid(&invalid))
+    {
+        refuse(CancelRejectEvent::OTHER, "Replace refused: " + invalid, false);
+        return;
+    }
+    if (noMarket)
+    {
+        refuse(CancelRejectEvent::OTHER, "Replace refused: there is no market for this instrument", false);
+        return;
+    }
+
+    // Store it under a fresh id. A ClOrdID already in use is refused, as for a new order (#67).
+    Store::PublishGuard publishGuard;
+    OrderEntry *stored = nullptr;
+    try
+    {
+        stored = orderStorage_->save(replacement, generator_, &publishGuard);
+    }
+    catch (const std::exception &)
+    {
+        bool duplicate = false;
+        std::string clOrdId;
+        try
+        {
+            const RawDataEntry &raw = replacement.clOrderId_.get();
+            clOrdId.assign(raw.data_, raw.length_);
+            duplicate = (nullptr != orderStorage_->locateByClOrderId(raw));
+        }
+        catch (const std::exception &)
+        {
+        }
+        refuse(CancelRejectEvent::OTHER,
+               duplicate ? "Replace refused: ClOrdID " + clOrdId + " is already in use"
+                         : std::string("Replace refused: it could not be stored"),
+               duplicate);
+        return;
+    }
+
+    // The original is replaced: out of the book, with nothing left to fill
+    onExecReplace replaced(stored->orderId_);
+    replaced.generator_ = generator_;
+    replaced.orderStorage_ = orderStorage_;
+    replaced.orderBook_ = orderBook_;
+    replaced.transaction_ = evnt.transaction_;
+    assert(nullptr != threadState().stateMachine);
+    threadState().stateMachine->setPersistance(original->stateMachinePersistance());
+    threadState().stateMachine->process_event(replaced);
+    OrderStatePersistence origState = threadState().stateMachine->getPersistence();
+    assert(nullptr != origState.orderData_);
+    origState.orderData_->setStateMachinePersistance(origState);
+
+    // The replacement goes live: matched, and into the book, as a new order is
+    OrderStatePersistence replState = threadState().initialSMState;
+    replState.orderData_ = stored;
+    threadState().stateMachine->setPersistance(replState);
+    threadState().stateMachine->process_event(evnt);
+    replState = threadState().stateMachine->getPersistence();
+    assert(nullptr != replState.orderData_);
+    replState.orderData_->setStateMachinePersistance(replState);
+    // Everything either machine checks is checked above, so neither can refuse. If one did, the machine swallowed the
+    // error and the status shows it.
+    if ((REPLACED_ORDSTATUS != original->status_) ||
+        ((NEW_ORDSTATUS != stored->status_) && (PARTFILL_ORDSTATUS != stored->status_))) [[unlikely]]
+    {
+        aux::ExchLogger::instance()->error("Processor: a replace that passed its checks did not complete");
+    }
+
+    // Persist both as part of this transaction (#20), ahead of the operations that publish their reports (#28)
+    persistOrder(evnt.transaction_, *stored);
+    persistOrder(evnt.transaction_, *original);
+    publishGuard.release();
+}
+
 void Processor::process(const ACID::TransactionId &id, ACID::Transaction *tr)
 {
     assert(nullptr != tr);
@@ -772,4 +883,38 @@ void Processor::rejectUnstoredOrder(const std::string &source, const OrderEntry 
                                                 : std::string("Order refused: it could not be stored");
     assert(nullptr != outQueues_);
     outQueues_->push(reject, source);
+}
+
+OrderRejectEvent Processor::makeReplaceRefusal(const OrderEntry &replacement, const OrderEntry *original,
+                                               CancelRejectEvent::Reason refusal, const std::string &reason)
+{
+    auto text = [](const RawDataEntry &raw)
+    {
+        return (nullptr != raw.data_) ? std::string(raw.data_, raw.length_) : std::string();
+    };
+    OrderRejectEvent event;
+    event.replacement_ = true;
+    event.refusal_ = refusal;
+    event.side_ = replacement.side_;
+    event.orderQty_ = replacement.orderQty_;
+    event.reason_ = reason;
+    try
+    {
+        event.clOrderId_ = text(replacement.clOrderId_.get());
+        event.symbol_ = replacement.instrument_.get().symbol_;
+        if (nullptr != original)
+        {
+            event.origClOrderId_ = text(original->clOrderId_.get());
+            event.origStatus_ = original->status_;
+        }
+        else if (SourceIdT() != replacement.origClOrderId_.getId())
+        {
+            event.origClOrderId_ = text(replacement.origClOrderId_.get());
+        }
+    }
+    catch (const std::exception &)
+    {
+        // a reference the order carries could not be resolved: report what is known
+    }
+    return event;
 }

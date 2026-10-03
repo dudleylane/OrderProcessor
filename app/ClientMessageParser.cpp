@@ -116,6 +116,7 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
                 readPrice(d, "price", &msg.replaceOrder.price, &msg) &&
                 readUnsigned(d, "orderQty", maxQty, &orderQty, &msg))
             {
+                msg.replaceOrder.clOrderId = d.value("clOrderId", "");
                 msg.replaceOrder.hasPrice = d.contains("price");
                 msg.replaceOrder.hasQty = d.contains("orderQty");
                 msg.replaceOrder.hasTif = d.contains("tif");

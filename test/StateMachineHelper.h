@@ -24,6 +24,8 @@ public:
     ~OrderStateWrapper();
 
     void start();
+    /// The order the machine works on, as Processor sets it before an event that creates none (#74)
+    void setOrderData(COP::OrderEntry *order);
     void processEvent(const COP::OrdState::onOrderReceived &evnt);
     void processEvent(const COP::OrdState::onRplOrderReceived &evnt);
     void processEvent(const COP::OrdState::onNewOrder &evnt);
