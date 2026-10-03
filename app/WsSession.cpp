@@ -29,6 +29,26 @@ std::atomic<u64> containedExceptions{ 0 };
 /// Numbers the ClOrdIDs this server makes up for WebSocket orders, so that two in the same microsecond differ (#67)
 std::atomic<u64> clOrderSequence{ 0 };
 
+/// A ClOrdID for an order or replacement the server makes up. The client did not choose it, so it must not collide
+/// with one already in use, which is refused (#67).
+SourceIdT newClOrderId()
+{
+    std::string clOrdStr = "WS-" +
+                           std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
+                                              std::chrono::system_clock::now().time_since_epoch())
+                                              .count()) +
+                           "-" + std::to_string(clOrderSequence.fetch_add(1, std::memory_order_relaxed) + 1);
+    auto *clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
+    return Store::WideDataStorage::instance()->add(clOrdRaw);
+}
+
+DateTimeT nowMillis()
+{
+    return static_cast<DateTimeT>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count());
+}
+
 /// Longest prefix of a client's request that goes into the log.
 const size_t MAX_LOGGED_REQUEST = 256;
 
@@ -178,15 +198,7 @@ void WsSession::handleMessage(const std::string &msgStr)
             return;
         }
 
-        // Create clOrderId RawDataEntry. The sequence number keeps two orders made in the same microsecond apart: the
-        // client did not choose this ClOrdID, and one already in use is refused (#67).
-        std::string clOrdStr = "WS-" +
-                               std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
-                                                  std::chrono::system_clock::now().time_since_epoch())
-                                                  .count()) +
-                               "-" + std::to_string(clOrderSequence.fetch_add(1, std::memory_order_relaxed) + 1);
-        auto *clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
-        SourceIdT clOrdId = Store::WideDataStorage::instance()->add(clOrdRaw);
+        SourceIdT clOrdId = newClOrderId();
 
         // Empty ID for the unset origClOrderId
         SourceIdT emptyId;
@@ -218,9 +230,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         // The protocol has no settlement type, and an order without one settles regular, as in FIX (#34)
         order->settlType_ = _0_SETTLTYPE;
         order->status_ = RECEIVEDNEW_ORDSTATUS;
-        order->creationTime_ = static_cast<DateTimeT>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
-                .count());
+        order->creationTime_ = nowMillis();
         order->lastUpdateTime_ = order->creationTime_;
 
         Queues::OrderEvent evt(order);
@@ -228,40 +238,66 @@ void WsSession::handleMessage(const std::string &msgStr)
     }
     else if (msg.type == "cancel_order")
     {
-        // A client names the order by its number, the part of its id it sees, or by its ClOrdID, which decides when
-        // given (#58). An order neither finds still goes to the engine, under an invalid id that keeps the number, so
-        // the client gets a cancel_reject naming it.
+        // An order the client names that doesn't exist still goes to the engine, under an invalid id that keeps the
+        // number, so the client gets a cancel_reject naming it (#58)
         const u64 number = msg.cancelOrder.orderId;
-        const std::string &clOrdId = msg.cancelOrder.clOrderId;
-        OrderEntry *order = nullptr;
-        if (!clOrdId.empty())
+        bool answered = false;
+        OrderEntry *order = findOrder(number, msg.cancelOrder.clOrderId, &answered);
+        if (answered)
         {
-            RawDataEntry key(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size()));
-            order = orderStorage_->locateByClOrderId(key);
-            if ((nullptr != order) && (number != order->orderId_.id_))
-            {
-                send(serializeError("Order " + std::to_string(number) + " does not have ClOrdID " + clOrdId));
-                return;
-            }
-        }
-        else
-        {
-            bool ambiguous = false;
-            order = orderStorage_->locateByOrderNumber(number, &ambiguous);
-            if (ambiguous)
-            {
-                send(serializeError("More than one order has number " + std::to_string(number) +
-                                    ": name it by clOrderId as well"));
-                return;
-            }
+            return;
         }
         Queues::OrderCancelEvent evt((nullptr != order) ? order->orderId_ : IdT(number, 0), "Canceled by user");
         inQueues_->push("WebSocket", evt);
     }
     else if (msg.type == "replace_order")
     {
-        // The engine can't complete a replace yet, and a correctly built replacement would crash it (#74)
-        send(serializeError("Replace is not supported yet: cancel the order and send a new one (#74)"));
+        const auto &ro = msg.replaceOrder;
+        if (!ro.hasPrice && !ro.hasQty && !ro.hasTif)
+        {
+            send(serializeError("replace_order changes nothing: give price, orderQty or tif"));
+            return;
+        }
+        bool answered = false;
+        OrderEntry *original = findOrder(ro.orderId, ro.clOrderId, &answered);
+        if (answered)
+        {
+            return;
+        }
+        if (nullptr == original)
+        {
+            send(serializeError("Order not found for replace: " + std::to_string(ro.orderId)));
+            return;
+        }
+
+        // The replacement is the original with the client's changes, a fresh id and a ClOrdID of its own (#74). The
+        // engine decides it, and fills in what the original has done.
+        std::unique_ptr<OrderEntry> replacement;
+        {
+            // read lock: a transaction worker may be updating the original
+            oneapi::tbb::spin_rw_mutex::scoped_lock lock(original->entryMutex_, false);
+            replacement.reset(original->clone());
+        }
+        replacement->orderId_ = IdT();
+        replacement->clOrderId_ = newClOrderId();
+        replacement->origClOrderId_ = original->clOrderId_;
+        if (ro.hasPrice)
+        {
+            replacement->price_ = ro.price;
+        }
+        if (ro.hasQty)
+        {
+            replacement->orderQty_ = ro.orderQty;
+        }
+        if (ro.hasTif)
+        {
+            replacement->tif_ = ro.tif;
+        }
+        replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+        replacement->lastUpdateTime_ = nowMillis();
+
+        Queues::OrderReplaceEvent evt(original->orderId_, replacement.release());
+        inQueues_->push("WebSocket", evt);
     }
     else if (msg.type == "subscribe_book")
     {
@@ -292,6 +328,32 @@ void WsSession::send(const std::string &msg)
     {
         doWrite();
     }
+}
+
+OrderEntry *WsSession::findOrder(u64 number, const std::string &clOrdId, bool *answered)
+{
+    *answered = false;
+    if (!clOrdId.empty())
+    {
+        RawDataEntry key(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size()));
+        OrderEntry *order = orderStorage_->locateByClOrderId(key);
+        if ((nullptr != order) && (number != order->orderId_.id_))
+        {
+            send(serializeError("Order " + std::to_string(number) + " does not have ClOrdID " + clOrdId));
+            *answered = true;
+            return nullptr;
+        }
+        return order;
+    }
+    bool ambiguous = false;
+    OrderEntry *order = orderStorage_->locateByOrderNumber(number, &ambiguous);
+    if (ambiguous)
+    {
+        send(serializeError("More than one order has number " + std::to_string(number) +
+                            ": name it by clOrderId as well"));
+        *answered = true;
+    }
+    return order;
 }
 
 void WsSession::doWrite()

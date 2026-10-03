@@ -155,6 +155,7 @@ struct PartFill : public boost::msm::front::state<>
     template <class FSM> void on_entry(onTradeCrctCncl const &, FSM &);
     template <class FSM> void on_entry(onNewDay const &, FSM &);
     template <class FSM> void on_entry(onContinue const &, FSM &);
+    template <class FSM> void on_entry(onReplace const &, FSM &);
 };
 
 struct Filled : public boost::msm::front::state<>

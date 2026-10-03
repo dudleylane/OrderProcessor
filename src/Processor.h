@@ -107,6 +107,8 @@ public:
     virtual void process(OrdState::onInternalCancel &evnt, OrderEntry *order, const ACID::Context &cnxt);
     virtual void process(OrdState::onExecCancel &evnt, OrderEntry *order, const std::string &requester,
                          const ACID::Context &cnxt);
+    virtual void process(OrdState::onReplace &evnt, OrderEntry *original, OrderEntry &replacement,
+                         const std::string &requester, const ACID::Context &cnxt);
 
 public:
     /// reimplemented from InQueueProcessor
@@ -126,6 +128,10 @@ private:
     void clearDeferedEvents();
     /// Tells the sender that its new order or replacement was refused without being stored (#67)
     void rejectUnstoredOrder(const std::string &source, const OrderEntry &order, bool replacement);
+    /// What tells a client its replace was refused, and why (#74); original is null when it is unknown
+    static Queues::OrderRejectEvent makeReplaceRefusal(const OrderEntry &replacement, const OrderEntry *original,
+                                                       Queues::CancelRejectEvent::Reason refusal,
+                                                       const std::string &reason);
 
 private:
     IdTValueGenerator *generator_;

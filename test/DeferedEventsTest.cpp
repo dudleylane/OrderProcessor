@@ -38,6 +38,8 @@ public:
     std::vector<OrderEntry *> tradeExecutionOrders;
     std::vector<OrderEntry *> internalCancelOrders;
     std::vector<std::pair<OrderEntry *, std::string>> cancelRequests;
+    std::vector<std::pair<OrderEntry *, std::string>> replaceRequests;
+    std::vector<OrderEntry *> replacements;
 
     void process(OrdState::onTradeExecution & /*ev*/, OrderEntry *order, const Context & /*cnxt*/) override
     {
@@ -55,11 +57,20 @@ public:
         cancelRequests.emplace_back(order, requester);
     }
 
+    void process(OrdState::onReplace & /*ev*/, OrderEntry *original, OrderEntry &replacement,
+                 const std::string &requester, const Context & /*cnxt*/) override
+    {
+        replaceRequests.emplace_back(original, requester);
+        replacements.push_back(&replacement);
+    }
+
     void reset()
     {
         tradeExecutionOrders.clear();
         internalCancelOrders.clear();
         cancelRequests.clear();
+        replaceRequests.clear();
+        replacements.clear();
     }
 };
 
@@ -351,6 +362,26 @@ TEST_F(DeferedEventsTest, CancelRequestHandsTheOrderAndRequesterToTheFunctor)
     EXPECT_EQ(order, functor.cancelRequests[0].first);
     EXPECT_EQ("WebSocket", functor.cancelRequests[0].second);
     delete order;
+}
+
+TEST_F(DeferedEventsTest, ReplaceRequestHandsTheOriginalReplacementAndRequesterToTheFunctor)
+{
+    TestDeferedEventFunctor functor;
+    OrderEntry *original = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
+    std::unique_ptr<OrderEntry> replacement(createTestOrder(instrId_, BUY_SIDE, 101.0, 100));
+    OrderEntry *replacementPtr = replacement.get();
+    ReplaceRequestDeferedEvent event(original, std::move(replacement), "WebSocket");
+    Context context;
+
+    event.execute(&functor, context, nullptr);
+
+    ASSERT_EQ(1u, functor.replaceRequests.size());
+    EXPECT_EQ(original, functor.replaceRequests[0].first);
+    EXPECT_EQ("WebSocket", functor.replaceRequests[0].second);
+    ASSERT_EQ(1u, functor.replacements.size());
+    EXPECT_EQ(replacementPtr, functor.replacements[0]);
+    EXPECT_EQ(replacementPtr, event.replacement_.get()) << "the event keeps the replacement";
+    delete original;
 }
 
 TEST_F(DeferedEventsTest, FunctorReset)

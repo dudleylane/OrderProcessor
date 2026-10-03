@@ -276,31 +276,10 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onReplace cons
     std::string reason;
     assert(nullptr != orderData);
 
+    // Processor::process(onReplace) has already checked the original, and that a market replacement has an order to
+    // trade with, and it replaces the original itself. This runs under the original's lock, so it must not call into
+    // the book: a matcher holding the book's lock can be waiting on the original (#74).
     if (!orderData->isValid(&reason))
-    {
-        throw std::runtime_error(reason.c_str());
-    }
-    if (MARKET_ORDERTYPE == orderData->ordType_)
-    {
-        assert(nullptr != evnt.orderBook_);
-        if (!evnt.orderBook_->find(FindAnyOpositeOrder(orderData)).isValid())
-        {
-            throw std::runtime_error("There is no market for this instrument!");
-        }
-    }
-
-    assert(evnt.origOrderId_.isValid());
-    assert(nullptr != evnt.orderStorage_);
-    OrderEntry *origOrder = evnt.orderStorage_->locateByOrderId(orderData->origOrderId_);
-    if (nullptr == origOrder)
-    {
-        throw std::runtime_error("Unable to locate original order for OrderReplaceAccept!");
-    }
-
-    // read lock on original order during field access
-    oneapi::tbb::spin_rw_mutex::scoped_lock origLock(origOrder->entryMutex_, false);
-
-    if (!origOrder->isReplaceValid(&reason))
     {
         throw std::runtime_error(reason.c_str());
     }
@@ -314,10 +293,6 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onReplace cons
         std::unique_ptr<Operation> addOp(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
         evnt.transaction_->addOperation(addOp);
     }
-    // change original order to CnclReplaced
-    std::unique_ptr<Operation> execOp(
-        new EnqueueOrderEventTrOperation<onExecReplace>(*origOrder, onExecReplace(orderData->orderId_)));
-    evnt.transaction_->addOperation(execOp);
 }
 
 void OrdStateImpl::processReject(OrderEntry *orderData, OrdState::onRplOrderRejected const &evnt)
@@ -594,6 +569,9 @@ void OrdStateImpl::processReplaced(OrderEntry *orderData, OrdState::onExecReplac
         std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
         evnt.transaction_->addOperation(op1);
     }
+    // Its quantity lives on in the replacement. Zero now, as for a cancel (#73): until the removal above runs, the
+    // matcher skips an order with no leaves, and a trade matched against it earlier is refused (#74).
+    orderData->leavesQty_ = 0;
 }
 void OrdStateImpl::processReceive(OrderEntry *, OrdState::onReplaceReceived const &) {}
 bool OrdStateImpl::processAcceptable(OrdState::onReplaceReceived const & /*evnt*/)

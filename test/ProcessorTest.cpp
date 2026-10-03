@@ -481,15 +481,44 @@ TEST_F(ProcessorTest, ProcessReplaceEvent)
     ASSERT_NE(nullptr, savedOrder);
     EXPECT_EQ(NEW_ORDSTATUS, savedOrder->status_);
 
-    // Submit a replace event (notify original order about replace)
-    OrderReplaceEvent replaceEvent(savedOrder->orderId_);
-    inQueues_->push("test", replaceEvent);
+    // Replace it: the original with a new price, a fresh id and a ClOrdID of its own. With transactions run inline, the
+    // decision runs within process() (#74).
+    OrderEntry *replacement = savedOrder->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = savedOrder->clOrderId_;
+    replacement->price_ = 11.0;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    RawDataEntry replacementId = replacement->clOrderId_.get();
+    inQueues_->push("test", OrderReplaceEvent(savedOrder->orderId_, replacement));
 
     processor_->process();
 
-    // Order should have received the replace notification
-    savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    EXPECT_EQ(REPLACED_ORDSTATUS, savedOrder->status_);
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    EXPECT_EQ(NEW_ORDSTATUS, live->status_);
+    EXPECT_DOUBLE_EQ(11.0, live->price_);
+    EXPECT_EQ(savedOrder->orderId_, live->origOrderId_);
+}
+
+TEST_F(ProcessorTest, ReplaceWithoutAReplacementOrderChangesNothing)
+{
+    // Before #74 such a request moved the order into GoingReplace, where nothing completed it and every later cancel or
+    // replace found one pending
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor_->process();
+    OrderEntry *savedOrder = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, savedOrder);
+    const int zone2 = savedOrder->stateMachinePersistance().stateZone2Id_;
+
+    inQueues_->push("test", OrderReplaceEvent(savedOrder->orderId_));
+    processor_->process();
+
+    EXPECT_EQ(NEW_ORDSTATUS, savedOrder->status_);
+    EXPECT_EQ(zone2, savedOrder->stateMachinePersistance().stateZone2Id_);
 }
 
 // =============================================================================
