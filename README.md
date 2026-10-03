@@ -316,8 +316,8 @@ The server communicates with clients via JSON messages over WebSocket. All messa
 | Type | Payload | Description |
 |------|---------|-------------|
 | `new_order` | `NewOrderRequest` | Submit a new order |
-| `cancel_order` | `{orderId, clOrderId?}` | Cancel an existing order: answered with a `CANCELED` execution report, or a `cancel_reject` |
-| `replace_order` | `{orderId, price?, orderQty?, tif?}` | Modify an existing order |
+| `cancel_order` | `{orderId, clOrderId?}` | Cancel an existing order: answered with a `CANCELED` execution report, or a `cancel_reject`. With `clOrderId`, that names the order and `orderId` must match it. Without, `orderId` does; a number more than one order has (possible only in a data directory written before order numbers continued across restarts) gets an `error` asking for `clOrderId` |
+| `replace_order` | `{orderId, price?, orderQty?, tif?}` | Modify an existing order. Not supported yet: answered with an `error` (#74) |
 | `subscribe_book` | `{symbol}` | Subscribe to order book updates for a symbol |
 | `unsubscribe_book` | `{symbol}` | Unsubscribe from order book updates |
 

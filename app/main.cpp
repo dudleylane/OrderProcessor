@@ -175,6 +175,12 @@ int main(int argc, char *argv[])
 
     aux::ExchLogger::instance()->note("Phase 2 LMDB load complete (orders restored)");
 
+    // Order and execution ids come from one counter, which starts at 1 in every run. Continue it past the orders just
+    // restored, so that no new order gets a number a restored order already has: clients name orders by number (#58).
+    const u64 lastOrderNumber = Store::OrderStorage::instance()->maxOrderNumber();
+    IdTGenerator::instance()->advancePast(lastOrderNumber);
+    aux::ExchLogger::instance()->note("Order numbers continue after " + std::to_string(lastOrderNumber));
+
     // Resolve the defaults that WebSocket and FIX orders need (#34). Without them the server still starts, as it does
     // on an unseeded directory, but refuses the orders that need them. seedData provides both.
     const SourceIdT defaultClearingId = Store::WideDataStorage::instance()->findClearingByFirm(cfg.clearingFirm);
