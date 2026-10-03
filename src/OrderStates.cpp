@@ -146,6 +146,20 @@ template <class FSM> void New::on_entry(onOrderReceived const &evnt, FSM &)
     evnt.transaction_->addOperation(op);
 }
 
+template <class FSM> void PartFill::on_entry(onReplace const &evnt, FSM &)
+{
+    if (evnt.testStateMachine_)
+    {
+        return;
+    }
+    assert(nullptr != evnt.order4StateMachine_);
+    evnt.order4StateMachine_->status_ = PARTFILL_ORDSTATUS;
+
+    std::unique_ptr<Operation> op(
+        new CreateReplaceExecReportTrOperation(evnt.origOrderId_, COP::PARTFILL_ORDSTATUS, *evnt.order4StateMachine_));
+    evnt.transaction_->addOperation(op);
+}
+
 template <class FSM> void New::on_entry(onReplace const &evnt, FSM &)
 {
     if (evnt.testStateMachine_)
@@ -253,8 +267,9 @@ template <class FSM> void CnclReplaced::on_entry(onExecReplace const &evnt, FSM 
     assert(nullptr != evnt.order4StateMachine_);
     evnt.order4StateMachine_->status_ = REPLACED_ORDSTATUS;
 
-    std::unique_ptr<Operation> op(
-        new CreateReplaceExecReportTrOperation(evnt.orderId_, COP::REPLACED_ORDSTATUS, *evnt.order4StateMachine_));
+    // A REPLACE report names the order that was replaced: the replacement's, and this one's, name this order (#74)
+    std::unique_ptr<Operation> op(new CreateReplaceExecReportTrOperation(
+        evnt.order4StateMachine_->orderId_, COP::REPLACED_ORDSTATUS, *evnt.order4StateMachine_));
     evnt.transaction_->addOperation(op);
 }
 
@@ -509,6 +524,7 @@ template void PartFill::on_entry<OrderState>(onTradeExecution const &, OrderStat
 template void PartFill::on_entry<OrderState>(onTradeCrctCncl const &, OrderState &);
 template void PartFill::on_entry<OrderState>(onNewDay const &, OrderState &);
 template void PartFill::on_entry<OrderState>(onContinue const &, OrderState &);
+template void PartFill::on_entry<OrderState>(onReplace const &, OrderState &);
 
 // Filled state on_entry instantiations
 template void Filled::on_entry<OrderState>(onTradeExecution const &, OrderState &);

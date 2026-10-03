@@ -204,8 +204,10 @@ protected:
         return cancel;
     }
 
-    /// Restores an order with this id and ClOrdID, as a load from persistence does
-    static OrderEntry *restoreOrder(const IdT &id, const std::string &clOrdId)
+    /// Restores an order with this id and ClOrdID, as a load from persistence does. Its fields are set before it is
+    /// stored, so the storage's lock orders them before the session reads them.
+    static OrderEntry *restoreOrder(const IdT &id, const std::string &clOrdId, Side side = BUY_SIDE,
+                                    PriceT price = 150.0, QuantityT qty = 100)
     {
         SourceIdT clOrderId = WideDataStorage::instance()->add(
             new RawDataEntry(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size())));
@@ -213,8 +215,36 @@ protected:
         auto *order = new OrderEntry(SourceIdT(), SourceIdT(), clOrderId, SourceIdT(), instrument, SourceIdT(),
                                      SourceIdT(), SourceIdT());
         order->orderId_ = id;
+        order->side_ = side;
+        order->price_ = price;
+        order->orderQty_ = qty;
+        order->leavesQty_ = qty;
         OrderStorage::instance()->restore(order);
         return order;
+    }
+
+    /// Takes the replace the session queued, with a copy of its replacement, polling as takeQueuedOrder() does. Empty
+    /// when nothing was queued.
+    std::optional<std::pair<IdT, std::unique_ptr<OrderEntry>>>
+    takeQueuedReplace(std::chrono::milliseconds timeout = REPLY_TIMEOUT)
+    {
+        std::optional<std::pair<IdT, std::unique_ptr<OrderEntry>>> replace;
+        testing::NiceMock<test::MockInQueueProcessor> processor;
+        // pop() frees the event's replacement after dispatch, so keep a copy (#74)
+        ON_CALL(processor, onEvent(testing::_, testing::An<const Queues::OrderReplaceEvent &>()))
+            .WillByDefault(
+                [&replace](const std::string &, const Queues::OrderReplaceEvent &evnt)
+                {
+                    replace.emplace(evnt.id_, std::unique_ptr<OrderEntry>(nullptr != evnt.replacementOrder_
+                                                                              ? evnt.replacementOrder_->clone()
+                                                                              : nullptr));
+                });
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (!inQueues_.pop(&processor) && std::chrono::steady_clock::now() < deadline)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return replace;
     }
 
     /// The session still reads and answers: an unknown type gets the ordinary error reply.
@@ -550,11 +580,70 @@ TEST_F(WsSessionTest, CancelByAnUnknownClOrdIdGoesToTheEngineAsUnknown)
     EXPECT_FALSE(cancel->id_.isValid());
 }
 
-TEST_F(WsSessionTest, ReplaceIsRefusedUntilTheEngineCanCompleteIt)
+// =============================================================================
+// Replacing orders (#74)
+// =============================================================================
+
+TEST_F(WsSessionTest, ReplaceBuildsTheReplacementFromTheOriginal)
 {
-    // The engine can't complete a replace, and a correctly built replacement would crash it (#74). Before #58 the
-    // session looked the order up as (number, 1) and answered "Order not found for replace".
+    // The replacement is the original with the client's changes, a fresh id and a ClOrdID of its own, naming the
+    // original (#74). Before, the session answered every replace with an error.
+    OrderEntry *original = restoreOrder(IdT(7, 1790000100), "CL-7", BUY_SIDE, 150.0, 100);
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"replace_order","data":{"orderId":7,"price":151.0,"orderQty":80}})");
+    auto replace = takeQueuedReplace();
+    ASSERT_TRUE(replace.has_value()) << "no replace queued; escaped: " << escaped();
+    EXPECT_EQ(original->orderId_, replace->first);
+    ASSERT_NE(nullptr, replace->second);
+    const OrderEntry &replacement = *replace->second;
+    EXPECT_FALSE(replacement.orderId_.isValid());
+    const RawDataEntry &clOrd = replacement.clOrderId_.get();
+    const std::string clOrdId(clOrd.data_, clOrd.length_);
+    EXPECT_TRUE(std::regex_match(clOrdId, std::regex("WS-[0-9]+-[0-9]+"))) << clOrdId;
+    const RawDataEntry &origClOrd = replacement.origClOrderId_.get();
+    EXPECT_EQ("CL-7", std::string(origClOrd.data_, origClOrd.length_));
+    EXPECT_DOUBLE_EQ(151.0, replacement.price_);
+    EXPECT_EQ(80u, replacement.orderQty_);
+    EXPECT_EQ(BUY_SIDE, replacement.side_);
+    EXPECT_EQ(original->instrument_.getId(), replacement.instrument_.getId());
+}
+
+TEST_F(WsSessionTest, ReplaceThatChangesNothingIsRefused)
+{
+    // The frontend's Replace button sends no changes, until it has a form for them
     restoreOrder(IdT(7, 1790000100), "CL-7");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"replace_order","data":{"orderId":7}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("replace_order changes nothing: give price, orderQty or tif", reply->value("message", ""));
+    EXPECT_EQ(0u, inQueues_.size());
+}
+
+TEST_F(WsSessionTest, ReplaceOfAnUnknownOrderIsRefused)
+{
+    restoreOrder(IdT(7, 1790000100), "CL-7");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"replace_order","data":{"orderId":999,"price":151.0}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Order not found for replace: 999", reply->value("message", ""));
+    EXPECT_EQ(0u, inQueues_.size());
+}
+
+TEST_F(WsSessionTest, ReplaceOfANumberTwoOrdersShareIsRefused)
+{
+    restoreOrder(IdT(7, 1790000100), "CL-7A");
+    restoreOrder(IdT(7, 1790009999), "CL-7B");
     Client client;
     connect(client);
     ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
@@ -562,8 +651,22 @@ TEST_F(WsSessionTest, ReplaceIsRefusedUntilTheEngineCanCompleteIt)
     send(client, R"({"type":"replace_order","data":{"orderId":7,"price":151.0}})");
     auto reply = readUntil(client, "error");
     ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
-    EXPECT_EQ("Replace is not supported yet: cancel the order and send a new one (#74)", reply->value("message", ""));
+    EXPECT_EQ("More than one order has number 7: name it by clOrderId as well", reply->value("message", ""));
     EXPECT_EQ(0u, inQueues_.size());
+}
+
+TEST_F(WsSessionTest, ReplaceByClOrdIdNamesTheOrderEvenWhenItsNumberIsShared)
+{
+    restoreOrder(IdT(7, 1790000100), "CL-7A");
+    OrderEntry *second = restoreOrder(IdT(7, 1790009999), "CL-7B");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"replace_order","data":{"orderId":7,"clOrderId":"CL-7B","price":151.0}})");
+    auto replace = takeQueuedReplace();
+    ASSERT_TRUE(replace.has_value()) << "no replace queued; escaped: " << escaped();
+    EXPECT_EQ(second->orderId_, replace->first);
 }
 
 } // namespace

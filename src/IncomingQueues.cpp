@@ -110,6 +110,10 @@ bool IncomingQueues::pop()
             {
                 std::unique_ptr<OrderEntry> ord(orderEvt->order_);
             }
+            else if (auto *replaceEvt = std::get_if<OrderReplaceEvent>(&pendingEvent_->event_))
+            {
+                std::unique_ptr<OrderEntry> ord(replaceEvt->replacementOrder_);
+            }
             pendingEvent_.reset();
             queueSize_.fetch_sub(1, std::memory_order_release);
             return true;
@@ -127,6 +131,10 @@ bool IncomingQueues::pop()
     if (auto *orderEvt = std::get_if<OrderEvent>(&event.event_))
     {
         std::unique_ptr<OrderEntry> ord(orderEvt->order_);
+    }
+    else if (auto *replaceEvt = std::get_if<OrderReplaceEvent>(&event.event_))
+    {
+        std::unique_ptr<OrderEntry> ord(replaceEvt->replacementOrder_);
     }
 
     queueSize_.fetch_sub(1, std::memory_order_release);
@@ -167,6 +175,11 @@ bool IncomingQueues::pop(InQueueProcessor *obs)
     if (auto *orderEvt = std::get_if<OrderEvent>(&event.event_))
     {
         ordCleanup.reset(orderEvt->order_);
+    }
+    else if (auto *replaceEvt = std::get_if<OrderReplaceEvent>(&event.event_))
+    {
+        // a replacement is owned the same way, and the processor keeps a copy (#74)
+        ordCleanup.reset(replaceEvt->replacementOrder_);
     }
 
     dispatchEvent(obs, event.source_, event.event_);
@@ -236,7 +249,11 @@ void IncomingQueues::push(const std::string &source, const OrderCancelEvent &evn
 
 void IncomingQueues::push(const std::string &source, const OrderReplaceEvent &evnt)
 {
+    // The queue owns the replacement from here, as it owns a new order (#74)
+    std::unique_ptr<OrderEntry> ord(evnt.replacementOrder_);
+
     eventQueue_.push(QueuedEvent(source, evnt));
+    ord.release();
     queueSize_.fetch_add(1, std::memory_order_release);
 
     InQueuesObserver *obs = observer_.load(std::memory_order_acquire);
@@ -295,6 +312,10 @@ void IncomingQueues::clear()
             {
                 std::unique_ptr<OrderEntry> ord(orderEvt->order_);
             }
+            else if (auto *replaceEvt = std::get_if<OrderReplaceEvent>(&pendingEvent_->event_))
+            {
+                std::unique_ptr<OrderEntry> ord(replaceEvt->replacementOrder_);
+            }
             pendingEvent_.reset();
         }
     }
@@ -306,6 +327,10 @@ void IncomingQueues::clear()
         if (auto *orderEvt = std::get_if<OrderEvent>(&event.event_))
         {
             std::unique_ptr<OrderEntry> ord(orderEvt->order_);
+        }
+        else if (auto *replaceEvt = std::get_if<OrderReplaceEvent>(&event.event_))
+        {
+            std::unique_ptr<OrderEntry> ord(replaceEvt->replacementOrder_);
         }
     }
 

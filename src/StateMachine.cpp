@@ -191,6 +191,16 @@ void OrderState_::accept(onReplace const &evnt)
     }
 }
 
+bool OrderState_::hasFills(onReplace const &evnt)
+{
+    if (evnt.testStateMachine_)
+    {
+        return evnt.testStateMachineCheckResult_;
+    }
+    assert(nullptr != orderData_);
+    return 0 < orderData_->cumQty_;
+}
+
 bool OrderState_::notexecuted(onTradeExecution const &evnt)
 {
     if (evnt.testStateMachine_)

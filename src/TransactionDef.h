@@ -102,7 +102,9 @@ typedef enum OperationType
     CREATE_REPLACE_EXECREPORT_TROPERATION, // creates and enqueues replace ExecutionReport for the changed order
     CREATE_CORRECT_EXECREPORT_TROPERATION, // creates and enqueues Correct ExecutionReport for the changed order
     PERSIST_ORDER_TROPERATION,             // writes a new persisted version of the changed order
-    CANCEL_ORDER_TROPERATION               // hands a client's cancel to the processor once it is the order's turn
+    CANCEL_ORDER_TROPERATION,              // hands a client's cancel to the processor once it is the order's turn
+    REPLACE_ORDER_TROPERATION,             // hands a client's replace to the processor once it is the order's turn
+    REFUSE_REPLACE_TROPERATION             // tells the requester that its replace was refused
 };
 
 struct Context

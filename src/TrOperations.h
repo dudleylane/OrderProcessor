@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include <string_view>
 #include "TransactionDef.h"
@@ -211,6 +212,42 @@ public:
 private:
     OrderStatus status_;
     Queues::CancelRejectEvent::Reason reason_;
+    std::string requester_;
+};
+
+/// Hands a client's replace to the processor as a deferred event, so it is decided after every transaction before it on
+/// the original or its instrument has run, together with the fills those caused (#74). It owns the replacement until
+/// then.
+class ReplaceOrderTrOperation final : public Operation
+{
+public:
+    ReplaceOrderTrOperation(OrderEntry *original, std::unique_ptr<OrderEntry> replacement,
+                            const std::string &requester);
+    ~ReplaceOrderTrOperation();
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    OrderEntry *original_;
+    std::unique_ptr<OrderEntry> replacement_;
+    std::string requester_;
+    size_t eventCountBefore_;
+};
+
+/// Tells the requester that its replace was refused, in order with the original's other reports (#74)
+class RefuseReplaceTrOperation final : public Operation
+{
+public:
+    RefuseReplaceTrOperation(const OrderEntry &original, const Queues::OrderRejectEvent &refusal,
+                             const std::string &requester);
+    ~RefuseReplaceTrOperation();
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    Queues::OrderRejectEvent refusal_;
     std::string requester_;
 };
 

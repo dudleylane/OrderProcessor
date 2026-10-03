@@ -135,6 +135,7 @@ export interface CancelOrderRequest {
 
 export interface ReplaceOrderRequest {
   orderId: number;
+  clOrderId?: string;
   price?: number;
   orderQty?: number;
   tif?: TimeInForce;
