@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <exception>
+#include <memory>
 #include <vector>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
@@ -30,8 +31,6 @@ const size_t MAX_LOGGED_MESSAGE = 256;
 /// its FIX 4.2 meaning. The engine's reject reasons are free text, so every reject goes out with this code and the
 /// reason itself in Text (58).
 const int ORD_REJ_REASON_BROKER_OPTION = 0;
-/// CxlRejReason (102) value 2, "Broker / Exchange option" in FIX 4.4 (QuickFIX: CxlRejReason_BROKER_CREDIT)
-const int CXL_REJ_REASON_BROKER_OPTION = 2;
 /// Numbers the ExecIDs of rejects for orders that were never stored, which have no execution of their own (#67)
 std::atomic<u64> orderRejectSequence{ 0 };
 
@@ -49,6 +48,21 @@ std::string cancelRejectText(const Queues::CancelRejectEvent &evnt)
         return "Cancel rejected: a replace of the order is pending";
     default:
         return "Cancel rejected";
+    }
+}
+/// CxlRejReason (102) for the engine's reason, the same for a refused cancel (434=1) and a refused replace (434=2)
+int cxlRejReasonFor(Queues::CancelRejectEvent::Reason reason)
+{
+    switch (reason)
+    {
+    case Queues::CancelRejectEvent::UNKNOWN_ORDER:
+        return FIX::CxlRejReason_UNKNOWN_ORDER;
+    case Queues::CancelRejectEvent::TOO_LATE:
+        return FIX::CxlRejReason_TOO_LATE_TO_CANCEL;
+    case Queues::CancelRejectEvent::PENDING:
+        return FIX::CxlRejReason_ORDER_ALREADY_IN_PENDING_STATUS;
+    default:
+        return FIX::CxlRejReason_OTHER;
     }
 }
 } // namespace
@@ -572,6 +586,8 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
 {
     FIX::OrigClOrdID origClOrdId;
     msg.get(origClOrdId);
+    FIX::ClOrdID clOrdId;
+    msg.get(clOrdId);
 
     std::string origClOrdStr = origClOrdId.getString();
     RawDataEntry rawKey(STRING_RAWDATATYPE, origClOrdStr.c_str(), static_cast<u32>(origClOrdStr.size()));
@@ -579,10 +595,75 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
     if (!existing)
     {
         aux::ExchLogger::instance()->error("FIX: Replace - order not found: " + origClOrdStr);
+        // Answered here, as a cancel of an unknown order is (#73), quoting the request's own ClOrdIDs
+        try
+        {
+            FIX44::OrderCancelReject reject = buildUnknownReplaceReject(clOrdId.getString(), origClOrdStr);
+            FIX::Session::sendToTarget(reject, sid);
+        }
+        catch (const std::exception &ex)
+        {
+            aux::ExchLogger::instance()->error(std::string("FixGateway: could not send the replace reject: ") +
+                                               ex.what());
+        }
         return;
     }
 
-    OrderEntry *replacement = existing->clone();
+    // The replacement is the original with the request's changes, a fresh id and the request's ClOrdID (11), naming the
+    // original (#74). The engine decides it, and carries over what the original has filled.
+    std::unique_ptr<OrderEntry> replacement;
+    std::string origOrderId;
+    char origStatus = FIX::OrdStatus_NEW;
+    {
+        // read lock: a transaction worker may be updating the original
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(existing->entryMutex_, false);
+        replacement.reset(existing->clone());
+        origOrderId = std::to_string(existing->orderId_.id_);
+        origStatus = fromOrdStatus(existing->status_);
+    }
+
+    // Side and Symbol name the order, and FIX requires them to match it; carried over, so that the engine refuses a
+    // replace that changes either, rather than keeping the original's without a word
+    FIX::Side side;
+    if (msg.isSet(side))
+    {
+        msg.get(side);
+        replacement->side_ = toSide(side.getValue());
+    }
+    FIX::Symbol symbol;
+    if (msg.isSet(symbol))
+    {
+        msg.get(symbol);
+        const SourceIdT instrument = wideData_->findInstrumentBySymbol(symbol.getString());
+        if (!instrument.isValid())
+        {
+            // Refused here: the engine's refusal can only describe an instrument that exists
+            Queues::OrderRejectEvent refusal;
+            refusal.replacement_ = true;
+            refusal.clOrderId_ = clOrdId.getString();
+            refusal.origClOrderId_ = origClOrdStr;
+            refusal.refusal_ = Queues::CancelRejectEvent::OTHER;
+            refusal.reason_ = "Replace refused: unknown instrument " + symbol.getString();
+            try
+            {
+                FIX44::OrderCancelReject reject = buildReplaceReject(refusal, origOrderId, origStatus);
+                FIX::Session::sendToTarget(reject, sid);
+            }
+            catch (const std::exception &ex)
+            {
+                aux::ExchLogger::instance()->error(std::string("FixGateway: could not send the replace reject: ") +
+                                                   ex.what());
+            }
+            return;
+        }
+        replacement->instrument_ = instrument;
+    }
+
+    replacement->orderId_ = IdT();
+    replacement->origClOrderId_ = replacement->clOrderId_;
+    const std::string clOrdStr = clOrdId.getString();
+    replacement->clOrderId_ = WideDataStorage::instance()->add(
+        new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size())));
 
     FIX::Price price;
     if (msg.isSet(price))
@@ -596,7 +677,6 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
     {
         msg.get(orderQty);
         replacement->orderQty_ = static_cast<QuantityT>(orderQty.getValue());
-        replacement->leavesQty_ = replacement->orderQty_;
     }
 
     FIX::TimeInForce tif;
@@ -605,9 +685,14 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
         msg.get(tif);
         replacement->tif_ = toTif(tif.getValue());
     }
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    replacement->lastUpdateTime_ = static_cast<DateTimeT>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count());
 
+    // The queue owns the replacement once pushed (#74)
     std::string sourceStr = makeSourceString(sid);
-    Queues::OrderReplaceEvent evt(existing->orderId_, replacement);
+    Queues::OrderReplaceEvent evt(existing->orderId_, replacement.release());
     inQueues_->push(sourceStr, evt);
 }
 
@@ -621,8 +706,18 @@ bool FixGateway::hasFixSession(const std::string &source) const
     return sessionMap_.find(source) != sessionMap_.end();
 }
 
+bool FixGateway::reportsOverFix(const ExecutionEntry *exec)
+{
+    return (REPLACE_EXECTYPE != exec->type_) || (REPLACED_ORDSTATUS != exec->orderStatus_);
+}
+
 void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntry &order)
 {
+    if (!reportsOverFix(exec))
+    {
+        return; // the replacement's report acknowledges the replace (#74)
+    }
+
     std::string source = order.source_.get();
 
     FIX::SessionID sid;
@@ -652,6 +747,15 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
     if (clOrd.data_ && clOrd.length_ > 0)
     {
         report.set(FIX::ClOrdID(std::string(clOrd.data_, clOrd.length_)));
+    }
+    // A replace is acknowledged with the replacement's report, which names the order it replaced in OrigClOrdID (41)
+    if ((REPLACE_EXECTYPE == exec->type_) && (SourceIdT() != order.origClOrderId_.getId()))
+    {
+        const auto &origClOrd = order.origClOrderId_.get();
+        if (origClOrd.data_ && origClOrd.length_ > 0)
+        {
+            report.set(FIX::OrigClOrdID(std::string(origClOrd.data_, origClOrd.length_)));
+        }
     }
 
     report.set(FIX::Symbol(order.instrument_.get().symbol_));
@@ -742,9 +846,10 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
     {
         if (evnt.replacement_)
         {
-            // The original order is stored, and the reject describes it
+            // The reject describes the order it was to replace: its OrderID, and its status as the engine saw it when
+            // it refused (#74), or as it is now; Rejected when there is no such order
             std::string origOrderId = "NONE";
-            char origStatus = FIX::OrdStatus_NEW;
+            char origStatus = FIX::OrdStatus_REJECTED;
             RawDataEntry rawKey(STRING_RAWDATATYPE, evnt.origClOrderId_.c_str(),
                                 static_cast<u32>(evnt.origClOrderId_.size()));
             if (OrderEntry *orig = orderStorage_->locateByClOrderId(rawKey))
@@ -752,6 +857,10 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
                 oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(orig->entryMutex_, false);
                 origOrderId = std::to_string(orig->orderId_.id_);
                 origStatus = fromOrdStatus(orig->status_);
+            }
+            if (INVALID_ORDSTATUS != evnt.origStatus_)
+            {
+                origStatus = fromOrdStatus(evnt.origStatus_);
             }
             FIX44::OrderCancelReject reject = buildReplaceReject(evnt, origOrderId, origStatus);
             FIX::Session::sendToTarget(reject, sid);
@@ -798,9 +907,21 @@ FIX44::OrderCancelReject FixGateway::buildReplaceReject(const Queues::OrderRejec
                                     FIX::OrigClOrdID(evnt.origClOrderId_), FIX::OrdStatus(origStatus),
                                     FIX::CxlRejResponseTo(FIX::CxlRejResponseTo_ORDER_CANCEL_REPLACE_REQUEST));
     reject.set(FIX::CxlRejReason(evnt.duplicateClOrderId_ ? FIX::CxlRejReason_DUPLICATE_CL_ORD_ID
-                                                          : CXL_REJ_REASON_BROKER_OPTION));
+                                                          : cxlRejReasonFor(evnt.refusal_)));
     reject.set(FIX::Text(evnt.reason_));
     return reject;
+}
+
+FIX44::OrderCancelReject FixGateway::buildUnknownReplaceReject(const std::string &clOrdId,
+                                                               const std::string &origClOrdId)
+{
+    Queues::OrderRejectEvent unknown;
+    unknown.replacement_ = true;
+    unknown.clOrderId_ = clOrdId;
+    unknown.origClOrderId_ = origClOrdId;
+    unknown.refusal_ = Queues::CancelRejectEvent::UNKNOWN_ORDER;
+    unknown.reason_ = "Replace refused: unknown order";
+    return buildReplaceReject(unknown, "NONE", FIX::OrdStatus_REJECTED);
 }
 
 FIX44::OrderCancelReject FixGateway::buildCancelReject(const Queues::CancelRejectEvent &evnt,
@@ -812,22 +933,7 @@ FIX44::OrderCancelReject FixGateway::buildCancelReject(const Queues::CancelRejec
     FIX44::OrderCancelReject reject(FIX::OrderID(orderId), FIX::ClOrdID(clOrdId), FIX::OrigClOrdID(origClOrdId),
                                     FIX::OrdStatus(status),
                                     FIX::CxlRejResponseTo(FIX::CxlRejResponseTo_ORDER_CANCEL_REQUEST));
-    int reason = FIX::CxlRejReason_OTHER;
-    switch (evnt.reason_)
-    {
-    case Queues::CancelRejectEvent::UNKNOWN_ORDER:
-        reason = FIX::CxlRejReason_UNKNOWN_ORDER;
-        break;
-    case Queues::CancelRejectEvent::TOO_LATE:
-        reason = FIX::CxlRejReason_TOO_LATE_TO_CANCEL;
-        break;
-    case Queues::CancelRejectEvent::PENDING:
-        reason = FIX::CxlRejReason_ORDER_ALREADY_IN_PENDING_STATUS;
-        break;
-    default:
-        break;
-    }
-    reject.set(FIX::CxlRejReason(reason));
+    reject.set(FIX::CxlRejReason(cxlRejReasonFor(evnt.reason_)));
     reject.set(FIX::Text(cancelRejectText(evnt)));
     return reject;
 }
@@ -1028,7 +1134,10 @@ char FixGateway::fromOrdStatus(OrderStatus s)
     case REJECTED_ORDSTATUS:
         return FIX::OrdStatus_REJECTED;
     case REPLACED_ORDSTATUS:
-        return FIX::OrdStatus_REPLACED;
+        // FIX 4.4 has no Replaced status: 39=5 is not in its dictionary, so a validating client refuses a message
+        // that carries it. A replaced order is closed, its quantity moved to the replacement, which has its own
+        // acknowledgement (#74); a cancel or replace that names it later gets 102=0 and this.
+        return FIX::OrdStatus_CANCELED;
     case PENDINGNEW_ORDSTATUS:
         return FIX::OrdStatus_PENDING_NEW;
     case PENDINGREPLACE_ORDSTATUS:

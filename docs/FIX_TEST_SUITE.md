@@ -65,6 +65,8 @@ Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBo
 | `TwoOrders_MatchAndFill` | Sell + buy at same price → both FILLED, cumQty=100 |
 | `PartialFill` | Sell 50 + buy 100 → sell FILLED, buy PARTFILL with leavesQty=50 |
 | `CancelOrder_ViaFix_Queued` | FIX OrderCancelRequest translates and queues correctly |
+| `ReplaceOrder_ViaFix_Completes` | FIX OrderCancelReplaceRequest → original REPLACED, replacement NEW under the request's ClOrdID, one REPLACE report each |
+| `ReplaceOfAFilledOrder_ViaFix_IsRefusedToTheSender` | Replace of a filled order → refused (too late) to the sending session, with the request's ClOrdIDs |
 | `SourceStringPreserved` | Order source tracks back to `"FIX:TRADER_A->ORDER_PROCESSOR"` |
 | `MarketOrder_FillsImmediately` | Market order enters pipeline with correct type/side/qty |
 
@@ -84,7 +86,7 @@ Pure unit tests for static enum conversion functions. No I/O, no singletons.
 | `OrdTypeConversion` | FIX OrdType (1,2,3,4) → COP OrderType |
 | `TifConversion` | FIX TimeInForce (0,1,2,3,4,7) → COP TimeInForce |
 | `CurrencyConversion` | FIX currency strings → COP Currency (8 currencies + invalid) |
-| `OrdStatusConversion` | COP OrderStatus → FIX OrdStatus chars (11 statuses) |
+| `OrdStatusConversion` | COP OrderStatus → FIX OrdStatus chars (11 statuses; REPLACED → 4, since FIX 4.4 has no 39=5) |
 | `ExecTypeConversion` | COP ExecType → FIX ExecType chars (12 types) |
 
 ---
@@ -102,7 +104,12 @@ Tests FIX message parsing and OrderEntry construction using `MockInQueues` to ca
 | `NewOrderSingle_MarketOrder` | Market order: ordType=MARKET, side=SELL, qty=50 |
 | `NewOrderSingle_UnknownSymbol_NoPush` | Unknown symbol → no event pushed, error logged |
 | `CancelRequest_PushesToQueue` | OrderCancelRequest → OrderCancelEvent with correct orderId |
-| `ReplaceRequest_PushesToQueue` | OrderCancelReplaceRequest → OrderReplaceEvent with new price/qty |
+| `ReplaceRequest_PushesToQueue` | OrderCancelReplaceRequest → OrderReplaceEvent: a fresh id, ClOrdID from tag 11, OrigClOrdID set, new price/qty |
+| `ReplaceRequest_CarriesTheRequestsSideAndSymbol` | Side and Symbol come from the request, so the engine refuses a change |
+| `ReplaceRequest_UnknownSymbol_IsNotQueued` | Unknown Symbol → refused by the gateway (102=99), nothing pushed |
+| `ReplaceRequest_UnknownOrigClOrdId_IsNotQueued` | Unknown OrigClOrdID → answered by the gateway (102=1), nothing pushed |
+| `ExecutionReport_ReplaceNamesTheReplacedOrder` | Replacement's REPLACE report → 150=5, its status, OrigClOrdID (41) |
+| `ExecutionReport_OnlyTheReplacementsReplaceReportGoesOverFix` | The replaced order's own REPLACE report is not sent over FIX |
 | `NewOrderMultileg_FxSwap_PushesToQueue` | 2-leg multileg → FXSWAP OrderEntry with near/far prices+dates |
 | `NewOrderMultileg_NonSwapOrdType_Rejected` | Non-FXSWAP OrdType in multileg → rejected, no push |
 | `NewOrderMultileg_TooFewLegs_Rejected` | Single leg multileg → rejected, no push |
