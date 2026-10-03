@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Order } from '../types';
+import type { Order, ReplaceOrderRequest } from '../types';
 import { formatQuantity, formatPrice, formatTime, formatId } from '../utils/format';
 import {
   ORDER_STATUS_LABELS,
@@ -13,7 +13,7 @@ import {
 interface OrderBlotterProps {
   orders: Map<string, Order>;
   cancelOrder: (orderId: number, clOrderId?: string) => void;
-  replaceOrder: (req: { orderId: number }) => void;
+  replaceOrder: (req: ReplaceOrderRequest) => void;
 }
 
 export function OrderBlotter({ orders, cancelOrder, replaceOrder }: OrderBlotterProps) {
@@ -105,7 +105,7 @@ export function OrderBlotter({ orders, cancelOrder, replaceOrder }: OrderBlotter
                         Cancel
                       </button>
                       <button
-                        onClick={() => replaceOrder({ orderId: order.orderId })}
+                        onClick={() => replaceOrder({ orderId: order.orderId, clOrderId: order.clOrderId })}
                         className="text-cyan-400 hover:text-cyan-300 text-xs"
                       >
                         Replace

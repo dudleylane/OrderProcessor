@@ -14,6 +14,7 @@
 
 #include <string>
 #include <deque>
+#include <memory>
 #include "TypesDef.h"
 #include "TransactionDef.h"
 #include "OrderStateEvents.h"
@@ -35,6 +36,9 @@ public:
     /// A client's cancel of the order; a refusal goes to the requester (#73)
     virtual void process(OrdState::onExecCancel &evnt, OrderEntry *order, const std::string &requester,
                          const ACID::Context &cnxt) = 0;
+    /// A client's replace of the original; the caller keeps the replacement, and a refusal goes to the requester (#74)
+    virtual void process(OrdState::onReplace &evnt, OrderEntry *original, OrderEntry &replacement,
+                         const std::string &requester, const ACID::Context &cnxt) = 0;
 };
 
 class DeferedEventBase
@@ -119,6 +123,21 @@ struct MatchSwapOrderDeferedEvent : public DeferedEventBase
 
     MatchSwapOrderDeferedEvent();
     explicit MatchSwapOrderDeferedEvent(OrderEntry *ord);
+
+    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+};
+
+/// A client's replace, queued by ReplaceOrderTrOperation once the transactions before it on the original are done (#74).
+/// It owns the replacement; the processor stores a copy if it accepts it.
+struct ReplaceRequestDeferedEvent : public DeferedEventBase
+{
+    OrderEntry *original_;
+    std::unique_ptr<OrderEntry> replacement_;
+    std::string requester_;
+
+    ReplaceRequestDeferedEvent(OrderEntry *original, std::unique_ptr<OrderEntry> replacement,
+                               const std::string &requester);
+    ~ReplaceRequestDeferedEvent();
 
     virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
 };

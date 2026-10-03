@@ -20,6 +20,7 @@ class OrderDataStorage;
 } // namespace Store
 class OrderBookImpl;
 class IdTValueGenerator;
+struct OrderEntry;
 
 namespace Queues
 {
@@ -54,6 +55,9 @@ private:
     void doRead();
     void onRead(boost::beast::error_code ec, std::size_t bytesTransferred);
     void handleMessage(const std::string &msg);
+    /// The order a client names: by its ClOrdID when it gives one, or else by its number (#58). Null when no order has
+    /// it. Also null, with answered set and an error already sent, when the number is ambiguous or the two disagree.
+    OrderEntry *findOrder(u64 number, const std::string &clOrdId, bool *answered);
     void doWrite();
     void onWrite(boost::beast::error_code ec, std::size_t bytesTransferred);
 

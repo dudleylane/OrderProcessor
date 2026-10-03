@@ -92,8 +92,13 @@ public:
         rejects_.emplace_back(evnt, target);
     }
     void push(const Queues::BusinessRejectEvent &, const std::string &) override {}
+    void push(const Queues::OrderRejectEvent &evnt, const std::string &target) override
+    {
+        refusals_.emplace_back(evnt, target);
+    }
 
     std::vector<std::pair<Queues::CancelRejectEvent, std::string>> rejects_;
+    std::vector<std::pair<Queues::OrderRejectEvent, std::string>> refusals_;
 };
 
 // =============================================================================
@@ -565,6 +570,69 @@ TEST_F(MatchOrderOperationTest, CancelReject_WithoutARequesterGoesToTheOrdersSou
     ASSERT_EQ(1u, out.rejects_.size());
     EXPECT_EQ(buyOrder_->orderId_, out.rejects_[0].first.id_);
     EXPECT_EQ("CLNT", out.rejects_[0].second);
+}
+
+// =============================================================================
+// Replace Operations (#74)
+// =============================================================================
+
+TEST_F(MatchOrderOperationTest, ReplaceOrder_RelatesToTheOriginalAndItsInstrument)
+{
+    // Related to the instrument as well as the original, so it runs after every earlier match on the instrument
+    ReplaceOrderTrOperation op(buyOrder_, std::unique_ptr<OrderEntry>(buyOrder_->clone()), "client");
+    EXPECT_EQ(buyOrder_->orderId_, op.getObjectId());
+    EXPECT_EQ(buyOrder_->instrument_.getId(), op.getRelatedId());
+}
+
+TEST_F(MatchOrderOperationTest, ReplaceOrder_Execute_QueuesTheRequestWithTheReplacement)
+{
+    std::unique_ptr<OrderEntry> replacement(buyOrder_->clone());
+    OrderEntry *replacementPtr = replacement.get();
+    ReplaceOrderTrOperation op(buyOrder_, std::move(replacement), "client");
+    Context ctx = createContext();
+
+    op.execute(ctx);
+
+    ASSERT_EQ(1u, deferedContainer_.deferedEventCount());
+    auto *request = dynamic_cast<ReplaceRequestDeferedEvent *>(deferedContainer_.events_[0]);
+    ASSERT_NE(nullptr, request);
+    EXPECT_EQ(buyOrder_, request->original_);
+    EXPECT_EQ(replacementPtr, request->replacement_.get());
+    EXPECT_EQ("client", request->requester_);
+}
+
+TEST_F(MatchOrderOperationTest, ReplaceOrder_Rollback_RemovesOnlyItsRequest)
+{
+    deferedContainer_.addDeferedEvent(new CancelRequestDeferedEvent(sellOrder_, "earlier"));
+    ReplaceOrderTrOperation op(buyOrder_, std::unique_ptr<OrderEntry>(buyOrder_->clone()), "client");
+    Context ctx = createContext();
+
+    op.execute(ctx);
+    EXPECT_EQ(2u, deferedContainer_.deferedEventCount());
+    op.rollback(ctx);
+
+    ASSERT_EQ(1u, deferedContainer_.deferedEventCount());
+    EXPECT_NE(nullptr, dynamic_cast<CancelRequestDeferedEvent *>(deferedContainer_.events_[0]));
+}
+
+TEST_F(MatchOrderOperationTest, RefuseReplace_GoesToTheRequester)
+{
+    RecordingOutQueues out;
+    Queues::OrderRejectEvent refusal;
+    refusal.replacement_ = true;
+    refusal.refusal_ = Queues::CancelRejectEvent::TOO_LATE;
+    refusal.reason_ = "Replace refused: too late";
+    RefuseReplaceTrOperation op(*buyOrder_, refusal, "requester");
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, &out, matcher_.get(), IdTGenerator::instance(),
+                &deferedContainer_);
+
+    op.execute(ctx);
+
+    ASSERT_EQ(1u, out.refusals_.size());
+    EXPECT_EQ("requester", out.refusals_[0].second);
+    EXPECT_EQ(Queues::CancelRejectEvent::TOO_LATE, out.refusals_[0].first.refusal_);
+    EXPECT_EQ("Replace refused: too late", out.refusals_[0].first.reason_);
+    EXPECT_EQ(buyOrder_->orderId_, op.getObjectId());
 }
 
 TEST_F(MatchOrderOperationTest, PersistOrderWritesAVersion)

@@ -93,6 +93,7 @@ struct ParsedCancelOrder
 struct ParsedReplaceOrder
 {
     u64 orderId;
+    std::string clOrderId; // optional; names the order when given, as for a cancel (#58, #74)
     double price;
     unsigned int orderQty;
     TimeInForce tif;

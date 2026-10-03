@@ -3,6 +3,7 @@ target_sources(orderEngine
         AccountCodec.cpp
         AllocateCache.cpp
         CancelOrderDeferedEvent.cpp
+        ReplaceRequestDeferedEvent.cpp
         ClearingCodec.cpp
         DataModelDef.cpp
         EntryFilter.cpp

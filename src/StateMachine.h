@@ -66,6 +66,7 @@ public:
     void reject(onRplOrderRejected const &);
 
     void accept(onReplace const &);
+    bool hasFills(onReplace const &);
 
     void fill(onTradeExecution const &);
     bool notexecuted(onTradeExecution const &);
@@ -102,7 +103,7 @@ public:
     // ToDo: add execCorrect, when qty not changed Fill->Fill for example
     // ToDo: add administrative switch to any state
     // clang-format off
-	struct transition_table : mpl::vector43<
+	struct transition_table : mpl::vector46<
 		//    Start                Event           Next           Action				Guard
 		//	  +-------------+------------------+-------------+------------+----------------------+
 		// create OrderEntry from received event and generate id
@@ -119,6 +120,11 @@ public:
 		a_row< Rcvd_New,	 onExternalOrderRejected,Rejected,&os::reject				         >,
 		// create OrderEntry from received event, generate id, add to OrderBook, prepare ExecReport New
 		a_row< Rcvd_New,	 onExternalOrder,	New,		  &os::accept						 >,
+		// a client's replace, decided at once (#74): the replacement goes into the OrderBook
+		// create ExecReport Replaced
+		a_row< Rcvd_New,	 onReplace,			New,		  &os::accept						 >,
+		/// should be after Rcvd_New->New to switch state depend on hasFills: the original's fills carry over
+		row  < Rcvd_New,	 onReplace,			PartFill,	  &os::accept, &os::hasFills		 >,
 
 		// apply onExecReplace to the original order and add to OrderBook
 		// Create ExecReport New
@@ -232,6 +238,9 @@ public:
 		// a client's cancel, decided at once (#73): remove order from OrderBook
 		// create ExecReport Canceled
 		a_row< NoCnlReplace, onExecCancel,		CnclReplaced, &os::canceled						 >,
+		// a client's replace, decided at once (#74): remove the original from OrderBook
+		// create ExecReport Replaced
+		a_row< NoCnlReplace, onExecReplace,		CnclReplaced, &os::replaced						 >,
 
 		// nothing to do?
 		a_row< GoingCancel,  onCancelRejected,  NoCnlReplace, &os::reject						 >,

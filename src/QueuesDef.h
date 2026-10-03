@@ -57,6 +57,7 @@ struct OrderCancelEvent : public EventBase
 
 struct OrderReplaceEvent : public EventBase
 {
+    /// Owned by the queue once pushed, which frees it after dispatch; the processor works on a copy (#74)
     OrderEntry *replacementOrder_;
 
     OrderReplaceEvent() : replacementOrder_(nullptr) {}
@@ -124,6 +125,10 @@ struct OrderRejectEvent : public EventBase
     bool replacement_ = false;        // a cancel/replace request's replacement, not a new order
     bool duplicateClOrderId_ = false; // refused because its ClOrdID is already in use
     std::string reason_;
+    /// For a replacement: why, in the terms of a cancel reject (FIX CxlRejReason 102), and the original's status when
+    /// the original is known (FIX OrdStatus 39) (#74)
+    CancelRejectEvent::Reason refusal_ = CancelRejectEvent::OTHER;
+    OrderStatus origStatus_ = INVALID_ORDSTATUS;
 };
 
 struct ProcessEvent : public EventBase

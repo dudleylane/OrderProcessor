@@ -332,6 +332,7 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
         {
             auto d = j["data"];
             msg.replaceOrder.orderId = d.value("orderId", (u64)0);
+            msg.replaceOrder.clOrderId = d.value("clOrderId", "");
             msg.replaceOrder.hasPrice = d.contains("price");
             msg.replaceOrder.hasQty = d.contains("orderQty");
             msg.replaceOrder.hasTif = d.contains("tif");
