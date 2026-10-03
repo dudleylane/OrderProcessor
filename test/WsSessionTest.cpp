@@ -185,6 +185,38 @@ protected:
         return order;
     }
 
+    /// Takes the cancel the session queued, polling as takeQueuedOrder() does. Empty when nothing was queued.
+    std::optional<Queues::OrderCancelEvent> takeQueuedCancel(std::chrono::milliseconds timeout = REPLY_TIMEOUT)
+    {
+        std::optional<Queues::OrderCancelEvent> cancel;
+        testing::NiceMock<test::MockInQueueProcessor> processor;
+        ON_CALL(processor, onEvent(testing::_, testing::An<const Queues::OrderCancelEvent &>()))
+            .WillByDefault(
+                [&cancel](const std::string &, const Queues::OrderCancelEvent &evnt)
+                {
+                    cancel = evnt;
+                });
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (!inQueues_.pop(&processor) && std::chrono::steady_clock::now() < deadline)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return cancel;
+    }
+
+    /// Restores an order with this id and ClOrdID, as a load from persistence does
+    static OrderEntry *restoreOrder(const IdT &id, const std::string &clOrdId)
+    {
+        SourceIdT clOrderId = WideDataStorage::instance()->add(
+            new RawDataEntry(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size())));
+        SourceIdT instrument = WideDataStorage::instance()->findInstrumentBySymbol("AAPL");
+        auto *order = new OrderEntry(SourceIdT(), SourceIdT(), clOrderId, SourceIdT(), instrument, SourceIdT(),
+                                     SourceIdT(), SourceIdT());
+        order->orderId_ = id;
+        OrderStorage::instance()->restore(order);
+        return order;
+    }
+
     /// The session still reads and answers: an unknown type gets the ordinary error reply.
     static bool stillAnswers(Client &client)
     {
@@ -421,6 +453,117 @@ TEST_F(WsSessionTest, SwapClOrdIdsCarryASequenceNumber)
     ASSERT_TRUE(std::regex_match(firstId, firstMatch, format)) << firstId;
     ASSERT_TRUE(std::regex_match(secondId, secondMatch, format)) << secondId;
     EXPECT_EQ(std::stoull(firstMatch[1]) + 1, std::stoull(secondMatch[1]));
+}
+
+// =============================================================================
+// Naming orders by number (#58)
+// =============================================================================
+
+TEST_F(WsSessionTest, CancelNamesTheOrderWithThatNumber)
+{
+    // The bug this covers: the session turned the client's number into the id (number, 1). No order has that id, since
+    // an id's second half is its creation time, so no cancel ever found its order (#58).
+    restoreOrder(IdT(3, 1790000000), "CL-3");
+    OrderEntry *seven = restoreOrder(IdT(7, 1790000100), "CL-7");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"cancel_order","data":{"orderId":7}})");
+    auto cancel = takeQueuedCancel();
+    ASSERT_TRUE(cancel.has_value()) << "no cancel queued; escaped: " << escaped();
+    EXPECT_EQ(seven->orderId_, cancel->id_);
+}
+
+TEST_F(WsSessionTest, CancelOfAnUnknownNumberGoesToTheEngineAsUnknown)
+{
+    // Under an invalid id that keeps the number, which the engine answers with a cancel_reject naming it (#57, #73)
+    restoreOrder(IdT(7, 1790000100), "CL-7");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"cancel_order","data":{"orderId":999}})");
+    auto cancel = takeQueuedCancel();
+    ASSERT_TRUE(cancel.has_value()) << "no cancel queued; escaped: " << escaped();
+    EXPECT_EQ(999u, cancel->id_.id_);
+    EXPECT_FALSE(cancel->id_.isValid());
+}
+
+TEST_F(WsSessionTest, CancelOfANumberTwoOrdersShareIsRefused)
+{
+    // A data directory written before #58 can hold two orders with one number, and neither is a safe guess
+    restoreOrder(IdT(7, 1790000100), "CL-7A");
+    restoreOrder(IdT(7, 1790009999), "CL-7B");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"cancel_order","data":{"orderId":7}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("More than one order has number 7: name it by clOrderId as well", reply->value("message", ""));
+    EXPECT_EQ(0u, inQueues_.size());
+}
+
+TEST_F(WsSessionTest, CancelByClOrdIdNamesTheOrderEvenWhenItsNumberIsShared)
+{
+    restoreOrder(IdT(7, 1790000100), "CL-7A");
+    OrderEntry *second = restoreOrder(IdT(7, 1790009999), "CL-7B");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"cancel_order","data":{"orderId":7,"clOrderId":"CL-7B"}})");
+    auto cancel = takeQueuedCancel();
+    ASSERT_TRUE(cancel.has_value()) << "no cancel queued; escaped: " << escaped();
+    EXPECT_EQ(second->orderId_, cancel->id_);
+}
+
+TEST_F(WsSessionTest, CancelWhoseClOrdIdBelongsToAnotherOrderIsRefused)
+{
+    restoreOrder(IdT(3, 1790000000), "CL-3");
+    restoreOrder(IdT(7, 1790000100), "CL-7");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"cancel_order","data":{"orderId":3,"clOrderId":"CL-7"}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Order 3 does not have ClOrdID CL-7", reply->value("message", ""));
+    EXPECT_EQ(0u, inQueues_.size());
+}
+
+TEST_F(WsSessionTest, CancelByAnUnknownClOrdIdGoesToTheEngineAsUnknown)
+{
+    // The ClOrdID decides when given, so an unknown one is not looked up by number instead
+    restoreOrder(IdT(7, 1790000100), "CL-7");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"cancel_order","data":{"orderId":7,"clOrderId":"NOPE"}})");
+    auto cancel = takeQueuedCancel();
+    ASSERT_TRUE(cancel.has_value()) << "no cancel queued; escaped: " << escaped();
+    EXPECT_EQ(7u, cancel->id_.id_);
+    EXPECT_FALSE(cancel->id_.isValid());
+}
+
+TEST_F(WsSessionTest, ReplaceIsRefusedUntilTheEngineCanCompleteIt)
+{
+    // The engine can't complete a replace, and a correctly built replacement would crash it (#74). Before #58 the
+    // session looked the order up as (number, 1) and answered "Order not found for replace".
+    restoreOrder(IdT(7, 1790000100), "CL-7");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"replace_order","data":{"orderId":7,"price":151.0}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Replace is not supported yet: cancel the order and send a new one (#74)", reply->value("message", ""));
+    EXPECT_EQ(0u, inQueues_.size());
 }
 
 } // namespace

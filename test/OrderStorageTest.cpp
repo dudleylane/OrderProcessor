@@ -179,6 +179,61 @@ TEST_F(OrderStorageTest, RestoreLoadsOrder)
 }
 
 // =============================================================================
+// Order Numbers (#58)
+// =============================================================================
+
+/// Restores an order with this id and a unique ClOrdID, as a load from persistence does
+OrderEntry *restoreOrder(const IdT &id)
+{
+    auto order = test::createCorrectOrder();
+    test::assignClOrderId(order.get());
+    order->orderId_ = id;
+    OrderEntry *raw = order.release();
+    OrderStorage::instance()->restore(raw);
+    return raw;
+}
+
+TEST_F(OrderStorageTest, LocateByOrderNumberFindsTheOrderWithIt)
+{
+    restoreOrder(IdT(3, 1790000000));
+    OrderEntry *seven = restoreOrder(IdT(7, 1790000100));
+    restoreOrder(IdT(9, 1790000200));
+
+    bool ambiguous = true;
+    EXPECT_EQ(seven, storage()->locateByOrderNumber(7, &ambiguous));
+    EXPECT_FALSE(ambiguous);
+}
+
+TEST_F(OrderStorageTest, LocateByOrderNumberReturnsNullForAMissingNumber)
+{
+    restoreOrder(IdT(7, 1790000100));
+
+    bool ambiguous = true;
+    EXPECT_EQ(nullptr, storage()->locateByOrderNumber(8, &ambiguous));
+    EXPECT_FALSE(ambiguous);
+    EXPECT_EQ(nullptr, storage()->locateByOrderNumber(6));
+}
+
+TEST_F(OrderStorageTest, LocateByOrderNumberRefusesANumberTwoOrdersShare)
+{
+    // A data directory written before #58 can hold two orders with one number, from different runs
+    restoreOrder(IdT(7, 1790000100));
+    restoreOrder(IdT(7, 1790009999));
+
+    bool ambiguous = false;
+    EXPECT_EQ(nullptr, storage()->locateByOrderNumber(7, &ambiguous));
+    EXPECT_TRUE(ambiguous);
+}
+
+TEST_F(OrderStorageTest, MaxOrderNumberIsTheLargestStored)
+{
+    EXPECT_EQ(0u, storage()->maxOrderNumber());
+    restoreOrder(IdT(12, 1790000000));
+    restoreOrder(IdT(4, 1790009999)); // newer, but with a smaller number
+    EXPECT_EQ(12u, storage()->maxOrderNumber());
+}
+
+// =============================================================================
 // Execution Save Tests
 // =============================================================================
 

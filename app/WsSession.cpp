@@ -297,40 +297,40 @@ void WsSession::handleMessage(const std::string &msgStr)
     }
     else if (msg.type == "cancel_order")
     {
-        IdT orderId(msg.cancelOrder.orderId, 1);
-        Queues::OrderCancelEvent evt(orderId, "Canceled by user");
+        // A client names the order by its number, the part of its id it sees, or by its ClOrdID, which decides when
+        // given (#58). An order neither finds still goes to the engine, under an invalid id that keeps the number, so
+        // the client gets a cancel_reject naming it.
+        const u64 number = msg.cancelOrder.orderId;
+        const std::string &clOrdId = msg.cancelOrder.clOrderId;
+        OrderEntry *order = nullptr;
+        if (!clOrdId.empty())
+        {
+            RawDataEntry key(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size()));
+            order = orderStorage_->locateByClOrderId(key);
+            if ((nullptr != order) && (number != order->orderId_.id_))
+            {
+                send(serializeError("Order " + std::to_string(number) + " does not have ClOrdID " + clOrdId));
+                return;
+            }
+        }
+        else
+        {
+            bool ambiguous = false;
+            order = orderStorage_->locateByOrderNumber(number, &ambiguous);
+            if (ambiguous)
+            {
+                send(serializeError("More than one order has number " + std::to_string(number) +
+                                    ": name it by clOrderId as well"));
+                return;
+            }
+        }
+        Queues::OrderCancelEvent evt((nullptr != order) ? order->orderId_ : IdT(number, 0), "Canceled by user");
         inQueues_->push("WebSocket", evt);
     }
     else if (msg.type == "replace_order")
     {
-        auto &ro = msg.replaceOrder;
-        IdT origOrderId(ro.orderId, 1);
-
-        // Look up existing order to clone
-        OrderEntry *existing = orderStorage_->locateByOrderId(origOrderId);
-        if (!existing)
-        {
-            send(serializeError("Order not found for replace: " + std::to_string(ro.orderId)));
-            return;
-        }
-
-        OrderEntry *replacement = existing->clone();
-        if (ro.hasPrice)
-        {
-            replacement->price_ = ro.price;
-        }
-        if (ro.hasQty)
-        {
-            replacement->orderQty_ = ro.orderQty;
-            replacement->leavesQty_ = ro.orderQty;
-        }
-        if (ro.hasTif)
-        {
-            replacement->tif_ = ro.tif;
-        }
-
-        Queues::OrderReplaceEvent evt(origOrderId, replacement);
-        inQueues_->push("WebSocket", evt);
+        // The engine can't complete a replace yet, and a correctly built replacement would crash it (#74)
+        send(serializeError("Replace is not supported yet: cancel the order and send a new one (#74)"));
     }
     else if (msg.type == "subscribe_book")
     {
