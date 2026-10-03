@@ -60,6 +60,22 @@ TEST_F(IdTGeneratorTest, FirstIdHasCounterOne)
     EXPECT_EQ(id.id_, 1u);
 }
 
+TEST_F(IdTGeneratorTest, AdvancePastSkipsNumbersAlreadyUsed)
+{
+    // After a restart the counter must start above the largest order number already stored (#58)
+    IdTGenerator::instance()->advancePast(41);
+    EXPECT_EQ(42u, IdTGenerator::instance()->getId().id_);
+    EXPECT_EQ(43u, IdTGenerator::instance()->getId().id_);
+}
+
+TEST_F(IdTGeneratorTest, AdvancePastNeverMovesTheCounterBack)
+{
+    IdTGenerator::instance()->advancePast(41);
+    EXPECT_EQ(42u, IdTGenerator::instance()->getId().id_);
+    IdTGenerator::instance()->advancePast(10);
+    EXPECT_EQ(43u, IdTGenerator::instance()->getId().id_);
+}
+
 TEST_F(IdTGeneratorTest, IdIncrementsMonotonically)
 {
     auto *generator = IdTGenerator::instance();

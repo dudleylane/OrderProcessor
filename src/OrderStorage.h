@@ -82,6 +82,11 @@ public:
 public:
     OrderEntry *locateByClOrderId(const RawDataEntry &clOrderId) const;
     OrderEntry *locateByOrderId(const IdT &orderId) const;
+    /// The order with this number, the part of its id that clients see (#58). Null when no order has it, or when more
+    /// than one does, which only a data directory written before #58 can hold; ambiguous, when given, says which.
+    OrderEntry *locateByOrderNumber(u64 number, bool *ambiguous = nullptr) const;
+    /// The largest order number stored, or 0 when there are none. After a restore, new numbers start above it (#58).
+    u64 maxOrderNumber() const;
     /// With a guard, the new order is write-locked before it becomes reachable; the caller releases
     /// the guard once the order is fully initialised.
     OrderEntry *save(const OrderEntry &order, IdTValueGenerator *idGenerator, PublishGuard *publishGuard = nullptr);

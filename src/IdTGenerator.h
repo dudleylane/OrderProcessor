@@ -26,6 +26,9 @@ public:
     ~IdTValueGenerator(void);
 
     IdT getId();
+    /// Makes every id issued from now on larger than id, so that after a restart new ids don't repeat ones already
+    /// stored (#58). Never moves the counter back.
+    void advancePast(u64 id);
 
 private:
     std::atomic<u64> counter_;

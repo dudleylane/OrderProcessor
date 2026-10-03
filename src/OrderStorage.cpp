@@ -86,6 +86,37 @@ OrderEntry *OrderDataStorage::locateByOrderId(const IdT &orderId) const
     return it->second;
 }
 
+OrderEntry *OrderDataStorage::locateByOrderNumber(u64 number, bool *ambiguous) const
+{
+    if (nullptr != ambiguous)
+    {
+        *ambiguous = false;
+    }
+    // Ids order by number, then by creation time, so the orders with this number are adjacent
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
+    OrdersByIDT::const_iterator it = ordersById_.lower_bound(IdT(number, 0));
+    if ((ordersById_.end() == it) || (number != it->first.id_))
+    {
+        return nullptr;
+    }
+    OrdersByIDT::const_iterator next = std::next(it);
+    if ((ordersById_.end() != next) && (number == next->first.id_))
+    {
+        if (nullptr != ambiguous)
+        {
+            *ambiguous = true;
+        }
+        return nullptr;
+    }
+    return it->second;
+}
+
+u64 OrderDataStorage::maxOrderNumber() const
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
+    return ordersById_.empty() ? 0 : ordersById_.rbegin()->first.id_;
+}
+
 OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *idGenerator, PublishGuard *publishGuard)
 {
     if (aux::ExchLogger::instance()->isNoteOn())

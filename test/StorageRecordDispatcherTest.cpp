@@ -31,6 +31,7 @@
 #include "OrderCodec.h"
 #include "OrderStorage.h"
 #include "LMDBStorage.h"
+#include "IdTGenerator.h"
 
 #include <filesystem>
 
@@ -1142,6 +1143,52 @@ TEST_F(StorageRecordDispatcherTest, OrderWhoseKeySortsBeforeItsInstrumentSurvive
         ASSERT_NE(nullptr, restored);
         EXPECT_EQ("AAPL", restored->instrument_.get().symbol_);
         EXPECT_EQ(1u, bookAfter.orders_.size());
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_F(StorageRecordDispatcherTest, OrderNumbersContinueAfterRestart)
+{
+    // The bug this covers: the id counter starts at 1 in every run, so after a restart a new order got a number a
+    // restored order already had, and a client naming orders by number could not tell them apart (#58)
+    const std::string dir = test::uniqueTestPath("dispatcher-order-numbers");
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        const u64 numbers[] = { 3, 9 };
+        for (u64 number : numbers)
+        {
+            std::unique_ptr<OrderEntry> order(createTestOrder());
+            order->clOrderId_ = addTestRawData("CL-" + std::to_string(number));
+            order->orderId_ = IdT(number, 20261001);
+            order->status_ = NEW_ORDSTATUS;
+            dispatcher_->save(*order);
+        }
+    }
+
+    {
+        // restart: fresh storage, dispatcher and id counter over the same directory
+        OrderDataStorage storageAfter;
+        TestOrderBook bookAfter;
+        StorageRecordDispatcher dispatcherAfter;
+        LMDBStorage lmdbAfter;
+        dispatcherAfter.init(restore_.get(), &bookAfter, &lmdbAfter, &storageAfter);
+        lmdbAfter.load(dir, &dispatcherAfter);
+        ASSERT_EQ(9u, storageAfter.maxOrderNumber());
+
+        IdTValueGenerator generator; // starts at 1, as in every run
+        generator.advancePast(storageAfter.maxOrderNumber());
+        std::unique_ptr<OrderEntry> fresh(createTestOrder());
+        fresh->clOrderId_ = addTestRawData("CL-NEW");
+        fresh->orderId_ = IdT();
+        OrderEntry *saved = storageAfter.save(*fresh, &generator);
+        ASSERT_NE(nullptr, saved);
+        EXPECT_EQ(10u, saved->orderId_.id_);
+        EXPECT_EQ(saved, storageAfter.locateByOrderNumber(10));
+        EXPECT_NE(nullptr, storageAfter.locateByOrderNumber(9));
     }
 
     std::error_code ec;
