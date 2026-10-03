@@ -12,7 +12,7 @@ import {
 
 interface OrderBlotterProps {
   orders: Map<string, Order>;
-  cancelOrder: (orderId: number) => void;
+  cancelOrder: (orderId: number, clOrderId?: string) => void;
   replaceOrder: (req: { orderId: number }) => void;
 }
 
@@ -99,7 +99,7 @@ export function OrderBlotter({ orders, cancelOrder, replaceOrder }: OrderBlotter
                     <span className="flex gap-2 justify-center">
                       {/* Fix: onClick wired to cancelOrder via WS hook */}
                       <button
-                        onClick={() => cancelOrder(order.orderId)}
+                        onClick={() => cancelOrder(order.orderId, order.clOrderId)}
                         className="text-red-400 hover:text-red-300 text-xs"
                       >
                         Cancel

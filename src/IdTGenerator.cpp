@@ -29,3 +29,12 @@ IdT IdTValueGenerator::getId()
     // not memory synchronization. The ID value itself provides ordering context.
     return IdT(counter_.fetch_add(1, std::memory_order_relaxed), static_cast<u32>(ltime));
 }
+
+void IdTValueGenerator::advancePast(u64 id)
+{
+    const u64 next = id + 1;
+    u64 current = counter_.load(std::memory_order_relaxed);
+    while ((current < next) && !counter_.compare_exchange_weak(current, next, std::memory_order_relaxed))
+    {
+    }
+}
