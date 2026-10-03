@@ -90,6 +90,21 @@ public:
         totalEvents_.fetch_add(1, std::memory_order_relaxed);
     }
 
+    void push(const OrderRejectEvent &evnt, const std::string &target) override
+    {
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            orderRejects_.emplace_back(evnt, target);
+        }
+        totalEvents_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    std::deque<std::pair<OrderRejectEvent, std::string>> orderRejects() const
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return orderRejects_;
+    }
+
     std::deque<CapturedExecReport> reports() const
     {
         std::lock_guard<std::mutex> lock(mtx_);
@@ -111,6 +126,7 @@ private:
     mutable std::mutex mtx_;
     std::deque<CapturedExecReport> reports_;
     std::deque<std::pair<CancelRejectEvent, std::string>> cancelRejects_;
+    std::deque<std::pair<OrderRejectEvent, std::string>> orderRejects_;
     std::atomic<int> totalEvents_{ 0 };
 };
 
@@ -233,6 +249,22 @@ protected:
         }
         msg.set(FIX::Account("TESTACCT"));
         msg.set(FIX::Currency("USD"));
+        return msg;
+    }
+
+    // Helper: build a FIX OrderCancelReplaceRequest for a limit order
+    FIX44::OrderCancelReplaceRequest makeReplace(const std::string &origClOrdId, const std::string &clOrdId, char side,
+                                                 double price, double qty)
+    {
+        FIX44::OrderCancelReplaceRequest msg;
+        msg.set(FIX::OrigClOrdID(origClOrdId));
+        msg.set(FIX::ClOrdID(clOrdId));
+        msg.set(FIX::Side(side));
+        msg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+        msg.set(FIX::OrdType(FIX::OrdType_LIMIT));
+        msg.set(FIX::Symbol("EURUSD"));
+        msg.set(FIX::Price(price));
+        msg.set(FIX::OrderQty(qty));
         return msg;
     }
 
@@ -417,6 +449,75 @@ TEST_F(FixEndToEndTest, CancelOfAFilledOrder_ViaFix_IsRefusedToTheSender)
     EXPECT_EQ(FILLED_ORDSTATUS, rejects[0].first.ordStatus_);
     EXPECT_EQ("FIX:TRADER_A->ORDER_PROCESSOR", rejects[0].second);
     EXPECT_EQ(FILLED_ORDSTATUS, sell->status_);
+}
+
+TEST_F(FixEndToEndTest, ReplaceOrder_ViaFix_Completes)
+{
+    // The bug this covers: a FIX replace kept the original's id and ClOrdID, so the engine refused it as a duplicate
+    // ClOrdID (35=9 102=6), and a well-formed one would have crashed it (#74)
+    gateway_->onMessage(makeNOS("FIX-RPL-001", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    RawDataEntry key(STRING_RAWDATATYPE, "FIX-RPL-001", 11);
+    OrderEntry *original = OrderStorage::instance()->locateByClOrderId(key);
+    ASSERT_NE(nullptr, original);
+    ASSERT_EQ(NEW_ORDSTATUS, original->status_);
+
+    gateway_->onMessage(makeReplace("FIX-RPL-001", "FIX-RPL-002", FIX::Side_BUY, 1.0840, 80), fixSid_);
+    waitForProcessing();
+
+    EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
+    EXPECT_EQ(0u, original->leavesQty_);
+    RawDataEntry newKey(STRING_RAWDATATYPE, "FIX-RPL-002", 11);
+    OrderEntry *replacement = OrderStorage::instance()->locateByClOrderId(newKey);
+    ASSERT_NE(nullptr, replacement);
+    EXPECT_EQ(NEW_ORDSTATUS, replacement->status_);
+    EXPECT_DOUBLE_EQ(1.0840, replacement->price_);
+    EXPECT_EQ(80u, replacement->orderQty_);
+    EXPECT_EQ(80u, replacement->leavesQty_);
+    EXPECT_EQ(original->orderId_, replacement->origOrderId_);
+    EXPECT_EQ("FIX:TRADER_A->ORDER_PROCESSOR", replacement->source_.get()); // its reports go to the same session
+    int originalReplaced = 0;
+    int replacementNew = 0;
+    for (const auto &r : outQueues_->reports())
+    {
+        if (REPLACE_EXECTYPE == r.execType)
+        {
+            originalReplaced += ((original->orderId_ == r.orderId) && (REPLACED_ORDSTATUS == r.orderStatus)) ? 1 : 0;
+            replacementNew += ((replacement->orderId_ == r.orderId) && (NEW_ORDSTATUS == r.orderStatus)) ? 1 : 0;
+        }
+    }
+    EXPECT_EQ(1, originalReplaced);
+    EXPECT_EQ(1, replacementNew);
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
+}
+
+TEST_F(FixEndToEndTest, ReplaceOfAFilledOrder_ViaFix_IsRefusedToTheSender)
+{
+    // A replace that comes too late is refused, to the session that sent it, with the order's status and the
+    // request's ClOrdIDs (#74)
+    gateway_->onMessage(makeNOS("FIX-RPL-S1", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    gateway_->onMessage(makeNOS("FIX-RPL-B1", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    RawDataEntry key(STRING_RAWDATATYPE, "FIX-RPL-S1", 10);
+    OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(key);
+    ASSERT_NE(nullptr, sell);
+    ASSERT_EQ(FILLED_ORDSTATUS, sell->status_);
+
+    gateway_->onMessage(makeReplace("FIX-RPL-S1", "FIX-RPL-S2", FIX::Side_SELL, 1.0860, 100), fixSid_);
+    waitForProcessing();
+
+    auto rejects = outQueues_->orderRejects();
+    ASSERT_EQ(1u, rejects.size());
+    EXPECT_TRUE(rejects[0].first.replacement_);
+    EXPECT_EQ(CancelRejectEvent::TOO_LATE, rejects[0].first.refusal_);
+    EXPECT_EQ(FILLED_ORDSTATUS, rejects[0].first.origStatus_);
+    EXPECT_EQ("FIX-RPL-S2", rejects[0].first.clOrderId_);
+    EXPECT_EQ("FIX-RPL-S1", rejects[0].first.origClOrderId_);
+    EXPECT_EQ("FIX:TRADER_A->ORDER_PROCESSOR", rejects[0].second);
+    EXPECT_EQ(FILLED_ORDSTATUS, sell->status_);
+    RawDataEntry newKey(STRING_RAWDATATYPE, "FIX-RPL-S2", 10);
+    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByClOrderId(newKey));
 }
 
 TEST_F(FixEndToEndTest, SourceStringPreserved)

@@ -100,16 +100,25 @@ public:
     static char fromSide(Side s);
 
     /// The ExecutionReport (35=8) for one of an order's execution reports; sendExecutionReport() sends it to the order's
-    /// session. Public and static so that tests can check it without a FIX session.
+    /// session. Public and static so that tests can check it without a FIX session. A replacement's REPLACE report
+    /// (150=5) also names the order it replaced in OrigClOrdID (41).
     static FIX44::ExecutionReport buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order);
+    /// Whether a FIX client gets this report. FIX acknowledges a replace once, with the replacement's report; the
+    /// replaced order's own REPLACE report is not sent, since FIX 4.4 has no Replaced status (#74).
+    static bool reportsOverFix(const ExecutionEntry *exec);
     /// The ExecutionReport (35=8) rejecting a new order the engine refused without storing it (#67): OrderID NONE,
     /// 150=8, 39=8, OrdRejReason 6 when its ClOrdID is already in use (else 0), and the reason in Text (58)
     static FIX44::ExecutionReport buildOrderReject(const Queues::OrderRejectEvent &evnt);
-    /// The OrderCancelReject (35=9) answering a cancel/replace request whose replacement the engine refused (#67):
-    /// 434=2, CxlRejReason 6 when its ClOrdID is already in use (else 2), the reason in Text (58). origOrderId and
-    /// origStatus describe the order it was to replace.
+    /// The OrderCancelReject (35=9) answering a cancel/replace request the engine refused (#67, #74): 434=2,
+    /// CxlRejReason 6 when the replacement's ClOrdID is already in use, else from the engine's reason as for a cancel
+    /// (0 too late, 1 unknown order, 3 a cancel or replace pending, 99 other), and the reason in Text (58). origOrderId
+    /// and origStatus describe the order it was to replace.
     static FIX44::OrderCancelReject buildReplaceReject(const Queues::OrderRejectEvent &evnt,
                                                        const std::string &origOrderId, char origStatus);
+    /// The gateway's own answer to a cancel/replace request whose OrigClOrdID names no order (#74): 434=2, 102=1,
+    /// OrderID NONE, OrdStatus 8, and the request's ClOrdIDs
+    static FIX44::OrderCancelReject buildUnknownReplaceReject(const std::string &clOrdId,
+                                                              const std::string &origClOrdId);
     /// The OrderCancelReject (35=9) refusing a cancel request (#73): 434=1, CxlRejReason from the engine's reason (0 too
     /// late, 1 unknown order, 3 a replace pending, 99 other), the order's OrdStatus (8 when the order is unknown), and
     /// why in Text (58). The engine's event carries no ClOrdID, so clOrdId is the cancel request's when the gateway has

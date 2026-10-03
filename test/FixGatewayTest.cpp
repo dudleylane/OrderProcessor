@@ -107,7 +107,8 @@ TEST_F(FixEnumTest, OrdStatusConversion)
     EXPECT_EQ(FIX::OrdStatus_FILLED, FixGateway::fromOrdStatus(FILLED_ORDSTATUS));
     EXPECT_EQ(FIX::OrdStatus_CANCELED, FixGateway::fromOrdStatus(CANCELED_ORDSTATUS));
     EXPECT_EQ(FIX::OrdStatus_REJECTED, FixGateway::fromOrdStatus(REJECTED_ORDSTATUS));
-    EXPECT_EQ(FIX::OrdStatus_REPLACED, FixGateway::fromOrdStatus(REPLACED_ORDSTATUS));
+    // FIX 4.4 has no Replaced status (39=5 is not in its dictionary): a replaced order is closed (#74)
+    EXPECT_EQ(FIX::OrdStatus_CANCELED, FixGateway::fromOrdStatus(REPLACED_ORDSTATUS));
     EXPECT_EQ(FIX::OrdStatus_EXPIRED, FixGateway::fromOrdStatus(EXPIRED_ORDSTATUS));
     EXPECT_EQ(FIX::OrdStatus_SUSPENDED, FixGateway::fromOrdStatus(SUSPENDED_ORDSTATUS));
     EXPECT_EQ(FIX::OrdStatus_DONE_FOR_DAY, FixGateway::fromOrdStatus(DFD_ORDSTATUS));
@@ -401,6 +402,8 @@ TEST_F(FixGatewayInboundTest, CancelRequest_PushesToQueue)
 
 TEST_F(FixGatewayInboundTest, ReplaceRequest_PushesToQueue)
 {
+    // The replacement is the original with the request's changes, a fresh id and the request's ClOrdID, naming the
+    // original (#74). Before, it kept the original's id and ClOrdID, so the engine refused it as a duplicate ClOrdID.
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
@@ -434,11 +437,94 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_PushesToQueue)
     gateway_->onMessage(replaceMsg, TEST_SID);
 
     ASSERT_NE(nullptr, capturedReplacement);
+    EXPECT_FALSE(capturedReplacement->orderId_.isValid());
+    const RawDataEntry &newClOrd = capturedReplacement->clOrderId_.get();
+    EXPECT_EQ("REPLACE001", std::string(newClOrd.data_, newClOrd.length_));
+    const RawDataEntry &origClOrd = capturedReplacement->origClOrderId_.get();
+    EXPECT_EQ(clOrdStr, std::string(origClOrd.data_, origClOrd.length_));
+    EXPECT_EQ(RECEIVEDNEW_ORDSTATUS, capturedReplacement->status_);
     EXPECT_DOUBLE_EQ(15.50, capturedReplacement->price_);
     EXPECT_EQ(200u, capturedReplacement->orderQty_);
-    EXPECT_EQ(200u, capturedReplacement->leavesQty_);
+    EXPECT_EQ(BUY_SIDE, capturedReplacement->side_);
+    EXPECT_EQ(instrumentId1_, capturedReplacement->instrument_.getId());
 
+    delete capturedReplacement; // the mock queue owns nothing
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_CarriesTheRequestsSideAndSymbol)
+{
+    // FIX requires a replace's Side and Symbol to match the order. They are carried over, so that the engine refuses a
+    // replace that changes either, rather than keeping the original's without a word (#74).
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    ASSERT_NE(nullptr, saved);
+    const auto &clOrd = saved->clOrderId_.get();
+
+    OrderEntry *capturedReplacement = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                capturedReplacement = evt.replacementOrder_;
+            }));
+
+    FIX44::OrderCancelReplaceRequest replaceMsg;
+    replaceMsg.set(FIX::OrigClOrdID(std::string(clOrd.data_, clOrd.length_)));
+    replaceMsg.set(FIX::ClOrdID("REPLACE002"));
+    replaceMsg.set(FIX::Side(FIX::Side_SELL));
+    replaceMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    replaceMsg.set(FIX::OrdType(FIX::OrdType_LIMIT));
+    replaceMsg.set(FIX::Symbol("bbb"));
+    replaceMsg.set(FIX::Price(15.50));
+    replaceMsg.set(FIX::OrderQty(200));
+    gateway_->onMessage(replaceMsg, TEST_SID);
+
+    ASSERT_NE(nullptr, capturedReplacement);
+    EXPECT_EQ(SELL_SIDE, capturedReplacement->side_);
+    EXPECT_EQ(instrumentId2_, capturedReplacement->instrument_.getId());
     delete capturedReplacement;
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_UnknownSymbol_IsNotQueued)
+{
+    // The gateway refuses it itself (102=99), since the engine's refusal can only describe an instrument that exists;
+    // there is no session here to send that to, so this checks that nothing reaches the engine (#74)
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    ASSERT_NE(nullptr, saved);
+    const auto &clOrd = saved->clOrderId_.get();
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+
+    FIX44::OrderCancelReplaceRequest replaceMsg;
+    replaceMsg.set(FIX::OrigClOrdID(std::string(clOrd.data_, clOrd.length_)));
+    replaceMsg.set(FIX::ClOrdID("REPLACE004"));
+    replaceMsg.set(FIX::Side(FIX::Side_BUY));
+    replaceMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    replaceMsg.set(FIX::OrdType(FIX::OrdType_LIMIT));
+    replaceMsg.set(FIX::Symbol("NO-SUCH-SYMBOL"));
+    replaceMsg.set(FIX::Price(15.50));
+    replaceMsg.set(FIX::OrderQty(200));
+    gateway_->onMessage(replaceMsg, TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_UnknownOrigClOrdId_IsNotQueued)
+{
+    // The gateway answers it itself, with buildUnknownReplaceReject(); before #74 it got no answer at all. There is no
+    // session here to send that to, so this checks that nothing reaches the engine.
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+
+    FIX44::OrderCancelReplaceRequest replaceMsg;
+    replaceMsg.set(FIX::OrigClOrdID("NO-SUCH-ORDER"));
+    replaceMsg.set(FIX::ClOrdID("REPLACE003"));
+    replaceMsg.set(FIX::Side(FIX::Side_BUY));
+    replaceMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    replaceMsg.set(FIX::OrdType(FIX::OrdType_LIMIT));
+    replaceMsg.set(FIX::Symbol("aaa"));
+    replaceMsg.set(FIX::Price(15.50));
+    replaceMsg.set(FIX::OrderQty(200));
+    gateway_->onMessage(replaceMsg, TEST_SID);
 }
 
 // =============================================================================
@@ -738,6 +824,53 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_CorrectionIsTradeCorrect)
     EXPECT_EQ(FIX::ExecType_TRADE_CORRECT, execType.getValue());
 }
 
+TEST_F(FixGatewayInboundTest, ExecutionReport_ReplaceNamesTheReplacedOrder)
+{
+    // FIX acknowledges a replace with the replacement's report: 150=5, its own OrderID, ClOrdID and status, and the
+    // ClOrdID of the order it replaced in OrigClOrdID (41) (#74). Other reports carry no 41.
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    order->orderId_ = IdT(9, 1);
+    order->origClOrderId_ = WideDataStorage::instance()->add(new RawDataEntry(STRING_RAWDATATYPE, "ORD-1", 5));
+    auto replace = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, PARTFILL_ORDSTATUS);
+    replace.orderId_ = order->orderId_;
+    replace.origOrderId_ = IdT(7, 1);
+
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&replace, *order);
+
+    FIX::ExecType execType;
+    report.get(execType);
+    EXPECT_EQ(FIX::ExecType_REPLACED, execType.getValue());
+    FIX::OrdStatus ordStatus;
+    report.get(ordStatus);
+    EXPECT_EQ(FIX::OrdStatus_PARTIALLY_FILLED, ordStatus.getValue());
+    FIX::OrderID orderId;
+    report.get(orderId);
+    EXPECT_EQ("9", orderId.getValue());
+    const RawDataEntry &clOrd = order->clOrderId_.get();
+    FIX::ClOrdID clOrdId;
+    report.get(clOrdId);
+    EXPECT_EQ(std::string(clOrd.data_, clOrd.length_), clOrdId.getValue());
+    FIX::OrigClOrdID origClOrdId;
+    report.get(origClOrdId);
+    EXPECT_EQ("ORD-1", origClOrdId.getValue());
+
+    auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    EXPECT_FALSE(FixGateway::buildExecutionReport(&ack, *order).isSetField(FIX::FIELD::OrigClOrdID));
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_OnlyTheReplacementsReplaceReportGoesOverFix)
+{
+    // The engine reports a replace for both orders. FIX acknowledges it once, with the replacement's report: the
+    // replaced order's has no FIX 4.4 form, since 39=5 left the protocol (#74).
+    auto replaced = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, REPLACED_ORDSTATUS);
+    auto replacement = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, NEW_ORDSTATUS);
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, FILLED_ORDSTATUS);
+    EXPECT_FALSE(FixGateway::reportsOverFix(&replaced));
+    EXPECT_TRUE(FixGateway::reportsOverFix(&replacement));
+    EXPECT_TRUE(FixGateway::reportsOverFix(&trade));
+}
+
 // =============================================================================
 // Orders refused without being stored (#67)
 // =============================================================================
@@ -846,6 +979,59 @@ TEST(FixOrderRejectTest, DuplicateReplacementGetsAnOrderCancelReject)
 // =============================================================================
 // Cancels the engine refused (#73)
 // =============================================================================
+
+TEST(FixOrderRejectTest, RefusedReplaceSaysWhyAsARefusedCancelDoes)
+{
+    // The engine's reason maps to CxlRejReason as for a refused cancel, and a ClOrdID already in use still says 6 (#74)
+    Queues::OrderRejectEvent evnt = makeOrderReject(true);
+    evnt.duplicateClOrderId_ = false;
+    FIX::CxlRejReason cxlRejReason;
+    const std::pair<Queues::CancelRejectEvent::Reason, int> cases[] = {
+        { Queues::CancelRejectEvent::TOO_LATE, FIX::CxlRejReason_TOO_LATE_TO_CANCEL },
+        { Queues::CancelRejectEvent::UNKNOWN_ORDER, FIX::CxlRejReason_UNKNOWN_ORDER },
+        { Queues::CancelRejectEvent::PENDING, FIX::CxlRejReason_ORDER_ALREADY_IN_PENDING_STATUS },
+        { Queues::CancelRejectEvent::OTHER, FIX::CxlRejReason_OTHER },
+    };
+    for (const auto &[refusal, code] : cases)
+    {
+        evnt.refusal_ = refusal;
+        FixGateway::buildReplaceReject(evnt, "12", FIX::OrdStatus_NEW).get(cxlRejReason);
+        EXPECT_EQ(code, cxlRejReason.getValue()) << "refusal " << refusal;
+    }
+    evnt.duplicateClOrderId_ = true;
+    FixGateway::buildReplaceReject(evnt, "12", FIX::OrdStatus_NEW).get(cxlRejReason);
+    EXPECT_EQ(FIX::CxlRejReason_DUPLICATE_CL_ORD_ID, cxlRejReason.getValue());
+}
+
+TEST(FixOrderRejectTest, ReplaceOfAnUnknownOrderIsRejectedAsUnknown)
+{
+    // The gateway's own answer to an OrigClOrdID that names no order (#74): 102=1, OrderID NONE, OrdStatus 8, and the
+    // request's ClOrdIDs. Before, the request got no answer at all.
+    FIX44::OrderCancelReject reject = FixGateway::buildUnknownReplaceReject("RPL-2", "ORD-9");
+
+    EXPECT_EQ("9", reject.getHeader().getField(FIX::FIELD::MsgType));
+    FIX::OrderID orderId;
+    reject.get(orderId);
+    EXPECT_EQ("NONE", orderId.getValue());
+    FIX::ClOrdID clOrdId;
+    reject.get(clOrdId);
+    EXPECT_EQ("RPL-2", clOrdId.getValue());
+    FIX::OrigClOrdID origClOrdId;
+    reject.get(origClOrdId);
+    EXPECT_EQ("ORD-9", origClOrdId.getValue());
+    FIX::OrdStatus ordStatus;
+    reject.get(ordStatus);
+    EXPECT_EQ(FIX::OrdStatus_REJECTED, ordStatus.getValue());
+    FIX::CxlRejResponseTo responseTo;
+    reject.get(responseTo);
+    EXPECT_EQ(FIX::CxlRejResponseTo_ORDER_CANCEL_REPLACE_REQUEST, responseTo.getValue());
+    FIX::CxlRejReason cxlRejReason;
+    reject.get(cxlRejReason);
+    EXPECT_EQ(FIX::CxlRejReason_UNKNOWN_ORDER, cxlRejReason.getValue());
+    FIX::Text text;
+    reject.get(text);
+    EXPECT_EQ("Replace refused: unknown order", text.getValue());
+}
 
 TEST(FixCancelRejectTest, CancelOfAFilledOrderIsTooLate)
 {
