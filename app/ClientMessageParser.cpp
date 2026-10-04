@@ -69,6 +69,7 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
 {
     const u64 maxQty = std::numeric_limits<unsigned int>::max();
     const u64 maxId = std::numeric_limits<u64>::max();
+    const u64 maxDate = std::numeric_limits<u64>::max(); // a swap leg's settlement date, as the engine stores it
     ParsedClientMessage msg{};
     try
     {
@@ -102,18 +103,23 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
         }
         else if (msg.type == "new_swap_order")
         {
-            auto d = j["data"];
-            msg.swapOrder.symbol = d.value("symbol", "");
-            msg.swapOrder.side = sideFromJson(d.value("side", ""));
-            msg.swapOrder.nearPrice = d.value("nearPrice", 0.0);
-            msg.swapOrder.farPrice = d.value("farPrice", 0.0);
-            msg.swapOrder.settlDate = d.value("settlDate", (u64)0);
-            msg.swapOrder.farSettlDate = d.value("farSettlDate", (u64)0);
-            msg.swapOrder.orderQty = d.value("orderQty", 0u);
-            msg.swapOrder.account = d.value("account", "");
-            msg.swapOrder.currency = currencyFromJson(d.value("currency", ""));
-            msg.swapOrder.capacity = capacityFromJson(d.value("capacity", ""));
-            msg.swapOrder.tif = tifFromJson(d.value("tif", "GTC"));
+            // Checked as a new order is (#86): on this branch "orderQty": -1 rested a swap for 4294967295
+            const json &d = j["data"];
+            u64 orderQty = 0;
+            if (requireObject(d, &msg) && readPrice(d, "nearPrice", &msg.swapOrder.nearPrice, &msg) &&
+                readPrice(d, "farPrice", &msg.swapOrder.farPrice, &msg) &&
+                readUnsigned(d, "settlDate", maxDate, &msg.swapOrder.settlDate, &msg) &&
+                readUnsigned(d, "farSettlDate", maxDate, &msg.swapOrder.farSettlDate, &msg) &&
+                readUnsigned(d, "orderQty", maxQty, &orderQty, &msg))
+            {
+                msg.swapOrder.symbol = d.value("symbol", "");
+                msg.swapOrder.side = sideFromJson(d.value("side", ""));
+                msg.swapOrder.orderQty = static_cast<unsigned int>(orderQty);
+                msg.swapOrder.account = d.value("account", "");
+                msg.swapOrder.currency = currencyFromJson(d.value("currency", ""));
+                msg.swapOrder.capacity = capacityFromJson(d.value("capacity", ""));
+                msg.swapOrder.tif = tifFromJson(d.value("tif", "GTC"));
+            }
         }
         else if (msg.type == "cancel_order")
         {

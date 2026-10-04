@@ -183,4 +183,81 @@ TEST(ClientMessageParserTest, ClientSentErrorTypeIsRejected)
     EXPECT_FALSE(msg.error.empty());
 }
 
+// --- FX swap orders (feature/fx-swap-support only, #86) ---
+
+TEST(ClientMessageParserTest, NewSwapOrderParsesFields)
+{
+    auto msg = parse(R"({"type":"new_swap_order","data":{"symbol":"EURUSD","side":"BUY","nearPrice":1.085,)"
+                     R"("farPrice":1.0875,"settlDate":20261006,"farSettlDate":20261106,"orderQty":1000000,)"
+                     R"("account":"ACC1","tif":"DAY"}})");
+
+    EXPECT_EQ("new_swap_order", msg.type);
+    EXPECT_TRUE(msg.error.empty());
+    EXPECT_EQ("EURUSD", msg.swapOrder.symbol);
+    EXPECT_EQ(BUY_SIDE, msg.swapOrder.side);
+    EXPECT_DOUBLE_EQ(1.085, msg.swapOrder.nearPrice);
+    EXPECT_DOUBLE_EQ(1.0875, msg.swapOrder.farPrice);
+    EXPECT_EQ(20261006u, msg.swapOrder.settlDate);
+    EXPECT_EQ(20261106u, msg.swapOrder.farSettlDate);
+    EXPECT_EQ(1000000u, msg.swapOrder.orderQty);
+    EXPECT_EQ("ACC1", msg.swapOrder.account);
+    EXPECT_EQ(DAY_TIF, msg.swapOrder.tif);
+}
+
+TEST(ClientMessageParserTest, NewSwapOrderTifDefaultsToGtc)
+{
+    auto msg = parse(R"({"type":"new_swap_order","data":{"symbol":"EURUSD","side":"SELL","orderQty":5}})");
+
+    EXPECT_EQ("new_swap_order", msg.type);
+    EXPECT_EQ(GTC_TIF, msg.swapOrder.tif);
+    EXPECT_DOUBLE_EQ(0.0, msg.swapOrder.nearPrice);
+    EXPECT_EQ(0u, msg.swapOrder.settlDate);
+}
+
+TEST(ClientMessageParserTest, NewSwapOrderNegativeQuantityIsRejected)
+{
+    // Before #86 this rested a swap for 4294967295
+    auto msg = parse(R"({"type":"new_swap_order","data":{"symbol":"EURUSD","side":"BUY","orderQty":-1}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("orderQty"));
+}
+
+TEST(ClientMessageParserTest, NewSwapOrderQuantityAboveUnsignedRangeIsRejected)
+{
+    // Before #86 this was an undefined float-to-integer conversion
+    auto msg = parse(R"({"type":"new_swap_order","data":{"symbol":"EURUSD","side":"BUY","orderQty":1e20}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("orderQty"));
+}
+
+TEST(ClientMessageParserTest, NewSwapOrderSettlementDatesMustBeNonNegativeIntegers)
+{
+    auto negative = parse(R"({"type":"new_swap_order","data":{"symbol":"EURUSD","settlDate":-5,"orderQty":1}})");
+    EXPECT_EQ("error", negative.type);
+    EXPECT_NE(std::string::npos, negative.error.find("settlDate"));
+
+    auto fractional =
+        parse(R"({"type":"new_swap_order","data":{"symbol":"EURUSD","farSettlDate":20261106.5,"orderQty":1}})");
+    EXPECT_EQ("error", fractional.type);
+    EXPECT_NE(std::string::npos, fractional.error.find("farSettlDate"));
+}
+
+TEST(ClientMessageParserTest, NewSwapOrderPricesMustBeNumbers)
+{
+    auto msg = parse(R"({"type":"new_swap_order","data":{"symbol":"EURUSD","farPrice":"1.0875","orderQty":1}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("farPrice"));
+}
+
+TEST(ClientMessageParserTest, NewSwapOrderDataMustBeAnObject)
+{
+    auto msg = parse(R"({"type":"new_swap_order","data":"EURUSD"})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("data"));
+}
+
 } // namespace

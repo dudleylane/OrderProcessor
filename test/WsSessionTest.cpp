@@ -611,6 +611,30 @@ TEST_F(WsSessionTest, ReplaceBuildsTheReplacementFromTheOriginal)
     EXPECT_EQ(original->instrument_.getId(), replacement.instrument_.getId());
 }
 
+TEST_F(WsSessionTest, OrdersWithAQuantityOutOfRangeAreRefused)
+{
+    // #86: on this branch "orderQty": -1 rested an order for 4294967295, and 1e20 one for nothing (an undefined
+    // conversion). The parser now checks numbers before narrowing them, as master's does since #16.
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","price":150.0,)"
+                 R"("orderQty":-1,"tif":"DAY","currency":"USD","capacity":"AGENCY"}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Invalid message: invalid orderQty: expected an integer from 0 to 4294967295",
+              reply->value("message", ""));
+
+    send(client, R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":150.0,)"
+                 R"("farPrice":151.0,"orderQty":1e20}})");
+    reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Invalid message: invalid orderQty: expected an integer from 0 to 4294967295",
+              reply->value("message", ""));
+    EXPECT_EQ(0u, inQueues_.size());
+}
+
 TEST_F(WsSessionTest, ReplaceThatChangesNothingIsRefused)
 {
     // The frontend's Replace button sends no changes, until it has a form for them
