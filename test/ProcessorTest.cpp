@@ -11,10 +11,13 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <chrono>
+#include <functional>
 #include <string>
 #include <thread>
 #include <memory>
 #include <deque>
+#include <vector>
 
 #include "TestFixtures.h"
 #include "TestAux.h"
@@ -116,6 +119,10 @@ public:
 
     void addTransaction(std::unique_ptr<Transaction> &tr) override
     {
+        if (onAdd_)
+        {
+            onAdd_();
+        }
         tr->setTransactionId(TransactionId(1, 1));
         if (proc_)
         {
@@ -150,6 +157,8 @@ public:
     }
 
     Processor *proc_;
+    /// Called as each transaction is added, before it runs
+    std::function<void()> onAdd_;
 
 private:
     int transactionCount_;
@@ -731,4 +740,140 @@ TEST_F(ProcessorTest, OrderIsDurableBeforeItsExecutionReportIsPublished)
     ASSERT_FALSE(sequence.empty());
     EXPECT_EQ("persist", sequence.front());
     EXPECT_NE(std::find(sequence.begin(), sequence.end(), "publish"), sequence.end());
+}
+
+// =============================================================================
+// A cancel or replace comes after the transaction that books its order (#83)
+// =============================================================================
+
+TEST_F(ProcessorTest, NewOrderIsMarkedUntilTheTransactionThatBooksItIsEnqueued)
+{
+    // A cancel or replace of the order waits while it is marked, so the mark must last until the order's own
+    // transaction has its id
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    std::vector<bool> marks;
+    transMgr_->onAdd_ = [&]()
+    {
+        if (const OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(clOrdId))
+        {
+            marks.push_back(stored->bookingPending_.load());
+        }
+    };
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor_->process();
+    transMgr_->onAdd_ = nullptr;
+
+    ASSERT_FALSE(marks.empty()) << "the order was not stored";
+    EXPECT_TRUE(marks.front()) << "the order was not marked when the transaction that books it was enqueued";
+    OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, stored);
+    EXPECT_EQ(NEW_ORDSTATUS, stored->status_);
+    EXPECT_FALSE(stored->bookingPending_.load());
+}
+
+TEST_F(ProcessorTest, ReplacementIsMarkedUntilTheTransactionThatBooksItIsEnqueued)
+{
+    // The same for a replacement, which the replace's decision stores on the transaction worker
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor_->process();
+    OrderEntry *original = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, original);
+
+    OrderEntry *replacement = original->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = original->clOrderId_;
+    replacement->price_ = 11.0;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    RawDataEntry replacementId = replacement->clOrderId_.get();
+    std::vector<bool> marks;
+    transMgr_->onAdd_ = [&]()
+    {
+        if (const OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(replacementId))
+        {
+            marks.push_back(stored->bookingPending_.load());
+        }
+    };
+    inQueues_->push("test", OrderReplaceEvent(original->orderId_, replacement));
+    processor_->process();
+    transMgr_->onAdd_ = nullptr;
+
+    ASSERT_FALSE(marks.empty()) << "the replacement was not stored";
+    EXPECT_TRUE(marks.front()) << "the replacement was not marked when the transaction that books it was enqueued";
+    EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    EXPECT_EQ(NEW_ORDSTATUS, live->status_);
+    EXPECT_FALSE(live->bookingPending_.load());
+}
+
+TEST_F(ProcessorTest, CancelWaitsForTheTransactionThatBooksTheOrder)
+{
+    // Stored, and its creator has not yet enqueued the transaction that books it. A cancel enqueued now would get the
+    // lower id and be decided before the order was booked. Here the creator enqueues it 100 ms later.
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    COP::Store::PublishGuard guard;
+    OrderEntry *stored = OrderStorage::instance()->save(*order, IdTGenerator::instance(), &guard);
+    ASSERT_NE(nullptr, stored);
+    guard.release(); // initialised: only the mark is left
+
+    transMgr_->proc_ = nullptr; // only when the cancel is enqueued matters here, so nothing runs
+    std::vector<bool> marks;
+    transMgr_->onAdd_ = [&]()
+    {
+        marks.push_back(stored->bookingPending_.load());
+    };
+    std::thread creator(
+        [&guard]()
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            guard.bookingEnqueued();
+        });
+    inQueues_->push("test", OrderCancelEvent(stored->orderId_, "client"));
+    processor_->process();
+    creator.join();
+    transMgr_->onAdd_ = nullptr;
+
+    ASSERT_EQ(1u, marks.size());
+    EXPECT_FALSE(marks.front()) << "the cancel was enqueued before the transaction that books the order";
+}
+
+TEST_F(ProcessorTest, ReplaceWaitsForTheTransactionThatBooksTheOriginal)
+{
+    // The same for a replace of it
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    COP::Store::PublishGuard guard;
+    OrderEntry *stored = OrderStorage::instance()->save(*order, IdTGenerator::instance(), &guard);
+    ASSERT_NE(nullptr, stored);
+    guard.release();
+
+    OrderEntry *replacement = stored->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = stored->clOrderId_;
+    replacement->price_ = 11.0;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+
+    transMgr_->proc_ = nullptr;
+    std::vector<bool> marks;
+    transMgr_->onAdd_ = [&]()
+    {
+        marks.push_back(stored->bookingPending_.load());
+    };
+    std::thread creator(
+        [&guard]()
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            guard.bookingEnqueued();
+        });
+    inQueues_->push("test", OrderReplaceEvent(stored->orderId_, replacement));
+    processor_->process();
+    creator.join();
+    transMgr_->onAdd_ = nullptr;
+
+    ASSERT_EQ(1u, marks.size());
+    EXPECT_FALSE(marks.front()) << "the replace was enqueued before the transaction that books the original";
 }

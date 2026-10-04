@@ -155,12 +155,16 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
         }
         // Lock the clone before it becomes reachable, so the caller can finish initialising it (status,
         // state machine persistence) before any other thread sees it. Nobody else can hold this entry's
-        // lock yet, so taking it inside orderRwLock_ cannot deadlock.
+        // lock yet, so taking it inside orderRwLock_ cannot deadlock. Mark it too, until the caller has
+        // enqueued the transaction that books it (#83). Set before the insertion, under orderRwLock_, the
+        // mark is seen by every lookup that finds the order.
         if (nullptr != publishGuard)
         {
-            assert(!publishGuard->holds());
+            assert(!publishGuard->holds() && (nullptr == publishGuard->pending_));
             cp->entryMutex_.lock();
             publishGuard->locked_ = cp.get();
+            cp->bookingPending_.store(true, std::memory_order_relaxed);
+            publishGuard->pending_ = cp.get();
         }
         int st = 0;
         try
@@ -184,6 +188,7 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
             if ((nullptr != publishGuard) && (cp.get() == publishGuard->locked_))
             {
                 publishGuard->release();
+                publishGuard->pending_ = nullptr; // nobody found the clone, and it is freed on the way out
             }
             throw;
         }
