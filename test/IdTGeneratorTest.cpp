@@ -13,8 +13,11 @@
 #include <thread>
 #include <vector>
 #include <set>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <mutex>
+#include <stdexcept>
 
 #include "IdTGenerator.h"
 
@@ -306,4 +309,144 @@ TEST(IdTGeneratorRecreationTest, RecreationResetsCounter)
     IdTGenerator::destroy();
 
     EXPECT_EQ(id3.id_, 1u);
+}
+
+// =============================================================================
+// Id Reservation (#81): no id is returned before a limit above it is saved
+// =============================================================================
+
+namespace
+{
+
+/// Records the limits it is asked to save, as the storage record dispatcher would write them
+class RecordingIdLimitSaver : public IdLimitSaver
+{
+public:
+    void saveIdLimit(u64 limit) override
+    {
+        std::lock_guard<std::mutex> lock(lock_);
+        if (fail_)
+        {
+            throw std::runtime_error("disk full");
+        }
+        saved_.push_back(limit);
+        latest_.store(limit);
+    }
+    std::vector<u64> saved() const
+    {
+        std::lock_guard<std::mutex> lock(lock_);
+        return saved_;
+    }
+    void setFailing(bool fail)
+    {
+        std::lock_guard<std::mutex> lock(lock_);
+        fail_ = fail;
+    }
+    /// The last limit saved; an id returned must be below the value read after it
+    std::atomic<u64> latest_{ 0 };
+
+private:
+    mutable std::mutex lock_;
+    std::vector<u64> saved_;
+    bool fail_ = false;
+};
+
+} // namespace
+
+TEST(IdTReservationTest, ALimitIsSavedBeforeAnIdPastItIsReturned)
+{
+    IdTValueGenerator generator; // the counter starts at 1
+    RecordingIdLimitSaver saver;
+    generator.reserve(&saver, 10);
+    EXPECT_EQ(std::vector<u64>({ 11 }), saver.saved()); // ids 1 to 10 may be issued
+
+    for (u64 expected = 1; expected <= 10; ++expected)
+    {
+        EXPECT_EQ(expected, generator.getId().id_);
+    }
+    EXPECT_EQ(1u, saver.saved().size()) << "nothing is saved within a block";
+
+    EXPECT_EQ(11u, generator.getId().id_);
+    EXPECT_EQ(std::vector<u64>({ 11, 21 }), saver.saved());
+}
+
+TEST(IdTReservationTest, AdvancingPastTheLimitSavesANewOneOnTheNextDraw)
+{
+    IdTValueGenerator generator;
+    RecordingIdLimitSaver saver;
+    generator.reserve(&saver, 10);
+    generator.advancePast(500);
+
+    EXPECT_EQ(501u, generator.getId().id_);
+    EXPECT_EQ(511u, saver.saved().back());
+}
+
+TEST(IdTReservationTest, ConcurrentIdsAreNeverReturnedBeforeALimitAboveThemIsSaved)
+{
+    IdTValueGenerator generator;
+    RecordingIdLimitSaver saver;
+    generator.reserve(&saver, 7); // a small block, so that draws often wait on a save
+    const int threads = 4;
+    const int draws = 5000;
+    std::atomic<int> uncovered{ 0 };
+    std::vector<std::thread> workers;
+    for (int t = 0; t < threads; ++t)
+    {
+        workers.emplace_back(
+            [&]()
+            {
+                for (int i = 0; i < draws; ++i)
+                {
+                    const u64 id = generator.getId().id_;
+                    if (id >= saver.latest_.load())
+                    {
+                        ++uncovered;
+                    }
+                }
+            });
+    }
+    for (auto &w : workers)
+    {
+        w.join();
+    }
+
+    EXPECT_EQ(0, uncovered.load());
+    const std::vector<u64> saved = saver.saved();
+    EXPECT_TRUE(std::is_sorted(saved.begin(), saved.end()));
+    EXPECT_GT(saved.back(), static_cast<u64>(threads * draws));
+}
+
+TEST(IdTReservationTest, ReleaseSavesTheExactNextIdAndStopsReserving)
+{
+    IdTValueGenerator generator;
+    RecordingIdLimitSaver saver;
+    generator.reserve(&saver, 10);
+    generator.getId();
+    generator.getId();
+    generator.getId();
+
+    generator.releaseReservation();
+    EXPECT_EQ(4u, saver.saved().back()) << "a clean restart continues at 4, without a gap";
+
+    // A draw after the release is past the saved limit: it is logged, and nothing more is saved
+    const size_t savedBefore = saver.saved().size();
+    EXPECT_EQ(4u, generator.getId().id_);
+    EXPECT_EQ(savedBefore, saver.saved().size());
+}
+
+TEST(IdTReservationTest, AnIdIsNotReturnedWhenItsLimitCannotBeSaved)
+{
+    IdTValueGenerator generator;
+    RecordingIdLimitSaver saver;
+    generator.reserve(&saver, 2);
+    EXPECT_EQ(1u, generator.getId().id_);
+    EXPECT_EQ(2u, generator.getId().id_);
+
+    saver.setFailing(true);
+    EXPECT_THROW(generator.getId(), std::runtime_error);
+
+    // The failed draw's id is skipped, and the next draw saves a limit that covers it
+    saver.setFailing(false);
+    EXPECT_EQ(4u, generator.getId().id_);
+    EXPECT_EQ(6u, saver.saved().back());
 }
