@@ -84,15 +84,18 @@ struct LoggerImpl
             // Queue size 8192 slots, single background thread.
             spdlog::init_thread_pool(8192, 1);
             logger_ = spdlog::basic_logger_mt<spdlog::async_factory>("exchange", "exchange.log");
-            logger_->set_pattern("%v");
-            logger_->flush_on(spdlog::level::warn);
         }
         catch (const spdlog::spdlog_ex &)
         {
             // Fallback to stdout if file logging fails
             logger_ = spdlog::stdout_color_mt("exchange");
-            logger_->set_pattern("%v");
         }
+        logger_->set_pattern("%v");
+        // Every message reaches spdlog at its own level (#65): loggingMask_ decides what is written, so spdlog passes
+        // everything down to debug, and writes warnings, errors and fatals out at once rather than when its buffer
+        // fills. Before, every level went in as info, so that flush never happened, and a crash lost them.
+        logger_->set_level(spdlog::level::trace);
+        logger_->flush_on(spdlog::level::warn);
     }
 
     ~LoggerImpl()
@@ -141,6 +144,24 @@ struct LoggerImpl
         return 0 != (mask & flag);
     }
 
+    /// The spdlog level of a message logged under this flag; the text carries the level in its prefix too
+    static spdlog::level::level_enum levelOf(char flag)
+    {
+        switch (flag)
+        {
+        case DEBUG_ON_FLAG:
+            return spdlog::level::debug;
+        case WARN_ON_FLAG:
+            return spdlog::level::warn;
+        case ERROR_ON_FLAG:
+            return spdlog::level::err;
+        case FATAL_ON_FLAG:
+            return spdlog::level::critical;
+        default:
+            return spdlog::level::info;
+        }
+    }
+
     void logMessage(const std::string &msg, char flag, const std::string &prefix)
     {
         if (!isFlag(flag))
@@ -149,7 +170,7 @@ struct LoggerImpl
         }
 
         oneapi::tbb::mutex::scoped_lock lock(lock_);
-        logger_->info("{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg);
+        logger_->log(levelOf(flag), "{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg);
     }
 
     void logMessage(const char *msg, char flag, const std::string &prefix)
@@ -160,7 +181,7 @@ struct LoggerImpl
         }
 
         oneapi::tbb::mutex::scoped_lock lock(lock_);
-        logger_->info("{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg);
+        logger_->log(levelOf(flag), "{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg);
     }
 
     void logMessage(int val, char flag, const std::string &prefix)
@@ -171,7 +192,7 @@ struct LoggerImpl
         }
 
         oneapi::tbb::mutex::scoped_lock lock(lock_);
-        logger_->info("{}{}{}] {}", getTimestamp(), prefix, getThreadId(), val);
+        logger_->log(levelOf(flag), "{}{}{}] {}", getTimestamp(), prefix, getThreadId(), val);
     }
 
     void logMessage(LogMessage &msg, char flag, const std::string &prefix)
@@ -184,7 +205,7 @@ struct LoggerImpl
         msg.prepareMessage();
 
         oneapi::tbb::mutex::scoped_lock lock(lock_);
-        logger_->info("{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg.getMessage());
+        logger_->log(levelOf(flag), "{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg.getMessage());
     }
 };
 } // namespace aux
