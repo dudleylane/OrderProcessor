@@ -33,6 +33,7 @@ target_sources(orderProcessorTest
         DeferedEventsTest.cpp
         FiltersTest.cpp
         IdTGeneratorTest.cpp
+        LoggerTest.cpp
         QueuesManagerTest.cpp
         SubscriptionTest.cpp
 
