@@ -107,8 +107,10 @@ public:
     /// replaced order's own REPLACE report is not sent, since FIX 4.4 has no Replaced status (#74).
     static bool reportsOverFix(const ExecutionEntry *exec);
     /// The ExecutionReport (35=8) rejecting a new order the engine refused without storing it (#67): OrderID NONE,
-    /// 150=8, 39=8, OrdRejReason 6 when its ClOrdID is already in use (else 0), and the reason in Text (58)
-    static FIX44::ExecutionReport buildOrderReject(const Queues::OrderRejectEvent &evnt);
+    /// ExecID R<execId>, 150=8, 39=8, OrdRejReason 6 when its ClOrdID is already in use (else 0), and the reason in
+    /// Text (58). sendOrderReject() draws execId from the shared id generator, so it doesn't repeat after a restart
+    /// (#81).
+    static FIX44::ExecutionReport buildOrderReject(const Queues::OrderRejectEvent &evnt, u64 execId);
     /// The OrderCancelReject (35=9) answering a cancel/replace request the engine refused (#67, #74): 434=2,
     /// CxlRejReason 6 when the replacement's ClOrdID is already in use, else from the engine's reason as for a cancel
     /// (0 too late, 1 unknown order, 3 a cancel or replace pending, 99 other), and the reason in Text (58). origOrderId
