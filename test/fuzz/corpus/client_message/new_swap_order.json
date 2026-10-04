@@ -1,0 +1,1 @@
+{"type":"new_swap_order","data":{"symbol":"EURUSD","side":"BUY","nearPrice":1.085,"farPrice":1.0875,"settlDate":20261006,"farSettlDate":20261106,"orderQty":1000000,"account":"ACC1","currency":"USD","capacity":"AGENCY","tif":"GTC"}}
