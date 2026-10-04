@@ -97,7 +97,7 @@ ctest --test-dir build-fuzz-gcc -R FuzzCorpus --output-on-failure
 ```
 
 - Pass a scratch directory first and the tracked seed directory second: libFuzzer writes every new unit into the first directory, and `test/fuzz/corpus/` must stay as committed.
-- Clang's `-fsanitize=undefined` includes `float-cast-overflow`; GCC's does not. The seeds `negative_and_huge_numbers.json` and `orderid_beyond_u64.json` fail only under Clang until the parser validates numeric ranges before narrowing (open issue: parser numeric narrowing).
+- Clang's `-fsanitize=undefined` includes `float-cast-overflow`; GCC's does not, so only a Clang replay catches an unchecked float-to-integer conversion. The seeds `negative_and_huge_numbers.json` and `orderid_beyond_u64.json` found one in the parser (#16). Since f584255 they parse to a rejection under both compilers, and they stay in the corpus as its regression inputs.
 - To add a seed, drop a file into `test/fuzz/corpus/client_message/`; the ctest entry picks it up on reconfigure. Crashes land under `-artifact_prefix`; commit a minimised reproducer to the corpus together with the fix.
 - Contract under test: `parseClientMessage()` returns for every input and never throws. `WsSession::handleMessage()` calls it from a Beast read handler with no try/catch, so anything escaping would take the server down; the harness turns an escaping exception into an abort.
 
