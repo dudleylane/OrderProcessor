@@ -1232,7 +1232,9 @@ COP (Concurrent Order Processor)
 │        │                                                                     │
 │        ├─── ORDER_RECORDTYPE ───────► OrderCodec ───────► OrderEntry        │
 │        │                                                                     │
-│        └─── EXECUTION_RECORDTYPE ───► (Execution handling) ► ExecutionsT    │
+│        ├─── EXECUTION_RECORDTYPE ───► (Execution handling) ► ExecutionsT    │
+│        │                                                                     │
+│        └─── IDLIMIT_RECORDTYPE ─────► (id limit, #81) ──► restoredIdLimit   │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 
@@ -1249,6 +1251,12 @@ COP (Concurrent Order Processor)
 │   Binary Format: Fixed fields + variable length data                        │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Ids across restarts (#58, #81).** Order ids and execution ids come from the shared `IdTGenerator`, which starts at 1 in every run. Transaction ids come from a counter of their own in `app/main.cpp`, because nothing persists them. After loading, the server continues the shared counter past two points: the largest order number restored (#58), and the limit in the `IDLIMIT_RECORDTYPE` record (#81).
+
+From then on, no id is returned before a limit above it is saved. `reserve()` saves one 10,000 ids ahead, and `getId()` saves the next one when the counter reaches it. So execution ids, whose reports aren't persisted, never repeat after a restart, even after a crash. A clean stop saves the exact next id (`releaseReservation()`), so the next run continues without a gap; after a crash, ids jump by up to one block.
+
+The record is keyed (0,1), and only its newest version is kept. A data directory written with it can't be loaded by an older server, which throws on the unknown record type.
 
 **Associated Test Cases:**
 

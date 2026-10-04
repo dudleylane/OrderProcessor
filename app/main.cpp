@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <csignal>
@@ -32,6 +33,10 @@ using namespace COP;
 
 namespace
 {
+
+/// Ids reserved ahead of the counter, and saved as one record (#81). A block costs a write each time the counter
+/// reaches it, and after a crash the next run's ids jump by up to this much; a clean stop saves the exact next id.
+const u64 ID_RESERVATION_BLOCK = 10000;
 
 struct Config
 {
@@ -167,9 +172,16 @@ int main(int argc, char *argv[])
 
     // Order and execution ids come from one counter, which starts at 1 in every run. Continue it past the orders just
     // restored, so that no new order gets a number a restored order already has: clients name orders by number (#58).
+    // And past the limit the previous run saved, below which it issued every id, execution ids included: execution
+    // reports aren't persisted, so without it a new report could repeat an id a client already has (#81).
     const u64 lastOrderNumber = Store::OrderStorage::instance()->maxOrderNumber();
-    IdTGenerator::instance()->advancePast(lastOrderNumber);
-    aux::ExchLogger::instance()->note("Order numbers continue after " + std::to_string(lastOrderNumber));
+    const u64 idLimit = dispatcher->restoredIdLimit();
+    const u64 lastIssued = std::max(lastOrderNumber, (0 < idLimit) ? idLimit - 1 : 0);
+    IdTGenerator::instance()->advancePast(lastIssued);
+    // From here on no id is returned before a limit above it is saved
+    IdTGenerator::instance()->reserve(dispatcher.get(), ID_RESERVATION_BLOCK);
+    aux::ExchLogger::instance()->note("Order numbers continue after " + std::to_string(lastOrderNumber) +
+                                      "; ids continue after " + std::to_string(lastIssued));
 
     // Resolve the defaults that WebSocket orders need (#34). Without them the server still starts, as it does on an
     // unseeded directory, but its sessions refuse the orders that need them. seedData provides both.
@@ -196,9 +208,12 @@ int main(int argc, char *argv[])
     auto wsOutQueues = std::make_unique<App::WsOutQueues>(sessionMgr.get(), Store::WideDataStorage::instance(),
                                                           Store::OrderStorage::instance(), orderBook.get());
 
-    // 7. Create TransactionManager
+    // 7. Create TransactionManager. Transaction ids need only increase within a run, and nothing persists them, so
+    // they come from a counter of their own: a draw from the shared one can save the next id limit (#81), and the
+    // manager draws under the lock that every worker's handoff also takes.
+    IdTValueGenerator transactionIds;
     auto transactMgr = std::make_unique<ACID::TransactionMgr>();
-    ACID::TransactionMgrParams tmParams(IdTGenerator::instance());
+    ACID::TransactionMgrParams tmParams(&transactionIds);
     transactMgr->init(tmParams);
 
     // 8. Create Processor pool
@@ -285,6 +300,17 @@ int main(int argc, char *argv[])
     // processed adds a transaction and a finishing one removes itself, and both require a started manager (#37).
     transactMgr->stop();
     transactMgr.reset();
+
+    // Nothing draws ids now: save the exact next one, so that the next run continues without a gap (#81). If that
+    // fails, the block limit already saved still covers every id issued.
+    try
+    {
+        IdTGenerator::instance()->releaseReservation();
+    }
+    catch (const std::exception &ex)
+    {
+        aux::ExchLogger::instance()->error(std::string("Could not save the next id: ") + ex.what());
+    }
     wsOutQueues.reset();
     inQueues.reset();
     sessionMgr.reset();
