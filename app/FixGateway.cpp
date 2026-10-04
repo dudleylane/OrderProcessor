@@ -31,8 +31,6 @@ const size_t MAX_LOGGED_MESSAGE = 256;
 /// its FIX 4.2 meaning. The engine's reject reasons are free text, so every reject goes out with this code and the
 /// reason itself in Text (58).
 const int ORD_REJ_REASON_BROKER_OPTION = 0;
-/// Numbers the ExecIDs of rejects for orders that were never stored, which have no execution of their own (#67)
-std::atomic<u64> orderRejectSequence{ 0 };
 
 /// Why a cancel was refused, for Text (58). The words match App::cancelRejectReason(), which WebSocket clients get;
 /// that lives in JsonSerializer.cpp, which the FIX benchmark does not build.
@@ -867,7 +865,10 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
         }
         else
         {
-            FIX44::ExecutionReport report = buildOrderReject(evnt);
+            // The order was never stored, so its reject has no execution of its own. Its ExecID still comes from the
+            // shared id generator, whose saved limit keeps it from repeating after a restart, as execution ids don't
+            // (#81); a counter of the gateway's own started again at R1 in every run.
+            FIX44::ExecutionReport report = buildOrderReject(evnt, IdTGenerator::instance()->getId().id_);
             FIX::Session::sendToTarget(report, sid);
         }
     }
@@ -877,11 +878,10 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
     }
 }
 
-FIX44::ExecutionReport FixGateway::buildOrderReject(const Queues::OrderRejectEvent &evnt)
+FIX44::ExecutionReport FixGateway::buildOrderReject(const Queues::OrderRejectEvent &evnt, u64 execId)
 {
     // The order was never stored, so it has no OrderID; its reject still needs an ExecID of its own
-    const u64 sequence = orderRejectSequence.fetch_add(1, std::memory_order_relaxed) + 1;
-    FIX44::ExecutionReport report(FIX::OrderID("NONE"), FIX::ExecID("R" + std::to_string(sequence)),
+    FIX44::ExecutionReport report(FIX::OrderID("NONE"), FIX::ExecID("R" + std::to_string(execId)),
                                   FIX::ExecType(FIX::ExecType_REJECTED), FIX::OrdStatus(FIX::OrdStatus_REJECTED),
                                   FIX::Side(fromSide(evnt.side_)), FIX::LeavesQty(0), FIX::CumQty(0), FIX::AvgPx(0));
     if (!evnt.clOrderId_.empty())

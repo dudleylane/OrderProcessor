@@ -894,7 +894,7 @@ TEST(FixOrderRejectTest, DuplicateNewOrderGetsAnExecutionReportReject)
 {
     // The FIX convention for a duplicate order: 150=8, 39=8, OrdRejReason 6, and the reason in Text (58). The order
     // was never stored, so it has no OrderID.
-    FIX44::ExecutionReport report = FixGateway::buildOrderReject(makeOrderReject(false));
+    FIX44::ExecutionReport report = FixGateway::buildOrderReject(makeOrderReject(false), 41);
 
     FIX::OrderID orderId;
     report.get(orderId);
@@ -928,12 +928,15 @@ TEST(FixOrderRejectTest, DuplicateNewOrderGetsAnExecutionReportReject)
     EXPECT_EQ("aaa", symbol.getValue());
 }
 
-TEST(FixOrderRejectTest, EachOrderRejectHasItsOwnExecId)
+TEST(FixOrderRejectTest, AnOrderRejectsExecIdIsTheIdItIsGiven)
 {
+    // sendOrderReject() gives each reject an id from the shared generator, whose saved limit keeps it from repeating
+    // after a restart (#81). Before, the gateway numbered rejects itself, from R1 in every run.
     FIX::ExecID first, second;
-    FixGateway::buildOrderReject(makeOrderReject(false)).get(first);
-    FixGateway::buildOrderReject(makeOrderReject(false)).get(second);
-    EXPECT_NE(first.getValue(), second.getValue());
+    FixGateway::buildOrderReject(makeOrderReject(false), 10007).get(first);
+    FixGateway::buildOrderReject(makeOrderReject(false), 10008).get(second);
+    EXPECT_EQ("R10007", first.getValue());
+    EXPECT_EQ("R10008", second.getValue());
 }
 
 TEST(FixOrderRejectTest, OrderRefusedForAnotherReasonUsesTheBrokerOptionCode)
@@ -941,7 +944,7 @@ TEST(FixOrderRejectTest, OrderRefusedForAnotherReasonUsesTheBrokerOptionCode)
     Queues::OrderRejectEvent evnt = makeOrderReject(false);
     evnt.duplicateClOrderId_ = false;
     FIX::OrdRejReason ordRejReason;
-    FixGateway::buildOrderReject(evnt).get(ordRejReason);
+    FixGateway::buildOrderReject(evnt, 42).get(ordRejReason);
     EXPECT_EQ(0, ordRejReason.getValue());
 }
 
