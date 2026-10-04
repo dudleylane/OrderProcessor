@@ -126,6 +126,10 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 
     assert(nullptr != idGenerator);
 
+    // Drawn before the lock: a draw can save the next id limit to disk (#81), and lookups must not wait on that. An
+    // order refused below wastes the id, which is harmless.
+    const IdT newId = order.orderId_.isValid() ? IdT() : idGenerator->getId();
+
     OrderEntry *result = nullptr;
     {
         // Exclusive write lock - atomic dual-map insert
@@ -147,7 +151,7 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
         std::unique_ptr<OrderEntry> cp(order.clone());
         if (!cp->orderId_.isValid())
         {
-            cp->orderId_ = idGenerator->getId();
+            cp->orderId_ = newId;
         }
         // Lock the clone before it becomes reachable, so the caller can finish initialising it (status,
         // state machine persistence) before any other thread sees it. Nobody else can hold this entry's
