@@ -15,9 +15,11 @@
 #include <map>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "FileStorageDef.h"
 #include "DataModelDef.h"
+#include "IdTGenerator.h"
 
 #ifdef BUILD_PG
 namespace COP::PG
@@ -40,7 +42,7 @@ class FileStorage;
 
 /// parse incoming buffer into the record
 /// buffer format: <type - 32 bit><body, format depends on type>
-class StorageRecordDispatcher : public FileStorageObserver, public DataSaver, public OrderSaver
+class StorageRecordDispatcher : public FileStorageObserver, public DataSaver, public OrderSaver, public IdLimitSaver
 {
 public:
     StorageRecordDispatcher(void);
@@ -70,6 +72,15 @@ public:
     virtual u32 save(const OrderEntry &val);
     virtual void erase(const IdT &orderId, u32 version);
 
+public:
+    /// reimplemented from IdLimitSaver: one record, the newest version kept (#81)
+    virtual void saveIdLimit(u64 limit);
+    /// The id limit the last load found, or 0 when the directory has none. Every id issued before is below it (#81).
+    u64 restoredIdLimit() const
+    {
+        return restoredIdLimit_;
+    }
+
 #ifdef BUILD_PG
 public:
     void setPGWriter(PG::PGWriteBehind *writer)
@@ -90,6 +101,7 @@ public:
         ORDER_RECORDTYPE,
         EXECUTION_RECORDTYPE,
         EXECUTIONS_RECORDTYPE,
+        IDLIMIT_RECORDTYPE, // every id issued is below the limit it holds (#81)
         TOTAL_RECORDTYPE
     };
 
@@ -104,6 +116,10 @@ private:
     /// decoding waits for finishLoad() too: an order's instrument may not be restored yet (#49).
     typedef std::map<IdT, std::pair<u32, std::string>> PendingOrdersT;
     PendingOrdersT pendingOrders_;
+    /// The largest id limit loaded, and every version of its record on disk: a crash between writing a new version
+    /// and erasing the old leaves two, and saveIdLimit() erases all but the one it writes (#81)
+    u64 restoredIdLimit_;
+    std::vector<u32> idLimitVersions_;
 #ifdef BUILD_PG
     PG::PGWriteBehind *pgWriter_ = nullptr;
 #endif

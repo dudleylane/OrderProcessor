@@ -34,10 +34,13 @@ using namespace COP::Store;
 namespace
 {
 const int MINIMAL_SIZE = 4;
-}
+/// The id limit record's key (#81). The generators never issue id 0, and the only record an earlier build keyed with
+/// id 0 is the empty execution list at (0,0), so (0,1) belongs to no other record.
+const IdT ID_LIMIT_RECORD_ID(0, 1);
+} // namespace
 
 StorageRecordDispatcher::StorageRecordDispatcher(void)
-    : storage_(nullptr), orderBook_(nullptr), fileStorage_(nullptr), orderStorage_(nullptr)
+    : storage_(nullptr), orderBook_(nullptr), fileStorage_(nullptr), orderStorage_(nullptr), restoredIdLimit_(0)
 {
 }
 
@@ -118,6 +121,22 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
         // Execution lists are no longer written (#33). A data directory from an earlier build may hold one such
         // record, an empty list keyed (0,0); it is skipped.
         break;
+    case IDLIMIT_RECORDTYPE:
+    {
+        // Every id the previous runs issued is below the largest limit (#81)
+        u64 limit = 0;
+        if (sizeof(type) + sizeof(limit) > size)
+        {
+            throw std::runtime_error("Id limit record too short, record could not be restored!");
+        }
+        memcpy(&limit, buf + sizeof(type), sizeof(limit));
+        if (limit > restoredIdLimit_)
+        {
+            restoredIdLimit_ = limit;
+        }
+        idLimitVersions_.push_back(version);
+    }
+    break;
     case ORDER_RECORDTYPE:
     {
         if (nullptr == orderStorage_)
@@ -320,4 +339,24 @@ void StorageRecordDispatcher::erase(const IdT &orderId, u32 version)
 {
     assert(nullptr != fileStorage_);
     fileStorage_->erase(orderId, version);
+}
+
+void StorageRecordDispatcher::saveIdLimit(u64 limit)
+{
+    assert(nullptr != fileStorage_);
+    string buffer;
+    const int t = StorageRecordDispatcher::IDLIMIT_RECORDTYPE;
+    buffer.append(reinterpret_cast<const char *>(&t), sizeof(t));
+    buffer.append(reinterpret_cast<const char *>(&limit), sizeof(limit));
+    // update() makes the new version durable before the old ones are erased, so a crash in between leaves both, and
+    // the load keeps the larger limit. replace() would do both in one write, but it walks the whole database.
+    const u32 written = fileStorage_->update(ID_LIMIT_RECORD_ID, buffer.data(), buffer.size());
+    for (u32 version : idLimitVersions_)
+    {
+        if (version != written)
+        {
+            fileStorage_->erase(ID_LIMIT_RECORD_ID, version);
+        }
+    }
+    idLimitVersions_.assign(1, written);
 }

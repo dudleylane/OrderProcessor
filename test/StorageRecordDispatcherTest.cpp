@@ -10,6 +10,7 @@
 */
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <vector>
 #include <deque>
 #include <map>
@@ -1189,6 +1190,182 @@ TEST_F(StorageRecordDispatcherTest, OrderNumbersContinueAfterRestart)
         EXPECT_EQ(10u, saved->orderId_.id_);
         EXPECT_EQ(saved, storageAfter.locateByOrderNumber(10));
         EXPECT_NE(nullptr, storageAfter.locateByOrderNumber(9));
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+// =============================================================================
+// Id Limit (#81)
+// =============================================================================
+
+namespace
+{
+/// The id limit record's key, as StorageRecordDispatcher.cpp defines it
+const IdT ID_LIMIT_KEY(0, 1);
+
+/// How a run continues its ids, as app/main.cpp does: past the largest order restored (#58) and past the saved limit
+u64 lastIssuedId(const OrderDataStorage &storage, const StorageRecordDispatcher &dispatcher)
+{
+    const u64 limit = dispatcher.restoredIdLimit();
+    return std::max(storage.maxOrderNumber(), (0 < limit) ? limit - 1 : 0);
+}
+
+/// Only the newest version of the id limit record is on disk
+void expectOneIdLimitVersion(const LMDBStorage &lmdb)
+{
+    const u32 top = lmdb.getTopVersion(ID_LIMIT_KEY);
+    EXPECT_TRUE(lmdb.isExists(ID_LIMIT_KEY, top));
+    for (u32 version = 0; version < top; ++version)
+    {
+        EXPECT_FALSE(lmdb.isExists(ID_LIMIT_KEY, version)) << "version " << version << " was not erased";
+    }
+}
+} // namespace
+
+TEST_F(StorageRecordDispatcherTest, IdLimitIsOneRecordAndSurvivesARestart)
+{
+    const std::string dir = test::uniqueTestPath("dispatcher-id-limit");
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        EXPECT_EQ(0u, dispatcher_->restoredIdLimit()) << "a new directory has no limit";
+        dispatcher_->saveIdLimit(100);
+        dispatcher_->saveIdLimit(250);
+        expectOneIdLimitVersion(lmdb);
+    }
+
+    {
+        // restart: a fresh dispatcher over the same directory
+        OrderDataStorage storageAfter;
+        TestOrderBook bookAfter;
+        StorageRecordDispatcher dispatcherAfter;
+        LMDBStorage lmdbAfter;
+        dispatcherAfter.init(restore_.get(), &bookAfter, &lmdbAfter, &storageAfter);
+        lmdbAfter.load(dir, &dispatcherAfter);
+        EXPECT_EQ(250u, dispatcherAfter.restoredIdLimit());
+        dispatcherAfter.saveIdLimit(300);
+        expectOneIdLimitVersion(lmdbAfter);
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_F(StorageRecordDispatcherTest, IdLimitKeepsTheLargerOfTheVersionsACrashLeft)
+{
+    // A crash between writing a new version and erasing the old leaves both on disk. The load keeps the larger limit,
+    // and the next save erases both.
+    const std::string dir = test::uniqueTestPath("dispatcher-id-limit-crash");
+    {
+        LMDBStorage lmdb;
+        StorageRecordDispatcher writer;
+        writer.init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, &writer);
+        const u64 limits[] = { 900, 400 };
+        for (u64 limit : limits)
+        {
+            std::string record = createRecordTypePrefix(StorageRecordDispatcher::IDLIMIT_RECORDTYPE);
+            record.append(reinterpret_cast<const char *>(&limit), sizeof(limit));
+            lmdb.update(ID_LIMIT_KEY, record.data(), record.size());
+        }
+    }
+
+    {
+        OrderDataStorage storageAfter;
+        TestOrderBook bookAfter;
+        StorageRecordDispatcher dispatcherAfter;
+        LMDBStorage lmdbAfter;
+        dispatcherAfter.init(restore_.get(), &bookAfter, &lmdbAfter, &storageAfter);
+        lmdbAfter.load(dir, &dispatcherAfter);
+        EXPECT_EQ(900u, dispatcherAfter.restoredIdLimit());
+        dispatcherAfter.saveIdLimit(1000);
+        expectOneIdLimitVersion(lmdbAfter);
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_F(StorageRecordDispatcherTest, ExecutionIdsContinueAfterACrash)
+{
+    // The bug this covers: execution reports aren't persisted, and after a restart ids continued only past the largest
+    // order number, so a new report could repeat an execution id a client already had (#81)
+    const std::string dir = test::uniqueTestPath("dispatcher-execution-ids");
+    u64 lastExecId = 0;
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        IdTValueGenerator generator;
+        generator.reserve(dispatcher_.get(), 1000);
+
+        std::unique_ptr<OrderEntry> order(createTestOrder());
+        order->clOrderId_ = addTestRawData("CL-81");
+        order->orderId_ = IdT();
+        order->status_ = NEW_ORDSTATUS;
+        OrderEntry *saved = orderStorage_->save(*order, &generator);
+        ASSERT_NE(nullptr, saved);
+        dispatcher_->save(*saved); // persisted, as PersistOrderTrOperation does
+        for (int i = 0; i < 5; ++i)
+        {
+            // its fills' reports, which aren't persisted
+            ExecutionEntry exec;
+            exec.orderId_ = saved->orderId_;
+            exec.type_ = TRADE_EXECTYPE;
+            lastExecId = orderStorage_->save(exec, &generator)->execId_.id_;
+        }
+        // stops without releasing the reservation, as a crash does
+    }
+
+    {
+        OrderDataStorage storageAfter;
+        TestOrderBook bookAfter;
+        StorageRecordDispatcher dispatcherAfter;
+        LMDBStorage lmdbAfter;
+        dispatcherAfter.init(restore_.get(), &bookAfter, &lmdbAfter, &storageAfter);
+        lmdbAfter.load(dir, &dispatcherAfter);
+        ASSERT_LT(storageAfter.maxOrderNumber(), lastExecId) << "the order number alone would repeat execution ids";
+
+        IdTValueGenerator generator; // starts at 1, as in every run
+        generator.advancePast(lastIssuedId(storageAfter, dispatcherAfter));
+        EXPECT_GT(generator.getId().id_, lastExecId);
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_F(StorageRecordDispatcherTest, IdsContinueWithoutAGapAfterACleanStop)
+{
+    const std::string dir = test::uniqueTestPath("dispatcher-clean-stop-ids");
+    u64 lastId = 0;
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        IdTValueGenerator generator;
+        generator.reserve(dispatcher_.get(), 1000);
+        for (int i = 0; i < 7; ++i)
+        {
+            lastId = generator.getId().id_;
+        }
+        generator.releaseReservation();
+    }
+
+    {
+        OrderDataStorage storageAfter;
+        TestOrderBook bookAfter;
+        StorageRecordDispatcher dispatcherAfter;
+        LMDBStorage lmdbAfter;
+        dispatcherAfter.init(restore_.get(), &bookAfter, &lmdbAfter, &storageAfter);
+        lmdbAfter.load(dir, &dispatcherAfter);
+
+        IdTValueGenerator generator;
+        generator.advancePast(lastIssuedId(storageAfter, dispatcherAfter));
+        EXPECT_EQ(lastId + 1, generator.getId().id_);
     }
 
     std::error_code ec;
