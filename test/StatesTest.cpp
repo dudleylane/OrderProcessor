@@ -21,6 +21,7 @@
 #include "IdTGenerator.h"
 #include "TransactionScope.h"
 #include "StateMachineHelper.h"
+#include "OrderStateMachineImpl.h"
 #include "OrderStorage.h"
 #include "Logger.h"
 
@@ -658,4 +659,60 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnExternalOrder_EmptyClOrderId)
     EXPECT_EQ(1u, trCntxt.op_.size());
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
     EXPECT_EQ(REJECTED_ORDSTATUS, evnt.order_->status_);
+}
+
+// =============================================================================
+// A reject handed the copy that its receive already stored (#68)
+// =============================================================================
+//
+// A receive can refuse an order after storing it, as it does a market order with nothing to trade with. The machine
+// then hands the reject the stored copy, not the incoming order. The rejects asserted otherwise, and Debug builds
+// aborted; the replace and external ones also went on with the incoming, unstored order.
+
+namespace
+{
+template <typename RejectEvent> OrderEntry *rejectGivenTheStoredCopy(OrderEntry *incoming, OrderEntry *stored)
+{
+    TestTransactionContext trCntxt;
+    RejectEvent evnt(incoming);
+    evnt.generator_ = IdTGenerator::instance();
+    evnt.transaction_ = &trCntxt;
+    evnt.orderStorage_ = OrderStorage::instance();
+    OrderEntry *data = stored;
+    OrdStateImpl::processReject(&data, evnt);
+    return data;
+}
+} // namespace
+
+TEST_F(StatesTest, OrderRejectKeepsTheCopyTheReceiveStored)
+{
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+    OrderEntry *stored = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    ASSERT_NE(nullptr, stored);
+
+    EXPECT_EQ(stored, rejectGivenTheStoredCopy<onRecvOrderRejected>(order.get(), stored));
+    EXPECT_EQ(stored, OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get()));
+}
+
+TEST_F(StatesTest, ReplacementRejectKeepsTheCopyTheReceiveStored)
+{
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+    OrderEntry *stored = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    ASSERT_NE(nullptr, stored);
+
+    EXPECT_EQ(stored, rejectGivenTheStoredCopy<onRecvRplOrderRejected>(order.get(), stored));
+    EXPECT_EQ(stored, OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get()));
+}
+
+TEST_F(StatesTest, ExternalOrderRejectKeepsTheCopyTheAcceptStored)
+{
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+    OrderEntry *stored = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    ASSERT_NE(nullptr, stored);
+
+    EXPECT_EQ(stored, rejectGivenTheStoredCopy<onExternalOrderRejected>(order.get(), stored));
+    EXPECT_EQ(stored, OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get()));
 }
