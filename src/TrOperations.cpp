@@ -30,7 +30,8 @@ namespace COP
 namespace ACID
 {
 
-void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, const ExecutionEntry &exec)
+void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, const ExecutionEntry &exec,
+                                    const std::string &requestClOrdId = std::string())
 {
     /// locate order and push event into the executions_
     /// find source of the order and push ExecReport to the source
@@ -51,7 +52,9 @@ void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, con
     ordLock.release();
 
     assert(nullptr != cnxt.outQueues_);
-    cnxt.outQueues_->push(ExecReportEvent(execReport), src);
+    ExecReportEvent report(execReport);
+    report.requestClOrdId_ = requestClOrdId;
+    cnxt.outQueues_->push(report, src);
 }
 
 void executeEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt)
@@ -255,6 +258,29 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
 
 void CreateExecReportTrOperation::rollback(const Context &) {}
 
+CreateCancelExecReportTrOperation::CreateCancelExecReportTrOperation(const OrderEntry &order,
+                                                                     const std::string &requestClOrdId)
+    : Operation(CREATE_EXECREPORT_TROPERATION, order.orderId_), requestClOrdId_(requestClOrdId)
+{
+}
+
+CreateCancelExecReportTrOperation::~CreateCancelExecReportTrOperation() {}
+
+void CreateCancelExecReportTrOperation::execute(const Context &cnxt)
+{
+    assert(nullptr != cnxt.outQueues_);
+    ExecutionEntry execReport;
+    execReport.orderId_ = getObjectId();
+    execReport.type_ = CANCEL_EXECTYPE;
+    execReport.transactTime_ = aux::currentDateTime();
+    execReport.execId_ = IdT(); /// will be assigned when saved into the storage
+    execReport.orderStatus_ = CANCELED_ORDSTATUS;
+    execReport.market_ = INTERNAL_EXECUTION;
+    processEvent_GenerateExecution(cnxt, getObjectId(), execReport, requestClOrdId_);
+}
+
+void CreateCancelExecReportTrOperation::rollback(const Context &) {}
+
 CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(const TradeExecEntry *trade, OrderStatus status,
                                                                    const OrderEntry &order)
     : Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), status_(status)
@@ -453,9 +479,9 @@ void RemoveFromOrderBookTrOperation::rollback(const Context &cnxt)
 }
 
 CancelRejectTrOperation::CancelRejectTrOperation(const OrderEntry &order, CancelRejectEvent::Reason reason,
-                                                 const std::string &requester)
+                                                 const std::string &requester, const std::string &requestClOrdId)
     : Operation(CANCEL_REJECT_TROPERATION, order.orderId_), status_(order.status_), reason_(reason),
-      requester_(requester)
+      requester_(requester), requestClOrdId_(requestClOrdId)
 {
 }
 
@@ -468,6 +494,7 @@ void CancelRejectTrOperation::execute(const Context &cnxt)
     reject.id_ = getObjectId();
     reject.reason_ = reason_;
     reject.ordStatus_ = status_;
+    reject.requestClOrdId_ = requestClOrdId_;
     std::string target = requester_;
     if (target.empty())
     {
@@ -528,9 +555,10 @@ void RefuseReplaceTrOperation::execute(const Context &cnxt)
 
 void RefuseReplaceTrOperation::rollback(const Context &) {}
 
-CancelOrderTrOperation::CancelOrderTrOperation(OrderEntry *order, const std::string &requester)
+CancelOrderTrOperation::CancelOrderTrOperation(OrderEntry *order, const std::string &requester,
+                                               const std::string &requestClOrdId)
     : Operation(CANCEL_ORDER_TROPERATION, order->orderId_, order->instrument_.getId()), order_(order),
-      requester_(requester), eventCountBefore_(0)
+      requester_(requester), requestClOrdId_(requestClOrdId), eventCountBefore_(0)
 {
 }
 
@@ -543,7 +571,7 @@ void CancelOrderTrOperation::execute(const Context &cnxt)
         throw std::runtime_error("CancelOrderTrOperation: no deferred event container to decide the cancel!");
     }
     eventCountBefore_ = cnxt.deferedEvents_->deferedEventCount();
-    cnxt.deferedEvents_->addDeferedEvent(new CancelRequestDeferedEvent(order_, requester_));
+    cnxt.deferedEvents_->addDeferedEvent(new CancelRequestDeferedEvent(order_, requester_, requestClOrdId_));
 }
 
 void CancelOrderTrOperation::rollback(const Context &cnxt)
