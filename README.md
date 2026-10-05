@@ -236,7 +236,6 @@ Benchmark results on 8-core CPU @ 3.8 GHz:
 | EventProcessing | ~7,200 | ~139K ops/sec |
 | OrderMatching | ~7,300 | ~137K ops/sec |
 | StateMachineTransitions | ~9,100 | ~110K ops/sec |
-| InterlockCache | ~30-40 | ~25-33M ops/sec |
 | IncomingQueues Push | ~15 | ~66M ops/sec |
 | IncomingQueues Pop | ~15 | ~66M ops/sec |
 
