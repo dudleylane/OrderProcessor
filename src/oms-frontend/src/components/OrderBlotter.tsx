@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { Order, ReplaceOrderRequest } from '../types';
+import { ReplaceOrderForm } from './ReplaceOrderForm';
 import { formatQuantity, formatPrice, formatTime, formatId } from '../utils/format';
 import {
   ORDER_STATUS_LABELS,
@@ -8,6 +9,7 @@ import {
   SIDE_COLORS,
   ACTIVE_STATUSES,
   CANCELABLE_STATUSES,
+  REPLACEABLE_STATUSES,
 } from '../utils/constants';
 
 interface OrderBlotterProps {
@@ -17,6 +19,8 @@ interface OrderBlotterProps {
 }
 
 export function OrderBlotter({ orders, cancelOrder, replaceOrder }: OrderBlotterProps) {
+  // The order whose replace form is open, if any
+  const [replacingId, setReplacingId] = useState<number | null>(null);
   const sortedOrders = Array.from(orders.values())
     .sort((a, b) => b.lastUpdateTime - a.lastUpdateTime);
 
@@ -52,68 +56,84 @@ export function OrderBlotter({ orders, cancelOrder, replaceOrder }: OrderBlotter
           {sortedOrders.map(order => {
             const isActive = ACTIVE_STATUSES.has(order.status);
             const canCancel = CANCELABLE_STATUSES.has(order.status);
+            const canReplace = REPLACEABLE_STATUSES.has(order.status);
+            const replacing = canReplace && replacingId === order.orderId;
 
             return (
-              <tr
-                key={order.orderId}
-                className={`border-b border-gray-800/50 hover:bg-gray-900/50
-                  ${!isActive ? 'opacity-60' : ''}`}
-              >
-                <td className="p-3 text-gray-500 font-mono">
-                  {formatTime(order.creationTime)}
-                </td>
-                <td className="p-3 font-mono text-gray-400" title={String(order.orderId)}>
-                  {formatId(order.orderId)}
-                </td>
-                <td className="p-3 font-mono font-medium">
-                  {order.symbol}
-                </td>
-                <td className={`p-3 font-medium ${SIDE_COLORS[order.side] ?? 'text-gray-400'}`}>
-                  {SIDE_LABELS[order.side] ?? order.side}
-                </td>
-                <td className="p-3 text-gray-400">
-                  {order.ordType}
-                </td>
-                <td className="p-3 text-right font-mono">
-                  {order.price > 0 ? formatPrice(order.price) : '--'}
-                </td>
-                <td className="p-3 text-right font-mono">
-                  {formatQuantity(order.orderQty)}
-                </td>
-                <td className="p-3 text-right font-mono text-green-400">
-                  {order.cumQty > 0 ? formatQuantity(order.cumQty) : '--'}
-                </td>
-                <td className="p-3 text-right font-mono">
-                  {formatQuantity(order.leavesQty)}
-                </td>
-                <td className="p-3 text-right font-mono">
-                  {order.avgPx > 0 ? formatPrice(order.avgPx) : '--'}
-                </td>
-                <td className={`p-3 font-medium ${ORDER_STATUS_COLORS[order.status] ?? 'text-gray-400'}`}>
-                  {/* Fix: use replaceAll instead of replace for multi-underscore statuses */}
-                  {ORDER_STATUS_LABELS[order.status] ?? order.status.replace(/_/g, ' ')}
-                </td>
-                <td className="p-3 text-gray-500">{order.tif}</td>
-                <td className="p-3 text-center">
-                  {canCancel && (
-                    <span className="flex gap-2 justify-center">
-                      {/* Fix: onClick wired to cancelOrder via WS hook */}
-                      <button
-                        onClick={() => cancelOrder(order.orderId, order.clOrderId)}
-                        className="text-red-400 hover:text-red-300 text-xs"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => replaceOrder({ orderId: order.orderId, clOrderId: order.clOrderId })}
-                        className="text-cyan-400 hover:text-cyan-300 text-xs"
-                      >
-                        Replace
-                      </button>
-                    </span>
-                  )}
-                </td>
-              </tr>
+              <React.Fragment key={order.orderId}>
+                <tr
+                  className={`border-b border-gray-800/50 hover:bg-gray-900/50
+                    ${!isActive ? 'opacity-60' : ''}`}
+                >
+                  <td className="p-3 text-gray-500 font-mono">
+                    {formatTime(order.creationTime)}
+                  </td>
+                  <td className="p-3 font-mono text-gray-400" title={String(order.orderId)}>
+                    {formatId(order.orderId)}
+                  </td>
+                  <td className="p-3 font-mono font-medium">
+                    {order.symbol}
+                  </td>
+                  <td className={`p-3 font-medium ${SIDE_COLORS[order.side] ?? 'text-gray-400'}`}>
+                    {SIDE_LABELS[order.side] ?? order.side}
+                  </td>
+                  <td className="p-3 text-gray-400">
+                    {order.ordType}
+                  </td>
+                  <td className="p-3 text-right font-mono">
+                    {order.price > 0 ? formatPrice(order.price) : '--'}
+                  </td>
+                  <td className="p-3 text-right font-mono">
+                    {formatQuantity(order.orderQty)}
+                  </td>
+                  <td className="p-3 text-right font-mono text-green-400">
+                    {order.cumQty > 0 ? formatQuantity(order.cumQty) : '--'}
+                  </td>
+                  <td className="p-3 text-right font-mono">
+                    {formatQuantity(order.leavesQty)}
+                  </td>
+                  <td className="p-3 text-right font-mono">
+                    {order.avgPx > 0 ? formatPrice(order.avgPx) : '--'}
+                  </td>
+                  <td className={`p-3 font-medium ${ORDER_STATUS_COLORS[order.status] ?? 'text-gray-400'}`}>
+                    {/* Fix: use replaceAll instead of replace for multi-underscore statuses */}
+                    {ORDER_STATUS_LABELS[order.status] ?? order.status.replace(/_/g, ' ')}
+                  </td>
+                  <td className="p-3 text-gray-500">{order.tif}</td>
+                  <td className="p-3 text-center">
+                    {canCancel && (
+                      <span className="flex gap-2 justify-center">
+                        {/* Fix: onClick wired to cancelOrder via WS hook */}
+                        <button
+                          onClick={() => cancelOrder(order.orderId, order.clOrderId)}
+                          className="text-red-400 hover:text-red-300 text-xs"
+                        >
+                          Cancel
+                        </button>
+                        {canReplace && (
+                          <button
+                            onClick={() => setReplacingId(replacing ? null : order.orderId)}
+                            className="text-cyan-400 hover:text-cyan-300 text-xs"
+                          >
+                            Replace
+                          </button>
+                        )}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+                {replacing && (
+                  <tr className="border-b border-gray-800/50">
+                    <td colSpan={13}>
+                      <ReplaceOrderForm
+                        order={order}
+                        replaceOrder={replaceOrder}
+                        onClose={() => setReplacingId(null)}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             );
           })}
         </tbody>

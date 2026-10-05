@@ -76,9 +76,15 @@ export const ACTIVE_STATUSES = new Set<OrderStatus>([
   OrderStatus.SUSPENDED,
 ]);
 
-/** Statuses where cancel/replace is allowed */
+/** Statuses where cancel is allowed */
 export const CANCELABLE_STATUSES = new Set<OrderStatus>([
   OrderStatus.NEW,
   OrderStatus.PARTIAL_FILL,
   OrderStatus.SUSPENDED,
+]);
+
+/** Statuses where replace is allowed: the engine replaces only an order in the book, and refuses a suspended one (#84) */
+export const REPLACEABLE_STATUSES = new Set<OrderStatus>([
+  OrderStatus.NEW,
+  OrderStatus.PARTIAL_FILL,
 ]);
