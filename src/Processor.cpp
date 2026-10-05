@@ -12,6 +12,8 @@
 
 #include <stdexcept>
 #include <cassert>
+#include <thread>
+#include <utility>
 #include "Processor.h"
 #include "TransactionDef.h"
 #include "StateMachine.h"
@@ -58,6 +60,9 @@ struct ProcessorThreadState
     std::unique_ptr<OrdState::OrderState> stateMachine;
     OrdState::OrderStatePersistence initialSMState;
     std::vector<DeferedEventBase *> events;
+    /// While a deferred event executes, the guard that a replacement it stores is saved under, which keeps the
+    /// replacement marked until the transaction that books it is enqueued (#83). Set by onEvent(DeferedEventBase*).
+    Store::PublishGuard *deferedPublishGuard = nullptr;
 
     ProcessorThreadState()
     {
@@ -71,6 +76,43 @@ ProcessorThreadState &threadState()
 {
     thread_local ProcessorThreadState s;
     return s;
+}
+
+/// Points this worker's deferedPublishGuard at one deferred event's guard, and puts back the one before
+class DeferedPublishGuardScope
+{
+public:
+    explicit DeferedPublishGuardScope(Store::PublishGuard *guard)
+        : previous_(std::exchange(threadState().deferedPublishGuard, guard))
+    {
+    }
+    ~DeferedPublishGuardScope()
+    {
+        threadState().deferedPublishGuard = previous_;
+    }
+    DeferedPublishGuardScope(const DeferedPublishGuardScope &) = delete;
+    DeferedPublishGuardScope &operator=(const DeferedPublishGuardScope &) = delete;
+
+private:
+    Store::PublishGuard *previous_;
+};
+
+/// Waits until the transaction that books the order is enqueued, if it is not yet (#83).
+///
+/// A new order or replacement can be found from the moment it is stored, a little before its creator enqueues the
+/// transaction that matches and books it. A transaction about the order enqueued in that gap would get the lower id
+/// and run first: a cancel would be decided before the order was booked, and the booking transaction would then match
+/// an order with nothing left. TransactionMgr::addTransaction() draws a transaction's id under its lock, and the
+/// creator clears the mark (release) only after that call returns, so a caller that sees the mark clear (acquire) and
+/// then enqueues draws a higher id. No caller waits here while holding a lock, and the creator never waits for an event
+/// handler, so this cannot deadlock. The wait is short: the gap holds no I/O, only the rest of the creator's state
+/// machine run and the enqueue.
+void waitUntilBookingEnqueued(const OrderEntry &order)
+{
+    while (order.bookingPending_.load(std::memory_order_acquire))
+    {
+        std::this_thread::yield();
+    }
 }
 } // namespace
 
@@ -145,7 +187,8 @@ void Processor::onEvent(const std::string &source, const OrderEvent &evnt)
     evnt2Proc.transaction_ = scope.get();
     evnt2Proc.orderStorage_ = orderStorage_;
     evnt2Proc.orderBook_ = orderBook_;
-    // save() locks the new order before publishing it; released below once its state is written (#13)
+    // save() locks the new order before publishing it, released below once its state is written (#13), and marks it
+    // until the transaction that books it is enqueued (#83)
     Store::PublishGuard publishGuard;
     evnt2Proc.publishGuard_ = &publishGuard;
 
@@ -178,6 +221,8 @@ void Processor::onEvent(const std::string &source, const OrderEvent &evnt)
     assert(nullptr != transactMgr_);
     std::unique_ptr<Transaction> tr(scope.release());
     transactMgr_->addTransaction(tr);
+    // The transaction that books the order has its id: a cancel or replace of the order can follow it (#83)
+    publishGuard.bookingEnqueued();
 
     // process defered events
     processDeferedEvent();
@@ -196,6 +241,8 @@ void Processor::onEvent(const std::string &source, const OrderCancelEvent &evnt)
         return;
     }
     [[assume(ord != nullptr)]];
+    // Enqueued before the transaction that books the order, the cancel would be decided before the order was booked
+    waitUntilBookingEnqueued(*ord);
 
     // The cancel is decided on the transaction worker, by process(onExecCancel) below, once every transaction before
     // this one on the order or its instrument has run, together with the fills it caused. Decided here, it could
@@ -237,6 +284,8 @@ void Processor::onEvent(const std::string &source, const OrderReplaceEvent &evnt
         return;
     }
     [[assume(original != nullptr)]];
+    // Enqueued before the transaction that books the original, the replace would be decided before it was booked
+    waitUntilBookingEnqueued(*original);
 
     // The queue frees the event's replacement after dispatch, so the operation keeps a copy
     PooledTransactionScope scope(scopePool_.get());
@@ -543,11 +592,18 @@ void Processor::onEvent(DeferedEventBase *evnt)
     PooledTransactionScope scope(scopePool_.get());
     ScopeArenaGuard arenaGuard(scope.get());
 
-    evnt->execute(this, cntxt, scope.get());
+    // A replace decided here stores its replacement under this guard, and this transaction books it, so the guard
+    // keeps the replacement marked until the transaction is enqueued (#83)
+    Store::PublishGuard publishGuard;
+    {
+        DeferedPublishGuardScope guardScope(&publishGuard);
+        evnt->execute(this, cntxt, scope.get());
+    }
 
     assert(nullptr != transactMgr_);
     std::unique_ptr<Transaction> tr(scope.release());
     transactMgr_->addTransaction(tr);
+    publishGuard.bookingEnqueued();
 }
 
 void Processor::processDeferedEvent()
@@ -754,8 +810,12 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
         return;
     }
 
-    // Store it under a fresh id. A ClOrdID already in use is refused, as for a new order (#67).
-    Store::PublishGuard publishGuard;
+    // Store it under a fresh id. A ClOrdID already in use is refused, as for a new order (#67). It is saved under the
+    // deferred event's guard, which keeps it marked until onEvent(DeferedEventBase*) has enqueued the transaction that
+    // books it (#83); called from anywhere else, under a guard of its own.
+    Store::PublishGuard ownGuard;
+    Store::PublishGuard &publishGuard =
+        (nullptr != threadState().deferedPublishGuard) ? *threadState().deferedPublishGuard : ownGuard;
     OrderEntry *stored = nullptr;
     try
     {

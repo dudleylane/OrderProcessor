@@ -665,3 +665,51 @@ TEST_F(OrderStorageTest, FailedSaveDoesNotLeaveAGuardHeld)
     EXPECT_THROW(storage()->save(*order, IdTGenerator::instance(), &guard), std::runtime_error);
     EXPECT_FALSE(guard.holds());
 }
+
+// =============================================================================
+// Booking mark (#83): a new order stays marked until its creator has enqueued the transaction that books it
+// =============================================================================
+
+TEST_F(OrderStorageTest, SaveWithPublishGuardMarksNewOrderUntilItsBookingIsEnqueued)
+{
+    auto order = createCorrectOrder();
+    COP::Store::PublishGuard guard;
+
+    OrderEntry *saved = storage()->save(*order, IdTGenerator::instance(), &guard);
+    ASSERT_NE(nullptr, saved);
+    EXPECT_TRUE(saved->bookingPending_.load());
+    // A copy is not the stored order, so nothing books it
+    std::unique_ptr<OrderEntry> copy(saved->clone());
+    EXPECT_FALSE(copy->bookingPending_.load());
+
+    // Initialised, the order is unlocked but stays marked
+    guard.release();
+    EXPECT_TRUE(saved->bookingPending_.load());
+
+    guard.bookingEnqueued();
+    EXPECT_FALSE(saved->bookingPending_.load());
+}
+
+TEST_F(OrderStorageTest, DestroyedPublishGuardLeavesNoOrderMarked)
+{
+    // A creator that throws before it enqueues must not leave a cancel of the order waiting for ever
+    auto order = createCorrectOrder();
+    OrderEntry *saved = nullptr;
+    {
+        COP::Store::PublishGuard guard;
+        saved = storage()->save(*order, IdTGenerator::instance(), &guard);
+        ASSERT_NE(nullptr, saved);
+    }
+    EXPECT_FALSE(saved->bookingPending_.load());
+    ASSERT_TRUE(saved->entryMutex_.try_lock());
+    saved->entryMutex_.unlock();
+}
+
+TEST_F(OrderStorageTest, SaveWithoutPublishGuardLeavesOrderUnmarked)
+{
+    // A restored order has no transaction to wait for
+    auto order = createCorrectOrder();
+    OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
+    ASSERT_NE(nullptr, saved);
+    EXPECT_FALSE(saved->bookingPending_.load());
+}
