@@ -549,6 +549,8 @@ void FixGateway::onMessage(const FIX44::OrderCancelRequest &msg, const FIX::Sess
 {
     FIX::OrigClOrdID origClOrdId;
     msg.get(origClOrdId);
+    FIX::ClOrdID clOrdId;
+    msg.get(clOrdId);
 
     // Look up by ClOrdID
     std::string origClOrdStr = origClOrdId.getString();
@@ -559,8 +561,6 @@ void FixGateway::onMessage(const FIX44::OrderCancelRequest &msg, const FIX::Sess
         aux::ExchLogger::instance()->error("FIX: Cancel - order not found: " + origClOrdStr);
         // Answered here rather than by the engine, which only rejects an unknown order id (#57): here the request's
         // own ClOrdID is known, so the reject can quote it (#73)
-        FIX::ClOrdID clOrdId;
-        msg.get(clOrdId);
         Queues::CancelRejectEvent unknown; // UNKNOWN_ORDER, with no order status
         try
         {
@@ -577,6 +577,8 @@ void FixGateway::onMessage(const FIX44::OrderCancelRequest &msg, const FIX::Sess
 
     std::string sourceStr = makeSourceString(sid);
     Queues::OrderCancelEvent evt(order->orderId_, "FIX cancel request");
+    // The engine hands it back on the cancel's acknowledgement and on a reject, for their ClOrdID (11) (#98)
+    evt.requestClOrdId_ = clOrdId.getString();
     inQueues_->push(sourceStr, evt);
 }
 
@@ -709,7 +711,8 @@ bool FixGateway::reportsOverFix(const ExecutionEntry *exec)
     return (REPLACE_EXECTYPE != exec->type_) || (REPLACED_ORDSTATUS != exec->orderStatus_);
 }
 
-void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntry &order)
+void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
+                                     const std::string &requestClOrdId)
 {
     if (!reportsOverFix(exec))
     {
@@ -729,11 +732,12 @@ void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntr
         sid = it->second;
     }
 
-    FIX44::ExecutionReport report = buildExecutionReport(exec, order);
+    FIX44::ExecutionReport report = buildExecutionReport(exec, order, requestClOrdId);
     FIX::Session::sendToTarget(report, sid);
 }
 
-FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order)
+FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
+                                                        const std::string &requestClOrdId)
 {
     FIX44::ExecutionReport report(
         FIX::OrderID(std::to_string(order.orderId_.id_)), FIX::ExecID(std::to_string(exec->execId_.id_)),
@@ -742,7 +746,16 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
         FIX::AvgPx(order.avgPx_));
 
     const auto &clOrd = order.clOrderId_.get();
-    if (clOrd.data_ && clOrd.length_ > 0)
+    if ((CANCEL_EXECTYPE == exec->type_) && !requestClOrdId.empty())
+    {
+        // A cancel's acknowledgement names the request it answers, and the order it cancelled (#98)
+        report.set(FIX::ClOrdID(requestClOrdId));
+        if (clOrd.data_ && clOrd.length_ > 0)
+        {
+            report.set(FIX::OrigClOrdID(std::string(clOrd.data_, clOrd.length_)));
+        }
+    }
+    else if (clOrd.data_ && clOrd.length_ > 0)
     {
         report.set(FIX::ClOrdID(std::string(clOrd.data_, clOrd.length_)));
     }
@@ -938,6 +951,14 @@ FIX44::OrderCancelReject FixGateway::buildCancelReject(const Queues::CancelRejec
     return reject;
 }
 
+FIX44::OrderCancelReject FixGateway::buildEngineCancelReject(const Queues::CancelRejectEvent &evnt,
+                                                             const std::string &orderId,
+                                                             const std::string &orderClOrdId)
+{
+    const std::string &clOrdId = evnt.requestClOrdId_.empty() ? orderClOrdId : evnt.requestClOrdId_;
+    return buildCancelReject(evnt, orderId, clOrdId, orderClOrdId);
+}
+
 void FixGateway::sendCancelReject(const Queues::CancelRejectEvent &evnt, const std::string &target)
 {
     // To the session that sent the cancel, which may not be the one that placed the order
@@ -966,7 +987,7 @@ void FixGateway::sendCancelReject(const Queues::CancelRejectEvent &evnt, const s
     }
     try
     {
-        FIX44::OrderCancelReject reject = buildCancelReject(evnt, orderId, clOrdId, clOrdId);
+        FIX44::OrderCancelReject reject = buildEngineCancelReject(evnt, orderId, clOrdId);
         FIX::Session::sendToTarget(reject, sid);
     }
     catch (const std::exception &ex)

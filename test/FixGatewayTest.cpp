@@ -387,6 +387,8 @@ TEST_F(FixGatewayInboundTest, CancelRequest_PushesToQueue)
             {
                 EXPECT_TRUE(source.find("FIX:") != std::string::npos);
                 EXPECT_EQ(saved->orderId_, evt.id_);
+                // the request's own ClOrdID, which the engine hands back on the cancel's answers (#98)
+                EXPECT_EQ("CANCEL001", evt.requestClOrdId_);
             }));
 
     FIX::UtcTimeStamp now;
@@ -788,6 +790,31 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_AcknowledgementCarriesNoRejectFiel
     EXPECT_FALSE(report.isSetField(FIX::FIELD::Text));
 }
 
+TEST_F(FixGatewayInboundTest, ExecutionReport_CancelAckNamesTheCancelRequest)
+{
+    // FIX 4.4 answers a cancel request with the request's own ClOrdID in 11, and the cancelled order's in 41 (#98)
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    const auto &clOrd = order->clOrderId_.get();
+    const std::string orderClOrdId(clOrd.data_, clOrd.length_);
+    auto ack = makeReport<ExecutionEntry>(CANCEL_EXECTYPE, CANCELED_ORDSTATUS);
+
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order, "CXL-7");
+    FIX::ClOrdID clOrdId;
+    report.get(clOrdId);
+    EXPECT_EQ("CXL-7", clOrdId.getValue());
+    FIX::OrigClOrdID origClOrdId;
+    report.get(origClOrdId);
+    EXPECT_EQ(orderClOrdId, origClOrdId.getValue());
+
+    // A cancel no request asked for, as of a market order the engine can't fill, has no request ClOrdID: the order's
+    // own stays in 11
+    FIX44::ExecutionReport internal = FixGateway::buildExecutionReport(&ack, *order);
+    internal.get(clOrdId);
+    EXPECT_EQ(orderClOrdId, clOrdId.getValue());
+    EXPECT_FALSE(internal.isSetField(FIX::FIELD::OrigClOrdID));
+}
+
 TEST_F(FixGatewayInboundTest, ExecutionReport_TradeCarriesLastQtyAndLastPx)
 {
     auto order = createCorrectOrder(instrumentId1_);
@@ -1067,6 +1094,27 @@ TEST(FixCancelRejectTest, CancelOfAFilledOrderIsTooLate)
     FIX::Text text;
     reject.get(text);
     EXPECT_EQ("Cancel rejected: too late, the order is FILLED", text.getValue());
+}
+
+TEST(FixCancelRejectTest, AnEngineRejectNamesTheCancelRequestAndTheOrder)
+{
+    // The engine carries the request's ClOrdID back since #98: 11 is the request's, 41 the order's
+    Queues::CancelRejectEvent evnt;
+    evnt.reason_ = Queues::CancelRejectEvent::TOO_LATE;
+    evnt.ordStatus_ = CANCELED_ORDSTATUS;
+    evnt.requestClOrdId_ = "CXL-8";
+    FIX44::OrderCancelReject reject = FixGateway::buildEngineCancelReject(evnt, "7", "ORD-1");
+    FIX::ClOrdID clOrdId;
+    reject.get(clOrdId);
+    EXPECT_EQ("CXL-8", clOrdId.getValue());
+    FIX::OrigClOrdID origClOrdId;
+    reject.get(origClOrdId);
+    EXPECT_EQ("ORD-1", origClOrdId.getValue());
+
+    // An event without it falls back to the order's in 11, as before #98
+    evnt.requestClOrdId_.clear();
+    FixGateway::buildEngineCancelReject(evnt, "7", "ORD-1").get(clOrdId);
+    EXPECT_EQ("ORD-1", clOrdId.getValue());
 }
 
 TEST(FixCancelRejectTest, CancelOfAnUnknownOrderIsRejectedAsUnknown)
