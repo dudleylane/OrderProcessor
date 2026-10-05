@@ -283,17 +283,29 @@ SourceIdT WideParamsDataStorage::add(ExecutionsT *val)
 
 // ============================================================================
 // Restore operations - use exclusive (write) locks
+//
+// A restore owns the object it is given. app/main.cpp loads the data directory twice, so every id comes back a second
+// time: the entry already stored stays, and the duplicate is deleted, not leaked (#61). A name index is set only by the
+// entry that is kept.
 // ============================================================================
 
 void WideParamsDataStorage::restore(InstrumentEntry *val)
 {
     // Atomically update subscrCounter_ with exponential backoff
     casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
+    bool inserted = false;
     {
         // Exclusive write lock
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-        instruments_.insert(InstrumentsT::value_type(val->id_, val));
-        instrumentsBySymbol_[val->symbol_] = val->id_;
+        inserted = instruments_.insert(InstrumentsT::value_type(val->id_, val)).second;
+        if (inserted)
+        {
+            instrumentsBySymbol_[val->symbol_] = val->id_;
+        }
+    }
+    if (!inserted)
+    {
+        delete val;
     }
 }
 
@@ -301,10 +313,15 @@ void WideParamsDataStorage::restore(const IdT &id, StringT *val)
 {
     // Atomically update subscrCounter_ with exponential backoff
     casUpdateWithBackoff(subscrCounter_, id.id_ + 1);
+    bool inserted = false;
     {
         // Exclusive write lock
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-        strings_.insert(StringsT::value_type(id, val));
+        inserted = strings_.insert(StringsT::value_type(id, val)).second;
+    }
+    if (!inserted)
+    {
+        delete val;
     }
 }
 
@@ -312,10 +329,15 @@ void WideParamsDataStorage::restore(RawDataEntry *val)
 {
     // Atomically update subscrCounter_ with exponential backoff
     casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
+    bool inserted = false;
     {
         // Exclusive write lock
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-        rawDatas_.insert(RawDataT::value_type(val->id_, val));
+        inserted = rawDatas_.insert(RawDataT::value_type(val->id_, val)).second;
+    }
+    if (!inserted)
+    {
+        delete val;
     }
 }
 
@@ -323,11 +345,19 @@ void WideParamsDataStorage::restore(AccountEntry *val)
 {
     // Atomically update subscrCounter_ with exponential backoff
     casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
+    bool inserted = false;
     {
         // Exclusive write lock
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-        accounts_.insert(AccountsT::value_type(val->id_, val));
-        accountsByName_[val->account_] = val->id_;
+        inserted = accounts_.insert(AccountsT::value_type(val->id_, val)).second;
+        if (inserted)
+        {
+            accountsByName_[val->account_] = val->id_;
+        }
+    }
+    if (!inserted)
+    {
+        delete val;
     }
 }
 
@@ -335,11 +365,19 @@ void WideParamsDataStorage::restore(ClearingEntry *val)
 {
     // Atomically update subscrCounter_ with exponential backoff
     casUpdateWithBackoff(subscrCounter_, val->id_.id_ + 1);
+    bool inserted = false;
     {
         // Exclusive write lock
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-        clearings_.insert(ClearingsT::value_type(val->id_, val));
-        clearingsByFirm_[val->firm_] = val->id_;
+        inserted = clearings_.insert(ClearingsT::value_type(val->id_, val)).second;
+        if (inserted)
+        {
+            clearingsByFirm_[val->firm_] = val->id_;
+        }
+    }
+    if (!inserted)
+    {
+        delete val;
     }
 }
 
