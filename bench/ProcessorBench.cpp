@@ -59,6 +59,7 @@ WideData createEngineState()
     aux::ExchLogger::create();
     aux::ExchLogger::instance()->setNoteOn(false);
     aux::ExchLogger::instance()->setWarnOn(false);
+    aux::ExchLogger::instance()->setDebugOn(false); // as the server does by default (#76)
     WideDataStorage::create();
     IdTGenerator::create();
     OrderStorage::create();

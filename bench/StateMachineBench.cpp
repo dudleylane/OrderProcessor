@@ -40,6 +40,7 @@ public:
     StateMachineBenchmarkSetup()
     {
         aux::ExchLogger::create();
+        aux::ExchLogger::instance()->setDebugOn(false); // measure the engine, not debug logging (#76)
         WideDataStorage::create();
         IdTGenerator::create();
         OrderStorage::create();

@@ -119,6 +119,7 @@ Server options:
 | `--huge-pages` | off | Enable huge page allocation |
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
 | `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
+| `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock |
 
 ### Docker Compose (Full Stack)
 
@@ -217,22 +218,29 @@ differ; these numbers are a shape, not a specification.
 
 | Benchmark | Time | Throughput | What it covers |
 |-----------|------|------------|----------------|
-| `BM_ProcessNewOrder` | ~2.4 µs | ~420K orders/sec | `Processor::onEvent` through the state machine, `OrderDataStorage::save`, the book, and the transaction, executed inline |
-| `BM_ProcessNewOrderWithMatch` | ~11.5 µs | ~88K orders/sec | the same, for an order that crosses: trade, deferred execution events, book removal |
-| `BM_ProcessCancelOrder` | ~3.9 µs | ~255K orders/sec | cancel of a resting order, completed: decided after the order's earlier transactions, removed from the book, reported |
-| `BM_TaskManagerThroughput/4` | ~8.8 ms per 500 orders | ~57K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
+| `BM_ProcessNewOrder` | ~2.4 µs | ~410K orders/sec | `Processor::onEvent` through the state machine, `OrderDataStorage::save`, the book, and the transaction, executed inline |
+| `BM_ProcessNewOrderWithMatch` | ~4.9 µs | ~205K orders/sec | the same, for an order that crosses: trade, deferred execution events, book removal |
+| `BM_ProcessCancelOrder` | ~1.6 µs | ~635K orders/sec | cancel of a resting order, completed: decided after the order's earlier transactions, removed from the book, reported |
+| `BM_TaskManagerThroughput/4` | ~1.9 ms per 500 orders | ~265K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
 
-`BM_TaskManagerThroughput` takes the processor count as its argument: ~30K orders/sec at 2, ~57K at
-4, and no further gain at 8 on a 4-core machine.
+`BM_TaskManagerThroughput` takes the processor count as its argument: ~205K orders/sec at 2, ~265K at
+4, and little more (~270K) at 8 on a 4-core machine.
 
 Two things these numbers deliberately exclude, both real in production:
 
-- **Logging.** The benchmarks turn notes off. `app/main.cpp` turns them on, and with them on a new
-  order costs about 27 µs instead of 2.4 µs: roughly 24 µs per order inside spdlog. Debug logging
-  stays on in both, so a row that removes an order from the book (a match that fills, a cancel)
-  includes `OrderBookImpl::remove`'s debug line: about a third of a cancel.
+- **Logging.** The benchmarks turn notes and debug logging off. `app/main.cpp` turns notes on; with
+  them on, a new order cost about 27 µs when #25 measured it, against 2.4 µs without, so roughly 24 µs
+  per order goes into spdlog. The server's debug logging is off unless `--debug` asks for it (#76).
+  With it on, every transaction formats about five more lines inside the transaction manager's lock,
+  and every removal from the book one more. Before #76 the rows above included them; in the same
+  session a match then took ~10.4 µs, a cancel ~3.8 µs, and `BM_TaskManagerThroughput/4` ~5.9 ms per
+  500 orders.
 - **Persistence.** No `OrderSaver` is attached, so nothing reaches LMDB. With the dispatcher wired
   up, each order change costs an LMDB write, about 2 ms with fsync per commit (issue #20).
+
+And one thing they include that production doesn't: the benchmark's `OutgoingQueues` keeps a copy of
+every report until the run ends, where production's queues keep none. That is about 2% of the
+instructions of a new order or a cancel.
 
 For the queue, order book, state machine, arena and cache microbenchmarks, run the binary:
 `./build/orderProcessorBench --benchmark_list_tests` shows everything available.

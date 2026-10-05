@@ -673,10 +673,20 @@ bool NLinkTree::isCurrentValid() const
 
 void NLinkTree::dumpTree()
 {
+    // The transaction manager calls this as it is destroyed. Transactions still in the tree then never ran, which is
+    // worth a warning; the dump of the tree is detail for debugging. Both were logged as fatal, at every shutdown (#76).
     char buf[64];
     buf[0] = 0;
     aux::toStr(buf, keys_.size());
-    aux::ExchLogger::instance()->fatal(string("Start duming tree: tree contains elements ") + buf);
+    if (!keys_.empty())
+    {
+        aux::ExchLogger::instance()->warn(string("NLinkTree: transactions left unexecuted at shutdown: ") + buf);
+    }
+    if (!aux::ExchLogger::instance()->isDebugOn())
+    {
+        return;
+    }
+    aux::ExchLogger::instance()->debug(string("Start dumping tree: tree contains elements ") + buf);
     string keyVal;
     for (KParamsT::const_iterator it = keys_.begin(); it != keys_.end(); ++it)
     {
@@ -716,7 +726,7 @@ void NLinkTree::dumpTree()
             text += "[" + keyVal + "] ";
         }
 
-        aux::ExchLogger::instance()->fatal(text);
+        aux::ExchLogger::instance()->debug(text);
     }
-    aux::ExchLogger::instance()->fatal(string("Finished duming tree"));
+    aux::ExchLogger::instance()->debug(string("Finished dumping tree"));
 }
