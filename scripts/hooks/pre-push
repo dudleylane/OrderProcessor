@@ -40,6 +40,14 @@ ROOT="$(git rev-parse --show-toplevel)"
 BUILD_DIR="${BUILD_DIR:-$ROOT/build}"
 CLANG_FORMAT="${CLANG_FORMAT:-clang-format-22}"
 
+# git exports this repository's environment to hooks: GIT_DIR, at least, in a
+# linked worktree. FetchContent runs git itself, in other repositories, and with
+# GIT_DIR set its clones and checkouts act on this one instead ("fatal: invalid
+# reference: v3.11.3"), so configuring a fresh BUILD_DIR could never succeed
+# from a worktree. Nothing below needs git, so drop all of it.
+# shellcheck disable=SC2046
+unset $(git rev-parse --local-env-vars)
+
 # Same toolchain activation as the CI workflows.
 TOOLSET=/opt/rh/gcc-toolset-15/root/usr
 if [[ -d "$TOOLSET" ]]; then
