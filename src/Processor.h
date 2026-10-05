@@ -99,6 +99,9 @@ public:
 private:
     /// Appends the operation that persists the order when the transaction commits (#20).
     void persistOrder(ACID::Scope *transaction, const OrderEntry &order);
+    /// Enqueues a state change of the order with id, to be decided on the transaction worker (#96). caller names the
+    /// handler in the error when the order doesn't exist.
+    void enqueueStateChange(const IdT &id, OrderStateChange change, const char *caller);
 
 public:
 public:
@@ -109,6 +112,7 @@ public:
                          const ACID::Context &cnxt);
     virtual void process(OrdState::onReplace &evnt, OrderEntry *original, OrderEntry &replacement,
                          const std::string &requester, const ACID::Context &cnxt);
+    virtual void process(OrderStateChange change, OrderEntry *order, ACID::Scope *scope, const ACID::Context &cnxt);
 
 public:
     /// reimplemented from InQueueProcessor

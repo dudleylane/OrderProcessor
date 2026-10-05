@@ -540,6 +540,55 @@ TEST_F(MatchOrderOperationTest, CancelOrder_ExecuteWithoutAContainerThrows)
     EXPECT_THROW(op.execute(ctx), std::runtime_error);
 }
 
+// =============================================================================
+// State change operations (#96)
+// =============================================================================
+
+TEST_F(MatchOrderOperationTest, ChangeOrderState_RelatesToTheOrderAndItsInstrument)
+{
+    // As a cancel does: it runs after every earlier match on the instrument
+    ChangeOrderStateTrOperation op(buyOrder_, OrderStateChange::SUSPEND);
+    EXPECT_EQ(buyOrder_->orderId_, op.getObjectId());
+    EXPECT_EQ(buyOrder_->instrument_.getId(), op.getRelatedId());
+}
+
+TEST_F(MatchOrderOperationTest, ChangeOrderState_Execute_QueuesTheChange)
+{
+    ChangeOrderStateTrOperation op(buyOrder_, OrderStateChange::EXPIRE);
+    Context ctx = createContext();
+
+    op.execute(ctx);
+
+    ASSERT_EQ(1u, deferedContainer_.deferedEventCount());
+    auto *change = dynamic_cast<StateChangeDeferedEvent *>(deferedContainer_.events_[0]);
+    ASSERT_NE(nullptr, change);
+    EXPECT_EQ(buyOrder_, change->order_);
+    EXPECT_EQ(OrderStateChange::EXPIRE, change->change_);
+}
+
+TEST_F(MatchOrderOperationTest, ChangeOrderState_Rollback_RemovesOnlyItsChange)
+{
+    deferedContainer_.addDeferedEvent(new StateChangeDeferedEvent(sellOrder_, OrderStateChange::FINISH));
+    ChangeOrderStateTrOperation op(buyOrder_, OrderStateChange::SUSPEND);
+    Context ctx = createContext();
+
+    op.execute(ctx);
+    EXPECT_EQ(2u, deferedContainer_.deferedEventCount());
+    op.rollback(ctx);
+
+    ASSERT_EQ(1u, deferedContainer_.deferedEventCount());
+    auto *remaining = dynamic_cast<StateChangeDeferedEvent *>(deferedContainer_.events_[0]);
+    ASSERT_NE(nullptr, remaining);
+    EXPECT_EQ(sellOrder_, remaining->order_);
+}
+
+TEST_F(MatchOrderOperationTest, ChangeOrderState_ExecuteWithoutAContainerThrows)
+{
+    ChangeOrderStateTrOperation op(buyOrder_, OrderStateChange::RESUME);
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, nullptr, matcher_.get(), IdTGenerator::instance());
+    EXPECT_THROW(op.execute(ctx), std::runtime_error);
+}
+
 TEST_F(MatchOrderOperationTest, CancelReject_GoesToTheRequesterWithTheReasonAndStatus)
 {
     RecordingOutQueues out;

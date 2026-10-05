@@ -40,6 +40,7 @@ public:
     std::vector<std::pair<OrderEntry *, std::string>> cancelRequests;
     std::vector<std::pair<OrderEntry *, std::string>> replaceRequests;
     std::vector<OrderEntry *> replacements;
+    std::vector<std::pair<OrderEntry *, OrderStateChange>> stateChanges;
 
     void process(OrdState::onTradeExecution & /*ev*/, OrderEntry *order, const Context & /*cnxt*/) override
     {
@@ -64,6 +65,11 @@ public:
         replacements.push_back(&replacement);
     }
 
+    void process(OrderStateChange change, OrderEntry *order, Scope * /*scope*/, const Context & /*cnxt*/) override
+    {
+        stateChanges.emplace_back(order, change);
+    }
+
     void reset()
     {
         tradeExecutionOrders.clear();
@@ -71,6 +77,7 @@ public:
         cancelRequests.clear();
         replaceRequests.clear();
         replacements.clear();
+        stateChanges.clear();
     }
 };
 
@@ -348,6 +355,20 @@ TEST_F(DeferedEventsTest, CancelOrderDeferedEventWithValidOrder)
 // =============================================================================
 // Functor Integration Tests
 // =============================================================================
+
+TEST_F(DeferedEventsTest, StateChangeHandsTheOrderAndTheChangeToTheFunctor)
+{
+    TestDeferedEventFunctor functor;
+    std::unique_ptr<OrderEntry> order(createTestOrder(instrId_, BUY_SIDE, 100.0, 100));
+    StateChangeDeferedEvent event(order.get(), OrderStateChange::SUSPEND);
+    Context context;
+
+    event.execute(&functor, context, nullptr);
+
+    ASSERT_EQ(1u, functor.stateChanges.size());
+    EXPECT_EQ(order.get(), functor.stateChanges[0].first);
+    EXPECT_EQ(OrderStateChange::SUSPEND, functor.stateChanges[0].second);
+}
 
 TEST_F(DeferedEventsTest, CancelRequestHandsTheOrderAndRequesterToTheFunctor)
 {

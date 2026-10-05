@@ -308,81 +308,22 @@ void Processor::onEvent(const std::string & /*source*/, const COP::Queues::Order
     {
         throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): order id is invalid!");
     }
-    if (evnt.changeType_ == OrderChangeStateEvent::INVALID_CHANGE) [[unlikely]]
-    {
-        throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): invalid change type!");
-    }
-
-    PooledTransactionScope scope(scopePool_.get());
-    ScopeArenaGuard arenaGuard(scope.get());
-
-    // locate the order
-    OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-    if (nullptr == ord) [[unlikely]]
-    {
-        throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): unable to locate order!");
-    }
-
-    // write lock on the order for state machine processing
-    oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
-
-    // restore state machine from order
-    assert(nullptr != threadState().stateMachine);
-    threadState().stateMachine->setPersistance(ord->stateMachinePersistance());
-
-    // process the appropriate state change event
+    OrderStateChange change = OrderStateChange::SUSPEND;
     switch (evnt.changeType_)
     {
     case OrderChangeStateEvent::SUSPEND:
-    {
-        onSuspended evnt2Proc;
-        evnt2Proc.generator_ = generator_;
-        evnt2Proc.transaction_ = scope.get();
-        evnt2Proc.orderStorage_ = orderStorage_;
-        evnt2Proc.orderBook_ = orderBook_;
-        threadState().stateMachine->process_event(evnt2Proc);
-    }
-    break;
+        change = OrderStateChange::SUSPEND;
+        break;
     case OrderChangeStateEvent::RESUME:
-    {
-        onContinue evnt2Proc;
-        evnt2Proc.generator_ = generator_;
-        evnt2Proc.transaction_ = scope.get();
-        evnt2Proc.orderStorage_ = orderStorage_;
-        evnt2Proc.orderBook_ = orderBook_;
-        threadState().stateMachine->process_event(evnt2Proc);
-    }
-    break;
+        change = OrderStateChange::RESUME;
+        break;
     case OrderChangeStateEvent::FINISH:
-    {
-        onFinished evnt2Proc;
-        evnt2Proc.generator_ = generator_;
-        evnt2Proc.transaction_ = scope.get();
-        evnt2Proc.orderStorage_ = orderStorage_;
-        evnt2Proc.orderBook_ = orderBook_;
-        threadState().stateMachine->process_event(evnt2Proc);
-    }
-    break;
+        change = OrderStateChange::FINISH;
+        break;
     default:
-        throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): unknown change type!");
+        throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): invalid change type!");
     }
-
-    // save updated state back to order
-    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
-    assert(nullptr != smState.orderData_);
-    smState.orderData_->setStateMachinePersistance(smState);
-    // Persist the order as part of this transaction (#20), ahead of the operations that publish
-    // execution reports, so an acknowledged change is already durable (#28).
-    persistOrder(scope.get(), *smState.orderData_);
-
-    ordLock.release();
-
-    // enqueue transaction
-    assert(nullptr != transactMgr_);
-    std::unique_ptr<Transaction> tr(scope.release());
-    transactMgr_->addTransaction(tr);
-
-    processDeferedEvent();
+    enqueueStateChange(evnt.id_, change, "Processor::onEvent(OrderChangeStateEvent)");
 }
 
 void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt)
@@ -472,74 +413,41 @@ void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
     {
         throw std::runtime_error("Processor::onEvent(TimerEvent): order id is invalid!");
     }
-    if (evnt.timerType_ == TimerEvent::INVALID_TIMER) [[unlikely]]
-    {
-        throw std::runtime_error("Processor::onEvent(TimerEvent): invalid timer type!");
-    }
-
-    PooledTransactionScope scope(scopePool_.get());
-    ScopeArenaGuard arenaGuard(scope.get());
-
-    // locate the order
-    OrderEntry *ord = orderStorage_->locateByOrderId(evnt.id_);
-    if (nullptr == ord) [[unlikely]]
-    {
-        throw std::runtime_error("Processor::onEvent(TimerEvent): unable to locate order!");
-    }
-
-    // write lock on the order for state machine processing
-    oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
-
-    // restore state machine from order
-    assert(nullptr != threadState().stateMachine);
-    threadState().stateMachine->setPersistance(ord->stateMachinePersistance());
-
-    // process the appropriate timer event
+    OrderStateChange change = OrderStateChange::EXPIRE;
     switch (evnt.timerType_)
     {
     case TimerEvent::EXPIRATION:
-    {
-        onExpired evnt2Proc;
-        evnt2Proc.generator_ = generator_;
-        evnt2Proc.transaction_ = scope.get();
-        evnt2Proc.orderStorage_ = orderStorage_;
-        evnt2Proc.orderBook_ = orderBook_;
-        threadState().stateMachine->process_event(evnt2Proc);
-    }
-    break;
+        change = OrderStateChange::EXPIRE;
+        break;
     case TimerEvent::DAY_END:
-    {
-        onNewDay evnt2Proc;
-        evnt2Proc.generator_ = generator_;
-        evnt2Proc.transaction_ = scope.get();
-        evnt2Proc.orderStorage_ = orderStorage_;
-        evnt2Proc.orderBook_ = orderBook_;
-        threadState().stateMachine->process_event(evnt2Proc);
-    }
-    break;
+        change = OrderStateChange::DAY_END;
+        break;
     case TimerEvent::DAY_START:
-    {
-        onContinue evnt2Proc;
-        evnt2Proc.generator_ = generator_;
-        evnt2Proc.transaction_ = scope.get();
-        evnt2Proc.orderStorage_ = orderStorage_;
-        evnt2Proc.orderBook_ = orderBook_;
-        threadState().stateMachine->process_event(evnt2Proc);
-    }
-    break;
+        change = OrderStateChange::DAY_START;
+        break;
     default:
-        throw std::runtime_error("Processor::onEvent(TimerEvent): unknown timer type!");
+        throw std::runtime_error("Processor::onEvent(TimerEvent): invalid timer type!");
     }
+    enqueueStateChange(evnt.id_, change, "Processor::onEvent(TimerEvent)");
+}
 
-    // save updated state back to order
-    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
-    assert(nullptr != smState.orderData_);
-    smState.orderData_->setStateMachinePersistance(smState);
-    // Persist the order as part of this transaction (#20), ahead of the operations that publish
-    // execution reports, so an acknowledged change is already durable (#28).
-    persistOrder(scope.get(), *smState.orderData_);
+void Processor::enqueueStateChange(const IdT &id, OrderStateChange change, const char *caller)
+{
+    OrderEntry *ord = orderStorage_->locateByOrderId(id);
+    if (nullptr == ord) [[unlikely]]
+    {
+        throw std::runtime_error(std::string(caller) + ": unable to locate order!");
+    }
+    // Enqueued before the transaction that books the order, the change would be decided before the order was booked
+    waitUntilBookingEnqueued(*ord);
 
-    ordLock.release();
+    // The change is decided on the transaction worker, by process(OrderStateChange) below, once every transaction
+    // before this one on the order or its instrument has run, together with the fills it caused, as a cancel is (#73).
+    // Decided here, a suspend could act on leaves that a queued trade is about to take (#96).
+    PooledTransactionScope scope(scopePool_.get());
+    ScopeArenaGuard arenaGuard(scope.get());
+    std::unique_ptr<Operation> op(new ChangeOrderStateTrOperation(ord, change));
+    scope->addOperation(op);
 
     // enqueue transaction
     assert(nullptr != transactMgr_);
@@ -720,6 +628,53 @@ void Processor::process(OrdState::onExecCancel &evnt, OrderEntry *order, const s
     // Persist the order as part of this transaction (#20), ahead of the operations that publish
     // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(evnt.transaction_, *smState.orderData_);
+}
+
+void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope *scope, const ACID::Context & /*cnxt*/)
+{
+    assert(nullptr != order);
+    assert(nullptr != scope);
+
+    // write lock on the order for the decision and its state machine
+    oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, true);
+
+    assert(nullptr != threadState().stateMachine);
+    threadState().stateMachine->setPersistance(order->stateMachinePersistance());
+    auto run = [&](auto evnt2Proc)
+    {
+        evnt2Proc.generator_ = generator_;
+        evnt2Proc.transaction_ = scope;
+        evnt2Proc.orderStorage_ = orderStorage_;
+        evnt2Proc.orderBook_ = orderBook_;
+        threadState().stateMachine->process_event(evnt2Proc);
+    };
+    switch (change)
+    {
+    case OrderStateChange::SUSPEND:
+        run(onSuspended());
+        break;
+    case OrderStateChange::RESUME:
+    case OrderStateChange::DAY_START:
+        run(onContinue());
+        break;
+    case OrderStateChange::FINISH:
+        run(onFinished());
+        break;
+    case OrderStateChange::EXPIRE:
+        run(onExpired());
+        break;
+    case OrderStateChange::DAY_END:
+        run(onNewDay());
+        break;
+    }
+
+    // save updated state back to order
+    OrderStatePersistence smState = threadState().stateMachine->getPersistence();
+    assert(nullptr != smState.orderData_);
+    smState.orderData_->setStateMachinePersistance(smState);
+    // Persist the order as part of this transaction (#20), ahead of the operations that publish
+    // execution reports, so an acknowledged change is already durable (#28).
+    persistOrder(scope, *smState.orderData_);
 }
 
 namespace

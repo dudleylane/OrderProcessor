@@ -558,6 +558,11 @@ COP (Concurrent Order Processor)
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
+Suspend, resume and finish (`OrderChangeStateEvent`) and the timer events (expiration, day end, day start) take the
+same path since #96. The handler waits for the order's booking (#83) and enqueues a `ChangeOrderStateTrOperation`,
+related to the order and its instrument. Its `StateChangeDeferedEvent` is decided by `Processor::process(OrderStateChange)`
+on the transaction worker, under the order's lock, after the order's earlier transactions and their fills.
+
 ### 4.3 Trade Execution Flow
 
 ```

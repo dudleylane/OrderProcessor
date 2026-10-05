@@ -104,7 +104,8 @@ typedef enum OperationType
     PERSIST_ORDER_TROPERATION,             // writes a new persisted version of the changed order
     CANCEL_ORDER_TROPERATION,              // hands a client's cancel to the processor once it is the order's turn
     REPLACE_ORDER_TROPERATION,             // hands a client's replace to the processor once it is the order's turn
-    REFUSE_REPLACE_TROPERATION             // tells the requester that its replace was refused
+    REFUSE_REPLACE_TROPERATION,            // tells the requester that its replace was refused
+    CHANGE_ORDER_STATE_TROPERATION         // hands a state change to the processor once it is the order's turn
 };
 
 struct Context
