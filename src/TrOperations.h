@@ -17,6 +17,7 @@
 #include <string_view>
 #include "TransactionDef.h"
 #include "DataModelDef.h"
+#include "DeferedEvents.h"
 #include "OrderStateEvents.h"
 #include "QueuesDef.h"
 
@@ -265,6 +266,23 @@ public:
 private:
     OrderEntry *order_;
     std::string requester_;
+    size_t eventCountBefore_;
+};
+
+/// Hands a state change of the order to the processor as a deferred event, so it is decided after every transaction
+/// before it on the order or its instrument has run, together with the fills those caused, as a cancel is (#73, #96).
+class ChangeOrderStateTrOperation final : public Operation
+{
+public:
+    ChangeOrderStateTrOperation(OrderEntry *order, Proc::OrderStateChange change);
+    ~ChangeOrderStateTrOperation();
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    OrderEntry *order_;
+    Proc::OrderStateChange change_;
     size_t eventCountBefore_;
 };
 
