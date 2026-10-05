@@ -24,7 +24,7 @@ void FixOutQueues::push(const ExecReportEvent &evnt, const std::string & /*targe
 
     // FixGateway::sendExecutionReport checks sessionMap_ internally —
     // silently returns if this order didn't come from a FIX session
-    gateway_->sendExecutionReport(evnt.exec_, *order);
+    gateway_->sendExecutionReport(evnt.exec_, *order, evnt.requestClOrdId_);
 }
 
 void FixOutQueues::push(const CancelRejectEvent &evnt, const std::string &target)
