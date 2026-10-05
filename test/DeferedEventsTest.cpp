@@ -38,6 +38,7 @@ public:
     std::vector<OrderEntry *> tradeExecutionOrders;
     std::vector<OrderEntry *> internalCancelOrders;
     std::vector<std::pair<OrderEntry *, std::string>> cancelRequests;
+    std::vector<std::string> cancelRequestClOrdIds;
     std::vector<std::pair<OrderEntry *, std::string>> replaceRequests;
     std::vector<OrderEntry *> replacements;
     std::vector<std::pair<OrderEntry *, OrderStateChange>> stateChanges;
@@ -52,10 +53,11 @@ public:
         internalCancelOrders.push_back(order);
     }
 
-    void process(OrdState::onExecCancel & /*ev*/, OrderEntry *order, const std::string &requester,
+    void process(OrdState::onExecCancel &ev, OrderEntry *order, const std::string &requester,
                  const Context & /*cnxt*/) override
     {
         cancelRequests.emplace_back(order, requester);
+        cancelRequestClOrdIds.push_back(ev.requestClOrdId_);
     }
 
     void process(OrdState::onReplace & /*ev*/, OrderEntry *original, OrderEntry &replacement,
@@ -75,6 +77,7 @@ public:
         tradeExecutionOrders.clear();
         internalCancelOrders.clear();
         cancelRequests.clear();
+        cancelRequestClOrdIds.clear();
         replaceRequests.clear();
         replacements.clear();
         stateChanges.clear();
@@ -368,6 +371,19 @@ TEST_F(DeferedEventsTest, StateChangeHandsTheOrderAndTheChangeToTheFunctor)
     ASSERT_EQ(1u, functor.stateChanges.size());
     EXPECT_EQ(order.get(), functor.stateChanges[0].first);
     EXPECT_EQ(OrderStateChange::SUSPEND, functor.stateChanges[0].second);
+}
+
+TEST_F(DeferedEventsTest, CancelRequestHandsTheRequestsClOrdIdOnTheEvent)
+{
+    TestDeferedEventFunctor functor;
+    std::unique_ptr<OrderEntry> order(createTestOrder(instrId_, BUY_SIDE, 100.0, 100));
+    CancelRequestDeferedEvent event(order.get(), "FIX", "CXL-4");
+    Context context;
+
+    event.execute(&functor, context, nullptr);
+
+    ASSERT_EQ(1u, functor.cancelRequestClOrdIds.size());
+    EXPECT_EQ("CXL-4", functor.cancelRequestClOrdIds[0]);
 }
 
 TEST_F(DeferedEventsTest, CancelRequestHandsTheOrderAndRequesterToTheFunctor)

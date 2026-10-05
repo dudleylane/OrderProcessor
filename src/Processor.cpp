@@ -237,6 +237,7 @@ void Processor::onEvent(const std::string &source, const OrderCancelEvent &evnt)
         CancelRejectEvent reject;
         reject.id_ = evnt.id_;
         reject.reason_ = CancelRejectEvent::UNKNOWN_ORDER;
+        reject.requestClOrdId_ = evnt.requestClOrdId_;
         outQueues_->push(reject, source);
         return;
     }
@@ -249,7 +250,7 @@ void Processor::onEvent(const std::string &source, const OrderCancelEvent &evnt)
     // overtake a trade already matched against the order and leave the other side filled alone (#73).
     PooledTransactionScope scope(scopePool_.get());
     ScopeArenaGuard arenaGuard(scope.get());
-    std::unique_ptr<Operation> op(new CancelOrderTrOperation(ord, source));
+    std::unique_ptr<Operation> op(new CancelOrderTrOperation(ord, source, evnt.requestClOrdId_));
     scope->addOperation(op);
 
     // enqueue transaction
@@ -606,7 +607,8 @@ void Processor::process(OrdState::onExecCancel &evnt, OrderEntry *order, const s
     if ((NEW_ORDSTATUS != status) && (PARTFILL_ORDSTATUS != status) && (SUSPENDED_ORDSTATUS != status) &&
         (DFD_ORDSTATUS != status))
     {
-        std::unique_ptr<Operation> op(new CancelRejectTrOperation(*order, CancelRejectEvent::TOO_LATE, requester));
+        std::unique_ptr<Operation> op(
+            new CancelRejectTrOperation(*order, CancelRejectEvent::TOO_LATE, requester, evnt.requestClOrdId_));
         evnt.transaction_->addOperation(op);
         return;
     }
@@ -617,7 +619,8 @@ void Processor::process(OrdState::onExecCancel &evnt, OrderEntry *order, const s
     if (CANCELED_ORDSTATUS != order->status_)
     {
         // No transition, and so nothing changed: a replace of the order is pending
-        std::unique_ptr<Operation> op(new CancelRejectTrOperation(*order, CancelRejectEvent::PENDING, requester));
+        std::unique_ptr<Operation> op(
+            new CancelRejectTrOperation(*order, CancelRejectEvent::PENDING, requester, evnt.requestClOrdId_));
         evnt.transaction_->addOperation(op);
         return;
     }

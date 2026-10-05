@@ -239,8 +239,9 @@ template <class FSM> void CnclReplaced::on_entry(onExecCancel const &evnt, FSM &
     assert(nullptr != evnt.order4StateMachine_);
     evnt.order4StateMachine_->status_ = CANCELED_ORDSTATUS;
 
+    // carries the cancel request's ClOrdID, so the gateway can name the request it answers (#98)
     std::unique_ptr<Operation> op(
-        new CreateExecReportTrOperation(COP::CANCELED_ORDSTATUS, COP::CANCEL_EXECTYPE, *evnt.order4StateMachine_));
+        new CreateCancelExecReportTrOperation(*evnt.order4StateMachine_, evnt.requestClOrdId_));
     evnt.transaction_->addOperation(op);
 }
 

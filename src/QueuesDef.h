@@ -43,6 +43,10 @@ struct OrderEvent : public EventBase
 struct OrderCancelEvent : public EventBase
 {
     std::string cancelReason_;
+    /// The ClOrdID of the cancel request itself, where the gateway has one (FIX tag 11); empty otherwise. The engine
+    /// hands it back on the cancel's acknowledgement and on a reject of it, so the sender can pair them with its
+    /// request (#98).
+    std::string requestClOrdId_;
 
     OrderCancelEvent() = default;
     explicit OrderCancelEvent(const IdT &orderId)
@@ -91,6 +95,9 @@ struct ExecReportEvent : public EventBase
     ExecReportEvent(ExecutionEntry *exec) : exec_(exec) {}
 
     ExecutionEntry *exec_;
+    /// On a cancel's acknowledgement, the ClOrdID of the cancel request (OrderCancelEvent::requestClOrdId_); empty on
+    /// every other report (#98)
+    std::string requestClOrdId_;
 };
 
 /// A cancel the engine refused. It says why in terms a gateway can map to its protocol (FIX CxlRejReason 102 and
@@ -106,6 +113,7 @@ struct CancelRejectEvent : public EventBase
     };
     Reason reason_ = UNKNOWN_ORDER;
     OrderStatus ordStatus_ = INVALID_ORDSTATUS; // the order's status; INVALID_ORDSTATUS when the order is unknown
+    std::string requestClOrdId_;                // the ClOrdID of the refused cancel request, if it had one (#98)
 };
 
 struct BusinessRejectEvent : public EventBase
