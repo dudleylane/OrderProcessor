@@ -82,6 +82,7 @@ public:
         {
             aux::ExchLogger::create();
         }
+        aux::ExchLogger::instance()->setDebugOn(false); // measure the gateway, not debug logging (#76)
         WideDataStorage::create();
         SubscrMgr::SubscriptionMgr::create();
         IdTGenerator::create();
