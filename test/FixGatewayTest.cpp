@@ -40,6 +40,8 @@ namespace
 {
 
 const FIX::SessionID TEST_SID("FIX.4.4", "CLIENT_A", "ORDER_PROCESSOR", "");
+/// A second client, whose orders TEST_SID must not be able to name (#71)
+const FIX::SessionID OTHER_SID("FIX.4.4", "CLIENT_B", "ORDER_PROCESSOR", "");
 
 // =============================================================================
 // Enum Conversion Tests
@@ -199,6 +201,35 @@ protected:
         farLeg.set(FIX::LegSettlDate("2000"));
         msg.addGroup(farLeg);
 
+        return msg;
+    }
+
+    /// Stores an order from source under this ClOrdID key, as it stands
+    OrderEntry *saveOrder(const std::string &source, const std::string &key)
+    {
+        auto order = createCorrectOrder(instrumentId1_);
+        order->source_ = WideDataStorage::instance()->add(new StringT(source));
+        order->clOrderId_ = WideDataStorage::instance()->add(
+            new RawDataEntry(STRING_RAWDATATYPE, key.c_str(), static_cast<u32>(key.size())));
+        return OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    }
+
+    /// Stores an order as sid placed it through the gateway: its ClOrdID under the session's key, and the session as
+    /// its source (#71)
+    OrderEntry *saveOrderOf(const FIX::SessionID &sid, const std::string &clOrdId)
+    {
+        const std::string source = FixGateway::makeSourceString(sid);
+        return saveOrder(source, FixGateway::sessionClOrdId(source, clOrdId));
+    }
+
+    FIX44::OrderCancelRequest makeCancelRequest(const std::string &origClOrdId, const std::string &clOrdId)
+    {
+        FIX44::OrderCancelRequest msg;
+        msg.set(FIX::OrigClOrdID(origClOrdId));
+        msg.set(FIX::ClOrdID(clOrdId));
+        msg.set(FIX::Side(FIX::Side_BUY));
+        msg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+        msg.set(FIX::Symbol("aaa"));
         return msg;
     }
 
@@ -371,15 +402,10 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_RefusedWhenTheServerHasNoC
 
 TEST_F(FixGatewayInboundTest, CancelRequest_PushesToQueue)
 {
-    // First create an order so we can cancel it
-    auto order = createCorrectOrder(instrumentId1_);
-    assignClOrderId(order.get());
-    OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    // First create an order of this session's, so we can cancel it
+    OrderEntry *saved = saveOrderOf(TEST_SID, "ORD-C1");
     ASSERT_NE(nullptr, saved);
-
-    // Get the clOrderId string
-    const auto &clOrd = saved->clOrderId_.get();
-    std::string clOrdStr(clOrd.data_, clOrd.length_);
+    const std::string clOrdStr = "ORD-C1";
 
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderCancelEvent &>()))
         .WillOnce(Invoke(
@@ -406,14 +432,11 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_PushesToQueue)
 {
     // The replacement is the original with the request's changes, a fresh id and the request's ClOrdID, naming the
     // original (#74). Before, it kept the original's id and ClOrdID, so the engine refused it as a duplicate ClOrdID.
-    auto order = createCorrectOrder(instrumentId1_);
-    assignClOrderId(order.get());
-    OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    OrderEntry *saved = saveOrderOf(TEST_SID, "ORD-R1");
     ASSERT_NE(nullptr, saved);
     saved->status_ = NEW_ORDSTATUS;
-
-    const auto &clOrd = saved->clOrderId_.get();
-    std::string clOrdStr(clOrd.data_, clOrd.length_);
+    const std::string clOrdStr = "ORD-R1";
+    const std::string source = FixGateway::makeSourceString(TEST_SID);
 
     OrderEntry *capturedReplacement = nullptr;
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
@@ -440,10 +463,11 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_PushesToQueue)
 
     ASSERT_NE(nullptr, capturedReplacement);
     EXPECT_FALSE(capturedReplacement->orderId_.isValid());
+    // both under the session's key (#71)
     const RawDataEntry &newClOrd = capturedReplacement->clOrderId_.get();
-    EXPECT_EQ("REPLACE001", std::string(newClOrd.data_, newClOrd.length_));
+    EXPECT_EQ(FixGateway::sessionClOrdId(source, "REPLACE001"), std::string(newClOrd.data_, newClOrd.length_));
     const RawDataEntry &origClOrd = capturedReplacement->origClOrderId_.get();
-    EXPECT_EQ(clOrdStr, std::string(origClOrd.data_, origClOrd.length_));
+    EXPECT_EQ(FixGateway::sessionClOrdId(source, clOrdStr), std::string(origClOrd.data_, origClOrd.length_));
     EXPECT_EQ(RECEIVEDNEW_ORDSTATUS, capturedReplacement->status_);
     EXPECT_DOUBLE_EQ(15.50, capturedReplacement->price_);
     EXPECT_EQ(200u, capturedReplacement->orderQty_);
@@ -457,11 +481,7 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_CarriesTheRequestsSideAndSymbol)
 {
     // FIX requires a replace's Side and Symbol to match the order. They are carried over, so that the engine refuses a
     // replace that changes either, rather than keeping the original's without a word (#74).
-    auto order = createCorrectOrder(instrumentId1_);
-    assignClOrderId(order.get());
-    OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
-    ASSERT_NE(nullptr, saved);
-    const auto &clOrd = saved->clOrderId_.get();
+    ASSERT_NE(nullptr, saveOrderOf(TEST_SID, "ORD-R2"));
 
     OrderEntry *capturedReplacement = nullptr;
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
@@ -472,7 +492,7 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_CarriesTheRequestsSideAndSymbol)
             }));
 
     FIX44::OrderCancelReplaceRequest replaceMsg;
-    replaceMsg.set(FIX::OrigClOrdID(std::string(clOrd.data_, clOrd.length_)));
+    replaceMsg.set(FIX::OrigClOrdID("ORD-R2"));
     replaceMsg.set(FIX::ClOrdID("REPLACE002"));
     replaceMsg.set(FIX::Side(FIX::Side_SELL));
     replaceMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
@@ -492,15 +512,11 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_UnknownSymbol_IsNotQueued)
 {
     // The gateway refuses it itself (102=99), since the engine's refusal can only describe an instrument that exists;
     // there is no session here to send that to, so this checks that nothing reaches the engine (#74)
-    auto order = createCorrectOrder(instrumentId1_);
-    assignClOrderId(order.get());
-    OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
-    ASSERT_NE(nullptr, saved);
-    const auto &clOrd = saved->clOrderId_.get();
+    ASSERT_NE(nullptr, saveOrderOf(TEST_SID, "ORD-R4"));
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
 
     FIX44::OrderCancelReplaceRequest replaceMsg;
-    replaceMsg.set(FIX::OrigClOrdID(std::string(clOrd.data_, clOrd.length_)));
+    replaceMsg.set(FIX::OrigClOrdID("ORD-R4"));
     replaceMsg.set(FIX::ClOrdID("REPLACE004"));
     replaceMsg.set(FIX::Side(FIX::Side_BUY));
     replaceMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
@@ -527,6 +543,110 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_UnknownOrigClOrdId_IsNotQueued)
     replaceMsg.set(FIX::Price(15.50));
     replaceMsg.set(FIX::OrderQty(200));
     gateway_->onMessage(replaceMsg, TEST_SID);
+}
+
+// =============================================================================
+// ClOrdIDs belong to the session that sent them (#71)
+// =============================================================================
+
+TEST(FixClOrdIdKeyTest, TheClientsClOrdIdComesBackFromItsSessionsKey)
+{
+    const std::string source = FixGateway::makeSourceString(TEST_SID);
+    EXPECT_EQ("FIX:CLIENT_A->ORDER_PROCESSOR|ORD-1", FixGateway::sessionClOrdId(source, "ORD-1"));
+    EXPECT_EQ("ORD-1", FixGateway::clientClOrdId(FixGateway::sessionClOrdId(source, "ORD-1"), source));
+    // A ClOrdID may itself contain '|'
+    EXPECT_EQ("A|B", FixGateway::clientClOrdId(FixGateway::sessionClOrdId(source, "A|B"), source));
+    // A key without this session's prefix comes back whole: an order's from before #71, a ClOrdID the server made up,
+    // or another session's
+    EXPECT_EQ("ORD-1", FixGateway::clientClOrdId("ORD-1", source));
+    EXPECT_EQ("WS-1-1", FixGateway::clientClOrdId("WS-1-1", source));
+    const std::string others = FixGateway::sessionClOrdId(FixGateway::makeSourceString(OTHER_SID), "ORD-1");
+    EXPECT_EQ(others, FixGateway::clientClOrdId(others, source));
+    EXPECT_EQ(source, FixGateway::clientClOrdId(source, source));
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_StoresTheClOrdIdUnderItsSession)
+{
+    OrderEntry *capturedOrder = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                capturedOrder = evt.order_;
+            }));
+    gateway_->onMessage(makeNewOrderSingle("ORD-S1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100), TEST_SID);
+
+    ASSERT_NE(nullptr, capturedOrder);
+    const RawDataEntry &clOrd = capturedOrder->clOrderId_.get();
+    EXPECT_EQ("FIX:CLIENT_A->ORDER_PROCESSOR|ORD-S1", std::string(clOrd.data_, clOrd.length_));
+    delete capturedOrder;
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderMultileg_StoresTheClOrdIdUnderItsSession)
+{
+    OrderEntry *capturedOrder = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                capturedOrder = evt.order_;
+            }));
+    gateway_->onMessage(makeFxSwap("SWAP-S1"), TEST_SID);
+
+    ASSERT_NE(nullptr, capturedOrder);
+    const RawDataEntry &clOrd = capturedOrder->clOrderId_.get();
+    EXPECT_EQ("FIX:CLIENT_A->ORDER_PROCESSOR|SWAP-S1", std::string(clOrd.data_, clOrd.length_));
+    delete capturedOrder;
+}
+
+TEST_F(FixGatewayInboundTest, CancelRequest_ForAnotherSessionsOrder_IsNotQueued)
+{
+    // Before #71 a session could cancel any order whose ClOrdID it knew or guessed. The gateway answers this one as an
+    // unknown order itself; there is no session here to send that to, so this checks that nothing reaches the engine.
+    ASSERT_NE(nullptr, saveOrderOf(OTHER_SID, "SHARED-1"));
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderCancelEvent &>())).Times(0);
+    gateway_->onMessage(makeCancelRequest("SHARED-1", "CANCEL-X1"), TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_ForAnotherSessionsOrder_IsNotQueued)
+{
+    ASSERT_NE(nullptr, saveOrderOf(OTHER_SID, "SHARED-2"));
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+
+    FIX44::OrderCancelReplaceRequest replaceMsg;
+    replaceMsg.set(FIX::OrigClOrdID("SHARED-2"));
+    replaceMsg.set(FIX::ClOrdID("REPLACE-X2"));
+    replaceMsg.set(FIX::Side(FIX::Side_BUY));
+    replaceMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    replaceMsg.set(FIX::OrdType(FIX::OrdType_LIMIT));
+    replaceMsg.set(FIX::Symbol("aaa"));
+    replaceMsg.set(FIX::Price(15.50));
+    replaceMsg.set(FIX::OrderQty(200));
+    gateway_->onMessage(replaceMsg, TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, CancelRequest_ForItsOwnOrderStoredUnderTheClOrdIdAlone_IsQueued)
+{
+    // An order stored before #71 has its ClOrdID alone; the session that placed it can still cancel it
+    OrderEntry *saved = saveOrder(FixGateway::makeSourceString(TEST_SID), "OLD-1");
+    ASSERT_NE(nullptr, saved);
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderCancelEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderCancelEvent &evt)
+            {
+                EXPECT_EQ(saved->orderId_, evt.id_);
+            }));
+    gateway_->onMessage(makeCancelRequest("OLD-1", "CANCEL-O1"), TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, CancelRequest_ForAnotherSourcesOrderStoredUnderTheClOrdIdAlone_IsNotQueued)
+{
+    // A WebSocket order's ClOrdID, or another session's from before #71: not this session's to name
+    ASSERT_NE(nullptr, saveOrder("WebSocket", "WS-1-1"));
+    ASSERT_NE(nullptr, saveOrder(FixGateway::makeSourceString(OTHER_SID), "OLD-2"));
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderCancelEvent &>())).Times(0);
+    gateway_->onMessage(makeCancelRequest("WS-1-1", "CANCEL-W1"), TEST_SID);
+    gateway_->onMessage(makeCancelRequest("OLD-2", "CANCEL-O2"), TEST_SID);
 }
 
 // =============================================================================
@@ -675,11 +795,8 @@ TEST_F(FixGatewayInboundTest, FromApp_RoutesAGenericNewOrderSingle)
 
 TEST_F(FixGatewayInboundTest, FromApp_RoutesAGenericCancelRequest)
 {
-    auto order = createCorrectOrder(instrumentId1_);
-    assignClOrderId(order.get());
-    OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    OrderEntry *saved = saveOrderOf(TEST_SID, "ORD-G1");
     ASSERT_NE(nullptr, saved);
-    const auto &clOrd = saved->clOrderId_.get();
 
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderCancelEvent &>()))
         .WillOnce(Invoke(
@@ -688,14 +805,7 @@ TEST_F(FixGatewayInboundTest, FromApp_RoutesAGenericCancelRequest)
                 EXPECT_EQ(saved->orderId_, evt.id_);
             }));
 
-    FIX44::OrderCancelRequest cancelMsg;
-    cancelMsg.set(FIX::OrigClOrdID(std::string(clOrd.data_, clOrd.length_)));
-    cancelMsg.set(FIX::ClOrdID("CANCEL-GEN"));
-    cancelMsg.set(FIX::Side(FIX::Side_BUY));
-    cancelMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
-    cancelMsg.set(FIX::Symbol("aaa"));
-
-    gateway_->fromApp(FIX::Message(cancelMsg), TEST_SID);
+    gateway_->fromApp(FIX::Message(makeCancelRequest("ORD-G1", "CANCEL-GEN")), TEST_SID);
 }
 
 TEST_F(FixGatewayInboundTest, FromApp_UnsupportedTypeStillReachesQuickFix)
@@ -886,6 +996,38 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ReplaceNamesTheReplacedOrder)
     EXPECT_FALSE(FixGateway::buildExecutionReport(&ack, *order).isSetField(FIX::FIELD::OrigClOrdID));
 }
 
+TEST_F(FixGatewayInboundTest, ExecutionReport_CarriesTheClientsOwnClOrdIds)
+{
+    // Stored under the session's key, the ClOrdIDs go out as the client sent them (#71): 11 on every report, 41 on the
+    // replacement's REPLACE report and on a cancel's acknowledgement
+    const std::string source = FixGateway::makeSourceString(TEST_SID);
+    auto order = createCorrectOrder(instrumentId1_);
+    order->source_ = WideDataStorage::instance()->add(new StringT(source));
+    const std::string key = FixGateway::sessionClOrdId(source, "ORD-2");
+    order->clOrderId_ = WideDataStorage::instance()->add(
+        new RawDataEntry(STRING_RAWDATATYPE, key.c_str(), static_cast<u32>(key.size())));
+    const std::string origKey = FixGateway::sessionClOrdId(source, "ORD-1");
+    order->origClOrderId_ = WideDataStorage::instance()->add(
+        new RawDataEntry(STRING_RAWDATATYPE, origKey.c_str(), static_cast<u32>(origKey.size())));
+
+    FIX::ClOrdID clOrdId;
+    FIX::OrigClOrdID origClOrdId;
+    auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    FixGateway::buildExecutionReport(&ack, *order).get(clOrdId);
+    EXPECT_EQ("ORD-2", clOrdId.getValue());
+
+    auto replace = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, NEW_ORDSTATUS);
+    FIX44::ExecutionReport replaced = FixGateway::buildExecutionReport(&replace, *order);
+    replaced.get(clOrdId);
+    EXPECT_EQ("ORD-2", clOrdId.getValue());
+    replaced.get(origClOrdId);
+    EXPECT_EQ("ORD-1", origClOrdId.getValue());
+
+    auto cancel = makeReport<ExecutionEntry>(CANCEL_EXECTYPE, CANCELED_ORDSTATUS);
+    FixGateway::buildExecutionReport(&cancel, *order, "CXL-9").get(origClOrdId);
+    EXPECT_EQ("ORD-2", origClOrdId.getValue());
+}
+
 TEST_F(FixGatewayInboundTest, ExecutionReport_OnlyTheReplacementsReplaceReportGoesOverFix)
 {
     // The engine reports a replace for both orders. FIX acknowledges it once, with the replacement's report: the
@@ -953,6 +1095,36 @@ TEST(FixOrderRejectTest, DuplicateNewOrderGetsAnExecutionReportReject)
     FIX::Symbol symbol;
     report.get(symbol);
     EXPECT_EQ("aaa", symbol.getValue());
+}
+
+TEST(FixOrderRejectTest, TheSenderSeesItsOwnClOrdIdsInAnOrderReject)
+{
+    // The engine names a ClOrdID in use as it is stored, with the session's key, both in the event and in its reason;
+    // the client gets its own (#71)
+    const std::string source = FixGateway::makeSourceString(TEST_SID);
+    Queues::OrderRejectEvent evnt = makeOrderReject(true);
+    evnt.clOrderId_ = FixGateway::sessionClOrdId(source, "ORD-7");
+    evnt.origClOrderId_ = FixGateway::sessionClOrdId(source, "ORD-1");
+    evnt.reason_ = "Replace refused: ClOrdID " + evnt.clOrderId_ + " is already in use";
+
+    const Queues::OrderRejectEvent shown = FixGateway::clientView(evnt, source);
+    EXPECT_EQ("ORD-7", shown.clOrderId_);
+    EXPECT_EQ("ORD-1", shown.origClOrderId_);
+    EXPECT_EQ("Replace refused: ClOrdID ORD-7 is already in use", shown.reason_);
+
+    FIX44::OrderCancelReject reject = FixGateway::buildReplaceReject(shown, "7", FIX::OrdStatus_NEW);
+    FIX::ClOrdID clOrdId;
+    reject.get(clOrdId);
+    EXPECT_EQ("ORD-7", clOrdId.getValue());
+    FIX::OrigClOrdID origClOrdId;
+    reject.get(origClOrdId);
+    EXPECT_EQ("ORD-1", origClOrdId.getValue());
+    FIX::Text text;
+    reject.get(text);
+    EXPECT_EQ("Replace refused: ClOrdID ORD-7 is already in use", text.getValue());
+
+    // A ClOrdID the gateway quotes as the client sent it stays as it is
+    EXPECT_EQ("ORD-7", FixGateway::clientView(makeOrderReject(true), source).clOrderId_);
 }
 
 TEST(FixOrderRejectTest, AnOrderRejectsExecIdIsTheIdItIsGiven)

@@ -70,6 +70,16 @@ public:
 
     // Build source string from SessionID
     static std::string makeSourceString(const FIX::SessionID &sid);
+    /// The key a FIX order's ClOrdID is stored under: its session's source string (makeSourceString()), '|', and the
+    /// ClOrdID as the client sent it. FIX scopes a ClOrdID to the client that sent it, so two sessions may use the same
+    /// one, and a session finds only its own orders by it (#71).
+    static std::string sessionClOrdId(const std::string &source, const std::string &clOrdId);
+    /// The ClOrdID a client sent, from the key it is stored under: the key without source's prefix. A key without that
+    /// prefix, as an order stored before #71 has, or a ClOrdID the server made up, comes back whole.
+    static std::string clientClOrdId(const std::string &stored, const std::string &source);
+    /// The OrderRejectEvent as the session that sent the order sees it: its ClOrdIDs, and the reason, which quotes a
+    /// ClOrdID in use as it is stored, without the session's prefix (#71)
+    static Queues::OrderRejectEvent clientView(const Queues::OrderRejectEvent &evnt, const std::string &source);
 
 private:
     /// builds the typed message for its MsgType and calls the matching handler
@@ -78,6 +88,10 @@ private:
     void rejectContained(const FIX::Message &msg, const FIX::SessionID &sid, const char *what);
     /// answers the one message with a BusinessMessageReject to its sender, quoting its MsgSeqNum, MsgType and ClOrdID
     void rejectMessage(const FIX::Message &msg, const FIX::SessionID &sid, int reason, const std::string &text);
+    /// The order a request from the session source names by ClOrdID (#71): the one stored under the session's key, or,
+    /// failing that, the one stored under the ClOrdID alone if this session placed it, as an order stored before #71
+    /// was. Another session's order is not found.
+    OrderEntry *locateSessionOrder(const std::string &source, const std::string &clOrdId) const;
 
     Queues::InQueues *inQueues_;
     Store::WideParamsDataStorage *wideData_;

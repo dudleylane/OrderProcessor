@@ -48,6 +48,16 @@ std::string cancelRejectText(const Queues::CancelRejectEvent &evnt)
         return "Cancel rejected";
     }
 }
+/// A RawDataEntry's text; empty when it has none
+std::string rawText(const RawDataEntry &raw)
+{
+    return ((nullptr != raw.data_) && (0 < raw.length_)) ? std::string(raw.data_, raw.length_) : std::string();
+}
+/// The session string an order came from, which prefixes the keys of its ClOrdIDs (#71); empty when it names none
+std::string sourceOf(const OrderEntry &order)
+{
+    return (SourceIdT() != order.source_.getId()) ? order.source_.get() : std::string();
+}
 /// CxlRejReason (102) for the engine's reason, the same for a refused cancel (434=1) and a refused replace (434=2)
 int cxlRejReasonFor(Queues::CancelRejectEvent::Reason reason)
 {
@@ -79,6 +89,56 @@ FixGateway::FixGateway(Queues::InQueues *inQueues, WideParamsDataStorage *wideDa
 std::string FixGateway::makeSourceString(const FIX::SessionID &sid)
 {
     return "FIX:" + sid.getSenderCompID().getString() + "->" + sid.getTargetCompID().getString();
+}
+
+std::string FixGateway::sessionClOrdId(const std::string &source, const std::string &clOrdId)
+{
+    return source + '|' + clOrdId;
+}
+
+std::string FixGateway::clientClOrdId(const std::string &stored, const std::string &source)
+{
+    // Only the exact prefix: a client's ClOrdID may itself contain '|'
+    if (!source.empty() && (stored.size() > source.size()) && ('|' == stored[source.size()]) &&
+        (0 == stored.compare(0, source.size(), source)))
+    {
+        return stored.substr(source.size() + 1);
+    }
+    return stored;
+}
+
+Queues::OrderRejectEvent FixGateway::clientView(const Queues::OrderRejectEvent &evnt, const std::string &source)
+{
+    Queues::OrderRejectEvent shown = evnt;
+    shown.clOrderId_ = clientClOrdId(evnt.clOrderId_, source);
+    shown.origClOrderId_ = clientClOrdId(evnt.origClOrderId_, source);
+    if (!source.empty())
+    {
+        const std::string prefix = source + '|';
+        for (size_t at = shown.reason_.find(prefix); std::string::npos != at; at = shown.reason_.find(prefix, at))
+        {
+            shown.reason_.erase(at, prefix.size());
+        }
+    }
+    return shown;
+}
+
+OrderEntry *FixGateway::locateSessionOrder(const std::string &source, const std::string &clOrdId) const
+{
+    const std::string key = sessionClOrdId(source, clOrdId);
+    RawDataEntry sessionKey(STRING_RAWDATATYPE, key.c_str(), static_cast<u32>(key.size()));
+    if (OrderEntry *order = orderStorage_->locateByClOrderId(sessionKey))
+    {
+        return order;
+    }
+    RawDataEntry rawKey(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size()));
+    OrderEntry *order = orderStorage_->locateByClOrderId(rawKey);
+    if (nullptr == order)
+    {
+        return nullptr;
+    }
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
+    return (source == sourceOf(*order)) ? order : nullptr;
 }
 
 // =============================================================================
@@ -286,8 +346,9 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
         return;
     }
 
-    // Create clOrderId as RawDataEntry
-    std::string clOrdStr = clOrdId.getString();
+    // The ClOrdID is stored under the session's key, since FIX scopes it to the client that sent it (#71)
+    std::string sourceStr = makeSourceString(sid);
+    std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
     auto *clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
     SourceIdT clOrdSrcId = WideDataStorage::instance()->add(clOrdRaw);
 
@@ -298,7 +359,6 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
     auto *execList = new ExecutionsT();
     SourceIdT execListId = WideDataStorage::instance()->add(execList);
 
-    std::string sourceStr = makeSourceString(sid);
     auto *srcStrPtr = new StringT(sourceStr);
     SourceIdT srcId = WideDataStorage::instance()->add(srcStrPtr);
 
@@ -504,8 +564,9 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
         tifVal = tif.getValue();
     }
 
-    // Build OrderEntry — same pattern as NewOrderSingle
-    std::string clOrdStr = clOrdId.getString();
+    // Build OrderEntry — same pattern as NewOrderSingle, with the ClOrdID under the session's key (#71)
+    std::string sourceStr = makeSourceString(sid);
+    std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
     auto *clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
     SourceIdT clOrdSrcId = WideDataStorage::instance()->add(clOrdRaw);
 
@@ -515,7 +576,6 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
     auto *execList = new ExecutionsT();
     SourceIdT execListId = WideDataStorage::instance()->add(execList);
 
-    std::string sourceStr = makeSourceString(sid);
     auto *srcStrPtr = new StringT(sourceStr);
     SourceIdT srcId = WideDataStorage::instance()->add(srcStrPtr);
 
@@ -552,10 +612,10 @@ void FixGateway::onMessage(const FIX44::OrderCancelRequest &msg, const FIX::Sess
     FIX::ClOrdID clOrdId;
     msg.get(clOrdId);
 
-    // Look up by ClOrdID
+    // Only the session's own orders: another session's is answered as unknown, without saying that it exists (#71)
+    const std::string sourceStr = makeSourceString(sid);
     std::string origClOrdStr = origClOrdId.getString();
-    RawDataEntry rawKey(STRING_RAWDATATYPE, origClOrdStr.c_str(), static_cast<u32>(origClOrdStr.size()));
-    OrderEntry *order = orderStorage_->locateByClOrderId(rawKey);
+    OrderEntry *order = locateSessionOrder(sourceStr, origClOrdStr);
     if (!order)
     {
         aux::ExchLogger::instance()->error("FIX: Cancel - order not found: " + origClOrdStr);
@@ -575,7 +635,6 @@ void FixGateway::onMessage(const FIX44::OrderCancelRequest &msg, const FIX::Sess
         return;
     }
 
-    std::string sourceStr = makeSourceString(sid);
     Queues::OrderCancelEvent evt(order->orderId_, "FIX cancel request");
     // The engine hands it back on the cancel's acknowledgement and on a reject, for their ClOrdID (11) (#98)
     evt.requestClOrdId_ = clOrdId.getString();
@@ -589,9 +648,10 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
     FIX::ClOrdID clOrdId;
     msg.get(clOrdId);
 
+    // Only the session's own orders, as for a cancel (#71)
+    const std::string sourceStr = makeSourceString(sid);
     std::string origClOrdStr = origClOrdId.getString();
-    RawDataEntry rawKey(STRING_RAWDATATYPE, origClOrdStr.c_str(), static_cast<u32>(origClOrdStr.size()));
-    OrderEntry *existing = orderStorage_->locateByClOrderId(rawKey);
+    OrderEntry *existing = locateSessionOrder(sourceStr, origClOrdStr);
     if (!existing)
     {
         aux::ExchLogger::instance()->error("FIX: Replace - order not found: " + origClOrdStr);
@@ -661,7 +721,7 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
 
     replacement->orderId_ = IdT();
     replacement->origClOrderId_ = replacement->clOrderId_;
-    const std::string clOrdStr = clOrdId.getString();
+    const std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
     replacement->clOrderId_ = WideDataStorage::instance()->add(
         new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size())));
 
@@ -691,7 +751,6 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
             .count());
 
     // The queue owns the replacement once pushed (#74)
-    std::string sourceStr = makeSourceString(sid);
     Queues::OrderReplaceEvent evt(existing->orderId_, replacement.release());
     inQueues_->push(sourceStr, evt);
 }
@@ -745,27 +804,29 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
         FIX::Side(fromSide(order.side_)), FIX::LeavesQty(order.leavesQty_), FIX::CumQty(order.cumQty_),
         FIX::AvgPx(order.avgPx_));
 
-    const auto &clOrd = order.clOrderId_.get();
+    // The client's own ClOrdIDs, without the session's key they are stored under (#71)
+    const std::string source = sourceOf(order);
+    const std::string clOrd = clientClOrdId(rawText(order.clOrderId_.get()), source);
     if ((CANCEL_EXECTYPE == exec->type_) && !requestClOrdId.empty())
     {
         // A cancel's acknowledgement names the request it answers, and the order it cancelled (#98)
         report.set(FIX::ClOrdID(requestClOrdId));
-        if (clOrd.data_ && clOrd.length_ > 0)
+        if (!clOrd.empty())
         {
-            report.set(FIX::OrigClOrdID(std::string(clOrd.data_, clOrd.length_)));
+            report.set(FIX::OrigClOrdID(clOrd));
         }
     }
-    else if (clOrd.data_ && clOrd.length_ > 0)
+    else if (!clOrd.empty())
     {
-        report.set(FIX::ClOrdID(std::string(clOrd.data_, clOrd.length_)));
+        report.set(FIX::ClOrdID(clOrd));
     }
     // A replace is acknowledged with the replacement's report, which names the order it replaced in OrigClOrdID (41)
     if ((REPLACE_EXECTYPE == exec->type_) && (SourceIdT() != order.origClOrderId_.getId()))
     {
-        const auto &origClOrd = order.origClOrderId_.get();
-        if (origClOrd.data_ && origClOrd.length_ > 0)
+        const std::string origClOrd = clientClOrdId(rawText(order.origClOrderId_.get()), source);
+        if (!origClOrd.empty())
         {
-            report.set(FIX::OrigClOrdID(std::string(origClOrd.data_, origClOrd.length_)));
+            report.set(FIX::OrigClOrdID(origClOrd));
         }
     }
 
@@ -855,6 +916,8 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
 
     try
     {
+        // The engine's event names the ClOrdIDs as they are stored; the client gets its own (#71)
+        const Queues::OrderRejectEvent shown = clientView(evnt, source);
         if (evnt.replacement_)
         {
             // The reject describes the order it was to replace: its OrderID, and its status as the engine saw it when
@@ -873,7 +936,7 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
             {
                 origStatus = fromOrdStatus(evnt.origStatus_);
             }
-            FIX44::OrderCancelReject reject = buildReplaceReject(evnt, origOrderId, origStatus);
+            FIX44::OrderCancelReject reject = buildReplaceReject(shown, origOrderId, origStatus);
             FIX::Session::sendToTarget(reject, sid);
         }
         else
@@ -881,7 +944,7 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
             // The order was never stored, so its reject has no execution of its own. Its ExecID still comes from the
             // shared id generator, whose saved limit keeps it from repeating after a restart, as execution ids don't
             // (#81); a counter of the gateway's own started again at R1 in every run.
-            FIX44::ExecutionReport report = buildOrderReject(evnt, IdTGenerator::instance()->getId().id_);
+            FIX44::ExecutionReport report = buildOrderReject(shown, IdTGenerator::instance()->getId().id_);
             FIX::Session::sendToTarget(report, sid);
         }
     }
@@ -979,10 +1042,11 @@ void FixGateway::sendCancelReject(const Queues::CancelRejectEvent &evnt, const s
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, false);
         orderId = std::to_string(order->orderId_.id_);
-        const RawDataEntry &clOrd = order->clOrderId_.get();
-        if ((nullptr != clOrd.data_) && (0 < clOrd.length_))
+        // the client's own ClOrdID, without the session's key it is stored under (#71)
+        const std::string client = clientClOrdId(rawText(order->clOrderId_.get()), sourceOf(*order));
+        if (!client.empty())
         {
-            clOrdId.assign(clOrd.data_, clOrd.length_);
+            clOrdId = client;
         }
     }
     try
