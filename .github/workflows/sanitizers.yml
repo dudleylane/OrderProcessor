@@ -8,7 +8,7 @@ on:
 
 jobs:
   sanitizer:
-    name: ${{ matrix.sanitizer }}${{ matrix.allow_failure && ' (advisory)' || '' }}
+    name: ${{ matrix.sanitizer }} (FIX ${{ matrix.fix }})${{ matrix.allow_failure && ' (advisory)' || '' }}
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
     continue-on-error: ${{ matrix.allow_failure }}
     strategy:
@@ -22,6 +22,11 @@ jobs:
         # OrderProcessor has no first-class CMake sanitizer flag (yet),
         # so flags are passed via CMAKE_CXX_FLAGS — exactly the recipe
         # documented in CLAUDE.md.
+        #
+        # Each sanitizer runs with the FIX gateway off and on (#99), as
+        # build-test.yml does; the include entries below apply to both.
+        sanitizer: [asan_ubsan, tsan]
+        fix: ['OFF', 'ON']
         include:
           - sanitizer: asan_ubsan
             cxxflags: "-fsanitize=address,undefined -fno-omit-frame-pointer -g"
@@ -86,7 +91,7 @@ jobs:
             -DBUILD_BENCHMARKS=OFF \
             -DBUILD_APP=ON \
             -DBUILD_PG=OFF \
-            -DBUILD_FIX=OFF \
+            -DBUILD_FIX=${{ matrix.fix }} \
             "${TBB_PREFIX_ARG[@]}" \
             -DCMAKE_CXX_FLAGS="${{ matrix.cxxflags }}" \
             -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.ldflags }}" \
