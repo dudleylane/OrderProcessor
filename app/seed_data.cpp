@@ -39,6 +39,7 @@ int main(int argc, char *argv[])
     // 1. Create singletons
     aux::ExchLogger::create();
     aux::ExchLogger::instance()->setNoteOn(true);
+    aux::ExchLogger::instance()->setDebugOn(false); // as the server does by default (#76)
     Store::WideDataStorage::create();
     IdTGenerator::create();
 
