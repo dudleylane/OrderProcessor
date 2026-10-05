@@ -52,6 +52,21 @@ private:
     OrderEntry *orderData_;
 };
 
+/// Whether a reject was handed the copy of the order that its event's receive had already stored. A receive can refuse
+/// an order after storing it, as it does a market order with nothing to trade with. The machine then passes the stored
+/// copy, not the incoming order, and the reject keeps it rather than storing the order a second time (#68).
+bool alreadyStored(const OrderEntry *order, const OrderEntry *received, OrderDataStorage *storage)
+{
+    if ((nullptr == order) || (order == received))
+    {
+        return false;
+    }
+    assert(nullptr != storage);
+    assert(order == storage->locateByOrderId(order->orderId_));
+    (void)storage;
+    return true;
+}
+
 } // namespace
 
 void OrderStatePersistence::serialize(std::string &msg) const
@@ -176,6 +191,10 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onRplOrderRe
 void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvOrderRejected const &evnt)
 {
     assert(nullptr != orderData);
+    if (alreadyStored(*orderData, evnt.order_, evnt.orderStorage_))
+    {
+        return;
+    }
     assert((nullptr == *orderData) || (evnt.order_ == *orderData));
 
     if (nullptr == *orderData)
@@ -197,6 +216,10 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvOrderRe
 void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvRplOrderRejected const &evnt)
 {
     assert(nullptr != orderData);
+    if (alreadyStored(*orderData, evnt.order_, evnt.orderStorage_))
+    {
+        return;
+    }
     assert((nullptr == *orderData) || (evnt.order_ == *orderData));
 
     *orderData = evnt.order_;
@@ -251,6 +274,10 @@ void OrdStateImpl::processAccept(OrderEntry **orderData, OrdState::onExternalOrd
 void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onExternalOrderRejected const &evnt)
 {
     assert(nullptr != orderData);
+    if (alreadyStored(*orderData, evnt.order_, evnt.orderStorage_))
+    {
+        return;
+    }
     assert((nullptr == *orderData) || (evnt.order_ == *orderData));
 
     *orderData = evnt.order_;
