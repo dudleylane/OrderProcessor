@@ -554,6 +554,32 @@ void CancelOrderTrOperation::rollback(const Context &cnxt)
     }
 }
 
+ChangeOrderStateTrOperation::ChangeOrderStateTrOperation(OrderEntry *order, OrderStateChange change)
+    : Operation(CHANGE_ORDER_STATE_TROPERATION, order->orderId_, order->instrument_.getId()), order_(order),
+      change_(change), eventCountBefore_(0)
+{
+}
+
+ChangeOrderStateTrOperation::~ChangeOrderStateTrOperation() {}
+
+void ChangeOrderStateTrOperation::execute(const Context &cnxt)
+{
+    if (nullptr == cnxt.deferedEvents_) [[unlikely]]
+    {
+        throw std::runtime_error("ChangeOrderStateTrOperation: no deferred event container to decide the change!");
+    }
+    eventCountBefore_ = cnxt.deferedEvents_->deferedEventCount();
+    cnxt.deferedEvents_->addDeferedEvent(new StateChangeDeferedEvent(order_, change_));
+}
+
+void ChangeOrderStateTrOperation::rollback(const Context &cnxt)
+{
+    if (nullptr != cnxt.deferedEvents_)
+    {
+        cnxt.deferedEvents_->removeDeferedEventsFrom(eventCountBefore_);
+    }
+}
+
 MatchOrderTrOperation::MatchOrderTrOperation(OrderEntry *order)
     : Operation(MATCH_ORDER_TROPERATION, order->orderId_), order_(order), eventCountBefore_(0)
 {
