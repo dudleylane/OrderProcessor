@@ -28,20 +28,30 @@ class IdTValueGenerator;
 namespace Store
 {
 
-/// Keeps a newly saved order's entry lock until its creator has finished initialising it.
+/// Keeps a newly saved order's entry lock until its creator has finished initialising it, and keeps the order marked
+/// until its creator has enqueued the transaction that books it.
 ///
 /// OrderDataStorage::save() makes an order reachable through locateByOrderId() and
 /// locateByClOrderId() while the state machine action that created it is still running; the
 /// creator then sets its status and state machine persistence. Passing a guard makes save()
 /// write-lock the order before it is inserted into the lookup maps, so any other thread that finds
 /// it blocks until release(). See #13.
+///
+/// The order is also reachable before its creator enqueues the transaction that matches and books it. A cancel or
+/// replace enqueued in that gap would get the lower transaction id and be decided before the order was booked. So
+/// save() also sets the order's bookingPending_, and Processor waits for it to clear before it enqueues a cancel or
+/// replace of the order. The creator calls bookingEnqueued() once that transaction is enqueued. See #83.
+///
+/// A guard serves one save().
 class PublishGuard
 {
 public:
     PublishGuard() = default;
+    /// Clears the mark too, so that a creator that throws before it enqueues leaves nobody waiting
     ~PublishGuard()
     {
         release();
+        bookingEnqueued();
     }
     PublishGuard(const PublishGuard &) = delete;
     PublishGuard &operator=(const PublishGuard &) = delete;
@@ -55,6 +65,16 @@ public:
             locked_ = nullptr;
         }
     }
+    /// Clears the order's bookingPending_, if this guard set it. Call once the transaction that books the order is
+    /// enqueued.
+    void bookingEnqueued() noexcept
+    {
+        if (nullptr != pending_)
+        {
+            pending_->bookingPending_.store(false, std::memory_order_release);
+            pending_ = nullptr;
+        }
+    }
     bool holds() const noexcept
     {
         return nullptr != locked_;
@@ -63,6 +83,7 @@ public:
 private:
     friend class OrderDataStorage;
     OrderEntry *locked_ = nullptr;
+    OrderEntry *pending_ = nullptr;
 };
 
 class OrderDataStorage
