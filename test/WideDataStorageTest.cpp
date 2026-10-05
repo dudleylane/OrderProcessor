@@ -265,6 +265,89 @@ TEST_F(WideDataStorageTest, RestoredExecutionListIsRegisteredOnceAndAdvancesIds)
 }
 
 // =============================================================================
+// A second load restores every reference record again (#61)
+// =============================================================================
+//
+// app/main.cpp loads the data directory twice, so each of these ids is restored twice. The first entry stays and the
+// second is deleted: LeakSanitizer fails these tests if it is leaked instead.
+
+TEST_F(WideDataStorageTest, InstrumentRestoredTwiceKeepsTheFirstAndFreesTheSecond)
+{
+    auto *first = new InstrumentEntry();
+    first->symbol_ = "TWICE";
+    first->securityId_ = "FIRST";
+    first->id_ = IdT(61, 1);
+    storage()->restore(first);
+    auto *second = new InstrumentEntry();
+    second->symbol_ = "TWICE";
+    second->securityId_ = "SECOND";
+    second->id_ = IdT(61, 1);
+    storage()->restore(second);
+
+    InstrumentEntry retrieved;
+    storage()->get(IdT(61, 1), &retrieved);
+    EXPECT_EQ("FIRST", retrieved.securityId_);
+    EXPECT_EQ(IdT(61, 1), storage()->findInstrumentBySymbol("TWICE"));
+}
+
+TEST_F(WideDataStorageTest, StringRestoredTwiceKeepsTheFirstAndFreesTheSecond)
+{
+    storage()->restore(IdT(62, 1), new StringT("first"));
+    storage()->restore(IdT(62, 1), new StringT("second"));
+
+    StringT retrieved;
+    storage()->get(IdT(62, 1), &retrieved);
+    EXPECT_EQ("first", retrieved);
+}
+
+TEST_F(WideDataStorageTest, RawDataRestoredTwiceKeepsTheFirstAndFreesTheSecond)
+{
+    auto *first = new RawDataEntry(STRING_RAWDATATYPE, "first", 5);
+    first->id_ = IdT(63, 1);
+    storage()->restore(first);
+    auto *second = new RawDataEntry(STRING_RAWDATATYPE, "second", 6);
+    second->id_ = IdT(63, 1);
+    storage()->restore(second);
+
+    RawDataEntry retrieved;
+    storage()->get(IdT(63, 1), &retrieved);
+    EXPECT_EQ("first", std::string(retrieved.data_, retrieved.length_));
+}
+
+TEST_F(WideDataStorageTest, AccountRestoredTwiceKeepsTheFirstAndFreesTheSecond)
+{
+    auto *first = new AccountEntry();
+    first->account_ = "TWICE";
+    first->firm_ = "FIRST";
+    first->id_ = IdT(64, 1);
+    storage()->restore(first);
+    auto *second = new AccountEntry();
+    second->account_ = "TWICE";
+    second->firm_ = "SECOND";
+    second->id_ = IdT(64, 1);
+    storage()->restore(second);
+
+    AccountEntry retrieved;
+    storage()->get(IdT(64, 1), &retrieved);
+    EXPECT_EQ("FIRST", retrieved.firm_);
+    EXPECT_EQ(IdT(64, 1), storage()->findAccountByName("TWICE"));
+}
+
+TEST_F(WideDataStorageTest, ClearingRestoredTwiceKeepsTheFirstAndFreesTheSecond)
+{
+    auto *first = new ClearingEntry();
+    first->firm_ = "TWICE";
+    first->id_ = IdT(65, 1);
+    storage()->restore(first);
+    auto *second = new ClearingEntry();
+    second->firm_ = "TWICE";
+    second->id_ = IdT(65, 1);
+    storage()->restore(second);
+
+    EXPECT_EQ(IdT(65, 1), storage()->findClearingByFirm("TWICE"));
+}
+
+// =============================================================================
 // Concurrent Read Tests
 // =============================================================================
 
