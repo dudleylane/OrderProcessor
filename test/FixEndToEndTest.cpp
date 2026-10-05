@@ -273,6 +273,30 @@ protected:
         taskMgr_->waitUntilTransactionsFinished(10);
     }
 
+    /// The order sid placed with this ClOrdID, which is stored under the session's key (#71)
+    OrderEntry *orderOf(const std::string &clOrdId, const FIX::SessionID &sid) const
+    {
+        const std::string key = FixGateway::sessionClOrdId(FixGateway::makeSourceString(sid), clOrdId);
+        RawDataEntry rawKey(STRING_RAWDATATYPE, key.c_str(), static_cast<u32>(key.size()));
+        return OrderStorage::instance()->locateByClOrderId(rawKey);
+    }
+
+    OrderEntry *orderOf(const std::string &clOrdId) const
+    {
+        return orderOf(clOrdId, fixSid_);
+    }
+
+    FIX44::OrderCancelRequest makeCancel(const std::string &origClOrdId, const std::string &clOrdId, char side)
+    {
+        FIX44::OrderCancelRequest msg;
+        msg.set(FIX::OrigClOrdID(origClOrdId));
+        msg.set(FIX::ClOrdID(clOrdId));
+        msg.set(FIX::Side(side));
+        msg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+        msg.set(FIX::Symbol("EURUSD"));
+        return msg;
+    }
+
 protected:
     SourceIdT instrId_;
     SourceIdT clearingId_;
@@ -299,8 +323,7 @@ TEST_F(FixEndToEndTest, LimitOrder_Accepted)
     waitForProcessing();
 
     // Find the order by scanning storage
-    RawDataEntry rawKey(STRING_RAWDATATYPE, "FIX-001", 7);
-    OrderEntry *order = OrderStorage::instance()->locateByClOrderId(rawKey);
+    OrderEntry *order = orderOf("FIX-001");
     ASSERT_NE(nullptr, order);
     EXPECT_EQ(NEW_ORDSTATUS, order->status_);
     EXPECT_EQ(BUY_SIDE, order->side_);
@@ -321,8 +344,7 @@ TEST_F(FixEndToEndTest, TwoOrders_MatchAndFill)
     gateway_->onMessage(sellMsg, fixSid_);
     waitForProcessing();
 
-    RawDataEntry sellKey(STRING_RAWDATATYPE, "FIX-SELL-001", 12);
-    OrderEntry *sellOrder = OrderStorage::instance()->locateByClOrderId(sellKey);
+    OrderEntry *sellOrder = orderOf("FIX-SELL-001");
     ASSERT_NE(nullptr, sellOrder);
     EXPECT_EQ(NEW_ORDSTATUS, sellOrder->status_);
 
@@ -331,8 +353,7 @@ TEST_F(FixEndToEndTest, TwoOrders_MatchAndFill)
     gateway_->onMessage(buyMsg, fixSid_);
     waitForProcessing();
 
-    RawDataEntry buyKey(STRING_RAWDATATYPE, "FIX-BUY-001", 11);
-    OrderEntry *buyOrder = OrderStorage::instance()->locateByClOrderId(buyKey);
+    OrderEntry *buyOrder = orderOf("FIX-BUY-001");
     ASSERT_NE(nullptr, buyOrder);
 
     // 3. Both should be filled
@@ -368,10 +389,8 @@ TEST_F(FixEndToEndTest, PartialFill)
     gateway_->onMessage(buyMsg, fixSid_);
     waitForProcessing();
 
-    RawDataEntry sellKey(STRING_RAWDATATYPE, "FIX-SELL-P1", 11);
-    RawDataEntry buyKey(STRING_RAWDATATYPE, "FIX-BUY-P1", 10);
-    OrderEntry *sellOrder = OrderStorage::instance()->locateByClOrderId(sellKey);
-    OrderEntry *buyOrder = OrderStorage::instance()->locateByClOrderId(buyKey);
+    OrderEntry *sellOrder = orderOf("FIX-SELL-P1");
+    OrderEntry *buyOrder = orderOf("FIX-BUY-P1");
 
     ASSERT_NE(nullptr, sellOrder);
     ASSERT_NE(nullptr, buyOrder);
@@ -390,8 +409,7 @@ TEST_F(FixEndToEndTest, CancelOrder_ViaFix_Completes)
     gateway_->onMessage(msg, fixSid_);
     waitForProcessing();
 
-    RawDataEntry key(STRING_RAWDATATYPE, "FIX-CNL-001", 11);
-    OrderEntry *order = OrderStorage::instance()->locateByClOrderId(key);
+    OrderEntry *order = orderOf("FIX-CNL-001");
     ASSERT_NE(nullptr, order);
     EXPECT_EQ(NEW_ORDSTATUS, order->status_);
 
@@ -428,8 +446,7 @@ TEST_F(FixEndToEndTest, CancelOfAFilledOrder_ViaFix_IsRefusedToTheSender)
     waitForProcessing();
     gateway_->onMessage(makeNOS("FIX-CNL-B1", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
     waitForProcessing();
-    RawDataEntry key(STRING_RAWDATATYPE, "FIX-CNL-S1", 10);
-    OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(key);
+    OrderEntry *sell = orderOf("FIX-CNL-S1");
     ASSERT_NE(nullptr, sell);
     ASSERT_EQ(FILLED_ORDSTATUS, sell->status_);
 
@@ -457,8 +474,7 @@ TEST_F(FixEndToEndTest, ReplaceOrder_ViaFix_Completes)
     // ClOrdID (35=9 102=6), and a well-formed one would have crashed it (#74)
     gateway_->onMessage(makeNOS("FIX-RPL-001", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
     waitForProcessing();
-    RawDataEntry key(STRING_RAWDATATYPE, "FIX-RPL-001", 11);
-    OrderEntry *original = OrderStorage::instance()->locateByClOrderId(key);
+    OrderEntry *original = orderOf("FIX-RPL-001");
     ASSERT_NE(nullptr, original);
     ASSERT_EQ(NEW_ORDSTATUS, original->status_);
 
@@ -467,8 +483,7 @@ TEST_F(FixEndToEndTest, ReplaceOrder_ViaFix_Completes)
 
     EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
     EXPECT_EQ(0u, original->leavesQty_);
-    RawDataEntry newKey(STRING_RAWDATATYPE, "FIX-RPL-002", 11);
-    OrderEntry *replacement = OrderStorage::instance()->locateByClOrderId(newKey);
+    OrderEntry *replacement = orderOf("FIX-RPL-002");
     ASSERT_NE(nullptr, replacement);
     EXPECT_EQ(NEW_ORDSTATUS, replacement->status_);
     EXPECT_DOUBLE_EQ(1.0840, replacement->price_);
@@ -499,8 +514,7 @@ TEST_F(FixEndToEndTest, ReplaceOfAFilledOrder_ViaFix_IsRefusedToTheSender)
     waitForProcessing();
     gateway_->onMessage(makeNOS("FIX-RPL-B1", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
     waitForProcessing();
-    RawDataEntry key(STRING_RAWDATATYPE, "FIX-RPL-S1", 10);
-    OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(key);
+    OrderEntry *sell = orderOf("FIX-RPL-S1");
     ASSERT_NE(nullptr, sell);
     ASSERT_EQ(FILLED_ORDSTATUS, sell->status_);
 
@@ -512,12 +526,14 @@ TEST_F(FixEndToEndTest, ReplaceOfAFilledOrder_ViaFix_IsRefusedToTheSender)
     EXPECT_TRUE(rejects[0].first.replacement_);
     EXPECT_EQ(CancelRejectEvent::TOO_LATE, rejects[0].first.refusal_);
     EXPECT_EQ(FILLED_ORDSTATUS, rejects[0].first.origStatus_);
-    EXPECT_EQ("FIX-RPL-S2", rejects[0].first.clOrderId_);
-    EXPECT_EQ("FIX-RPL-S1", rejects[0].first.origClOrderId_);
+    // The engine's event names the ClOrdIDs as they are stored, under the session's key; the session gets its own
+    // (#71)
+    const OrderRejectEvent shown = FixGateway::clientView(rejects[0].first, rejects[0].second);
+    EXPECT_EQ("FIX-RPL-S2", shown.clOrderId_);
+    EXPECT_EQ("FIX-RPL-S1", shown.origClOrderId_);
     EXPECT_EQ("FIX:TRADER_A->ORDER_PROCESSOR", rejects[0].second);
     EXPECT_EQ(FILLED_ORDSTATUS, sell->status_);
-    RawDataEntry newKey(STRING_RAWDATATYPE, "FIX-RPL-S2", 10);
-    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByClOrderId(newKey));
+    EXPECT_EQ(nullptr, orderOf("FIX-RPL-S2"));
 }
 
 TEST_F(FixEndToEndTest, SourceStringPreserved)
@@ -527,8 +543,7 @@ TEST_F(FixEndToEndTest, SourceStringPreserved)
     gateway_->onMessage(msg, fixSid_);
     waitForProcessing();
 
-    RawDataEntry key(STRING_RAWDATATYPE, "FIX-SRC-001", 11);
-    OrderEntry *order = OrderStorage::instance()->locateByClOrderId(key);
+    OrderEntry *order = orderOf("FIX-SRC-001");
     ASSERT_NE(nullptr, order);
 
     std::string source = order->source_.get();
@@ -543,8 +558,7 @@ TEST_F(FixEndToEndTest, MarketOrder_FillsImmediately)
     waitForProcessing();
 
     // Verify sell is on book before sending market
-    RawDataEntry sellVerifyKey(STRING_RAWDATATYPE, "FIX-MKT-S1", 10);
-    OrderEntry *sellVerify = OrderStorage::instance()->locateByClOrderId(sellVerifyKey);
+    OrderEntry *sellVerify = orderOf("FIX-MKT-S1");
     ASSERT_NE(nullptr, sellVerify);
     ASSERT_EQ(NEW_ORDSTATUS, sellVerify->status_);
 
@@ -555,10 +569,8 @@ TEST_F(FixEndToEndTest, MarketOrder_FillsImmediately)
     waitForProcessing();
     waitForProcessing(); // market orders chain: match → execution → cancel-if-unfilled
 
-    RawDataEntry sellKey(STRING_RAWDATATYPE, "FIX-MKT-S1", 10);
-    RawDataEntry buyKey(STRING_RAWDATATYPE, "FIX-MKT-B1", 10);
-    OrderEntry *sellOrder = OrderStorage::instance()->locateByClOrderId(sellKey);
-    OrderEntry *buyOrder = OrderStorage::instance()->locateByClOrderId(buyKey);
+    OrderEntry *sellOrder = orderOf("FIX-MKT-S1");
+    OrderEntry *buyOrder = orderOf("FIX-MKT-B1");
 
     ASSERT_NE(nullptr, sellOrder);
     ASSERT_NE(nullptr, buyOrder);
@@ -570,6 +582,58 @@ TEST_F(FixEndToEndTest, MarketOrder_FillsImmediately)
     EXPECT_EQ(MARKET_ORDERTYPE, buyOrder->ordType_);
     EXPECT_EQ(BUY_SIDE, buyOrder->side_);
     EXPECT_EQ(100u, buyOrder->orderQty_);
+}
+
+// =============================================================================
+// ClOrdIDs belong to the session that sent them (#71)
+// =============================================================================
+
+TEST_F(FixEndToEndTest, TwoSessions_CanUseTheSameClOrdId)
+{
+    // FIX scopes a ClOrdID to the client that sent it. The engine refused the second order as a duplicate (#67), and
+    // before that crashed on it.
+    const FIX::SessionID otherSid{ "FIX.4.4", "TRADER_B", "ORDER_PROCESSOR", "" };
+    gateway_->onMessage(makeNOS("SAME-1", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0800, 100), fixSid_);
+    waitForProcessing();
+    gateway_->onMessage(makeNOS("SAME-1", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0900, 100), otherSid);
+    waitForProcessing();
+
+    OrderEntry *mine = orderOf("SAME-1");
+    OrderEntry *theirs = orderOf("SAME-1", otherSid);
+    ASSERT_NE(nullptr, mine);
+    ASSERT_NE(nullptr, theirs);
+    EXPECT_NE(mine, theirs);
+    EXPECT_EQ(NEW_ORDSTATUS, mine->status_);
+    EXPECT_EQ(NEW_ORDSTATUS, theirs->status_);
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
+
+    // Each session's cancel finds its own order
+    gateway_->onMessage(makeCancel("SAME-1", "SAME-2", FIX::Side_SELL), otherSid);
+    waitForProcessing();
+    EXPECT_EQ(CANCELED_ORDSTATUS, theirs->status_);
+    EXPECT_EQ(NEW_ORDSTATUS, mine->status_);
+}
+
+TEST_F(FixEndToEndTest, AnotherSessionsCancelAndReplace_ViaFix_DoNotReachTheEngine)
+{
+    // Before #71 any session could cancel or replace an order whose ClOrdID it knew or guessed. The gateway answers
+    // them as for an unknown order, and the engine never sees them.
+    const FIX::SessionID otherSid{ "FIX.4.4", "TRADER_B", "ORDER_PROCESSOR", "" };
+    gateway_->onMessage(makeNOS("MINE-1", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0800, 100), fixSid_);
+    waitForProcessing();
+    OrderEntry *mine = orderOf("MINE-1");
+    ASSERT_NE(nullptr, mine);
+    ASSERT_EQ(NEW_ORDSTATUS, mine->status_);
+
+    gateway_->onMessage(makeCancel("MINE-1", "THEIRS-1", FIX::Side_BUY), otherSid);
+    gateway_->onMessage(makeReplace("MINE-1", "THEIRS-2", FIX::Side_BUY, 1.0700, 100), otherSid);
+    waitForProcessing();
+
+    EXPECT_EQ(NEW_ORDSTATUS, mine->status_);
+    EXPECT_DOUBLE_EQ(1.0800, mine->price_);
+    EXPECT_EQ(nullptr, orderOf("THEIRS-2", otherSid));
+    EXPECT_TRUE(outQueues_->cancelRejects().empty());
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
 }
 
 } // anonymous namespace

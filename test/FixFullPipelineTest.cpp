@@ -253,8 +253,12 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
     // =========================================================================
 
     // --- [FixGateway] Source string proves FIX gateway translated the order ---
-    RawDataEntry sellKey(STRING_RAWDATATYPE, "PIPE-SELL-001", 13);
-    RawDataEntry buyKey(STRING_RAWDATATYPE, "PIPE-BUY-001", 12);
+    // Stored under the session's key (#71)
+    const std::string fixSource = FixGateway::makeSourceString(sid);
+    const std::string sellClOrd = FixGateway::sessionClOrdId(fixSource, "PIPE-SELL-001");
+    const std::string buyClOrd = FixGateway::sessionClOrdId(fixSource, "PIPE-BUY-001");
+    RawDataEntry sellKey(STRING_RAWDATATYPE, sellClOrd.c_str(), static_cast<u32>(sellClOrd.size()));
+    RawDataEntry buyKey(STRING_RAWDATATYPE, buyClOrd.c_str(), static_cast<u32>(buyClOrd.size()));
     OrderEntry *sellOrder = OrderStorage::instance()->locateByClOrderId(sellKey);
     OrderEntry *buyOrder = OrderStorage::instance()->locateByClOrderId(buyKey);
     ASSERT_NE(nullptr, sellOrder) << "[FixGateway] sell order not found in storage";
