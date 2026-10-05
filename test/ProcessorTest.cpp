@@ -867,6 +867,75 @@ TEST_F(ProcessorTest, MarketOrderWithNothingToMatchIsStoredOnceAndRejected)
 }
 
 // =============================================================================
+// A cancel's answers carry the cancel request's own ClOrdID (#98)
+// =============================================================================
+
+namespace
+{
+/// Records the request ClOrdIDs that cancel answers carry
+class CancelAnswerQueues final : public Queues::OutQueues
+{
+public:
+    void push(const Queues::ExecReportEvent &evnt, const std::string &) override
+    {
+        if ((nullptr != evnt.exec_) && (CANCEL_EXECTYPE == evnt.exec_->type_))
+        {
+            acks_.push_back(evnt.requestClOrdId_);
+        }
+    }
+    void push(const Queues::CancelRejectEvent &evnt, const std::string &) override
+    {
+        rejects_.emplace_back(evnt.reason_, evnt.requestClOrdId_);
+    }
+    void push(const Queues::BusinessRejectEvent &, const std::string &) override {}
+
+    std::vector<std::string> acks_;
+    std::vector<std::pair<Queues::CancelRejectEvent::Reason, std::string>> rejects_;
+};
+} // namespace
+
+TEST_F(ProcessorTest, CancelAnswersCarryTheRequestsClOrdId)
+{
+    // FIX answers a cancel with the cancel request's own ClOrdID in tag 11, and the engine is what has to carry it
+    // there: on the acknowledgement, and on a reject, whether too late or for an unknown order (#98)
+    CancelAnswerQueues out;
+    ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(), &out,
+                           inQueues_.get(), transMgr_.get());
+    Processor processor;
+    processor.init(params);
+    transMgr_->proc_ = &processor;
+
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor.process();
+    OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, stored);
+
+    OrderCancelEvent first(stored->orderId_);
+    first.requestClOrdId_ = "CXL-1";
+    inQueues_->push("client", first);
+    processor.process();
+    OrderCancelEvent second(stored->orderId_);
+    second.requestClOrdId_ = "CXL-2";
+    inQueues_->push("client", second);
+    processor.process();
+    OrderCancelEvent unknown(IdT(stored->orderId_.id_ + 1000, stored->orderId_.date_));
+    unknown.requestClOrdId_ = "CXL-3";
+    inQueues_->push("client", unknown);
+    processor.process();
+
+    EXPECT_EQ(CANCELED_ORDSTATUS, stored->status_);
+    ASSERT_EQ(1u, out.acks_.size());
+    EXPECT_EQ("CXL-1", out.acks_[0]);
+    ASSERT_EQ(2u, out.rejects_.size());
+    EXPECT_EQ(Queues::CancelRejectEvent::TOO_LATE, out.rejects_[0].first);
+    EXPECT_EQ("CXL-2", out.rejects_[0].second);
+    EXPECT_EQ(Queues::CancelRejectEvent::UNKNOWN_ORDER, out.rejects_[1].first);
+    EXPECT_EQ("CXL-3", out.rejects_[1].second);
+}
+
+// =============================================================================
 // A cancel or replace comes after the transaction that books its order (#83)
 // =============================================================================
 
