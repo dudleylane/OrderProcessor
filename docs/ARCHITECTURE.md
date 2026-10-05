@@ -542,7 +542,8 @@ COP (Concurrent Order Processor)
 │ OrderStateMachine.onOrderReceived()                                      │
 │   • Validate order                                                       │
 │   • Create OrderEntry                                                    │
-│   • Add to OrderDataStorage                                              │
+│   • Add to OrderDataStorage, locked until initialised (#13), and marked  │
+│     until its transaction is enqueued (#83)                              │
 │   • Transition: INITIAL → RCVD_NEW → NEW                                │
 └──────────────────────────────────────────────────────────────────────────┘
        │
@@ -568,6 +569,8 @@ COP (Concurrent Order Processor)
 │   • Add to NLinkedTree dependency graph                                 │
 │   • Mark objects as "in transaction"                                    │
 │   • Schedule execution                                                   │
+│   • The processor then clears the order's mark: a cancel or replace of   │
+│     the order can now be enqueued after this transaction (#83)           │
 └──────────────────────────────────────────────────────────────────────────┘
        │
        ▼
@@ -611,6 +614,8 @@ COP (Concurrent Order Processor)
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ Processor.onEvent(OrderCancelEvent)                     (event worker)   │
 │   • Locate order in OrderDataStorage; unknown → CancelRejectEvent        │
+│   • Wait while the order is marked: the transaction that books it is     │
+│     not enqueued yet, and the cancel must come after it (#83)            │
 │   • Enqueue a transaction holding CancelOrderTrOperation, related to     │
 │     the order and its instrument                                         │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -709,6 +714,7 @@ COP (Concurrent Order Processor)
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ Processor.onEvent(OrderReplaceEvent)                    (event worker)   │
 │   • No replacement, or the original unknown → OrderRejectEvent           │
+│   • Wait while the original is marked, as a cancel does (#83)            │
 │   • Enqueue a transaction holding ReplaceOrderTrOperation (a copy of     │
 │     the replacement), related to the original and its instrument         │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -731,7 +737,9 @@ COP (Concurrent Order Processor)
 │     not above the original's cumQty, or it is invalid, or it is a        │
 │     market order with nothing to trade with → refuse                     │
 │   • Replacement takes the original's cumQty, avgPx and executions;       │
-│     stored under a fresh id (a ClOrdID in use → refuse, #67)             │
+│     stored under a fresh id (a ClOrdID in use → refuse, #67), and        │
+│     marked until the transaction below, which books it, is enqueued      │
+│     (#83)                                                                │
 │   • Original:    onExecReplace: NO_CNL_REPLACE → CNCL_REPLACED,          │
 │                  RemoveFromOrderBook, leavesQty = 0, REPLACE report      │
 │   • Replacement: onReplace: RCVD_NEW → NEW (PARTFILL with fills),        │

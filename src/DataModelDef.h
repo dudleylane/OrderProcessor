@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <set>
 #include <oneapi/tbb/spin_rw_mutex.h>
 #include "TypesDef.h"
@@ -236,6 +237,9 @@ public:
     QuantityT cumQty_;
     QuantityT orderQty_;
     TimeInForce tif_;
+    /// Set while the transaction that books a newly stored order or replacement is not yet enqueued, so that a cancel
+    /// or replace of the order waits for it (#83). Store::PublishGuard sets and clears it; a copy starts clear.
+    std::atomic<bool> bookingPending_{ false };
 
     // --- Warm fields (accessed during processing) ---
     PriceT stopPx_;
