@@ -242,7 +242,7 @@ And one thing they include that production doesn't: the benchmark's `OutgoingQue
 every report until the run ends, where production's queues keep none. That is about 2% of the
 instructions of a new order or a cancel.
 
-For the queue, order book, state machine, arena and cache microbenchmarks, run the binary:
+For the queue, order book, state machine, arena, pool, NUMA and field-layout microbenchmarks, run the binary:
 `./build/orderProcessorBench --benchmark_list_tests` shows everything available.
 
 ---
