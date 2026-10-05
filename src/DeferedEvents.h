@@ -161,8 +161,10 @@ struct CancelRequestDeferedEvent : public DeferedEventBase
 {
     OrderEntry *order_;
     std::string requester_;
+    std::string requestClOrdId_; // the cancel request's own ClOrdID, if it has one (#98)
 
-    CancelRequestDeferedEvent(OrderEntry *ord, const std::string &requester);
+    CancelRequestDeferedEvent(OrderEntry *ord, const std::string &requester,
+                              const std::string &requestClOrdId = std::string());
 
     virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
 };

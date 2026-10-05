@@ -224,6 +224,8 @@ struct onFinished : public OrderStateEvent
 };
 struct onExecCancel : public OrderStateEvent
 {
+    /// The ClOrdID of the client's cancel request, carried to its acknowledgement (#98)
+    std::string requestClOrdId_;
 };
 struct onInternalCancel : public OrderStateEvent
 {

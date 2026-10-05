@@ -41,6 +41,21 @@ private:
     ExecType execType_;
 };
 
+/// Reports a client's cancel as done: the CANCELED execution report, carrying the cancel request's ClOrdID, so that the
+/// gateway can name the request it answers (#98)
+class CreateCancelExecReportTrOperation final : public Operation
+{
+public:
+    CreateCancelExecReportTrOperation(const OrderEntry &order, const std::string &requestClOrdId);
+    ~CreateCancelExecReportTrOperation();
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    std::string requestClOrdId_;
+};
+
 class CreateTradeExecReportTrOperation final : public Operation
 {
 public:
@@ -204,7 +219,8 @@ class CancelRejectTrOperation final : public Operation
 {
 public:
     CancelRejectTrOperation(const OrderEntry &order, Queues::CancelRejectEvent::Reason reason,
-                            const std::string &requester = std::string());
+                            const std::string &requester = std::string(),
+                            const std::string &requestClOrdId = std::string());
     ~CancelRejectTrOperation();
 
     void execute(const Context &cnxt) override;
@@ -214,6 +230,7 @@ private:
     OrderStatus status_;
     Queues::CancelRejectEvent::Reason reason_;
     std::string requester_;
+    std::string requestClOrdId_;
 };
 
 /// Hands a client's replace to the processor as a deferred event, so it is decided after every transaction before it on
@@ -257,7 +274,8 @@ private:
 class CancelOrderTrOperation final : public Operation
 {
 public:
-    CancelOrderTrOperation(OrderEntry *order, const std::string &requester);
+    CancelOrderTrOperation(OrderEntry *order, const std::string &requester,
+                           const std::string &requestClOrdId = std::string());
     ~CancelOrderTrOperation();
 
     void execute(const Context &cnxt) override;
@@ -266,6 +284,7 @@ public:
 private:
     OrderEntry *order_;
     std::string requester_;
+    std::string requestClOrdId_;
     size_t eventCountBefore_;
 };
 

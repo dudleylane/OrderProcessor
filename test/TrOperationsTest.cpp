@@ -86,7 +86,10 @@ public:
 class RecordingOutQueues : public Queues::OutQueues
 {
 public:
-    void push(const Queues::ExecReportEvent &, const std::string &) override {}
+    void push(const Queues::ExecReportEvent &evnt, const std::string &target) override
+    {
+        reports_.emplace_back(evnt, target);
+    }
     void push(const Queues::CancelRejectEvent &evnt, const std::string &target) override
     {
         rejects_.emplace_back(evnt, target);
@@ -97,6 +100,7 @@ public:
         refusals_.emplace_back(evnt, target);
     }
 
+    std::vector<std::pair<Queues::ExecReportEvent, std::string>> reports_;
     std::vector<std::pair<Queues::CancelRejectEvent, std::string>> rejects_;
     std::vector<std::pair<Queues::OrderRejectEvent, std::string>> refusals_;
 };
@@ -604,6 +608,53 @@ TEST_F(MatchOrderOperationTest, CancelReject_GoesToTheRequesterWithTheReasonAndS
     EXPECT_EQ(Queues::CancelRejectEvent::TOO_LATE, out.rejects_[0].first.reason_);
     EXPECT_EQ(FILLED_ORDSTATUS, out.rejects_[0].first.ordStatus_);
     EXPECT_EQ("requester", out.rejects_[0].second);
+}
+
+// =============================================================================
+// The cancel request's own ClOrdID, handed back with its answer (#98)
+// =============================================================================
+
+TEST_F(MatchOrderOperationTest, CancelReject_CarriesTheRequestsClOrdId)
+{
+    RecordingOutQueues out;
+    buyOrder_->status_ = FILLED_ORDSTATUS;
+    CancelRejectTrOperation op(*buyOrder_, Queues::CancelRejectEvent::TOO_LATE, "requester", "CXL-1");
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, &out, matcher_.get(), IdTGenerator::instance(),
+                &deferedContainer_);
+
+    op.execute(ctx);
+
+    ASSERT_EQ(1u, out.rejects_.size());
+    EXPECT_EQ("CXL-1", out.rejects_[0].first.requestClOrdId_);
+}
+
+TEST_F(MatchOrderOperationTest, CancelOrder_Execute_QueuesTheRequestWithItsClOrdId)
+{
+    CancelOrderTrOperation op(buyOrder_, "client", "CXL-2");
+    Context ctx = createContext();
+
+    op.execute(ctx);
+
+    ASSERT_EQ(1u, deferedContainer_.deferedEventCount());
+    auto *request = dynamic_cast<CancelRequestDeferedEvent *>(deferedContainer_.events_[0]);
+    ASSERT_NE(nullptr, request);
+    EXPECT_EQ("CXL-2", request->requestClOrdId_);
+}
+
+TEST_F(MatchOrderOperationTest, CancelExecReport_CarriesTheRequestsClOrdId)
+{
+    RecordingOutQueues out;
+    CreateCancelExecReportTrOperation op(*buyOrder_, "CXL-3");
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, &out, matcher_.get(), IdTGenerator::instance(),
+                &deferedContainer_);
+
+    op.execute(ctx);
+
+    ASSERT_EQ(1u, out.reports_.size());
+    ASSERT_NE(nullptr, out.reports_[0].first.exec_);
+    EXPECT_EQ(CANCEL_EXECTYPE, out.reports_[0].first.exec_->type_);
+    EXPECT_EQ(CANCELED_ORDSTATUS, out.reports_[0].first.exec_->orderStatus_);
+    EXPECT_EQ("CXL-3", out.reports_[0].first.requestClOrdId_);
 }
 
 TEST_F(MatchOrderOperationTest, CancelReject_WithoutARequesterGoesToTheOrdersSource)
