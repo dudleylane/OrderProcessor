@@ -124,6 +124,11 @@ public:
             onAdd_();
         }
         tr->setTransactionId(TransactionId(1, 1));
+        if (keep_)
+        {
+            kept_.push_back(std::move(tr));
+            return;
+        }
         if (proc_)
         {
             proc_->process(tr->transactionId(), tr.get());
@@ -159,6 +164,9 @@ public:
     Processor *proc_;
     /// Called as each transaction is added, before it runs
     std::function<void()> onAdd_;
+    /// While set, a transaction added is kept here, not run
+    bool keep_ = false;
+    std::vector<std::unique_ptr<Transaction>> kept_;
 
 private:
     int transactionCount_;
@@ -740,6 +748,102 @@ TEST_F(ProcessorTest, OrderIsDurableBeforeItsExecutionReportIsPublished)
     ASSERT_FALSE(sequence.empty());
     EXPECT_EQ("persist", sequence.front());
     EXPECT_NE(std::find(sequence.begin(), sequence.end(), "publish"), sequence.end());
+}
+
+// =============================================================================
+// A state change is decided when its transaction runs (#96)
+// =============================================================================
+
+namespace
+{
+/// Books a buy, then handles evnt with the transaction manager keeping what it enqueues. Returns the order.
+template <typename Event>
+OrderEntry *enqueueStateChangeFor(IncomingQueues &inQueues, Processor &processor, TestTransactionManager &transMgr,
+                                  std::unique_ptr<OrderEntry> order, Event (*makeEvent)(const IdT &))
+{
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues.push("test", OrderEvent(order.release()));
+    processor.process();
+    OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    if ((nullptr == stored) || (NEW_ORDSTATUS != stored->status_))
+    {
+        return nullptr;
+    }
+    transMgr.keep_ = true;
+    inQueues.push("test", makeEvent(stored->orderId_));
+    processor.process();
+    transMgr.keep_ = false;
+    return stored;
+}
+
+OrderChangeStateEvent suspendOf(const IdT &id)
+{
+    return OrderChangeStateEvent(id, OrderChangeStateEvent::SUSPEND);
+}
+
+TimerEvent expiryOf(const IdT &id)
+{
+    return TimerEvent(id, TimerEvent::EXPIRATION);
+}
+} // namespace
+
+TEST_F(ProcessorTest, SuspendIsDecidedWhenItsTransactionRuns)
+{
+    // As a cancel is (#73): the handler only enqueues the request, and the state machine runs when its transaction
+    // does, after the order's earlier transactions and the fills they caused.
+    OrderEntry *stored = enqueueStateChangeFor(*inQueues_, *processor_, *transMgr_,
+                                               createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), &suspendOf);
+    ASSERT_NE(nullptr, stored);
+    ASSERT_EQ(1u, transMgr_->kept_.size());
+    EXPECT_EQ(NEW_ORDSTATUS, stored->status_) << "the suspend was decided before its transaction ran";
+
+    processor_->process(TransactionId(1, 1), transMgr_->kept_.front().get());
+    EXPECT_EQ(SUSPENDED_ORDSTATUS, stored->status_);
+}
+
+TEST_F(ProcessorTest, ExpiryIsDecidedWhenItsTransactionRuns)
+{
+    OrderEntry *stored = enqueueStateChangeFor(*inQueues_, *processor_, *transMgr_,
+                                               createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), &expiryOf);
+    ASSERT_NE(nullptr, stored);
+    ASSERT_EQ(1u, transMgr_->kept_.size());
+    EXPECT_EQ(NEW_ORDSTATUS, stored->status_) << "the expiry was decided before its transaction ran";
+
+    processor_->process(TransactionId(1, 1), transMgr_->kept_.front().get());
+    EXPECT_EQ(EXPIRED_ORDSTATUS, stored->status_);
+}
+
+TEST_F(ProcessorTest, StateChangeWaitsForTheTransactionThatBooksTheOrder)
+{
+    // As a cancel does (#83): enqueued before the transaction that books the order, it would be decided first
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    COP::Store::PublishGuard guard;
+    OrderEntry *stored = OrderStorage::instance()->save(*order, IdTGenerator::instance(), &guard);
+    ASSERT_NE(nullptr, stored);
+    guard.release();
+
+    transMgr_->proc_ = nullptr;
+    std::vector<bool> marks;
+    transMgr_->onAdd_ = [&]()
+    {
+        marks.push_back(stored->bookingPending_.load());
+    };
+    std::thread creator(
+        [&guard]()
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            guard.bookingEnqueued();
+        });
+    inQueues_->push("test", OrderChangeStateEvent(stored->orderId_, OrderChangeStateEvent::SUSPEND));
+    inQueues_->push("test", TimerEvent(stored->orderId_, TimerEvent::EXPIRATION));
+    processor_->process();
+    processor_->process();
+    creator.join();
+    transMgr_->onAdd_ = nullptr;
+
+    ASSERT_EQ(2u, marks.size());
+    EXPECT_FALSE(marks[0]) << "the suspend was enqueued before the transaction that books the order";
+    EXPECT_FALSE(marks[1]) << "the expiry was enqueued before the transaction that books the order";
 }
 
 // =============================================================================

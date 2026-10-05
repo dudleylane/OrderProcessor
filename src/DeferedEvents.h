@@ -26,6 +26,18 @@ struct OrderEntry;
 namespace Proc
 {
 
+/// A change of an order's state that a request asks for: a suspend, resume or finish, or a timer's expiry, day end or
+/// day start (#96)
+enum class OrderStateChange
+{
+    SUSPEND,
+    RESUME,
+    FINISH,
+    EXPIRE,
+    DAY_END,
+    DAY_START
+};
+
 class DeferedEventFunctor
 {
 public:
@@ -39,6 +51,8 @@ public:
     /// A client's replace of the original; the caller keeps the replacement, and a refusal goes to the requester (#74)
     virtual void process(OrdState::onReplace &evnt, OrderEntry *original, OrderEntry &replacement,
                          const std::string &requester, const ACID::Context &cnxt) = 0;
+    /// A state change of the order, decided into scope (#96)
+    virtual void process(OrderStateChange change, OrderEntry *order, ACID::Scope *scope, const ACID::Context &cnxt) = 0;
 };
 
 class DeferedEventBase
@@ -149,6 +163,18 @@ struct CancelRequestDeferedEvent : public DeferedEventBase
     std::string requester_;
 
     CancelRequestDeferedEvent(OrderEntry *ord, const std::string &requester);
+
+    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+};
+
+/// A state change of an order, queued by ChangeOrderStateTrOperation once the transactions before it on the order are
+/// done (#96)
+struct StateChangeDeferedEvent : public DeferedEventBase
+{
+    OrderEntry *order_;
+    OrderStateChange change_;
+
+    StateChangeDeferedEvent(OrderEntry *ord, OrderStateChange change);
 
     virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
 };

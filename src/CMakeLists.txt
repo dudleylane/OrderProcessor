@@ -4,6 +4,7 @@ target_sources(orderEngine
         AllocateCache.cpp
         CancelOrderDeferedEvent.cpp
         ReplaceRequestDeferedEvent.cpp
+        StateChangeDeferedEvent.cpp
         ClearingCodec.cpp
         DataModelDef.cpp
         EntryFilter.cpp
