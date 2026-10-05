@@ -153,10 +153,10 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 │  │   │  └─────────────────┘     └─────────────────────────────┘    │   │    │
 │  │   └─────────────────────────────────────────────────────────────┘   │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
-│  ┌──────────────────────┐  ┌────────────────────────────────────────────┐   │
-│  │   InterLockCache     │  │              NLinkedTree                   │   │
-│  │  (Wait-Free Pool)    │  │       (Transaction Dependency)             │   │
-│  └──────────────────────┘  └────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                             NLinkedTree                              │   │
+│  │                       (Transaction Dependency)                       │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -279,7 +279,6 @@ COP (Concurrent Order Processor)
 | Test File | Test Case | Description |
 |-----------|-----------|-------------|
 | `IncomingQueuesTest.cpp` | `IncomingQueuesTest.*` | Queue insertion/retrieval |
-| `InterlockCacheTest.cpp` | `PopAndPushBasic` | Underlying cache mechanism |
 
 ---
 
@@ -888,21 +887,6 @@ COP (Concurrent Order Processor)
 │ LAYER 1: Lock-Free Components                                                │
 │                                                                              │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │                    InterLockCache                                    │   │
-│   │                                                                      │   │
-│   │   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐                       │   │
-│   │   │Obj1│──►│Obj2│──►│Obj3│──►│Obj4│──►│NULL│                       │   │
-│   │   └────┘   └────┘   └────┘   └────┘   └────┘                       │   │
-│   │      ▲                                   ▲                          │   │
-│   │      │                                   │                          │   │
-│   │   nextFree_                          nextNull_                      │   │
-│   │   (atomic)                           (atomic)                       │   │
-│   │                                                                      │   │
-│   │   pop() : atomic_compare_exchange_strong                            │   │
-│   │   push(): atomic_compare_exchange_strong                            │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
 │   │                  TransactionScopePool                               │   │
 │   │                                                                      │   │
 │   │   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐                       │   │
@@ -1024,7 +1008,6 @@ COP (Concurrent Order Processor)
 
 3. Lock-Free Where Possible
    ┌───────────────────────────────────────────────────────────────────────┐
-   │   • InterLockCache: Wait-free object allocation                      │
    │   • Atomic processor attachment                                       │
    │   • Atomic counter updates                                           │
    │   • NumaAllocator: NUMA-local memory binding via mbind()             │
@@ -1035,8 +1018,6 @@ COP (Concurrent Order Processor)
 
 | Test File | Test Cases | Coverage |
 |-----------|------------|----------|
-| `InterlockCacheTest.cpp` | `PopAndPushBasic`, `ExceedCacheSize` | Lock-free cache |
-| `InterlockCacheBench.cpp` | `BM_InterlockCache*` | Cache performance |
 | `NLinkTreeTest.cpp` | `AddSingleNode`, `ClearTree` | Dependency graph |
 | `TaskManagerTest.cpp` | `TaskManagerTest.*` | Task parallelism |
 | `TransactionScopePoolTest.cpp` | `TransactionScopePoolTest.*` | Lock-free object pool |
@@ -1383,7 +1364,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Low-Latency** | CacheAlignedAtomicTest.cpp, CpuAffinityHugePagesTest.cpp, NumaAllocatorTest.cpp, TransactionScopePoolTest.cpp | - | TransactionScopePoolBench.cpp, NumaAllocatorBench.cpp, OrderParamsLayoutBench.cpp | - |
 | **LMDB Storage** | LMDBStorageTest.cpp | - | - | - |
 | **PostgreSQL** | PGEnumStringsTest.cpp, PGRequestBuilderTest.cpp, PGWriteBehindTest.cpp | - | - | - |
-| **Concurrency** | InterlockCacheTest.cpp (93), testInterlockCache.cpp (153) | testTaskManager.cpp (238) | InterlockCacheBench.cpp | 484+ |
+| **Concurrency** | - | testTaskManager.cpp (238) | - | 238+ |
 
 ### 9.2 Test File Details
 
@@ -1391,7 +1372,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 
 | Category | Test Files |
 |----------|------------|
-| **Core** | `CodecsTest.cpp`, `IncomingQueuesTest.cpp`, `OutgoingQueuesTest.cpp`, `InterlockCacheTest.cpp`, `NLinkTreeTest.cpp`, `ProcessorTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp` |
+| **Core** | `CodecsTest.cpp`, `IncomingQueuesTest.cpp`, `OutgoingQueuesTest.cpp`, `NLinkTreeTest.cpp`, `ProcessorTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp` |
 | **Transactions** | `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TransactionScopePoolTest.cpp`, `TrOperationsTest.cpp` |
 | **Storage** | `FileStorageTest.cpp`, `StorageRecordDispatcherTest.cpp`, `WideDataStorageTest.cpp`, `LMDBStorageTest.cpp` |
 | **Low-Latency** | `CacheAlignedAtomicTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `NumaAllocatorTest.cpp` |
@@ -1461,7 +1442,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Storage** | `FileStorage.h/cpp`, `FileStorageDef.h`, `OrderStorage.h/cpp`, `StorageRecordDispatcher.h/cpp`, `LMDBStorage.h/cpp` |
 | **Data Models** | `DataModelDef.h/cpp`, `TypesDef.h`, `QueuesDef.h`, `EventDef.h`, `TasksDef.h` |
 | **Codecs** | `OrderCodec.h/cpp`, `InstrumentCodec.h/cpp`, `AccountCodec.h/cpp`, `ClearingCodec.h/cpp`, `RawDataCodec.h/cpp`, `StringTCodec.h/cpp` |
-| **Concurrency** | `TaskManager.h/cpp`, `InterLockCache.h/cpp`, `AllocateCache.h/cpp` |
+| **Concurrency** | `TaskManager.h/cpp`, `AllocateCache.h/cpp` |
 | **Low-Latency** | `TransactionScopePool.h`, `CacheAlignedAtomic.h`, `CpuAffinity.h`, `HugePages.h`, `NumaAllocator.h` |
 | **Subscriptions** | `SubscrManager.h/cpp`, `SubscriptionLayerImpl.h/cpp`, `SubscriptionLayerDef.h`, `SubscriptionDef.h`, `FilterImpl.h/cpp`, `EntryFilter.h/cpp`, `OrderFilter.h/cpp` |
 | **Events** | `EventManager.h/cpp`, `DeferedEvents.h`, `CancelOrderDeferedEvent.cpp`, `ExecutionDeferedEvent.cpp`, `MatchOrderDeferedEvent.cpp` |
@@ -1472,7 +1453,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 
 | Category | Files |
 |----------|-------|
-| **Google Test (33)** | `CacheAlignedAtomicTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `EventBenchmarkTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `InterlockCacheTest.cpp`, `LMDBStorageTest.cpp`, `NLinkTreeTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp` |
+| **Google Test (33)** | `CacheAlignedAtomicTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `EventBenchmarkTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `LMDBStorageTest.cpp`, `NLinkTreeTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 
@@ -1483,7 +1464,6 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | `EventProcessingBench.cpp` | Event queue throughput measurement |
 | `OrderMatchingBench.cpp` | Order matching performance |
 | `StateMachineBench.cpp` | State transition performance |
-| `InterlockCacheBench.cpp` | Lock-free cache performance |
 | `TransactionScopePoolBench.cpp` | Lock-free object pool allocation |
 | `NumaAllocatorBench.cpp` | NUMA-aware allocation performance |
 | `OrderParamsLayoutBench.cpp` | Field layout optimization |

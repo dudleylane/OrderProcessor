@@ -286,7 +286,6 @@ Benchmark results on 8-core CPU @ 3.8 GHz:
 | **TransactionScopePool** | CAS ring buffer with exponential backoff | Zero-allocation transaction processing |
 | **OrderStorage** | `tbb::spin_rw_mutex` + `tbb::concurrent_hash_map` | Concurrent lookups, fine-grained access |
 | **WideDataStorage** | `tbb::spin_rw_mutex` | Concurrent reads for reference data |
-| **InterLockCache** | CAS-based circular buffer | Wait-free memory pooling |
 | **CacheAlignedAtomic** | `alignas(64)` wrapper | Prevents false sharing on contended atomics |
 | **SessionManager** | `tbb::spin_rw_mutex` | Thread-safe broadcast to WebSocket clients |
 
