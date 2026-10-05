@@ -8,8 +8,15 @@ on:
 
 jobs:
   build-and-test:
-    name: Release build + ctest
+    name: Release build + ctest (FIX ${{ matrix.fix }})
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both configurations (#99). FIX ON builds the FIX gateway and runs its
+        # tests; FIX OFF catches code that compiles only when FIX is on.
+        # QuickFIX is installed on the runner host (/usr/local/lib).
+        fix: ['OFF', 'ON']
     # Activate gcc-toolset-15 by putting its binaries first on PATH and
     # adding its libraries to LD_LIBRARY_PATH.  No `source enable` script
     # exists at the standard path on Stream 10 — env vars achieve the
@@ -36,7 +43,7 @@ jobs:
             -DBUILD_BENCHMARKS=ON \
             -DBUILD_APP=ON \
             -DBUILD_PG=OFF \
-            -DBUILD_FIX=OFF
+            -DBUILD_FIX=${{ matrix.fix }}
 
       - name: Build
         shell: bash
