@@ -743,6 +743,26 @@ TEST_F(ProcessorTest, OrderIsDurableBeforeItsExecutionReportIsPublished)
 }
 
 // =============================================================================
+// A market order with nothing to trade with (#68)
+// =============================================================================
+
+TEST_F(ProcessorTest, MarketOrderWithNothingToMatchIsStoredOnceAndRejected)
+{
+    // The receive stores the order, then finds nothing on the other side and refuses it. The reject asserted it had
+    // been handed the incoming order rather than the stored copy, and Debug builds aborted here (#68).
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    order->ordType_ = MARKET_ORDERTYPE;
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor_->process();
+
+    OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, stored);
+    EXPECT_EQ(REJECTED_ORDSTATUS, stored->status_);
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "a refused order must not rest in the book";
+}
+
+// =============================================================================
 // A cancel or replace comes after the transaction that books its order (#83)
 // =============================================================================
 
