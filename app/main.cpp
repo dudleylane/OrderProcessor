@@ -53,6 +53,7 @@ struct Config
     std::string fixCfg;                                    // path to QuickFIX settings file (empty = FIX disabled)
     std::string clearingFirm = App::DEFAULT_CLEARING_FIRM; // the clearing firm on every order (#34)
     std::string defaultAccount = App::DEFAULT_ACCOUNT;     // the account of an order that names none (#34)
+    bool debug = false;                                    // debug logging, off unless asked for (#76)
 };
 
 Config parseArgs(int argc, char *argv[])
@@ -93,6 +94,10 @@ Config parseArgs(int argc, char *argv[])
         {
             cfg.defaultAccount = argv[++i];
         }
+        else if (arg == "--debug")
+        {
+            cfg.debug = true;
+        }
     }
     return cfg;
 }
@@ -108,6 +113,9 @@ int main(int argc, char *argv[])
     aux::ExchLogger::instance()->setNoteOn(true);
     aux::ExchLogger::instance()->setWarnOn(true);
     aux::ExchLogger::instance()->setErrorOn(true);
+    // The logger starts with every level on. Debug lines cost about six per transaction, formatted inside the
+    // transaction manager's lock, so they are off unless --debug asks for them (#76).
+    aux::ExchLogger::instance()->setDebugOn(cfg.debug);
 
     Store::WideDataStorage::create();
     IdTGenerator::create();
