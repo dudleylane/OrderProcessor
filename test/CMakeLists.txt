@@ -12,7 +12,6 @@ target_sources(orderProcessorTest
         CodecsTest.cpp
         FileStorageTest.cpp
         IncomingQueuesTest.cpp
-        InterlockCacheTest.cpp
         NLinkTreeTest.cpp
         OrderBookTest.cpp
         ProcessorTest.cpp

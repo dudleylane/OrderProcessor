@@ -15,7 +15,6 @@ target_sources(orderEngine
         IdTGenerator.cpp
         IncomingQueues.cpp
         InstrumentCodec.cpp
-        InterLockCache.cpp
         LMDBStorage.cpp
         Logger.cpp
         MatchOrderDeferedEvent.cpp

@@ -3,7 +3,6 @@ target_sources(orderProcessorBench
         EventProcessingBench.cpp
         OrderMatchingBench.cpp
         StateMachineBench.cpp
-        InterlockCacheBench.cpp
         TransactionScopePoolBench.cpp
         NumaAllocatorBench.cpp
         OrderParamsLayoutBench.cpp
