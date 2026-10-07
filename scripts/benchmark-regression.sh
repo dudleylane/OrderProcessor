@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
-# benchmark-regression.sh — Automated benchmark regression testing
+# benchmark-regression.sh — ad-hoc before/after benchmark comparison
+#
+# This is a tool, not a gate: no baseline is committed, because a baseline is only
+# meaningful on the machine that produced it. Create one on the machine you are
+# measuring, change the code, then compare against it.
 #
 # Usage:
-#   ./scripts/benchmark-regression.sh                    # clean build + run + compare
-#   ./scripts/benchmark-regression.sh --no-build         # run + compare (build exists)
-#   ./scripts/benchmark-regression.sh --update-baseline   # save current run as new baseline
-#   ./scripts/benchmark-regression.sh --filter "Pool"     # test subset of benchmarks
+#   ./scripts/benchmark-regression.sh --update-baseline          # record "before" on this machine
+#   ./scripts/benchmark-regression.sh --no-build                 # compare "after" against it
+#   ./scripts/benchmark-regression.sh --pinned 3 --no-build      # pin to core 3 (see below)
+#   ./scripts/benchmark-regression.sh --filter "Pool"            # only matching benchmarks
 #
-# Exit codes: 0 = pass, 1 = regression detected, 2 = usage/setup error
+# Trustworthy numbers need an otherwise idle machine, the benchmark pinned to an
+# isolated core and, where permitted, real-time priority: --pinned does this and
+# warns about whatever it could not arrange.
+#
+# Exit codes: 0 = no change beyond the threshold, 1 = a benchmark moved more than
+# the threshold, 2 = usage/setup error
 
 set -euo pipefail
 
@@ -19,6 +28,7 @@ UPDATE_BASELINE=false
 BASELINE=""
 BUILD_DIR=""
 FILTER=""
+PINNED_CORES=""
 
 # --- Resolve project root from script location ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,6 +51,8 @@ while [[ $# -gt 0 ]]; do
             BUILD_DIR="$2"; shift 2 ;;
         --filter)
             FILTER="$2"; shift 2 ;;
+        --pinned)
+            PINNED_CORES="$2"; shift 2 ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -52,6 +64,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --baseline FILE      Override baseline file path"
             echo "  --build-dir DIR      Override build directory path"
             echo "  --filter REGEX       Run only matching benchmarks"
+            echo "  --pinned CORES       Pin the run to CORES (taskset list, e.g. 3 or 2-3) and"
+            echo "                       request real-time priority where permitted"
             echo "  -h, --help           Show this help"
             exit 0
             ;;
@@ -89,6 +103,41 @@ fi
 
 # --- Step 2: Run benchmarks ---
 echo "=== Running Benchmarks (repetitions=$REPETITIONS) ==="
+echo "--- machine ---"
+echo "  host:      $(uname -n)  kernel $(uname -r)"
+echo "  cpu:       $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')  ($(nproc) threads)"
+echo "  governor:  $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)"
+# Report the compiler the benchmark was built with, not whatever $CXX is now.
+COMPILER=$(sed -n 's/^CMAKE_CXX_COMPILER:[A-Z]*=//p' "$BUILD_DIR/CMakeCache.txt" 2>/dev/null || true)
+echo "  compiler:  $("${COMPILER:-${CXX:-c++}}" --version 2>/dev/null | head -1)"
+echo "  commit:    $(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo '(not a git checkout)')"
+
+GOVERNOR=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)
+if [[ "$GOVERNOR" != "performance" && "$GOVERNOR" != "unknown" ]]; then
+    echo "  WARNING: CPU governor is '$GOVERNOR'; frequency scaling adds run-to-run noise." >&2
+fi
+
+# Build the launcher: taskset pins the run to the given cores, chrt asks for
+# real-time priority. chrt needs privileges (ulimit -r), so a failure downgrades
+# to taskset alone rather than aborting the run.
+LAUNCH=()
+if [[ -n "$PINNED_CORES" ]]; then
+    if ! command -v taskset >/dev/null 2>&1; then
+        echo "ERROR: --pinned needs taskset (util-linux)" >&2
+        exit 2
+    fi
+    LAUNCH=(taskset -c "$PINNED_CORES")
+    if command -v chrt >/dev/null 2>&1 && chrt -f 50 true >/dev/null 2>&1; then
+        LAUNCH=(chrt -f 50 "${LAUNCH[@]}")
+        echo "  pinned:    cores $PINNED_CORES, SCHED_FIFO 50"
+    else
+        echo "  pinned:    cores $PINNED_CORES (no real-time priority: needs privileges, see 'ulimit -r')"
+    fi
+else
+    echo "  pinned:    no (pass --pinned CORES for comparable numbers)"
+fi
+echo ""
+
 BENCH_ARGS=(
     --benchmark_format=json
     "--benchmark_out=$CURRENT_RESULTS"
@@ -98,7 +147,7 @@ if [[ -n "$FILTER" ]]; then
     BENCH_ARGS+=("--benchmark_filter=$FILTER")
 fi
 
-"$BENCH_EXE" "${BENCH_ARGS[@]}"
+"${LAUNCH[@]}" "$BENCH_EXE" "${BENCH_ARGS[@]}"
 echo ""
 
 # --- Step 3: If no baseline exists, handle accordingly ---
@@ -107,11 +156,15 @@ if [[ ! -f "$BASELINE" ]]; then
         cp "$CURRENT_RESULTS" "$BASELINE"
         echo "=== Baseline Created ==="
         echo "Saved to: $BASELINE"
-        echo "Commit this file to track benchmark performance."
+        echo "This baseline belongs to this machine and toolchain; it is deliberately"
+        echo "not committed. Re-record it after a toolchain, hardware or kernel change."
         exit 0
     else
-        echo "ERROR: No baseline file found: $BASELINE" >&2
-        echo "Run with --update-baseline to create one." >&2
+        echo "ERROR: No baseline to compare against: $BASELINE" >&2
+        echo "" >&2
+        echo "Baselines are per-machine and are not committed. Record one first:" >&2
+        echo "  $0 --update-baseline${PINNED_CORES:+ --pinned $PINNED_CORES}" >&2
+        echo "then make your change and re-run this command." >&2
         exit 2
     fi
 fi
