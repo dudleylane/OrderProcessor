@@ -192,21 +192,21 @@ Export to JSON for comparison:
 
 ### Comparing Benchmarks Before and After a Change
 
-`scripts/benchmark-regression.sh` compares a run against a baseline you record yourself. A baseline is only meaningful on the machine that produced it, so none is committed.
+`scripts/benchmark-regression.sh` compares the benchmark binary from before a change with the one after it, on the same machine. Nothing is committed: a comparison only means something on the machine that made it.
 
 ```bash
-# Record "before" on this machine, pinned to an isolated core
-./scripts/benchmark-regression.sh --update-baseline --pinned 3
+# Before the change: build, then save the benchmark binary as the baseline
+./scripts/benchmark-regression.sh --update-baseline
 
-# Make your change, rebuild, then compare against it
-./scripts/benchmark-regression.sh --no-build --pinned 3
+# Make your change, rebuild, then compare the two binaries
+./scripts/benchmark-regression.sh --no-build --pinned 2-5 --filter 'Pool|StateMachine'
 ```
 
-It reports every benchmark that moved more than the threshold, and exits non-zero if any regressed.
+The two binaries run in alternating rounds, and the order flips every round, so drift between runs (clock frequency, temperature, other load) falls on both alike. Each benchmark is judged by the median, over rounds, of its after/before ratio: by real time for benchmarks that ask for it (`/real_time`), by CPU time otherwise. The report lists every benchmark that moved more than the threshold, with the number of rounds in which it was slower and its range across rounds. The script exits 1 if a benchmark got slower by more than the threshold, and 2 if one failed to run or anything else went wrong.
 
-Options: `--threshold N` (default 5%), `--repetitions N` (default 3), `--filter REGEX`, `--pinned CORES`, `--baseline FILE`, `--build-dir DIR`, `--no-build`.
+Options: `--threshold N` (default 5%), `--rounds N` (default 6), `--repetitions N` (per binary per round, default 1), `--filter REGEX`, `--pinned CORES`, `--baseline FILE`, `--build-dir DIR`, `--no-build`.
 
-The run prints the machine, kernel, CPU, governor, compiler and commit it measured, and warns when the CPU governor or missing real-time privileges make the numbers noisy. Re-record the baseline after any toolchain, kernel or hardware change.
+Pin to a range of cores, not one: the TaskManager benchmarks need worker threads (#120). A comparison runs the suite twice per round, so use `--filter` to pick the benchmarks your change touches. The run prints the machine, kernel, CPU, governor, compiler and both commits, and warns when the CPU governor or missing real-time privileges make the numbers noisy. Save a new baseline after any toolchain, kernel or hardware change.
 
 ### Performance Results (Release Build)
 
