@@ -26,7 +26,7 @@ Testing/
 exchange.log
 
 # Benchmark baselines are per-machine and never committed (#12)
-benchmark_baseline.json
+benchmark_baseline*
 
 # Runtime data (LMDB)
 data/
