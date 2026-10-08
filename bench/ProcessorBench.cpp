@@ -455,6 +455,8 @@ static void BM_TaskManagerThroughput(benchmark::State &state)
         }
         inQueues->detach();
         transactMgr->detach();
+        // As app/main.cpp does once the TaskManager is gone (#37); ~TransactionMgr asserts it.
+        transactMgr->stop();
         TaskManager::destroy();
     }
     destroyEngineState();
