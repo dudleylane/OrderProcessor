@@ -12,6 +12,7 @@
 #include <benchmark/benchmark.h>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "IncomingQueues.h"
 #include "OutgoingQueues.h"
@@ -212,12 +213,16 @@ BENCHMARK(BM_QueuePopEvents)->Range(8, 8 << 10);
 static void BM_OutQueuePushExecReport(benchmark::State &state)
 {
     BenchmarkSetup setup;
+    // The queue keeps each event's execution pointer without owning it. In production the order's
+    // executions own them; here this vector does, and outlives the queue.
+    std::vector<std::unique_ptr<ExecutionEntry>> executions;
+    executions.reserve(static_cast<size_t>(state.max_iterations));
     OutgoingQueues queues;
 
     for (auto _ : state)
     {
-        auto exec = createExecution();
-        ExecReportEvent event(exec);
+        executions.emplace_back(createExecution());
+        ExecReportEvent event(executions.back().get());
         queues.push(event, "target");
     }
     state.SetItemsProcessed(state.iterations());
