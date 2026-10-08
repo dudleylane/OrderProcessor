@@ -80,7 +80,9 @@ public:
         auto *rawClOrdId = new RawDataEntry(STRING_RAWDATATYPE, buf, static_cast<u32>(strlen(buf)));
         SourceIdT clOrdId = WideDataStorage::instance()->add(rawClOrdId);
 
-        auto order = new OrderEntry(srcId, destId, clOrdId, origClOrdId, instrId_, accountId, clearingId, execList);
+        // save() stores a clone; this order is only its template, freed on return.
+        auto order = std::make_unique<OrderEntry>(srcId, destId, clOrdId, origClOrdId, instrId_, accountId, clearingId,
+                                                  execList);
         order->side_ = side;
         order->price_ = price;
         order->orderQty_ = qty;
