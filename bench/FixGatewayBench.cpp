@@ -78,10 +78,7 @@ class FixBenchSetup
 public:
     FixBenchSetup()
     {
-        if (!aux::ExchLogger::instance())
-        {
-            aux::ExchLogger::create();
-        }
+        aux::ExchLogger::create();
         aux::ExchLogger::instance()->setDebugOn(false); // measure the gateway, not debug logging (#76)
         WideDataStorage::create();
         SubscrMgr::SubscriptionMgr::create();
@@ -112,6 +109,7 @@ public:
         IdTGenerator::destroy();
         SubscrMgr::SubscriptionMgr::destroy();
         WideDataStorage::destroy();
+        aux::ExchLogger::destroy();
     }
     FixBenchSetup(const FixBenchSetup &) = delete;
     FixBenchSetup &operator=(const FixBenchSetup &) = delete;
@@ -323,8 +321,8 @@ static void BM_SingleLegMatch(benchmark::State &state)
         auto *raw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
         clOrdId = WideDataStorage::instance()->add(raw);
 
-        auto *sell =
-            new OrderEntry(srcId, destId, clOrdId, origClOrdId, setup.instrId_, accountId, clearingId, execList);
+        auto sell = std::make_unique<OrderEntry>(srcId, destId, clOrdId, origClOrdId, setup.instrId_, accountId,
+                                                 clearingId, execList);
         sell->side_ = SELL_SIDE;
         sell->ordType_ = LIMIT_ORDERTYPE;
         sell->price_ = 1.2650;
@@ -332,6 +330,7 @@ static void BM_SingleLegMatch(benchmark::State &state)
         sell->leavesQty_ = 100;
         sell->status_ = NEW_ORDSTATUS;
         OrderEntry *savedSell = OrderStorage::instance()->save(*sell, IdTGenerator::instance());
+        sell.reset(); // save() stored a clone; free the template before timing resumes
         orderBook.add(*savedSell);
 
         // Create aggressor buy
@@ -339,8 +338,8 @@ static void BM_SingleLegMatch(benchmark::State &state)
         auto *buyRaw = new RawDataEntry(STRING_RAWDATATYPE, buyClOrdStr.c_str(), static_cast<u32>(buyClOrdStr.size()));
         SourceIdT buyClOrdId = WideDataStorage::instance()->add(buyRaw);
 
-        auto *buy =
-            new OrderEntry(srcId, destId, buyClOrdId, origClOrdId, setup.instrId_, accountId, clearingId, execList);
+        auto buy = std::make_unique<OrderEntry>(srcId, destId, buyClOrdId, origClOrdId, setup.instrId_, accountId,
+                                                clearingId, execList);
         buy->side_ = BUY_SIDE;
         buy->ordType_ = LIMIT_ORDERTYPE;
         buy->price_ = 1.2650;
@@ -348,6 +347,7 @@ static void BM_SingleLegMatch(benchmark::State &state)
         buy->leavesQty_ = 100;
         buy->status_ = NEW_ORDSTATUS;
         OrderEntry *savedBuy = OrderStorage::instance()->save(*buy, IdTGenerator::instance());
+        buy.reset(); // save() stored a clone; free the template before timing resumes
 
         defered.count_ = 0;
         state.ResumeTiming();
@@ -405,8 +405,8 @@ static void BM_FxSwapMatch(benchmark::State &state)
         auto *sellRaw = new RawDataEntry(STRING_RAWDATATYPE, sellStr.c_str(), static_cast<u32>(sellStr.size()));
         SourceIdT sellClOrdId = WideDataStorage::instance()->add(sellRaw);
 
-        auto *sell =
-            new OrderEntry(srcId, destId, sellClOrdId, origClOrdId, setup.instrId_, accountId, clearingId, execList);
+        auto sell = std::make_unique<OrderEntry>(srcId, destId, sellClOrdId, origClOrdId, setup.instrId_, accountId,
+                                                 clearingId, execList);
         sell->side_ = SELL_SIDE;
         sell->ordType_ = FXSWAP_ORDERTYPE;
         sell->price_ = 1.2650;
@@ -417,6 +417,7 @@ static void BM_FxSwapMatch(benchmark::State &state)
         sell->leavesQty_ = 100;
         sell->status_ = NEW_ORDSTATUS;
         OrderEntry *savedSell = OrderStorage::instance()->save(*sell, IdTGenerator::instance());
+        sell.reset(); // save() stored a clone; free the template before timing resumes
         orderBook.add(*savedSell);
 
         // Aggressor buy swap
@@ -424,8 +425,8 @@ static void BM_FxSwapMatch(benchmark::State &state)
         auto *buyRaw = new RawDataEntry(STRING_RAWDATATYPE, buyStr.c_str(), static_cast<u32>(buyStr.size()));
         SourceIdT buyClOrdId = WideDataStorage::instance()->add(buyRaw);
 
-        auto *buy =
-            new OrderEntry(srcId, destId, buyClOrdId, origClOrdId, setup.instrId_, accountId, clearingId, execList);
+        auto buy = std::make_unique<OrderEntry>(srcId, destId, buyClOrdId, origClOrdId, setup.instrId_, accountId,
+                                                clearingId, execList);
         buy->side_ = BUY_SIDE;
         buy->ordType_ = FXSWAP_ORDERTYPE;
         buy->price_ = 1.2650;
@@ -436,6 +437,7 @@ static void BM_FxSwapMatch(benchmark::State &state)
         buy->leavesQty_ = 100;
         buy->status_ = NEW_ORDSTATUS;
         OrderEntry *savedBuy = OrderStorage::instance()->save(*buy, IdTGenerator::instance());
+        buy.reset(); // save() stored a clone; free the template before timing resumes
 
         defered.count_ = 0;
         state.ResumeTiming();
