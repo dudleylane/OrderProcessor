@@ -41,6 +41,7 @@ public:
     OrderBookBenchmarkSetup()
     {
         aux::ExchLogger::create();
+        aux::ExchLogger::instance()->setNoteOn(false);  // measure the engine, not spdlog (#121)
         aux::ExchLogger::instance()->setDebugOn(false); // measure the engine, not debug logging (#76)
         WideDataStorage::create();
         IdTGenerator::create();
