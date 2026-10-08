@@ -9,6 +9,7 @@
  * Distributed under the GNU Affero General Public License (AGPL).
  */
 #include <benchmark/benchmark.h>
+#include <oneapi/tbb/info.h>
 
 #include <chrono>
 #include <memory>
@@ -367,6 +368,14 @@ BENCHMARK(BM_ProcessCancelOrder);
 /// is polling rather than running tasks, so a single-worker configuration never drains.
 static void BM_TaskManagerThroughput(benchmark::State &state)
 {
+    // oneTBB sizes its pool from the CPUs the process may use. On one CPU it has no worker, and this
+    // thread only polls, so no batch would ever drain (#120). Say so now, not after every deadline.
+    if (oneapi::tbb::info::default_concurrency() < 2)
+    {
+        state.SkipWithError("needs at least 2 CPUs, so TaskManager has a worker; pin to a range such as 2-5");
+        return;
+    }
+
     const int processors = static_cast<int>(state.range(0));
     const u64 batch = 500;
 
@@ -434,6 +443,12 @@ static void BM_TaskManagerThroughput(benchmark::State &state)
                         break;
                     }
                     std::this_thread::sleep_for(std::chrono::microseconds(50));
+                }
+                // SkipWithError doesn't end the loop: without this, each remaining iteration waits out
+                // its own deadline, 20 minutes per case.
+                if (state.skipped())
+                {
+                    break;
                 }
             }
             state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * batch));
