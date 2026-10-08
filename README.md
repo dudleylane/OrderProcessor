@@ -235,15 +235,11 @@ Pin to a range of cores, not one: the TaskManager benchmarks need worker threads
 
 ### Performance Results (Release Build)
 
-Benchmark results on 8-core CPU @ 3.8 GHz:
-
-| Benchmark | Time (ns) | Throughput |
-|-----------|-----------|------------|
-| EventProcessing | ~7,200 | ~139K ops/sec |
-| OrderMatching | ~7,300 | ~137K ops/sec |
-| StateMachineTransitions | ~9,100 | ~110K ops/sec |
-| IncomingQueues Push | ~15 | ~66M ops/sec |
-| IncomingQueues Pop | ~15 | ~66M ops/sec |
+The benchmarks measure the engine with note and debug logging off (#121). Logging is a real cost in
+production; it is simply not what these numbers are for. For the queue, order book, state machine,
+arena, pool, NUMA, field-layout and FIX gateway microbenchmarks, run the binary:
+`./build/orderProcessorBench --benchmark_list_tests` shows everything available, and
+`scripts/benchmark-regression.sh` compares two builds (above).
 
 ---
 

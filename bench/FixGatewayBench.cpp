@@ -79,6 +79,7 @@ public:
     FixBenchSetup()
     {
         aux::ExchLogger::create();
+        aux::ExchLogger::instance()->setNoteOn(false);  // measure the gateway, not spdlog (#121)
         aux::ExchLogger::instance()->setDebugOn(false); // measure the gateway, not debug logging (#76)
         WideDataStorage::create();
         SubscrMgr::SubscriptionMgr::create();
