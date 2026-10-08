@@ -22,6 +22,12 @@
 # warns about whatever it could not arrange. Pin to a range, not one core: the
 # TaskManager benchmarks need worker threads (#120).
 #
+# Each run's address space is capped, at half of RAM by default (--memory-cap), so a
+# benchmark that keeps more state than expected fails with exit 2 instead of pushing
+# the machine into swap. Many benchmarks keep what every iteration creates until they
+# end, and run more iterations the faster they get: one full pass reached 26 GB on a
+# 30 GB laptop before #125.
+#
 # Exit codes: 0 = no benchmark got slower by more than the threshold, 1 = at least
 # one did, 2 = usage/setup error, or a benchmark failed to run
 
@@ -38,6 +44,7 @@ BUILD_DIR=""
 FILTER=""
 PINNED_CORES=""
 BASELINE_ARG=""
+MEMORY_CAP_GIB=""
 
 # --- Resolve project root from script location ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,7 +58,7 @@ usage_error() {
 # --- Argument parsing ---
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --threshold|--rounds|--repetitions|--baseline|--build-dir|--filter|--pinned)
+        --threshold|--rounds|--repetitions|--baseline|--build-dir|--filter|--pinned|--memory-cap)
             [[ $# -ge 2 ]] || usage_error "$1 needs a value"
             case "$1" in
                 --threshold)   THRESHOLD="$2" ;;
@@ -61,6 +68,7 @@ while [[ $# -gt 0 ]]; do
                 --build-dir)   BUILD_DIR="$2" ;;
                 --filter)      FILTER="$2" ;;
                 --pinned)      PINNED_CORES="$2" ;;
+                --memory-cap)  MEMORY_CAP_GIB="$2" ;;
             esac
             shift 2 ;;
         --no-build)
@@ -82,6 +90,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --filter REGEX       Run only matching benchmarks"
             echo "  --pinned CORES       Pin the runs to CORES (taskset list; use a range such as 2-5)"
             echo "                       and request real-time priority where permitted"
+            echo "  --memory-cap GIB     Cap each benchmark run's address space at GIB GiB (default:"
+            echo "                       half of RAM; 0 for no cap, e.g. for a sanitizer build)"
             echo "  -h, --help           Show this help"
             exit 0
             ;;
@@ -96,6 +106,15 @@ done
 [[ "$REPETITIONS" =~ ^[0-9]+$ ]] && (( 10#$REPETITIONS >= 1 )) || usage_error "--repetitions needs a whole number of at least 1, got '$REPETITIONS'"
 ROUNDS=$(( 10#$ROUNDS ))
 REPETITIONS=$(( 10#$REPETITIONS ))
+if [[ -n "$MEMORY_CAP_GIB" ]]; then
+    [[ "$MEMORY_CAP_GIB" =~ ^[0-9]+$ ]] || usage_error "--memory-cap needs a whole number of GiB (0 for no cap), got '$MEMORY_CAP_GIB'"
+    MEMORY_CAP_GIB=$(( 10#$MEMORY_CAP_GIB ))
+else
+    # Half of RAM: room for any benchmark today (a full pass peaks near 2 GB) and for whatever else
+    # shares the machine. If RAM can't be read, don't cap.
+    MEM_TOTAL_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)
+    MEMORY_CAP_GIB=$(( ${MEM_TOTAL_KB:-0} / 2 / 1024 / 1024 ))
+fi
 
 BASELINE="${BASELINE:-$PROJECT_ROOT/benchmark_baseline.bin}"
 BUILD_DIR="${BUILD_DIR:-$PROJECT_ROOT/build}"
@@ -245,6 +264,11 @@ if [[ -n "$PINNED_CORES" ]]; then
 else
     echo "  pinned:    no (pass --pinned CORES for comparable numbers)"
 fi
+if (( MEMORY_CAP_GIB > 0 )); then
+    echo "  memory:    each run capped at $MEMORY_CAP_GIB GiB of address space (--memory-cap; 0 for none)"
+else
+    echo "  memory:    no cap (--memory-cap 0)"
+fi
 echo "--- before (baseline) ---"
 echo "  binary:    $BASELINE"
 if [[ -f "$BASELINE.info" ]]; then
@@ -264,11 +288,22 @@ echo ""
 # --- Step 5: Run the rounds ---
 BENCH_ARGS=(--benchmark_out_format=json "--benchmark_repetitions=$REPETITIONS" "${FILTER_ARGS[@]}")
 
+# Runs in the subshell that starts a benchmark, so the cap applies to that run alone.
+limit_memory() {
+    if (( MEMORY_CAP_GIB > 0 )); then
+        ulimit -v $(( MEMORY_CAP_GIB * 1024 * 1024 ))
+    fi
+}
+
 run_side() {  # round, side, binary
     local out="$WORK/r$1-$2.json" log="$WORK/r$1-$2.log"
-    if ! ( cd "$WORK" && "${LAUNCH[@]}" "$3" "${BENCH_ARGS[@]}" "--benchmark_out=$out" ) > "$log" 2>&1; then
+    if ! ( cd "$WORK" && limit_memory && "${LAUNCH[@]}" "$3" "${BENCH_ARGS[@]}" "--benchmark_out=$out" ) > "$log" 2>&1; then
         echo "ERROR: the $2 binary failed in round $1. The last lines of its output:" >&2
         tail -n 20 "$log" >&2
+        if (( MEMORY_CAP_GIB > 0 )) && grep -q -E 'bad_alloc|Cannot allocate memory|out of memory' "$log"; then
+            echo "It ran out of memory under the $MEMORY_CAP_GIB GiB cap: a benchmark kept more state than that." >&2
+            echo "Narrow --filter, or raise --memory-cap if the machine has room." >&2
+        fi
         exit 2
     fi
 }
