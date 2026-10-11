@@ -17,7 +17,11 @@ option(BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(BUILD_APP "Build production WebSocket server" ON)
 option(BUILD_FIX "Build with QuickFIX/C++ FIX gateway (requires quickfix)" OFF)
 if(BUILD_FIX)
-    find_library(QUICKFIX_LIB quickfix REQUIRED)
+    # QuickFIX changes its SONAME at every major release, and code built against one major must not use
+    # another's library (22.0 changed an inline comparator in message_order), so ask for the major this
+    # branch is verified with. The package's version check accepts the same major only, and its imported
+    # target brings the headers and the library from the same installation.
+    find_package(quickfix 22 CONFIG REQUIRED)
 endif()
 option(BUILD_FUZZ "Build fuzz targets in test/fuzz (libFuzzer with Clang, corpus replay otherwise)" OFF)
 
@@ -117,9 +121,9 @@ if(BUILD_TESTS)
     )
 
     if(BUILD_FIX)
-        target_link_libraries(orderProcessorTest PRIVATE ${QUICKFIX_LIB})
+        target_link_libraries(orderProcessorTest PRIVATE quickfix::quickfix)
         target_compile_definitions(orderProcessorTest PRIVATE BUILD_FIX)
-        target_include_directories(orderProcessorTest PRIVATE /usr/local/include ${CMAKE_SOURCE_DIR}/app)
+        target_include_directories(orderProcessorTest PRIVATE ${CMAKE_SOURCE_DIR}/app)
     endif()
 
     include(GoogleTest)
@@ -146,9 +150,8 @@ if(BUILD_BENCHMARKS)
     )
 
     if(BUILD_FIX)
-        target_link_libraries(orderProcessorBench PRIVATE ${QUICKFIX_LIB})
+        target_link_libraries(orderProcessorBench PRIVATE quickfix::quickfix)
         target_compile_definitions(orderProcessorBench PRIVATE BUILD_FIX)
-        target_include_directories(orderProcessorBench PRIVATE /usr/local/include)
     endif()
 endif()
 
@@ -159,9 +162,8 @@ if(BUILD_APP)
         orderEngine nlohmann_json::nlohmann_json pthread)
 
     if(BUILD_FIX)
-        target_link_libraries(orderProcessorServer PRIVATE ${QUICKFIX_LIB})
+        target_link_libraries(orderProcessorServer PRIVATE quickfix::quickfix)
         target_compile_definitions(orderProcessorServer PRIVATE BUILD_FIX)
-        target_include_directories(orderProcessorServer PRIVATE /usr/local/include)
     endif()
 
     add_executable(seedData app/seed_data.cpp)

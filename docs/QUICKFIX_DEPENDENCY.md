@@ -1,172 +1,93 @@
 # QuickFIX/C++ Dependency
 
-## Installed Version
+The FIX gateway (`-DBUILD_FIX=ON`) builds against **QuickFIX 22**, from the maintained fork at
+https://github.com/dudleylane/quickfix. The branch was last verified with **v22.1.0**, on 2026-10-11.
+
+## Why the major version is pinned
+
+The fork changes its SONAME at every major release where code built against the previous one must
+not use the new library. 21.0 changed the Application callback contract; 22.0 changed what
+`message_order` stores while its comparison stays inline, so headers from 21 used with the 22
+library would misorder fields. CMake therefore asks for the major it was verified with:
+
+```cmake
+if(BUILD_FIX)
+    find_package(quickfix 22 CONFIG REQUIRED)
+endif()
+
+# server, tests and benchmarks:
+target_link_libraries(<target> PRIVATE quickfix::quickfix)
+```
+
+The package's version check accepts the same major only, so a 21 or a 23 installation fails at
+configure time instead of building. The imported target `quickfix::quickfix` brings the headers,
+the library and its SSL dependencies from one installation.
+
+## Installed files
 
 | Property | Value |
 |----------|-------|
-| **Package** | QuickFIX (Hardened Fork) |
-| **Version** | 1.16.1-hardened |
-| **Source** | https://github.com/dudleylane/quickfix |
-| **Library** | `/usr/local/lib/libquickfix.so.17.0.0` (shared, 1.5 MB) |
-| **Headers** | `/usr/local/include/quickfix/` (94 core headers) |
-| **Data Dictionaries** | `/usr/local/share/quickfix/` (9 XML files) |
-| **Build flags** | `-O3 -march=native -flto -DENABLE_TBB_ALLOCATOR -std=c++23` |
+| **Library** | `/usr/local/lib/libquickfix.so.22` → `libquickfix.so.22.1.0` (SONAME `libquickfix.so.22`) |
+| **Headers** | `/usr/local/include/quickfix/` (`QUICKFIX_VERSION` is in `QuickFIXVersion.h`) |
+| **CMake package** | `/usr/local/lib/cmake/quickfix/` (target `quickfix::quickfix`) |
+| **pkg-config** | `/usr/local/lib/pkgconfig/quickfix.pc` |
+| **Data dictionaries** | `/usr/local/share/quickfix/` |
+| **Links** | `libssl`, `libcrypto`, `pthread` |
 
-## File Locations
+Older majors (`libquickfix.so.18` to `.21`) stay installed beside it, so programs built against them
+still load, but every new build of this branch uses 22.
 
-```
-/usr/local/
-├── include/quickfix/
-│   ├── Application.h          # Core Application interface
-│   ├── Acceptor.h             # Base acceptor (start/stop)
-│   ├── ThreadedSocketAcceptor.h  # Thread-per-session acceptor
-│   ├── SessionSettings.h      # INI config parser
-│   ├── SessionID.h            # BeginString:Sender->Target
-│   ├── Session.h              # sendToTarget() static method
-│   ├── FileStore.h            # Persistent message store
-│   ├── FileLog.h              # File-based logging
-│   ├── FieldMap.h             # GroupArena bump-pointer allocator
-│   ├── FixValues.h            # FIX enum constants (Side_BUY, OrdType_LIMIT, etc.)
-│   ├── FixFields.h            # Typed field classes (ClOrdID, Price, Side, etc.)
-│   ├── fix44/                 # FIX 4.4 message classes (95 headers)
-│   │   ├── NewOrderSingle.h
-│   │   ├── ExecutionReport.h
-│   │   ├── OrderCancelRequest.h
-│   │   ├── OrderCancelReplaceRequest.h
-│   │   ├── OrderCancelReject.h
-│   │   ├── MessageCracker.h   # Type-safe message dispatch
-│   │   └── ...
-│   └── ...
-├── lib/
-│   ├── libquickfix.so → libquickfix.so.17
-│   ├── libquickfix.so.17 → libquickfix.so.17.0.0
-│   └── libquickfix.so.17.0.0
-└── share/quickfix/
-    ├── FIX40.xml
-    ├── FIX41.xml
-    ├── FIX42.xml
-    ├── FIX43.xml
-    ├── FIX44.xml    ← used by OrderProcessor
-    ├── FIX50.xml
-    ├── FIX50SP1.xml
-    ├── FIX50SP2.xml
-    └── FIXT11.xml
-```
+## What the gateway uses
 
-## Runtime Dependencies
+FIX 4.4 only:
 
-The shared library links to:
+- **Transport and sessions:** `ThreadedSocketAcceptor`, `Session`, `SessionSettings`, `SessionID`,
+  `FileStore`, `FileLog`, `Application`.
+- **Messages:** `NewOrderSingle`, `NewOrderMultileg` (FX swaps, with the `NoLegs` group),
+  `OrderCancelRequest`, `OrderCancelReplaceRequest`, `ExecutionReport`, `OrderCancelReject`,
+  `BusinessMessageReject`, `News`.
+- **Settings:** `config/fix.cfg` (acceptor on port 5001, `ResetOnLogon=Y`).
 
-| Library | System Path | Purpose |
-|---------|-------------|---------|
-| `libssl.so.3` | `/lib64/libssl.so.3` | TLS/SSL for encrypted FIX sessions |
-| `libcrypto.so.3` | `/lib64/libcrypto.so.3` | Cryptographic primitives |
-| `libtbbmalloc.so.2` | `/lib64/libtbbmalloc.so.2` | TBB scalable allocator |
-| `libstdc++.so.6` | `/lib64/libstdc++.so.6` | C++ standard library |
+The data dictionary is the project's own copy, `config/spec/FIX44.xml`. It differs from the
+`FIX44.xml` that QuickFIX installs only in the types of fields 139 (MiscFeeType) and 532
+(MassCancelRejectReason): CHAR here, STRING there. The gateway uses neither.
 
-## CMake Integration
+## Installing a release
 
-The OrderProcessor links QuickFIX conditionally via `BUILD_FIX`:
-
-```cmake
-# CMakeLists.txt
-option(BUILD_FIX "Build with QuickFIX/C++ FIX gateway (requires quickfix)" OFF)
-if(BUILD_FIX)
-    find_library(QUICKFIX_LIB quickfix REQUIRED)
-endif()
-
-# Each target (server, test, bench) then links ${QUICKFIX_LIB}:
-if(BUILD_FIX)
-    target_link_libraries(<target> PRIVATE ${QUICKFIX_LIB})
-    target_compile_definitions(<target> PRIVATE BUILD_FIX)
-    target_include_directories(<target> PRIVATE /usr/local/include)
-endif()
-```
-
-Build commands:
+Build with gcc-toolset-15, as the rest of the project is:
 
 ```bash
-# Without FIX (default, no QuickFIX dependency)
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
-
-# With FIX gateway enabled
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_FIX=ON
-cmake --build build -j$(nproc)
-```
-
-## GCC 15 / C++23 Compatibility
-
-The previous HFT fork's `Config23.h` injected `boost::container::flat_map` into `namespace std` as a polyfill. This hardened fork **does not include `Config23.h`** — the polyfill and its associated conflicts are eliminated.
-
-No ordering constraints on QuickFIX includes vs `<flat_map>` includes. GCC 15's native `std::flat_map` is used everywhere.
-
-## Key Differences from Previous HFT Fork
-
-| Aspect | Previous (1.17.0-hft) | Current (hardened fork) |
-|--------|----------------------|------------------------|
-| `Config23.h` | Polyfills `std::flat_map` via Boost | Not present — no polyfill |
-| `HFTOptimizations.h` | Branch hints, prefetch macros | Not present — not needed |
-| `CompileTimeOptimizations.h` | Compile-time tag validation | Not present — not needed |
-| `QUICKFIX_HFT_OPTIMIZED` | Defined | Not defined |
-| `QUICKFIX_LOCK_FREE` | Defined | Not defined |
-| `QUICKFIX_ZERO_COPY` | Defined | Not defined |
-| PostgreSQL | Linked | Not linked (unused by OrderProcessor) |
-| TBB allocator | Not available | Linked (`libtbbmalloc.so.2`) |
-| GroupArena | Not available | Per-message bump-pointer arena for groups |
-| Thread safety | Hand-rolled recursive mutex (data race) | `PTHREAD_MUTEX_RECURSIVE` (per-session), `std::shared_mutex` (global session registry) |
-| `sizeof(Group)` | 120 bytes | 128 bytes (**ABI break — recompile required**) |
-
-## ABI Break Notice
-
-`sizeof(FIX::FieldMap)` changed from 112 → 120 and `sizeof(FIX::Group)` from 120 → 128 due to the addition of `std::unique_ptr<GroupArena> m_arena`. Any code compiled against the previous HFT fork headers **must be recompiled** against the new headers, or struct layout mismatches will cause crashes.
-
-```bash
-# After installing the new QuickFIX, clean and rebuild OrderProcessor:
-cd /home/ojohnson/OrderProcessor
-rm -rf build
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_FIX=ON
-cmake --build build -j$(nproc)
-```
-
-## FIX Protocol Version
-
-The OrderProcessor uses **FIX 4.4** exclusively. The data dictionary is copied from the QuickFIX installation to the project:
-
-```
-/usr/local/share/quickfix/FIX44.xml → config/spec/FIX44.xml
-```
-
-The session configuration (`config/fix.cfg`) references this dictionary:
-
-```ini
-[DEFAULT]
-BeginString=FIX.4.4
-DataDictionary=config/spec/FIX44.xml
-```
-
-## Installation from Source
-
-```bash
-git clone https://github.com/dudleylane/quickfix.git
-cd quickfix
-cmake -S . -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX=/usr/local \
-  -DCMAKE_CXX_FLAGS="-O3 -march=native -flto" \
-  -DCMAKE_EXE_LINKER_FLAGS="-flto" \
-  -DCMAKE_SHARED_LINKER_FLAGS="-flto" \
-  -DHAVE_SSL=ON \
-  -DENABLE_TBB_ALLOCATOR=ON \
-  -DQUICKFIX_SHARED_LIBS=ON
-cmake --build build -j$(nproc)
-sudo cmake --install build
+cd ~/quickfix && git fetch --tags && git checkout v22.1.0
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+  -DHAVE_SSL=ON -DENABLE_TBB_ALLOCATOR=OFF \
+  -DQUICKFIX_TESTS=OFF -DQUICKFIX_EXAMPLES=OFF -DHAVE_PYTHON3=OFF
+cmake --build build-release -j"$(nproc)"
+sudo cmake --install build-release
 sudo ldconfig
 ```
 
-Verify:
+Check it:
 
 ```bash
-ls /usr/local/lib/libquickfix.so       # symlink exists
-ldd /usr/local/lib/libquickfix.so.17   # shows libssl, libtbbmalloc
+grep 'define QUICKFIX_VERSION ' /usr/local/include/quickfix/QuickFIXVersion.h   # 22.1.0
+readlink /usr/local/lib/libquickfix.so                                         # libquickfix.so.22
+ldconfig -p | grep libquickfix.so.22
 ```
+
+Then rebuild this branch from a clean build directory. A new major has a new SONAME, so nothing
+built against the old one picks it up.
+
+## Taking a new major
+
+1. Read the release's library diff (`git diff vOLD vNEW -- src/C++`), not only its notes, for the
+   classes listed above.
+2. Install it as above, and raise the version in `find_package(quickfix 22 CONFIG REQUIRED)`.
+3. Verify with FIX on: the pre-push hook (Release, `ctest -j1`, clang-format), ASan+UBSan and TSan
+   as `sanitizers.yml` runs them, and a live FIX session (logon, orders that cross, a cancel, a
+   two-leg FX swap) against `orderProcessorServer --fix-cfg`.
+
+22.1.0 was taken that way. 22.0 changed three things the gateway reaches: how `message_order`
+looks up a field's position (an array for compact field numbers, as FIX 4.4's are, and a hash
+table otherwise, with the same ordering rule), the parsing of `SocketAcceptPort` (now checked as
+0 to 65535 instead of truncated to `short`), and how data dictionaries load (faster, same
+result). 22.1.0 changed only the Ruby binding.
