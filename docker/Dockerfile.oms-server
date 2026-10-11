@@ -6,9 +6,14 @@ FROM quay.io/centos/centos:stream10 AS builder
 RUN dnf install -y epel-release 'dnf-command(config-manager)' \
     && dnf config-manager --set-enabled crb \
     && dnf install -y \
-        cmake gcc-c++ git \
+        cmake gcc-toolset-15-gcc-c++ git \
         tbb-devel spdlog-devel boost-devel lmdb-devel numactl-devel \
     && dnf clean all
+
+# The engine needs GCC 15 (C++23's <flat_map>, among others), and the system gcc-c++ is GCC 14,
+# so build with gcc-toolset-15, as CI and the pre-push hook do (#132).
+ENV PATH=/opt/rh/gcc-toolset-15/root/usr/bin:$PATH \
+    CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++
 
 WORKDIR /build
 COPY CMakeLists.txt ./
