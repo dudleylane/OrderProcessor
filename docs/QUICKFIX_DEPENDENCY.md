@@ -81,7 +81,8 @@ built against the old one picks it up.
 
 1. Read the release's library diff (`git diff vOLD vNEW -- src/C++`), not only its notes, for the
    classes listed above.
-2. Install it as above, and raise the version in `find_package(quickfix 22 CONFIG REQUIRED)`.
+2. Install it as above, raise the version in `find_package(quickfix 22 CONFIG REQUIRED)`, and raise
+   `QUICKFIX_REF` in `docker/Dockerfile.oms-server`, whose builder stage builds QuickFIX itself (#132).
 3. Verify with FIX on: the pre-push hook (Release, `ctest -j1`, clang-format), ASan+UBSan and TSan
    as `sanitizers.yml` runs them, and a live FIX session (logon, orders that cross, a cancel, a
    two-leg FX swap) against `orderProcessorServer --fix-cfg`.

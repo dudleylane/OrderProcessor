@@ -15,6 +15,18 @@ RUN dnf install -y epel-release 'dnf-command(config-manager)' \
 ENV PATH=/opt/rh/gcc-toolset-15/root/usr/bin:$PATH \
     CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++
 
+# The FIX gateway builds against QuickFIX 22 from the maintained fork (CMakeLists.txt asks for major
+# 22), installed as docs/QUICKFIX_DEPENDENCY.md describes. Before #132 nothing installed it here.
+ARG QUICKFIX_REF=v22.1.0
+RUN dnf install -y openssl-devel && dnf clean all \
+    && git clone --depth 1 --branch "$QUICKFIX_REF" https://github.com/dudleylane/quickfix.git /tmp/quickfix \
+    && cmake -S /tmp/quickfix -B /tmp/quickfix/build -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_C_COMPILER=/opt/rh/gcc-toolset-15/root/usr/bin/gcc \
+        -DHAVE_SSL=ON -DENABLE_TBB_ALLOCATOR=OFF -DQUICKFIX_TESTS=OFF -DQUICKFIX_EXAMPLES=OFF -DHAVE_PYTHON3=OFF \
+    && cmake --build /tmp/quickfix/build -j"$(nproc)" \
+    && cmake --install /tmp/quickfix/build \
+    && rm -rf /tmp/quickfix
+
 WORKDIR /build
 COPY CMakeLists.txt ./
 COPY src/ src/
@@ -38,7 +50,8 @@ COPY --from=builder /build/out/seedData /usr/local/bin/
 COPY --from=builder /usr/local/lib/libquickfix.so* /usr/local/lib/
 COPY --from=builder /build/config/ /etc/orderprocessor/
 
-RUN ldconfig
+# libquickfix goes to /usr/local/lib, which this base image's loader doesn't search (#132).
+RUN echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf && ldconfig
 
 EXPOSE 8080 5001
 VOLUME /data
