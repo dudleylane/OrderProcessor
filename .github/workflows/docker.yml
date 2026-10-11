@@ -1,0 +1,42 @@
+name: Docker Image
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [master]
+
+jobs:
+  server-image:
+    name: Server image build + run
+    # Builds docker/Dockerfile.oms-server and runs it (#135).  The other jobs
+    # build on this host's own toolchain, so nothing else checks the image:
+    # until #132 it couldn't build on either branch, with every check green.
+    # scripts/check-server-image.sh says what it checks; run it locally the
+    # same way.  This runner runs as the same user as everything else on the
+    # dev box, so podman's storage is shared: the script names what it makes
+    # after the run and removes it, and builds with --layers=false so that
+    # no intermediate images are left behind.
+    runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
+    # A hung build would hold the only runner until it is killed (#59).
+    timeout-minutes: 30
+    env:
+      CHECK_NAME: orderprocessor-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove what an interrupted run left behind
+        # The host has powered off mid-job (#32), and a run that dies never
+        # cleans up.  Jobs run one at a time on this runner, so anything named
+        # orderprocessor-ci-* belongs to an earlier run.
+        shell: bash
+        run: |
+          stale() { grep '^orderprocessor-ci-' || true; }
+          podman ps -a --format '{{.Names}}' | stale | xargs -r podman rm -f -t 0
+          podman volume ls --format '{{.Name}}' | stale | xargs -r podman volume rm -f
+          podman images --format '{{.Repository}}' | sed 's|^localhost/||' | stale | sort -u \
+            | sed 's|^|localhost/|' | xargs -r podman rmi -f
+
+      - name: Build the server image and run it
+        shell: bash
+        run: scripts/check-server-image.sh
