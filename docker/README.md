@@ -166,10 +166,12 @@ docker compose up --build -d  # Rebuild and reinitialize
 
 | Stage | Base Image | Purpose |
 |-------|-----------|---------|
-| Builder | `centos:stream10` | Installs GCC, CMake, TBB, spdlog, Boost, LMDB, numactl; compiles Release build |
+| Builder | `centos:stream10` | Installs GCC 15 (gcc-toolset-15), CMake, TBB, spdlog, Boost, LMDB, numactl; compiles Release build |
 | Runtime | `centos:stream10` | Minimal image with only runtime libraries; copies `orderProcessorServer` and `seedData` |
 
 The build compiles with `-DCMAKE_BUILD_TYPE=Release` (LTO, -O3, -march=native) and disables tests and benchmarks to minimize build time.
+
+CI builds and runs this image on every push (`.github/workflows/docker.yml`), with `scripts/check-server-image.sh`. The script seeds a volume and starts the server. It then checks that the server listens on every port the image exposes, that it answers a WebSocket upgrade on `/ws`, and that SIGTERM stops it cleanly. Run the script before changing this Dockerfile, the build or a dependency; it takes a few minutes. Nothing checks the frontend image.
 
 ### oms-frontend (Multi-stage)
 
