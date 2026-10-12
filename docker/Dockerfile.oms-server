@@ -50,7 +50,9 @@ COPY --from=builder /build/out/seedData /usr/local/bin/
 COPY --from=builder /usr/local/lib/libquickfix.so* /usr/local/lib/
 COPY --from=builder /build/config/ /etc/orderprocessor/
 
-# libquickfix goes to /usr/local/lib, which this base image's loader doesn't search (#132).
+# The server finds libquickfix through its RUNPATH, /usr/local/lib, which CMake gives a build-tree binary
+# linked to a library outside the system directories. This loader entry isn't needed for it; it covers a
+# binary without that RUNPATH, such as one installed with `cmake --install` (#132, corrected in #135).
 RUN echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf && ldconfig
 
 EXPOSE 8080 5001
