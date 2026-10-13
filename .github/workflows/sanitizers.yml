@@ -9,6 +9,11 @@ on:
 jobs:
   sanitizer:
     name: ${{ matrix.sanitizer }} (FIX ${{ matrix.fix }})${{ matrix.allow_failure && ' (advisory)' || '' }}
+    # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
+    # A pull request can delete this line, so the runner's job-started hook,
+    # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
+    # same-repository pull requests run as before.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
     continue-on-error: ${{ matrix.allow_failure }}
     strategy:
