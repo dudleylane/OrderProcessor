@@ -32,7 +32,13 @@ The first build takes several minutes (C++ compilation inside the container). Su
 
 1. **oms-db** starts first, initializes schema from `init-db/001_schema.sql`
 2. **oms-server** waits for `oms-db` to be healthy (`pg_isready` check), then starts the C++ engine on port 8080
-3. **oms-frontend** waits for `oms-server` to start, then serves the React app on port 3000
+3. **oms-frontend** waits for `oms-server` to be healthy (it answers HTTP on 8080, which it does only after restoring its data), then serves the React app on port 3000
+
+All three restart unless stopped (`restart: unless-stopped`), and each has a health check, a memory limit and a process limit in `docker-compose.yml`. The server's and the frontend's health checks are also in their images; compose repeats them because podman builds OCI images by default, and those don't keep a `HEALTHCHECK`. The server's 2 GB is a starting point: raise it for a large book or a large LMDB map. The server answers only after restoring its data directory, and its health check allows two minutes for that: raise `start_period` for a larger directory, or Docker Compose will find the server unhealthy and won't start the frontend.
+
+On a host with SELinux enforcing, as el10 is by default, compose relabels `init-db/` so the database container can read it (the `z` on its mount, #201). Without that, Postgres can't read its init scripts and never starts.
+
+The server runs as the user `oms`, which owns `/data`, and nginx as the user `nginx`; neither container runs as root. nginx looks the server up through the container's own DNS resolver when a request needs it, so it starts while the server is still down, and it finds a re-created server container at its new address.
 
 ### Networking
 
@@ -162,6 +168,14 @@ docker compose down -v       # Removes all volumes
 docker compose up --build -d  # Rebuild and reinitialize
 ```
 
+### A volume written by an older image
+
+Server images before #158 ran as root, so the files they wrote in `oms-data` belong to root. The server now runs as `oms` and can't open them: it exits with `LMDBStorage::load mdb_env_open: Permission denied`, and restarts again and again. Give the volume to `oms` once, and the server comes up at its next restart:
+
+```bash
+docker compose run --rm --no-deps --user 0 --entrypoint chown oms-server -R oms:oms /data
+```
+
 ## Build Details
 
 ### oms-server (Multi-stage)
@@ -238,7 +252,8 @@ docker compose logs oms-server
 # Common issues:
 # - "Address already in use" → port 8080 is taken
 # - Database connection errors → oms-db not healthy yet (check health with docker compose ps)
-# - LMDB errors → volume permissions or corrupt data (try docker compose down -v)
+# - "mdb_env_open: Permission denied" → a volume an older image wrote as root (see "A volume written by an older image")
+# - Other LMDB errors → corrupt data (docker compose down -v starts again, and deletes it)
 ```
 
 ### Frontend shows "Disconnected"
