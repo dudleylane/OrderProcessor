@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <quickfix/FixValues.h>
@@ -72,6 +74,16 @@ int cxlRejReasonFor(Queues::CancelRejectEvent::Reason reason)
     default:
         return FIX::CxlRejReason_OTHER;
     }
+}
+/// Why an OrderQty was refused, in the terms of FixGateway::toQuantity() (#145)
+std::string quantityRefusal()
+{
+    return "OrderQty (38) must be a whole number from 1 to " + std::to_string(std::numeric_limits<QuantityT>::max());
+}
+/// Why a price in field was refused, in the terms of FixGateway::isTradablePrice() (#145)
+std::string priceRefusal(const std::string &field, OrderType ordType)
+{
+    return field + ((MARKET_ORDERTYPE == ordType) ? " must be a finite number" : " must be a finite number above zero");
 }
 } // namespace
 
@@ -234,6 +246,22 @@ void FixGateway::rejectMessage(const FIX::Message &msg, const FIX::SessionID &si
     }
 }
 
+void FixGateway::refuseOrder(const FIX::Message &msg, const FIX::SessionID &sid, int ordRejReason,
+                             const std::string &text)
+{
+    try
+    {
+        // Its ExecID comes from the shared generator, as an engine reject's does (#81)
+        FIX44::ExecutionReport report =
+            buildOrderRefusal(msg, ordRejReason, text, IdTGenerator::instance()->getId().id_);
+        FIX::Session::sendToTarget(report, sid);
+    }
+    catch (const std::exception &ex)
+    {
+        aux::ExchLogger::instance()->error(std::string("FixGateway: could not send the order refusal: ") + ex.what());
+    }
+}
+
 void FixGateway::dispatch(const FIX::Message &msg, const FIX::SessionID &sid)
 {
     // Build the handler's message type from the generic message rather than casting to it. The session hands
@@ -346,6 +374,32 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
         return;
     }
 
+    // The quantity and prices are checked before they are narrowed or anything is stored (#145). OrdRejReason 13 is
+    // FIX's code for an incorrect quantity; a price has no code of its own, so Text says what is wrong with it.
+    const std::optional<QuantityT> qty = toQuantity(orderQty.getValue());
+    if (!qty)
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_INCORRECT_QUANTITY, "Order refused: " + quantityRefusal());
+        return;
+    }
+    const OrderType ordTypeVal = toOrdType(ordType.getValue());
+    if (msg.isSet(price) && !isTradablePrice(priceVal, ordTypeVal))
+    {
+        refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION, "Order refused: " + priceRefusal("Price (44)", ordTypeVal));
+        return;
+    }
+    double farPrice = 0.0;
+    if ((FXSWAP_ORDERTYPE == ordTypeVal) && msg.isSetField(6500))
+    {
+        farPrice = std::stod(msg.getField(6500));
+        if (!isTradablePrice(farPrice, ordTypeVal))
+        {
+            refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION,
+                        "Order refused: " + priceRefusal("the far leg's price (6500)", ordTypeVal));
+            return;
+        }
+    }
+
     // The ClOrdID is stored under the session's key, since FIX scopes it to the client that sent it (#71)
     std::string sourceStr = makeSourceString(sid);
     std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
@@ -367,9 +421,9 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
 
     auto *order = new OrderEntry(srcId, destId, clOrdSrcId, emptyId, instrId, acctId, clearingId, execListId);
     order->side_ = toSide(side.getValue());
-    order->ordType_ = toOrdType(ordType.getValue());
+    order->ordType_ = ordTypeVal;
     order->price_ = priceVal;
-    order->orderQty_ = static_cast<QuantityT>(orderQty.getValue());
+    order->orderQty_ = *qty;
     order->leavesQty_ = order->orderQty_;
     order->tif_ = toTif(tifVal);
     order->currency_ = toCurrency(ccyStr);
@@ -386,7 +440,7 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
     {
         if (msg.isSetField(6500))
         {
-            order->farPrice_ = std::stod(msg.getField(6500));
+            order->farPrice_ = farPrice; // read and checked above (#145)
         }
         if (msg.isSetField(6501))
         {
@@ -477,6 +531,13 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
         {
             legGroup.get(lpx);
             lpxVal = lpx.getValue();
+            // Checked before anything is stored, as the quantity is below (#145)
+            if (!isTradablePrice(lpxVal, FXSWAP_ORDERTYPE))
+            {
+                refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION,
+                            "Order refused: " + priceRefusal("LegPrice (566)", FXSWAP_ORDERTYPE));
+                return;
+            }
         }
 
         FIX::LegSettlDate lsd;
@@ -547,6 +608,13 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
                       "Order refused: the server has no clearing firm");
         return;
     }
+    // As for NewOrderSingle, before the quantity is narrowed or anything is stored (#145)
+    const std::optional<QuantityT> qty = toQuantity(orderQty.getValue());
+    if (!qty)
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_INCORRECT_QUANTITY, "Order refused: " + quantityRefusal());
+        return;
+    }
 
     FIX::Currency currency;
     std::string ccyStr = "USD";
@@ -589,7 +657,7 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
     order->farPrice_ = farPrice;
     order->settlDate_ = nearSettlDate;
     order->farSettlDate_ = farSettlDate;
-    order->orderQty_ = static_cast<QuantityT>(orderQty.getValue());
+    order->orderQty_ = *qty;
     order->leavesQty_ = order->orderQty_;
     order->tif_ = toTif(tifVal);
     order->currency_ = toCurrency(ccyStr);
@@ -682,6 +750,27 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
         origStatus = fromOrdStatus(existing->status_);
     }
 
+    // A request the gateway refuses itself gets an OrderCancelReject (102=99) that says why, quoting its ClOrdIDs
+    auto refuse = [&](const std::string &reason)
+    {
+        Queues::OrderRejectEvent refusal;
+        refusal.replacement_ = true;
+        refusal.clOrderId_ = clOrdId.getString();
+        refusal.origClOrderId_ = origClOrdStr;
+        refusal.refusal_ = Queues::CancelRejectEvent::OTHER;
+        refusal.reason_ = reason;
+        try
+        {
+            FIX44::OrderCancelReject reject = buildReplaceReject(refusal, origOrderId, origStatus);
+            FIX::Session::sendToTarget(reject, sid);
+        }
+        catch (const std::exception &ex)
+        {
+            aux::ExchLogger::instance()->error(std::string("FixGateway: could not send the replace reject: ") +
+                                               ex.what());
+        }
+    };
+
     // Side and Symbol name the order, and FIX requires them to match it; carried over, so that the engine refuses a
     // replace that changes either, rather than keeping the original's without a word
     FIX::Side side;
@@ -698,37 +787,22 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
         if (!instrument.isValid())
         {
             // Refused here: the engine's refusal can only describe an instrument that exists
-            Queues::OrderRejectEvent refusal;
-            refusal.replacement_ = true;
-            refusal.clOrderId_ = clOrdId.getString();
-            refusal.origClOrderId_ = origClOrdStr;
-            refusal.refusal_ = Queues::CancelRejectEvent::OTHER;
-            refusal.reason_ = "Replace refused: unknown instrument " + symbol.getString();
-            try
-            {
-                FIX44::OrderCancelReject reject = buildReplaceReject(refusal, origOrderId, origStatus);
-                FIX::Session::sendToTarget(reject, sid);
-            }
-            catch (const std::exception &ex)
-            {
-                aux::ExchLogger::instance()->error(std::string("FixGateway: could not send the replace reject: ") +
-                                                   ex.what());
-            }
+            refuse("Replace refused: unknown instrument " + symbol.getString());
             return;
         }
         replacement->instrument_ = instrument;
     }
 
-    replacement->orderId_ = IdT();
-    replacement->origClOrderId_ = replacement->clOrderId_;
-    const std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
-    replacement->clOrderId_ = WideDataStorage::instance()->add(
-        new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size())));
-
+    // The price and quantity are checked before they are narrowed, and before the request's ClOrdID is stored (#145)
     FIX::Price price;
     if (msg.isSet(price))
     {
         msg.get(price);
+        if (!isTradablePrice(price.getValue(), replacement->ordType_))
+        {
+            refuse("Replace refused: " + priceRefusal("Price (44)", replacement->ordType_));
+            return;
+        }
         replacement->price_ = price.getValue();
     }
 
@@ -736,8 +810,20 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
     if (msg.isSet(orderQty))
     {
         msg.get(orderQty);
-        replacement->orderQty_ = static_cast<QuantityT>(orderQty.getValue());
+        const std::optional<QuantityT> qty = toQuantity(orderQty.getValue());
+        if (!qty)
+        {
+            refuse("Replace refused: " + quantityRefusal());
+            return;
+        }
+        replacement->orderQty_ = *qty;
     }
+
+    replacement->orderId_ = IdT();
+    replacement->origClOrderId_ = replacement->clOrderId_;
+    const std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
+    replacement->clOrderId_ = WideDataStorage::instance()->add(
+        new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size())));
 
     FIX::TimeInForce tif;
     if (msg.isSet(tif))
@@ -976,6 +1062,36 @@ FIX44::ExecutionReport FixGateway::buildOrderReject(const Queues::OrderRejectEve
     return report;
 }
 
+FIX44::ExecutionReport FixGateway::buildOrderRefusal(const FIX::Message &order, int ordRejReason,
+                                                     const std::string &text, u64 execId)
+{
+    Queues::OrderRejectEvent refusal;
+    FIX::ClOrdID clOrdId;
+    if (order.getFieldIfSet(clOrdId))
+    {
+        refusal.clOrderId_ = clOrdId.getValue();
+    }
+    FIX::Symbol symbol;
+    if (order.getFieldIfSet(symbol))
+    {
+        refusal.symbol_ = symbol.getValue();
+    }
+    refusal.reason_ = text;
+    FIX44::ExecutionReport report = buildOrderReject(refusal, execId);
+    report.set(FIX::OrdRejReason(ordRejReason));
+    // Side and OrderQty as they were sent: the engine's own types may not hold them
+    FIX::Side side;
+    if (order.getFieldIfSet(side))
+    {
+        report.set(side);
+    }
+    if (order.isSetField(FIX::FIELD::OrderQty))
+    {
+        report.setField(FIX::FIELD::OrderQty, order.getField(FIX::FIELD::OrderQty));
+    }
+    return report;
+}
+
 FIX44::OrderCancelReject FixGateway::buildReplaceReject(const Queues::OrderRejectEvent &evnt,
                                                         const std::string &origOrderId, char origStatus)
 {
@@ -1202,6 +1318,22 @@ Currency FixGateway::toCurrency(const std::string &fixCcy)
         return NZD_CURRENCY;
     }
     return INVALID_CURRENCY;
+}
+
+std::optional<QuantityT> FixGateway::toQuantity(double orderQty)
+{
+    // Checked before the cast, which is undefined behaviour for a value outside QuantityT's range
+    if (std::isfinite(orderQty) && (1.0 <= orderQty) &&
+        (orderQty <= static_cast<double>(std::numeric_limits<QuantityT>::max())) && (std::trunc(orderQty) == orderQty))
+    {
+        return static_cast<QuantityT>(orderQty);
+    }
+    return std::nullopt;
+}
+
+bool FixGateway::isTradablePrice(double price, OrderType ordType)
+{
+    return std::isfinite(price) && ((MARKET_ORDERTYPE == ordType) || (0.0 < price));
 }
 
 char FixGateway::fromOrdStatus(OrderStatus s)

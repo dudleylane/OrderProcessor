@@ -15,6 +15,7 @@
 #include <quickfix/fix44/News.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
+#include <quickfix/FieldConvertors.h>
 #include "FixGateway.h"
 #include "MultiOutQueues.h"
 
@@ -26,6 +27,8 @@
 #include "MockQueues.h"
 #include "MockStorage.h"
 
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 
 using namespace COP;
@@ -745,6 +748,216 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_TooFewLegs_Rejected)
 }
 
 // =============================================================================
+// Quantities and prices the engine can't take are refused (#145)
+// =============================================================================
+
+/// OrderQty values the engine's QuantityT can't hold. Before #145 the gateway narrowed them without a check: -5 became
+/// an order for 4294967291, and 4294967296 and 0.5 orders for 0.
+const double BAD_QUANTITIES[] = { -5.0, 4294967296.0, 0.5, 0.0 };
+/// A 310-digit price. QuickFIX's format check for a PRICE field accepts it, and converts it to infinity.
+const std::string HUGE_PRICE = "1" + std::string(309, '0');
+/// Prices no order trades at: beyond double's range either way, zero, and negative
+const std::string BAD_PRICES[] = { HUGE_PRICE, "-" + HUGE_PRICE, "0", "-1.25" };
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_OrderQtyTheEngineCannotHold_IsNotQueued)
+{
+    // Refused to the sender instead; there is no session here to send that to, so this checks that nothing reaches
+    // the engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    int n = 0;
+    for (double qty : BAD_QUANTITIES)
+    {
+        auto msg =
+            makeNewOrderSingle("QTY-" + std::to_string(++n), "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, qty);
+        gateway_->onMessage(msg, TEST_SID);
+    }
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_LargestOrderQtyTheEngineHolds_IsQueued)
+{
+    OrderEntry *capturedOrder = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                capturedOrder = evt.order_;
+            }));
+
+    auto msg = makeNewOrderSingle("QTY-MAX", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 4294967295.0);
+    gateway_->onMessage(msg, TEST_SID);
+
+    ASSERT_NE(nullptr, capturedOrder);
+    EXPECT_EQ(4294967295u, capturedOrder->orderQty_);
+    EXPECT_EQ(4294967295u, capturedOrder->leavesQty_);
+    delete capturedOrder;
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_LimitPriceNoOrderTradesAt_IsNotQueued)
+{
+    // Before #145 a 310-digit price reached the engine as inf, and a limit price of 0 or less as it was
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    int n = 0;
+    for (const std::string &price : BAD_PRICES)
+    {
+        auto msg =
+            makeNewOrderSingle("PX-" + std::to_string(++n), "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100);
+        msg.setField(FIX::FIELD::Price, price);
+        gateway_->onMessage(msg, TEST_SID);
+    }
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_MarketOrderWithPriceZero_IsQueued)
+{
+    // A market order trades at no price of its own, so a Price (44) of 0 on one is still taken
+    OrderEntry *capturedOrder = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                capturedOrder = evt.order_;
+            }));
+
+    auto msg = makeNewOrderSingle("MKT-PX0", "aaa", FIX::Side_SELL, FIX::OrdType_MARKET, 0.0, 50);
+    msg.set(FIX::Price(0.0));
+    gateway_->onMessage(msg, TEST_SID);
+
+    ASSERT_NE(nullptr, capturedOrder);
+    EXPECT_EQ(MARKET_ORDERTYPE, capturedOrder->ordType_);
+    delete capturedOrder;
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_MarketOrderWithAPriceBeyondDoubleRange_IsNotQueued)
+{
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    auto msg = makeNewOrderSingle("MKT-HUGE", "aaa", FIX::Side_SELL, FIX::OrdType_MARKET, 0.0, 50);
+    msg.setField(FIX::FIELD::Price, HUGE_PRICE);
+    gateway_->onMessage(msg, TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_FxSwapFarPriceNoOrderTradesAt_IsNotQueued)
+{
+    // The far price (6500) went through std::stod, which also takes "inf" and "nan"
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    int n = 0;
+    for (const char *farPrice : { "inf", "nan", "0", "-1.0872" })
+    {
+        auto msg = makeNewOrderSingle("SWAP-FAR-" + std::to_string(++n), "aaa", FIX::Side_BUY, FIX::OrdType_FOREX_SWAP,
+                                      1.0850, 1000000);
+        msg.setField(6500, farPrice);
+        msg.setField(6501, "2000");
+        msg.setField(FIX::FIELD::SettlDate, "1000");
+        gateway_->onMessage(msg, TEST_SID);
+    }
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderMultileg_OrderQtyTheEngineCannotHold_IsNotQueued)
+{
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    int n = 0;
+    for (double qty : BAD_QUANTITIES)
+    {
+        FIX44::NewOrderMultileg msg = makeFxSwap("SWAP-QTY-" + std::to_string(++n));
+        msg.set(FIX::OrderQty(qty));
+        gateway_->onMessage(msg, TEST_SID);
+    }
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderMultileg_LegPriceNoOrderTradesAt_IsNotQueued)
+{
+    // Either leg's LegPrice (566)
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    int n = 0;
+    for (unsigned leg = 1; leg <= 2; ++leg)
+    {
+        for (const std::string &price : BAD_PRICES)
+        {
+            FIX44::NewOrderMultileg msg = makeFxSwap("SWAP-PX-" + std::to_string(++n));
+            FIX44::NewOrderMultileg::NoLegs group;
+            msg.getGroup(leg, group);
+            group.setField(FIX::FIELD::LegPrice, price);
+            msg.replaceGroup(leg, group);
+            gateway_->onMessage(msg, TEST_SID);
+        }
+    }
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_OrderQtyTheEngineCannotHold_IsNotQueued)
+{
+    // Refused to the sender with an OrderCancelReject, as an unknown symbol is
+    ASSERT_NE(nullptr, saveOrderOf(TEST_SID, "ORD-R5"));
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    int n = 0;
+    for (double qty : BAD_QUANTITIES)
+    {
+        FIX44::OrderCancelReplaceRequest replaceMsg;
+        replaceMsg.set(FIX::OrigClOrdID("ORD-R5"));
+        replaceMsg.set(FIX::ClOrdID("REPLACE-QTY-" + std::to_string(++n)));
+        replaceMsg.set(FIX::Side(FIX::Side_BUY));
+        replaceMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+        replaceMsg.set(FIX::OrdType(FIX::OrdType_LIMIT));
+        replaceMsg.set(FIX::Symbol("aaa"));
+        replaceMsg.set(FIX::Price(15.50));
+        replaceMsg.set(FIX::OrderQty(qty));
+        gateway_->onMessage(replaceMsg, TEST_SID);
+    }
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_PriceNoOrderTradesAt_IsNotQueued)
+{
+    ASSERT_NE(nullptr, saveOrderOf(TEST_SID, "ORD-R6"));
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    int n = 0;
+    for (const std::string &price : BAD_PRICES)
+    {
+        FIX44::OrderCancelReplaceRequest replaceMsg;
+        replaceMsg.set(FIX::OrigClOrdID("ORD-R6"));
+        replaceMsg.set(FIX::ClOrdID("REPLACE-PX-" + std::to_string(++n)));
+        replaceMsg.set(FIX::Side(FIX::Side_BUY));
+        replaceMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+        replaceMsg.set(FIX::OrdType(FIX::OrdType_LIMIT));
+        replaceMsg.set(FIX::Symbol("aaa"));
+        replaceMsg.setField(FIX::FIELD::Price, price);
+        replaceMsg.set(FIX::OrderQty(200));
+        gateway_->onMessage(replaceMsg, TEST_SID);
+    }
+}
+
+TEST(FixQuantityTest, OrderQtyIsAWholeNumberTheEngineCanHold)
+{
+    EXPECT_EQ(std::optional<QuantityT>(1u), FixGateway::toQuantity(1.0));
+    EXPECT_EQ(std::optional<QuantityT>(100u), FixGateway::toQuantity(100.0));
+    EXPECT_EQ(std::optional<QuantityT>(4294967295u), FixGateway::toQuantity(4294967295.0));
+    for (double qty : BAD_QUANTITIES)
+    {
+        EXPECT_FALSE(FixGateway::toQuantity(qty).has_value()) << qty;
+    }
+    const double inf = std::numeric_limits<double>::infinity();
+    for (double qty : { -0.0, 4294967295.5, 1e300, inf, -inf, std::numeric_limits<double>::quiet_NaN() })
+    {
+        EXPECT_FALSE(FixGateway::toQuantity(qty).has_value()) << qty;
+    }
+}
+
+TEST(FixPriceTest, APriceIsFiniteAndAboveZeroUnlessTheOrderIsAMarketOrder)
+{
+    // As QuickFIX hands a 310-digit PRICE field over
+    const double huge = FIX::DoubleConvertor::convert(HUGE_PRICE);
+    EXPECT_TRUE(std::isinf(huge));
+
+    EXPECT_TRUE(FixGateway::isTradablePrice(1.2650, LIMIT_ORDERTYPE));
+    EXPECT_TRUE(FixGateway::isTradablePrice(1.2650, FXSWAP_ORDERTYPE));
+    for (double price : { huge, -huge, 0.0, -1.25, std::numeric_limits<double>::quiet_NaN() })
+    {
+        EXPECT_FALSE(FixGateway::isTradablePrice(price, LIMIT_ORDERTYPE)) << price;
+        EXPECT_FALSE(FixGateway::isTradablePrice(price, FXSWAP_ORDERTYPE)) << price;
+    }
+    // A market order trades at no price of its own, so any finite one will do
+    EXPECT_TRUE(FixGateway::isTradablePrice(0.0, MARKET_ORDERTYPE));
+    EXPECT_FALSE(FixGateway::isTradablePrice(huge, MARKET_ORDERTYPE));
+    EXPECT_FALSE(FixGateway::isTradablePrice(-huge, MARKET_ORDERTYPE));
+}
+
+// =============================================================================
 // Session Routing Tests
 // =============================================================================
 
@@ -1145,6 +1358,48 @@ TEST(FixOrderRejectTest, OrderRefusedForAnotherReasonUsesTheBrokerOptionCode)
     FIX::OrdRejReason ordRejReason;
     FixGateway::buildOrderReject(evnt, 42).get(ordRejReason);
     EXPECT_EQ(0, ordRejReason.getValue());
+}
+
+TEST(FixOrderRejectTest, AnOrderTheGatewayRefusesGetsAnExecutionReportRejectQuotingItsQuantityAsSent)
+{
+    // Refused before the engine sees it (#145), so it has no OrderID; OrderQty is the client's own, which QuantityT
+    // can't hold, and OrdRejReason 13 is FIX's code for an incorrect quantity
+    FIX44::NewOrderSingle order;
+    order.set(FIX::ClOrdID("QTY-1"));
+    order.set(FIX::Side(FIX::Side_SELL));
+    order.set(FIX::Symbol("aaa"));
+    order.set(FIX::OrderQty(-5));
+    const std::string why = "Order refused: OrderQty (38) must be a whole number from 1 to 4294967295";
+    FIX44::ExecutionReport report = FixGateway::buildOrderRefusal(order, FIX::OrdRejReason_INCORRECT_QUANTITY, why, 43);
+
+    FIX::OrderID orderId;
+    report.get(orderId);
+    EXPECT_EQ("NONE", orderId.getValue());
+    FIX::ExecID execId;
+    report.get(execId);
+    EXPECT_EQ("R43", execId.getValue());
+    FIX::ExecType execType;
+    report.get(execType);
+    EXPECT_EQ(FIX::ExecType_REJECTED, execType.getValue());
+    FIX::OrdStatus ordStatus;
+    report.get(ordStatus);
+    EXPECT_EQ(FIX::OrdStatus_REJECTED, ordStatus.getValue());
+    FIX::ClOrdID clOrdId;
+    report.get(clOrdId);
+    EXPECT_EQ("QTY-1", clOrdId.getValue());
+    FIX::Side side;
+    report.get(side);
+    EXPECT_EQ(FIX::Side_SELL, side.getValue());
+    FIX::Symbol symbol;
+    report.get(symbol);
+    EXPECT_EQ("aaa", symbol.getValue());
+    EXPECT_EQ("-5", report.getField(FIX::FIELD::OrderQty));
+    FIX::OrdRejReason ordRejReason;
+    report.get(ordRejReason);
+    EXPECT_EQ(FIX::OrdRejReason_INCORRECT_QUANTITY, ordRejReason.getValue());
+    FIX::Text text;
+    report.get(text);
+    EXPECT_EQ(why, text.getValue());
 }
 
 TEST(FixOrderRejectTest, DuplicateReplacementGetsAnOrderCancelReject)
