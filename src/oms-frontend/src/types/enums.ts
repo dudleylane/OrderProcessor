@@ -7,6 +7,7 @@ export enum OrderType {
   LIMIT = 'LIMIT',
   STOP = 'STOP',
   STOPLIMIT = 'STOPLIMIT',
+  FXSWAP = 'FXSWAP',
 }
 
 export enum Side {
@@ -62,6 +63,12 @@ export enum ExecType {
 export enum Currency {
   USD = 'USD',
   EUR = 'EUR',
+  GBP = 'GBP',
+  JPY = 'JPY',
+  CHF = 'CHF',
+  AUD = 'AUD',
+  CAD = 'CAD',
+  NZD = 'NZD',
 }
 
 export enum Capacity {

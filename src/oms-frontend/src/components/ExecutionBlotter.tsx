@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Execution, Order, TradeExecution, RejectExecution, CorrectExecution, TradeCancelExecution, ReplaceExecution } from '../types';
-import { ExecType } from '../types/enums';
+import { ExecType, Side } from '../types/enums';
 import { formatQuantity, formatPrice, formatTime, formatId } from '../utils/format';
 import { EXEC_TYPE_COLORS, ORDER_STATUS_LABELS, ORDER_STATUS_COLORS } from '../utils/constants';
 import { downloadCsv } from '../utils/csv';
@@ -8,6 +8,16 @@ import { downloadCsv } from '../utils/csv';
 interface ExecutionBlotterProps {
   executions: Execution[];
   orders: Map<string, Order>;
+}
+
+/** The side a report trades on: a swap's far leg trades the other way from its order (#154) */
+function legSide(exec: Execution, side: Side | undefined): string {
+  if (!side) return '--';
+  if (exec.execLegType === 'FAR') {
+    const opposite = side === Side.BUY ? Side.SELL : side === Side.SELL ? Side.BUY : side;
+    return `${opposite} (far)`;
+  }
+  return exec.execLegType === 'NEAR' ? `${side} (near)` : side;
 }
 
 function execDetails(exec: Execution): string {
@@ -121,7 +131,7 @@ export function ExecutionBlotter({ executions, orders }: ExecutionBlotterProps) 
                   {formatId(exec.orderId)}
                 </td>
                 <td className="p-3 text-gray-400">
-                  {order?.side ?? '--'}
+                  {legSide(exec, order?.side)}
                 </td>
                 <td className="p-3 text-right font-mono">
                   {trade ? formatQuantity(trade.lastQty) : '--'}

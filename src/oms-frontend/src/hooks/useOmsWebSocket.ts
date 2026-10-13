@@ -7,6 +7,7 @@ import type {
   Instrument,
   Account,
   NewOrderRequest,
+  NewSwapOrderRequest,
   CancelOrderRequest,
   ReplaceOrderRequest,
   SystemMetrics,
@@ -97,6 +98,7 @@ const INITIAL_STATE: OmsState = {
 
 export interface OmsActions {
   sendOrder: (req: NewOrderRequest) => void;
+  sendSwapOrder: (req: NewSwapOrderRequest) => void;
   cancelOrder: (orderId: number, clOrderId?: string) => void;
   replaceOrder: (req: ReplaceOrderRequest) => void;
   subscribeBook: (symbol: string) => void;
@@ -203,6 +205,11 @@ export function useOmsWebSocket(): OmsState & OmsActions {
     [send],
   );
 
+  const sendSwapOrder = useCallback(
+    (req: NewSwapOrderRequest) => send({ type: 'new_swap_order', data: req }),
+    [send],
+  );
+
   const cancelOrder = useCallback(
     (orderId: number, clOrderId?: string) =>
       send({ type: 'cancel_order', data: { orderId, clOrderId } }),
@@ -227,6 +234,7 @@ export function useOmsWebSocket(): OmsState & OmsActions {
   return {
     ...state,
     sendOrder,
+    sendSwapOrder,
     cancelOrder,
     replaceOrder,
     subscribeBook,
