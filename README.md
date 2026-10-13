@@ -172,7 +172,7 @@ cd build && ctest --output-on-failure
 
 ### Local pre-push gate
 
-A tracked hook runs the build, `ctest -j1`, and the clang-format check before every push and refuses the push if any fails. Enable it once per clone:
+A tracked hook runs the build, `ctest -j1 --timeout 300`, and the clang-format check before every push, and refuses the push if any fails. It builds the working tree, so it also refuses a push unless the working tree is the commit pushed: `HEAD`, with nothing changed or untracked. Its build directory must be a Release one configured as CI configures it (`BUILD_TESTS`, `BUILD_BENCHMARKS` and `BUILD_APP` on). Enable it once per clone:
 
 ```bash
 git config core.hooksPath scripts/hooks

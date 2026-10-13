@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # pre-push: the local gate from the Decision-Making Policy.
 #
-# Runs the same three checks the CI workflows run, against the existing
-# Release build directory, and refuses the push if any of them fails:
-#   1. cmake --build            (build-test.yml: Build)
-#   2. ctest -j1                (build-test.yml: Test; -j1 because
-#                                LMDBStorageTest cases share a directory)
+# Runs three of the checks the CI workflows run, on the commit being pushed,
+# and refuses the push if any of them fails:
+#   1. cmake --build            (build-test.yml: Build), in a Release build
+#                               directory configured with CI's BUILD_* options
+#   2. ctest -j1 --timeout 300  (build-test.yml: Test, which runs -j$(nproc):
+#                               a test that depends on running alone, or on
+#                               another's timing, fails in one of the two)
 #   3. clang-format --dry-run   (format.yml)
-# Sanitizer and benchmark runs are not included: the policy lists them as
-# per-change extras, not the always-on gate.
+# It builds the working tree, so it refuses a push unless the working tree is
+# the commit pushed: HEAD, with nothing changed or untracked (#152). Left to CI:
+# the sanitizer jobs and the server image. The policy lists sanitizer and
+# benchmark runs as per-change extras, not the always-on gate.
 #
 # Enable once per clone:        git config core.hooksPath scripts/hooks
 # Bypass, visibly and on purpose: git push --no-verify, and record it with a
@@ -26,19 +30,42 @@
 set -euo pipefail
 
 ZERO=0000000000000000000000000000000000000000
-updates=0
+pushed=()
 while read -r _local_ref local_sha _remote_ref _remote_sha; do
     if [[ "$local_sha" != "$ZERO" ]]; then
-        updates=$((updates + 1))
+        pushed+=("$local_sha")
     fi
 done
-if (( updates == 0 )); then
+if (( ${#pushed[@]} == 0 )); then
     exit 0
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
 BUILD_DIR="${BUILD_DIR:-$ROOT/build}"
 CLANG_FORMAT="${CLANG_FORMAT:-clang-format-22}"
+
+refuse() {
+    echo >&2
+    echo "pre-push: REFUSED: $1" >&2
+    echo "pre-push: fix it and push again, or push with --no-verify and add a" >&2
+    echo "pre-push: 'Deviation:' trailer to the commit (Decision-Making Policy)." >&2
+    exit 1
+}
+
+# The checks below build and test the working tree, so it must be what the push
+# carries (#152). Pushing another branch, or with edits not committed, used to
+# test something else, and a new file a committed CMakeLists names but git
+# doesn't track passed here and failed in CI.
+head="$(git rev-parse HEAD)"
+for sha in "${pushed[@]}"; do
+    commit="$(git rev-parse --verify --quiet "${sha}^{commit}" || true)"
+    if [[ "$commit" != "$head" ]]; then
+        refuse "the push carries ${sha:0:12}, but HEAD is ${head:0:12}; the hook tests the working tree, so check out what you push"
+    fi
+done
+if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
+    refuse "the working tree has changes the push doesn't carry (git status); commit or stash them: the hook tests the working tree"
+fi
 
 # git exports this repository's environment to hooks: GIT_DIR, at least, in a
 # linked worktree. FetchContent runs git itself, in other repositories, and with
@@ -55,14 +82,6 @@ if [[ -d "$TOOLSET" ]]; then
     export LD_LIBRARY_PATH="$TOOLSET/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     export CC="$TOOLSET/bin/gcc" CXX="$TOOLSET/bin/g++"
 fi
-
-refuse() {
-    echo >&2
-    echo "pre-push: REFUSED: $1" >&2
-    echo "pre-push: fix it and push again, or push with --no-verify and add a" >&2
-    echo "pre-push: 'Deviation:' trailer to the commit (Decision-Making Policy)." >&2
-    exit 1
-}
 
 step() {
     echo
@@ -90,6 +109,13 @@ fi
 if ! grep -q '^CMAKE_BUILD_TYPE:STRING=Release$' "$BUILD_DIR/CMakeCache.txt"; then
     refuse "$BUILD_DIR is not a Release build; CI tests Release. Point BUILD_DIR at one."
 fi
+# CI turns each of these on (build-test.yml), so a directory with one off would
+# skip code CI builds: BUILD_APP=OFF never compiles the server (#152).
+for option in BUILD_TESTS BUILD_BENCHMARKS BUILD_APP; do
+    if ! grep -q "^${option}:BOOL=ON\$" "$BUILD_DIR/CMakeCache.txt"; then
+        refuse "$BUILD_DIR has $option off; CI builds with it on. Point BUILD_DIR at a directory configured as CI configures."
+    fi
+done
 # ctest exits 0 when it finds no tests, so a BUILD_TESTS=OFF directory would
 # pass the gate vacuously. Refuse it here, before the slow build step.
 if ! ctest --test-dir "$BUILD_DIR" -N 2>/dev/null | grep -qE '^Total Tests: [1-9]'; then
@@ -97,9 +123,9 @@ if ! ctest --test-dir "$BUILD_DIR" -N 2>/dev/null | grep -qE '^Total Tests: [1-9
 fi
 cmake --build "$BUILD_DIR" -j"$(nproc)" || refuse "build failed"
 
-# 2. Tests, serial, as in CI.
-step "ctest -j1"
-ctest --test-dir "$BUILD_DIR" --output-on-failure -j1 || refuse "tests failed"
+# 2. Tests, serial here and parallel in CI, with CI's per-test timeout.
+step "ctest -j1 --timeout 300"
+ctest --test-dir "$BUILD_DIR" --output-on-failure --timeout 300 -j1 || refuse "tests failed"
 
 # 3. Format check, identical to format.yml.
 step "$("$CLANG_FORMAT" --version) --dry-run"
