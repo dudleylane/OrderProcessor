@@ -35,6 +35,8 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
     assert(nullptr != version);
 
     *id = val.orderId_;
+    // Nothing stores this version: the dispatcher keys records with the storage's own, and decode() finds the far
+    // leg by its marker (#144).
     *version = (FXSWAP_ORDERTYPE == val.ordType_) ? 1u : 0u;
 
     string strbuf;
@@ -176,6 +178,8 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     assert(nullptr != version);
 
     *id = val.orderId_;
+    // Nothing stores this version: the dispatcher keys records with the storage's own, and decode() finds the far
+    // leg by its marker (#144).
     *version = (FXSWAP_ORDERTYPE == val.ordType_) ? 1u : 0u;
 
     char *p = buf;
@@ -342,7 +346,7 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     return p;
 }
 
-OrderEntry *OrderCodec::decode(const IdT &id, u32 version, const char *buf, size_t size)
+OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, size_t size)
 {
     assert(nullptr != buf);
     assert(0 < size);
@@ -697,8 +701,10 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 version, const char *buf, size
 
     p = val->stateMachinePersistance_.restore(p, size - (p - buf));
 
-    // Version 1: decode FX Swap fields
-    if (version >= 1 && (p - buf) < static_cast<std::ptrdiff_t>(size) && '.' == *p)
+    // A swap's far leg follows its own '.' marker, and every other record ends here. Decide by content, not by
+    // version: StorageRecordDispatcher stores a record under the storage's own write counter, not the version
+    // encode() returns, so a swap written once comes back as version 0 (#144).
+    if ((p - buf) < static_cast<std::ptrdiff_t>(size) && '.' == *p)
     {
         ++p;
         if (size < static_cast<size_t>(p - buf) + sizeof(val->farPrice_))
@@ -708,7 +714,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 version, const char *buf, size
         }
         memcpy(&(val->farPrice_), p, sizeof(val->farPrice_));
         p += sizeof(val->farPrice_);
-        if ('.' != *p)
+        if (size <= static_cast<size_t>(p - buf) || '.' != *p)
         {
             throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after farPrice_!");
         }
