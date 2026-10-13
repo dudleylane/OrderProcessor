@@ -13,13 +13,16 @@
 #include <cstring>
 #include <stdexcept>
 #include "StringTCodec.h"
+#include "CodecChecks.h"
 
 using namespace COP;
 using namespace COP::Codec;
 
 namespace
 {
-}
+// Records hold a string as its length, a size_t, then its bytes; a different size_t would misread every one (#149)
+static_assert(sizeof(size_t) == 8, "a string's length is stored as an 8-byte size_t");
+} // namespace
 
 /*	
 	typedef std::string StringT;
@@ -48,7 +51,11 @@ const char *StringTCodec::restore(const char *buf, size_t size, StringT *val)
     assert(nullptr != buf);
 
     size_t valSize = 0;
-    assert(sizeof(valSize) <= size);
+    // Checked in every build, not only by an assert: a record cut short would otherwise be read past its end (#149)
+    if (size < sizeof(valSize))
+    {
+        throw std::runtime_error("restore(StringT): unable to restore value, buffer too small for its length!");
+    }
     memcpy(&valSize, buf, sizeof(valSize));
     if (valSize > size - sizeof(valSize))
     {
@@ -73,7 +80,7 @@ void StringTCodec::decode(const char *buf, size_t size, StringT *val)
 {
     assert(nullptr != buf);
     assert(nullptr != val);
-    assert(0 < size);
+    expectNotEmpty(size, "String");
 
-    restore(buf, size, val);
+    expectConsumed(restore(buf, size, val), buf + size, "String");
 }

@@ -156,6 +156,10 @@ char *IdT::serialize(char *buf) const
     return p;
 }
 
+// Records hold an id as its date, ':' and its number, in their in-memory bytes (#149)
+static_assert((sizeof(IdT::date_) == 4) && (sizeof(IdT::id_) == 8),
+              "an IdT is stored as a 4-byte date and an 8-byte id");
+
 const char *IdT::restore(const char *buf, size_t size)
 {
     const char *p = buf;

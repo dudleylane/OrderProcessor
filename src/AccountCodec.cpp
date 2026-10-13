@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include "AccountCodec.h"
 #include "StringTCodec.h"
+#include "CodecChecks.h"
 
 using namespace COP;
 using namespace COP::Codec;
@@ -21,7 +22,9 @@ using namespace COP::Codec;
 namespace
 {
 const int BUFFER_SIZE = 128;
-}
+// The record holds the type as its in-memory bytes (#149)
+static_assert(sizeof(AccountType) == 4, "an account's type is stored as 4 bytes");
+} // namespace
 
 /*	
 	struct AccountEntry{
@@ -59,25 +62,18 @@ void AccountCodec::encode(const AccountEntry &val, std::string *buf, IdT *id, u3
     buf->append(typebuf, sizeof(val.type_));
 }
 
-void AccountCodec::decode(const IdT &id, u32 /*version*/, const char *buf, size_t size, AccountEntry *val)
+void AccountCodec::decode(const IdT &id, u32 /*formatVersion*/, const char *buf, size_t size, AccountEntry *val)
 {
     assert(nullptr != buf);
     assert(nullptr != val);
-    assert(0 < size);
+    expectNotEmpty(size, "Account");
+    const char *const end = buf + size;
 
     val->id_ = id;
     const char *p = StringTCodec::restore(buf, size, &(val->account_));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded Account - missed '.' after account!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded Account - missed '.' after account!");
     p = StringTCodec::restore(p, size - (p - buf), &(val->firm_));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded Account - missed '.' after firm!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded Account - missed '.' after firm!");
 
     val->type_ = INVALID_ACCOUNTTYPE;
     if (size < (p - buf) + sizeof(val->type_))
@@ -86,4 +82,6 @@ void AccountCodec::decode(const IdT &id, u32 /*version*/, const char *buf, size_
             "Invalid format of the encoded Account - size less than required, unable decode type!");
     }
     memcpy(&(val->type_), p, sizeof(val->type_));
+    p += sizeof(val->type_);
+    expectConsumed(p, end, "Account");
 }

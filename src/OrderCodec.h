@@ -27,9 +27,13 @@ public:
     ~OrderCodec(void);
 
 public:
+    /// The layout encode() writes, carried in the record's first 4 bytes (#149). decode() reads it and every older
+    /// one: to change the layout, bump this, keep decoding the old version, and add golden records for the new one.
+    static constexpr u32 FORMAT_VERSION = 0;
+
     static void encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *version);
     static char *encode(const OrderEntry &val, char *buf, IdT *id, u32 *version);
-    static OrderEntry *decode(const IdT &id, u32 version, const char *buf, size_t size);
+    static OrderEntry *decode(const IdT &id, u32 formatVersion, const char *buf, size_t size);
 };
 
 } // namespace Codec
