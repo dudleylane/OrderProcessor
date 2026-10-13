@@ -54,6 +54,8 @@ struct Config
     std::string clearingFirm = App::DEFAULT_CLEARING_FIRM; // the clearing firm on every order (#34)
     std::string defaultAccount = App::DEFAULT_ACCOUNT;     // the account of an order that names none (#34)
     bool debug = false;                                    // debug logging, off unless asked for (#76)
+    // LMDB's starting map, in MiB: a write that finds the map full doubles it (#148)
+    u64 lmdbMapMb = Store::LMDBStorage::DEFAULT_MAP_SIZE >> 20;
 };
 
 Config parseArgs(int argc, char *argv[])
@@ -97,6 +99,10 @@ Config parseArgs(int argc, char *argv[])
         else if (arg == "--debug")
         {
             cfg.debug = true;
+        }
+        else if (arg == "--lmdb-map-mb" && i + 1 < argc)
+        {
+            cfg.lmdbMapMb = std::max<u64>(1, std::stoull(argv[++i]));
         }
     }
     return cfg;
@@ -154,7 +160,8 @@ int main(int argc, char *argv[])
     }
 
     // 2. Create LMDB storage and record dispatcher
-    auto lmdbStorage = std::make_unique<Store::LMDBStorage>();
+    const size_t lmdbMapSize = static_cast<size_t>(cfg.lmdbMapMb) << 20;
+    auto lmdbStorage = std::make_unique<Store::LMDBStorage>(lmdbMapSize);
     auto dispatcher = std::make_unique<Store::StorageRecordDispatcher>();
 
     // Phase 1: Load reference data (instruments, accounts, strings) — orderBook is null
@@ -175,7 +182,7 @@ int main(int argc, char *argv[])
 
     // 4. Phase 2: Create fresh LMDB + dispatcher with orderBook for order restoration
     lmdbStorage.reset();
-    lmdbStorage = std::make_unique<Store::LMDBStorage>();
+    lmdbStorage = std::make_unique<Store::LMDBStorage>(lmdbMapSize);
     dispatcher = std::make_unique<Store::StorageRecordDispatcher>();
     dispatcher->init(Store::WideDataStorage::instance(), orderBook.get(), lmdbStorage.get(),
                      Store::OrderStorage::instance());
@@ -315,7 +322,7 @@ int main(int argc, char *argv[])
     // 10c. Create MetricsPublisher for system monitoring
     auto metricsPublisher = std::make_shared<App::MetricsPublisher>(
         ioc, sessionMgr.get(), taskMgr.get(), inQueues.get(), Store::OrderStorage::instance(),
-        static_cast<Proc::Processor *>(evntProcessors[0])->scopePool());
+        static_cast<Proc::Processor *>(evntProcessors[0])->scopePool(), lmdbStorage.get());
     metricsPublisher->start();
 
     // 11. Signal handling for graceful shutdown

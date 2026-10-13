@@ -155,4 +155,17 @@ TEST_F(JsonSerializerTest, SnapshotIncludesAnOrderWithUnsetReferences)
     EXPECT_EQ("CL-3", msg["data"][0].value("clOrderId", "?"));
 }
 
+// The metrics carry LMDB's map, which used to fill unseen and then fail every write (#148)
+TEST(JsonSerializerMetricsTest, MetricsUpdateCarriesLmdbsMap)
+{
+    App::SystemMetrics metrics{};
+    metrics.storageMapSize = 512UL * 1024 * 1024;
+    metrics.storageMapUsed = 300UL * 1024 * 1024;
+
+    nlohmann::json msg = nlohmann::json::parse(App::serializeMetricsUpdate(metrics));
+    EXPECT_EQ("metrics_update", msg.value("type", "?"));
+    EXPECT_EQ(512UL * 1024 * 1024, msg["data"].value("storageMapSize", size_t(0)));
+    EXPECT_EQ(300UL * 1024 * 1024, msg["data"].value("storageMapUsed", size_t(0)));
+}
+
 } // namespace

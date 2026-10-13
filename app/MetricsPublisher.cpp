@@ -3,6 +3,7 @@
 #include "SessionManager.h"
 #include "TaskManager.h"
 #include "IncomingQueues.h"
+#include "LMDBStorage.h"
 #include "OrderStorage.h"
 #include "TransactionScopePool.h"
 #include "TransactionScope.h"
@@ -14,9 +15,9 @@ using namespace COP::App;
 MetricsPublisher::MetricsPublisher(boost::asio::io_context &ioc, SessionManager *sessionMgr,
                                    Tasks::TaskManager *taskMgr, Queues::InQueuesContainer *inQueues,
                                    Store::OrderDataStorage *orderStorage, const ACID::TransactionScopePool *scopePool,
-                                   std::chrono::milliseconds interval)
+                                   const Store::LMDBStorage *storage, std::chrono::milliseconds interval)
     : timer_(ioc), interval_(interval), running_(false), sessionMgr_(sessionMgr), taskMgr_(taskMgr),
-      inQueues_(inQueues), orderStorage_(orderStorage), scopePool_(scopePool)
+      inQueues_(inQueues), orderStorage_(orderStorage), scopePool_(scopePool), storage_(storage)
 {
 }
 
@@ -87,6 +88,13 @@ void MetricsPublisher::collectAndBroadcast()
             ++orderCount;
         });
     m.activeOrders = orderCount;
+
+    // LMDB's map: its size, which doubles when a write finds it full, and how much of it is in use (#148)
+    if (nullptr != storage_)
+    {
+        m.storageMapSize = storage_->mapSize();
+        m.storageMapUsed = storage_->mapUsed();
+    }
 
     // Timestamp
     m.timestamp = static_cast<u64>(

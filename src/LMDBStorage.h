@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <cstring>
@@ -28,8 +30,13 @@ namespace Store
 class LMDBStorage final : public FileSaver
 {
 public:
+    /// The map LMDB starts with unless asked for another (#148). A write that finds the map full doubles it.
+    static constexpr size_t DEFAULT_MAP_SIZE = 256UL * 1024UL * 1024UL;
+
     LMDBStorage();
-    LMDBStorage(const std::string &path, FileStorageObserver *observer);
+    /// mapSize: the map to start with. A directory that holds more opens with what it holds.
+    explicit LMDBStorage(size_t mapSize);
+    LMDBStorage(const std::string &path, FileStorageObserver *observer, size_t mapSize = DEFAULT_MAP_SIZE);
     ~LMDBStorage();
 
 public:
@@ -55,6 +62,11 @@ public:
     /// return false if version of record not exists
     bool loadRecord(const IdT &id, u32 version, std::vector<char> *buf);
 
+    /// The map's size, and how much of it is in use (the high-water mark of its pages), as of the last commit (#148).
+    /// Safe from any thread.
+    size_t mapSize() const noexcept;
+    size_t mapUsed() const noexcept;
+
 private:
     struct CompositeKey
     {
@@ -78,6 +90,14 @@ private:
 
     void close();
 
+    /// Runs body(txn), which returns an LMDB result, in a write transaction and commits it. A write that finds the map
+    /// full doubles the map and runs again (#148).
+    template <typename Body> void write(const char *context, Body &&body);
+    /// doubles the map; txnLock_ held, and no transaction open
+    void grow(const char *context);
+    /// records the map's size and use for mapSize() and mapUsed()
+    void noteUsage();
+
     LMDBStorage(const LMDBStorage &) = delete;
     LMDBStorage &operator=(const LMDBStorage &) = delete;
 
@@ -86,6 +106,13 @@ private:
     MDB_dbi dbi_;
     bool open_;
     IdTValueGenerator generator_;
+    size_t initialMapSize_;
+    size_t pageSize_;
+    std::atomic<size_t> mapSize_;
+    std::atomic<size_t> mapUsed_;
+    /// Held around every transaction. LMDB serializes writers itself, but it lets the map's size change only while no
+    /// transaction is open in the process (#148), and only a lock of the storage's own can promise that.
+    mutable std::mutex txnLock_;
 };
 
 } // namespace Store
