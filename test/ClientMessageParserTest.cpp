@@ -292,6 +292,26 @@ TEST(ClientMessageParserTest, NewSwapOrderPricesMustBeNumbers)
     EXPECT_NE(std::string::npos, msg.error.find("farPrice"));
 }
 
+TEST(ClientMessageParserTest, NewSwapOrderNearPriceBeyondDoubleRangeIsRejected)
+{
+    // Parsed as inf in Release builds until #142
+    auto msg = parse(R"({"type":"new_swap_order","data":{"symbol":"EURUSD","side":"BUY","nearPrice":1e400,)"
+                     R"("farPrice":1.0875,"orderQty":1000000}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("overflow"));
+}
+
+TEST(ClientMessageParserTest, NewSwapOrderFarPriceBeyondDoubleRangeIsRejected)
+{
+    // Parsed as -inf in Release builds until #142
+    auto msg = parse(R"({"type":"new_swap_order","data":{"symbol":"EURUSD","side":"BUY","nearPrice":1.085,)"
+                     R"("farPrice":-1e400,"orderQty":1000000}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("overflow"));
+}
+
 TEST(ClientMessageParserTest, NewSwapOrderDataMustBeAnObject)
 {
     auto msg = parse(R"({"type":"new_swap_order","data":"EURUSD"})");
