@@ -3,16 +3,22 @@
 #
 # Nothing else builds the image. CI and the pre-push hook build on the host's own
 # toolchain, so the image couldn't build on either branch for months while every
-# check stayed green (#132). This builds it the way `docker compose up --build` does,
-# from docker/Dockerfile.oms-server with the repository as context, and then:
+# check stayed green (#132). This builds it as `docker compose up --build` does: from
+# docker/Dockerfile.oms-server, with the repository as context, and in docker format,
+# which keeps its HEALTHCHECK. (podman-compose builds OCI images, which drop it, so
+# docker-compose.yml repeats the health check.) Then:
 #   1. seedData seeds a new volume.
 #   2. The server starts on it with the image's own CMD.
 #   3. Every port the image EXPOSEs is listened on: 8080, the WebSocket port, and on
 #      feature/fx-swap-support also 5001, the FIX acceptor's. This is checked inside the
 #      container, because rootless port forwarding accepts a connection on the host
 #      whether or not anything listens behind it.
-#   4. /ws, through the published port, answers a WebSocket upgrade with 101.
-#   5. SIGTERM stops the server with exit code 0, the clean stop that saves the next
+#   4. The image's health check passes, and fails while the server is stopped with
+#      SIGSTOP: then the kernel still completes TCP handshakes, but nothing answers
+#      (#158). The image is built in docker format, because podman's default, OCI,
+#      drops a HEALTHCHECK.
+#   5. /ws, through the published port, answers a WebSocket upgrade with 101.
+#   6. SIGTERM stops the server with exit code 0, the clean stop that saves the next
 #      id (#81), and its log has no errors. The image logs to standard output
 #      (EXCHANGE_LOG=-, #156), so the log is the container's output, and nothing
 #      may write /exchange.log into the container's layer.
@@ -102,8 +108,8 @@ step "build $IMAGE from docker/Dockerfile.oms-server ($(podman --version))"
 # --layers=false keeps no intermediate images, so a run leaves nothing behind in the
 # store it shares with everything else this user runs, and every run installs current
 # packages. --pull=newer refreshes the base image, and uses the local copy when the
-# registry can't be reached.
-podman build --layers=false --pull=newer -f docker/Dockerfile.oms-server -t "$IMAGE" . \
+# registry can't be reached. --format docker keeps the HEALTHCHECK, which OCI drops.
+podman build --layers=false --pull=newer --format docker -f docker/Dockerfile.oms-server -t "$IMAGE" . \
     || fail "the image didn't build"
 build_seconds=$SECONDS
 
@@ -119,8 +125,9 @@ done
     || fail "the image doesn't expose $WS_PORT/tcp, the WebSocket port its CMD gives the server"
 
 step "start the server and wait for it to listen on ${ports[*]}"
-podman run -d --name "$NAME" -v "$NAME:/data" -p "127.0.0.1::$WS_PORT" "$IMAGE" >/dev/null \
-    || fail "the container didn't start"
+# --health-interval=disable: the health check runs only when this script runs it
+podman run -d --name "$NAME" --health-interval=disable -v "$NAME:/data" -p "127.0.0.1::$WS_PORT" "$IMAGE" \
+    >/dev/null || fail "the container didn't start"
 deadline=$((SECONDS + START_TIMEOUT))
 while :; do
     [[ "$(podman inspect --format '{{.State.Running}}' "$NAME")" == true ]] \
@@ -135,6 +142,27 @@ while :; do
     sleep 1
 done
 echo "listening on ${ports[*]}"
+
+step "the image's health check"
+check="$(podman image inspect --format '{{json .HealthCheck}}' "$IMAGE")"
+[[ -n "$check" && "$check" != null ]] || fail "the image has no health check"
+echo "$check"
+health=1
+for _ in 1 2 3 4 5; do
+    podman healthcheck run "$NAME" >/dev/null 2>&1 && { health=0; break; }
+    sleep 1
+done
+(( health == 0 )) || fail "the health check fails on a server that listens"
+echo "healthy while the server runs"
+# A stopped server still completes TCP handshakes, through the kernel's listen backlog, but answers nothing: the state
+# of a server that has stopped accepting (#202). The check must call that unhealthy.
+podman kill --signal STOP "$NAME" >/dev/null || fail "couldn't stop the server with SIGSTOP"
+stopped_health=0
+podman healthcheck run "$NAME" >/dev/null 2>&1 || stopped_health=$?
+podman kill --signal CONT "$NAME" >/dev/null || fail "couldn't resume the server with SIGCONT"
+(( stopped_health != 0 )) || fail "the health check passes on a server that doesn't answer"
+(( stopped_health == 1 )) || fail "the health check couldn't run on the stopped server (exit $stopped_health)"
+echo "unhealthy while the server is stopped (exit 1)"
 
 step "WebSocket upgrade on /ws"
 published="$(podman port "$NAME" "$WS_PORT/tcp" | head -n 1)"

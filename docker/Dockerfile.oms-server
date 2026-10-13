@@ -55,12 +55,28 @@ COPY --from=builder /build/config/ /etc/orderprocessor/
 # binary without that RUNPATH, such as one installed with `cmake --install` (#132, corrected in #135).
 RUN echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf && ldconfig
 
+# Not root (#158): the server and seedData run as oms, which owns /data. The directory is made before VOLUME declares it,
+# so a new volume starts out owned by oms.
+RUN useradd --system --user-group --uid 10001 --home-dir /data --no-create-home oms \
+    && mkdir -p /data \
+    && chown oms:oms /data
+
 EXPOSE 8080 5001
 VOLUME /data
 
 # The log goes to standard output (#156), so `docker compose logs` shows it and the runtime rotates it. Without this it
 # was /exchange.log in the container's own layer: outside the volume, lost on every rebuild, and never rotated.
 ENV EXCHANGE_LOG=-
+
+USER oms
+
+# Healthy once the server answers HTTP on its port (#158). Any answer will do: a plain GET gets the WebSocket server's
+# 400. A TCP connect isn't enough, since a server that has stopped accepting (#202) still completes handshakes into its
+# listen backlog. The server listens only after restoring /data, so a large directory may need a longer start period, and
+# a server started on another port needs its own check. docker-compose.yml repeats this check, because podman builds
+# OCI images by default, and they don't keep it.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=120s --retries=3 \
+    CMD ["curl", "-s", "-o", "/dev/null", "--max-time", "2", "http://127.0.0.1:8080/"]
 
 ENTRYPOINT ["orderProcessorServer"]
 CMD ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/fix.cfg"]
