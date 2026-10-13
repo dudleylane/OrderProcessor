@@ -13,7 +13,11 @@ import type {
 } from '../types';
 import type { ServerMessage, ClientMessage } from '../types/websocket';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws';
+// /ws on the host and port the page came from, unless a build sets VITE_WS_URL (#157). The dev server and the image's
+// nginx both pass /ws on to the server. A URL fixed at build time sent a browser on another machine to its own
+// loopback, and broke the page behind a remapped port.
+const WS_URL =
+  import.meta.env.VITE_WS_URL || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 const RECONNECT_DELAY = 3000;
 const MAX_EXECUTIONS = 1000;
 const MAX_METRICS_HISTORY = 300; // 5 minutes at 1/sec
