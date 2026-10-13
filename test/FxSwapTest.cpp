@@ -295,6 +295,9 @@ TEST_F(FxSwapTest, SwapCodecRoundTrip)
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    // the states Processor gives a stored order before it's persisted: New, and no cancel or replace (#150)
+    saved->stateMachinePersistance_.stateZone1Id_ = 2;
+    saved->stateMachinePersistance_.stateZone2Id_ = 8;
 
     saved->ordType_ = FXSWAP_ORDERTYPE;
     saved->price_ = 1.0850;
@@ -329,6 +332,9 @@ TEST_F(FxSwapTest, LegacyCodecCompat_V0DefaultsSwapFields)
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    // the states Processor gives a stored order before it's persisted: New, and no cancel or replace (#150)
+    saved->stateMachinePersistance_.stateZone1Id_ = 2;
+    saved->stateMachinePersistance_.stateZone2Id_ = 8;
     saved->ordType_ = LIMIT_ORDERTYPE; // non-swap
 
     // Encode as v0
@@ -357,6 +363,9 @@ TEST_F(FxSwapTest, SwapCodecReadsTheFarLegWhateverTheVersion)
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    // the states Processor gives a stored order before it's persisted: New, and no cancel or replace (#150)
+    saved->stateMachinePersistance_.stateZone1Id_ = 2;
+    saved->stateMachinePersistance_.stateZone2Id_ = 8;
     saved->ordType_ = FXSWAP_ORDERTYPE;
     saved->farPrice_ = 1.0872;
     saved->farSettlDate_ = 1716595200000ULL;
@@ -381,6 +390,9 @@ TEST_F(FxSwapTest, SwapRecordCutAfterTheFarPriceIsRejected)
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    // the states Processor gives a stored order before it's persisted: New, and no cancel or replace (#150)
+    saved->stateMachinePersistance_.stateZone1Id_ = 2;
+    saved->stateMachinePersistance_.stateZone2Id_ = 8;
     saved->ordType_ = FXSWAP_ORDERTYPE;
     saved->farPrice_ = 1.0872;
     saved->farSettlDate_ = 1716595200000ULL;

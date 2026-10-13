@@ -37,6 +37,36 @@ static_assert(sizeof(PriceT) == 8, "prices are stored as 8 bytes");
 static_assert(sizeof(DateTimeT) == 8, "times and dates are stored as 8 bytes");
 static_assert(sizeof(OrdState::OrderStatePersistence::stateZone1Id_) == 4, "state ids are stored as 4 bytes");
 static_assert(sizeof(OrdState::OrderStatePersistence::stateZone2Id_) == 4, "state ids are stored as 4 bytes");
+// The record holds each enum's value, so the values are pinned too (#150): renumbering or reordering an enumerator
+// misreads every order already written. A new enumerator goes at the end, with its value added here.
+static_assert((INVALID_ORDSTATUS == 0) && (RECEIVEDNEW_ORDSTATUS == 1) && (REJECTED_ORDSTATUS == 2) &&
+                  (PENDINGNEW_ORDSTATUS == 3) && (PENDINGREPLACE_ORDSTATUS == 4) && (NEW_ORDSTATUS == 5) &&
+                  (PARTFILL_ORDSTATUS == 6) && (FILLED_ORDSTATUS == 7) && (EXPIRED_ORDSTATUS == 8) &&
+                  (DFD_ORDSTATUS == 9) && (SUSPENDED_ORDSTATUS == 10) && (REPLACED_ORDSTATUS == 11) &&
+                  (CANCELED_ORDSTATUS == 12),
+              "OrderStatus values are persisted");
+static_assert((INVALID_SIDE == 0) && (BUY_SIDE == 1) && (SELL_SIDE == 2) && (BUY_MINUS_SIDE == 3) &&
+                  (SELL_PLUS_SIDE == 4) && (SELL_SHORT_SIDE == 5) && (CROSS_SIDE == 6),
+              "Side values are persisted");
+static_assert((INVALID_ORDERTYPE == 0) && (MARKET_ORDERTYPE == 1) && (LIMIT_ORDERTYPE == 2) && (STOP_ORDERTYPE == 3) &&
+                  (STOPLIMIT_ORDERTYPE == 4) && (FXSWAP_ORDERTYPE == 5),
+              "OrderType values are persisted");
+static_assert((INVALID_TIF == 0) && (DAY_TIF == 1) && (GTD_TIF == 2) && (GTC_TIF == 3) && (FOK_TIF == 4) &&
+                  (IOC_TIF == 5) && (OPG_TIF == 6) && (ATCLOSE_TIF == 7),
+              "TimeInForce values are persisted");
+static_assert((INVALID_SETTLTYPE == 0) && (_0_SETTLTYPE == 1) && (_1_SETTLTYPE == 2) && (_2_SETTLTYPE == 3) &&
+                  (_3_SETTLTYPE == 4) && (_4_SETTLTYPE == 5) && (_5_SETTLTYPE == 6) && (_6_SETTLTYPE == 7) &&
+                  (_7_SETTLTYPE == 8) && (_8_SETTLTYPE == 9) && (_9_SETTLTYPE == 10) && (_B_SETTLTYPE == 11) &&
+                  (_C_SETTLTYPE == 12) && (TENOR_SETTLTYPE == 13),
+              "SettlTypeBase values are persisted");
+static_assert((INVALID_CAPACITY == 0) && (AGENCY_CAPACITY == 1) && (PRINCIPAL_CAPACITY == 2) &&
+                  (PROPRIETARY_CAPACITY == 3) && (INDIVIDUAL_CAPACITY == 4) && (RISKLESS_PRINCIPAL_CAPACITY == 5) &&
+                  (AGENT_FOR_ANOTHER_MEMBER_CAPACITY == 6),
+              "Capacity values are persisted");
+static_assert((INVALID_CURRENCY == 0) && (USD_CURRENCY == 1) && (EUR_CURRENCY == 2) && (GBP_CURRENCY == 3) &&
+                  (JPY_CURRENCY == 4) && (CHF_CURRENCY == 5) && (AUD_CURRENCY == 6) && (CAD_CURRENCY == 7) &&
+                  (NZD_CURRENCY == 8),
+              "Currency values are persisted");
 } // namespace
 
 OrderCodec::OrderCodec(void) {}
