@@ -78,6 +78,7 @@ public:
     void removeLastOperation() override;
     size_t startNewStage() override;
     void removeStage(const size_t &id) override;
+    bool hasOperation(COP::ACID::OperationType type, const COP::IdT &id) const override;
 
     // Extended interface for testing
     const std::string &invalidReason() const;

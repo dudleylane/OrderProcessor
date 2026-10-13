@@ -27,6 +27,7 @@
 
 #include "DataModelDef.h"
 #include "Processor.h"
+#include "TransactionScope.h"
 #include "IncomingQueues.h"
 #include "OutgoingQueues.h"
 #include "IdTGenerator.h"
@@ -748,6 +749,33 @@ TEST_F(ProcessorTest, OrderIsDurableBeforeItsExecutionReportIsPublished)
     ASSERT_FALSE(sequence.empty());
     EXPECT_EQ("persist", sequence.front());
     EXPECT_NE(std::find(sequence.begin(), sequence.end(), "publish"), sequence.end());
+}
+
+TEST_F(ProcessorTest, AnOrderIsPersistedOncePerTransaction)
+{
+    // LMDBStorage::update() keeps the newest version it finds besides the one it writes (#148). That is safe because
+    // the transactions that persist an order run one after another, and each writes it once: a rollback then erases
+    // the one version it wrote. A second persist of the order in the same transaction would write the same record,
+    // since the codec reads the order when the operation executes, and a rollback would erase both versions.
+    std::vector<std::string> sequence;
+    RecordingOrderSaver saver(&sequence);
+    OrderStorage::instance()->attach(&saver);
+
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    order->orderId_ = IdT(1001, 1);
+    auto other = createTestOrder(instrId1_, SELL_SIDE, 10.0, 100);
+    other->orderId_ = IdT(1002, 1);
+
+    TransactionScope scope;
+    Processor::persistOrder(&scope, *order);
+    Processor::persistOrder(&scope, *other);
+    Processor::persistOrder(&scope, *order);
+    EXPECT_EQ(2u, scope.operationCount());
+
+    Context cnxt;
+    cnxt.orderStorage_ = OrderStorage::instance();
+    EXPECT_TRUE(scope.executeTransaction(cnxt));
+    EXPECT_EQ((std::vector<std::string>{ "persist", "persist" }), sequence);
 }
 
 // =============================================================================

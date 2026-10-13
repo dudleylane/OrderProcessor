@@ -269,6 +269,8 @@ std::string App::serializeMetricsUpdate(const SystemMetrics &m)
     data["poolArenaSize"] = m.poolArenaSize;
     data["activeSessions"] = m.activeSessions;
     data["activeOrders"] = m.activeOrders;
+    data["storageMapSize"] = m.storageMapSize;
+    data["storageMapUsed"] = m.storageMapUsed;
     data["timestamp"] = m.timestamp;
     j["data"] = data;
     return j.dump();

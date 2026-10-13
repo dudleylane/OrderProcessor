@@ -50,6 +50,8 @@ struct SystemMetrics
     size_t poolArenaSize;
     size_t activeSessions;
     size_t activeOrders;
+    size_t storageMapSize; ///< LMDB's map in bytes, which doubles when a write finds it full (#148)
+    size_t storageMapUsed; ///< bytes of the map in use: the high-water mark of its pages
     u64 timestamp;
 };
 

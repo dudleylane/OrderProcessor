@@ -38,7 +38,8 @@ public:
     /// saves record into the file
     virtual IdT save(const char *buf, size_t size) = 0;
     virtual void save(const IdT &id, const char *buf, size_t size) = 0;
-    /// saves new version of the record and return version
+    /// saves new version of the record and return version. LMDBStorage also erases every version older than the newest
+    /// one it finds, which leaves two: that one and the new one (#148). FileStorage, which is deprecated, keeps them all.
     virtual u32 update(const IdT &id, const char *buf, size_t size) = 0;
     /// saves new version of the record and erase existing version.
     /// return 0 if replaced version not exists, returns version otherwise

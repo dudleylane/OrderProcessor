@@ -185,6 +185,18 @@ size_t TransactionScope::startNewStage()
     return stageId;
 }
 
+bool TransactionScope::hasOperation(OperationType type, const IdT &id) const
+{
+    for (const Operation *op : operations_)
+    {
+        if ((type == op->type()) && (id == op->getObjectId()))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void TransactionScope::removeStage(const size_t &stageId)
 {
     if (stageId >= stageBoundaries_.size())
