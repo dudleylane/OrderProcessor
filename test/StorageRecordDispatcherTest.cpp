@@ -931,6 +931,56 @@ TEST_F(StorageRecordDispatcherTest, OrderSurvivesRestartWithItsFinalState)
     std::filesystem::remove_all(dir, ec);
 }
 
+TEST_F(StorageRecordDispatcherTest, SwapSavedOnceKeepsItsFarLegAcrossRestart)
+{
+    // The bug this covers: the codec writes a swap's far leg after a '.' marker and calls the record version 1, but
+    // the dispatcher stores it under LMDB's own version, 0 on an order's first write, and decode read the far leg only
+    // from version 1 on. A swap that rested without a fill, cancel or replace came back with a far leg of 0, and the
+    // matcher, which requires equal far settlement dates, could never trade it (#144).
+    const std::string dir = test::uniqueTestPath("dispatcher-swap-restart");
+    std::unique_ptr<OrderEntry> order(createTestOrder());
+    order->orderId_ = IdT(4446, 6789);
+    order->ordType_ = FXSWAP_ORDERTYPE;
+    order->status_ = NEW_ORDSTATUS;
+    order->orderQty_ = 100;
+    order->leavesQty_ = 100;
+    order->cumQty_ = 0;
+    order->price_ = 1.0850;
+    order->settlDate_ = 1714003200000ULL;
+    order->farPrice_ = 1.0872;
+    order->farSettlDate_ = 1716595200000ULL;
+    const IdT orderId = order->orderId_;
+
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        EXPECT_EQ(0u, dispatcher_->save(*order)); // its only write, which LMDB numbers version 0
+    }
+
+    {
+        // restart: a fresh dispatcher, storage and book over the same directory
+        OrderDataStorage storageAfter;
+        TestOrderBook bookAfter;
+        StorageRecordDispatcher dispatcherAfter;
+        LMDBStorage lmdbAfter;
+        dispatcherAfter.init(restore_.get(), &bookAfter, &lmdbAfter, &storageAfter);
+        lmdbAfter.load(dir, &dispatcherAfter);
+
+        OrderEntry *restored = storageAfter.locateByOrderId(orderId);
+        ASSERT_NE(nullptr, restored);
+        EXPECT_EQ(FXSWAP_ORDERTYPE, restored->ordType_);
+        EXPECT_DOUBLE_EQ(1.0850, restored->price_);
+        EXPECT_EQ(1714003200000ULL, restored->settlDate_);
+        EXPECT_DOUBLE_EQ(1.0872, restored->farPrice_);
+        EXPECT_EQ(1716595200000ULL, restored->farSettlDate_);
+        EXPECT_EQ(1u, bookAfter.orders_.size()); // still resting
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
 // =============================================================================
 // Execution Lists (#33)
 // =============================================================================

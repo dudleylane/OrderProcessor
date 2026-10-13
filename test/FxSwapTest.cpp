@@ -350,6 +350,53 @@ TEST_F(FxSwapTest, LegacyCodecCompat_V0DefaultsSwapFields)
     delete decoded;
 }
 
+TEST_F(FxSwapTest, SwapCodecReadsTheFarLegWhateverTheVersion)
+{
+    // Records are stored under the storage's own version, 0 on an order's first write, not the 1 encode() returns for
+    // a swap. Decode used to read the far leg only from version 1 on, so a swap written once lost it (#144).
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    saved->ordType_ = FXSWAP_ORDERTYPE;
+    saved->farPrice_ = 1.0872;
+    saved->farSettlDate_ = 1716595200000ULL;
+
+    std::string buf;
+    IdT id;
+    u32 version;
+    COP::Codec::OrderCodec codec;
+    codec.encode(*saved, &buf, &id, &version);
+
+    std::unique_ptr<OrderEntry> decoded(codec.decode(id, 0, buf.data(), buf.size()));
+    ASSERT_NE(nullptr, decoded);
+    EXPECT_DOUBLE_EQ(1.0872, decoded->farPrice_);
+    EXPECT_EQ(1716595200000ULL, decoded->farSettlDate_);
+}
+
+TEST_F(FxSwapTest, SwapRecordCutAfterTheFarPriceIsRejected)
+{
+    // A record that ends right after farPrice_ must be rejected without reading past its end: decode used to read the
+    // byte after it to look for the next '.' (#144). The copy is exactly as long as the record, so a sanitizer build
+    // sees any read beyond it.
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    saved->ordType_ = FXSWAP_ORDERTYPE;
+    saved->farPrice_ = 1.0872;
+    saved->farSettlDate_ = 1716595200000ULL;
+
+    std::string buf;
+    IdT id;
+    u32 version;
+    COP::Codec::OrderCodec codec;
+    codec.encode(*saved, &buf, &id, &version);
+
+    const size_t cut = buf.size() - 1 - sizeof(saved->farSettlDate_); // drop the last '.' and farSettlDate_
+    std::unique_ptr<char[]> exact(new char[cut]);
+    memcpy(exact.get(), buf.data(), cut);
+    EXPECT_THROW(delete codec.decode(id, version, exact.get(), cut), std::runtime_error);
+}
+
 // =============================================================================
 // Regression Tests
 // =============================================================================
