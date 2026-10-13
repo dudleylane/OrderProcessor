@@ -42,6 +42,12 @@ services:
       - "8080:8080"
     volumes:
       - oms-data:/data
+    # The server logs to standard output (EXCHANGE_LOG=- in its image, #156); keep at most 3 files of 10 MB
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       oms-db:
         condition: service_healthy
