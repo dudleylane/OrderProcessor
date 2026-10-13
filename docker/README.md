@@ -245,6 +245,8 @@ docker compose build oms-server
 
 ### Server won't start
 
+A server that can't start logs why, as a line with `[Fatal]` and `Can't start:`, and exits with status 1. It restarts and fails again until the cause is fixed.
+
 ```bash
 # Check server logs
 docker compose logs oms-server
