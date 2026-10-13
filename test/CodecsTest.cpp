@@ -334,6 +334,9 @@ TEST_F(OrderCodecTest, OrderCodecFilled)
     val.side_ = BUY_SIDE;
     val.ordType_ = LIMIT_ORDERTYPE;
     val.orderId_ = IdT(4444, 4445);
+    // Rejected, and no cancel or replace: a persisted order's states are always states of the machine (#150)
+    val.stateMachinePersistance_.stateZone1Id_ = 12;
+    val.stateMachinePersistance_.stateZone2Id_ = 8;
 
     OrderCodec::encode(val, &buf, &id, &version);
 

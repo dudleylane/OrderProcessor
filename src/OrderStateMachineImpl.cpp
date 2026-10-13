@@ -12,6 +12,7 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include "OrderStateMachineImpl.h"
 #include "IdTGenerator.h"
 #include "OrderStorage.h"
@@ -110,6 +111,15 @@ const char *OrderStatePersistence::restore(const char *buf, size_t size)
     ++p;
     memcpy(&stateZone2Id_, p, sizeof(stateZone2Id_));
     p += sizeof(stateZone2Id_);
+    // MSM indexes its state table by these ids without checking them, so an id that isn't a state of this build would be
+    // undefined behaviour the first time the order is processed (#150)
+    if ((stateZone1Id_ < 0) || (ORDER_STATE_COUNT <= stateZone1Id_) || (stateZone2Id_ < 0) ||
+        (ORDER_STATE_COUNT <= stateZone2Id_))
+    {
+        throw std::runtime_error("Unable to restore OrderStatePersistence - state ids " +
+                                 std::to_string(stateZone1Id_) + ":" + std::to_string(stateZone2Id_) +
+                                 " are not states of this build!");
+    }
     return p;
 }
 

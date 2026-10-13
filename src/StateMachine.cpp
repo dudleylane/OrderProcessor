@@ -10,7 +10,9 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <cassert>
 #include <stdexcept>
+#include <boost/mpl/size.hpp>
 #include "StateMachine.h"
 #include "DataModelDef.h"
 #include "OrderStateMachineImpl.h"
@@ -21,16 +23,35 @@ using namespace boost::msm;
 
 namespace
 {
-const int STATE_SIZE = 13;
-const std::string state_names[STATE_SIZE] = { "Rcvd_New",     "Pend_Replace", "New",          "PartFill",
-                                              "Filled",       "Expired",      "DoneForDay",   "Suspended",
-                                              "NoCnlReplace", "GoingCancel",  "GoingReplace", "CnclReplaced",
-                                              "Rejected" };
+const std::string state_names[ORDER_STATE_COUNT] = { "Rcvd_New",     "Pend_Replace", "New",          "PartFill",
+                                                     "Filled",       "Expired",      "DoneForDay",   "Suspended",
+                                                     "NoCnlReplace", "GoingCancel",  "GoingReplace", "CnclReplaced",
+                                                     "Rejected" };
+
+// Every stored order holds its states' ids (#150), so each id is pinned here to the index of its name above. MSM numbers
+// the states by their first appearance in the transition table, sources first, then the states that are only targets.
+// An edit of the table that moves a state fails to compile here, instead of reinterpreting every order already stored.
+template <typename State> constexpr int stateId = boost::msm::back::get_state_id<OrderState::stt, State>::value;
+static_assert(stateId<Rcvd_New> == 0, "Rcvd_New's id is persisted");
+static_assert(stateId<Pend_Replace> == 1, "Pend_Replace's id is persisted");
+static_assert(stateId<New> == 2, "New's id is persisted");
+static_assert(stateId<PartFill> == 3, "PartFill's id is persisted");
+static_assert(stateId<Filled> == 4, "Filled's id is persisted");
+static_assert(stateId<Expired> == 5, "Expired's id is persisted");
+static_assert(stateId<DoneForDay> == 6, "DoneForDay's id is persisted");
+static_assert(stateId<Suspended> == 7, "Suspended's id is persisted");
+static_assert(stateId<NoCnlReplace> == 8, "NoCnlReplace's id is persisted");
+static_assert(stateId<GoingCancel> == 9, "GoingCancel's id is persisted");
+static_assert(stateId<GoingReplace> == 10, "GoingReplace's id is persisted");
+static_assert(stateId<CnclReplaced> == 11, "CnclReplaced's id is persisted");
+static_assert(stateId<Rejected> == 12, "Rejected's id is persisted");
+static_assert(boost::mpl::size<boost::msm::back::generate_state_set<OrderState::stt>::type>::value == ORDER_STATE_COUNT,
+              "a new state needs its id pinned above and a name in state_names");
 } // namespace
 
 const std::string &OrderState_::getStateName(int idx)
 {
-    if (STATE_SIZE <= idx)
+    if ((idx < 0) || (ORDER_STATE_COUNT <= idx))
     {
         throw std::runtime_error("Invalid index of the state's name!");
     }
@@ -62,6 +83,9 @@ void OrderState_::setPersistance(const OrderStatePersistence &st)
     orderData_ = st.orderData_;
     // Direct write to state array (const_cast is needed as current_state() returns const)
     auto *states = const_cast<int *>(backend->current_state());
+    // Restore refuses an id that isn't a state (#150); every other id comes from the machine itself
+    assert((0 <= st.stateZone1Id_) && (st.stateZone1Id_ < ORDER_STATE_COUNT));
+    assert((0 <= st.stateZone2Id_) && (st.stateZone2Id_ < ORDER_STATE_COUNT));
     states[0] = st.stateZone1Id_;
     states[1] = st.stateZone2Id_;
 }

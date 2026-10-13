@@ -14,6 +14,9 @@
 
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "StateMachine.h"
 #include "StateMachineHelper.h"
@@ -899,4 +902,71 @@ TEST_F(StateMachineTest, MultipleOrders_IndependentStateTracking)
     // First still New, second is Rejected
     p1.checkStates("New", "NoCnlReplace");
     p2.checkStates("Rejected", "NoCnlReplace");
+}
+
+// =============================================================================
+// Persisted state ids (#150)
+// =============================================================================
+
+TEST(OrderStateIdTest, EveryStateKeepsTheIdOrdersArePersistedWith)
+{
+    // Every stored order holds these numbers. A transition-table edit that moves a state can't pass by renaming the
+    // state's name to match: the numbers are pinned here, and to MSM's state types at compile time in StateMachine.cpp.
+    const char *const names[] = { "Rcvd_New",     "Pend_Replace", "New",       "PartFill",     "Filled",
+                                  "Expired",      "DoneForDay",   "Suspended", "NoCnlReplace", "GoingCancel",
+                                  "GoingReplace", "CnclReplaced", "Rejected" };
+    for (int id = 0; id < 13; ++id)
+    {
+        EXPECT_EQ(names[id], OrderState::getStateName(id)) << "state id " << id;
+    }
+
+    using boost::msm::back::get_state_id;
+    EXPECT_EQ(0, (get_state_id<OrderState::stt, Rcvd_New>::value));
+    EXPECT_EQ(1, (get_state_id<OrderState::stt, Pend_Replace>::value));
+    EXPECT_EQ(2, (get_state_id<OrderState::stt, New>::value));
+    EXPECT_EQ(3, (get_state_id<OrderState::stt, PartFill>::value));
+    EXPECT_EQ(4, (get_state_id<OrderState::stt, Filled>::value));
+    EXPECT_EQ(5, (get_state_id<OrderState::stt, Expired>::value));
+    EXPECT_EQ(6, (get_state_id<OrderState::stt, DoneForDay>::value));
+    EXPECT_EQ(7, (get_state_id<OrderState::stt, Suspended>::value));
+    EXPECT_EQ(8, (get_state_id<OrderState::stt, NoCnlReplace>::value));
+    EXPECT_EQ(9, (get_state_id<OrderState::stt, GoingCancel>::value));
+    EXPECT_EQ(10, (get_state_id<OrderState::stt, GoingReplace>::value));
+    EXPECT_EQ(11, (get_state_id<OrderState::stt, CnclReplaced>::value));
+    EXPECT_EQ(12, (get_state_id<OrderState::stt, Rejected>::value));
+}
+
+TEST(OrderStateIdTest, AnIdThatIsNoStateHasNoName)
+{
+    // getStateName() used to check only the upper bound, and read before its table for a negative id
+    EXPECT_THROW(OrderState::getStateName(-1), std::runtime_error);
+    EXPECT_THROW(OrderState::getStateName(13), std::runtime_error);
+}
+
+TEST(OrderStateIdTest, ARestoredIdThatIsNoStateIsRefused)
+{
+    // MSM indexes its state table by these ids without checking them, so an order restored with one that isn't a state
+    // would be undefined behaviour the first time it's processed. The record is refused instead.
+    const std::vector<std::pair<int, int>> invalid = { { 13, 8 }, { -1, 8 }, { 2, 13 }, { 2, -1 }, { 1000000, 8 } };
+    for (const auto &ids : invalid)
+    {
+        OrderStatePersistence written;
+        written.stateZone1Id_ = ids.first;
+        written.stateZone2Id_ = ids.second;
+        std::string buf;
+        written.serialize(buf);
+        OrderStatePersistence restored;
+        EXPECT_THROW(restored.restore(buf.data(), buf.size()), std::runtime_error)
+            << "state ids " << ids.first << ":" << ids.second;
+    }
+
+    OrderStatePersistence written;
+    written.stateZone1Id_ = 2; // New
+    written.stateZone2Id_ = 8; // NoCnlReplace
+    std::string buf;
+    written.serialize(buf);
+    OrderStatePersistence restored;
+    EXPECT_EQ(buf.data() + buf.size(), restored.restore(buf.data(), buf.size()));
+    EXPECT_EQ(2, restored.stateZone1Id_);
+    EXPECT_EQ(8, restored.stateZone2Id_);
 }

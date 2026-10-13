@@ -26,6 +26,10 @@ const int BUFFER_SIZE = 128;
 // The record holds these as their in-memory bytes (#149)
 static_assert(sizeof(RawDataType) == 4, "raw data's type is stored as 4 bytes");
 static_assert(sizeof(RawDataEntry::length_) == 4, "raw data's length is stored as 4 bytes");
+// The type is stored as its value, so the values are pinned too (#150)
+static_assert((INVALID_RAWDATATYPE == 0) && (STRING_RAWDATATYPE == 1) && (MESSAGE_RAWDATATYPE == 2) &&
+                  (XML_RAWDATATYPE == 3) && (BINARY_RAWDATATYPE == 4),
+              "RawDataType values are persisted");
 } // namespace
 
 /*	
