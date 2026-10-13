@@ -15,6 +15,11 @@ jobs:
     # Called by its versioned name because this job inherits the runner's
     # PATH: an unversioned clang-format earlier on it (pip installs 23.x
     # into ~/.local/bin) would win, and 23.1.0 flags master as unformatted.
+    # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
+    # A pull request can delete this line, so the runner's job-started hook,
+    # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
+    # same-repository pull requests run as before.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
     steps:
       - uses: actions/checkout@v4

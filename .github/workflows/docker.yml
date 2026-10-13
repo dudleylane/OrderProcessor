@@ -17,6 +17,11 @@ jobs:
     # dev box, so podman's storage is shared: the script names what it makes
     # after the run and removes it, and builds with --layers=false so that
     # no intermediate images are left behind.
+    # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
+    # A pull request can delete this line, so the runner's job-started hook,
+    # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
+    # same-repository pull requests run as before.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
     # A hung build would hold the only runner until it is killed (#59).
     timeout-minutes: 30
