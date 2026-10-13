@@ -114,7 +114,13 @@ private:
     /// Orders seen during a load: the newest version of each and its record, still encoded. The loader
     /// replays every version of every record, so the newest cannot be picked until the load ends, and
     /// decoding waits for finishLoad() too: an order's instrument may not be restored yet (#49).
-    typedef std::map<IdT, std::pair<u32, std::string>> PendingOrdersT;
+    struct PendingOrder
+    {
+        u32 version_;       ///< LMDB's version of the record, which picks the newest
+        u32 formatVersion_; ///< the layout the codec wrote, which decode() reads by (#149)
+        std::string record_;
+    };
+    typedef std::map<IdT, PendingOrder> PendingOrdersT;
     PendingOrdersT pendingOrders_;
     /// The largest id limit loaded, and every version of its record on disk: a crash between writing a new version
     /// and erasing the old leaves two, and saveIdLimit() erases all but the one it writes (#81)

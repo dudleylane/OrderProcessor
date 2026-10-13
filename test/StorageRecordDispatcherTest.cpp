@@ -11,6 +11,9 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <cstdlib>
+#include <iostream>
+#include <string>
 #include <vector>
 #include <deque>
 #include <map>
@@ -1453,4 +1456,481 @@ TEST_F(StorageRecordDispatcherTest, OrderRecordsAreSkippedWithoutOrderStorage)
     // the reference data still loads
     ASSERT_EQ(1u, restore_->instruments_.size());
     EXPECT_EQ(instrument.symbol_, restore_->instruments_.at(0)->symbol_);
+}
+
+// =============================================================================
+// Golden records (#149)
+// =============================================================================
+//
+// Records as the dispatcher and its codecs wrote them before #149 changed anything: the 4-byte record type, then the
+// codec's fields, in x86-64 byte order (little-endian, an 8-byte size_t), as the format has always been. The tests above
+// encode and decode with the same build, so a layout change passes them and then misreads, or fails to load, every data
+// directory already written. These keep today's bytes: the build must still write them, and still read every field
+// back from them.
+//
+// To change a format on purpose, give the codec a new FORMAT_VERSION, keep reading the old one, and add golden records
+// for the new one beside these. Run the suite with GOLDEN_PRINT=1 to print what the build writes.
+
+namespace
+{
+
+std::string toHex(const std::string &bytes)
+{
+    static const char digits[] = "0123456789abcdef";
+    std::string hex;
+    hex.reserve(2 * bytes.size());
+    for (const char c : bytes)
+    {
+        const unsigned char b = static_cast<unsigned char>(c);
+        hex.push_back(digits[b >> 4]);
+        hex.push_back(digits[b & 0xf]);
+    }
+    return hex;
+}
+
+std::string fromHex(const std::string &hex)
+{
+    std::string bytes;
+    for (size_t i = 0; i + 1 < hex.size(); i += 2)
+    {
+        bytes.push_back(static_cast<char>(std::stoi(hex.substr(i, 2), nullptr, 16)));
+    }
+    return bytes;
+}
+
+/// Expects the bytes written to be the golden record, and prints them as a C++ literal when GOLDEN_PRINT is set
+void expectGolden(const char *name, const std::string &written, const char *golden)
+{
+    if (nullptr != std::getenv("GOLDEN_PRINT"))
+    {
+        const std::string hex = toHex(written);
+        std::cout << "const char *const " << name << " =";
+        for (size_t i = 0; i < hex.size(); i += 64)
+        {
+            std::cout << "\n    \"" << hex.substr(i, 64) << "\"";
+        }
+        std::cout << ";\n";
+    }
+    EXPECT_EQ(std::string(golden), toHex(written)) << name << ": the bytes written are not the golden record";
+}
+
+// The entries the golden records hold. Every field has a value of its own, so a field read from another's place shows,
+// and the strings hold '.', the codecs' field separator.
+const IdT GOLDEN_INSTRUMENT_ID(101, 20261013);
+const IdT GOLDEN_STRING_ID(102, 20261013);
+const IdT GOLDEN_ACCOUNT_ID(103, 20261013);
+const IdT GOLDEN_CLEARING_ID(104, 20261013);
+const IdT GOLDEN_RAWDATA_ID(105, 20261013);
+const IdT GOLDEN_ORDER_ID(4444, 20261013);
+const u64 GOLDEN_ID_LIMIT = 1234567890123ULL;
+const StringT GOLDEN_STRING = "NASDAQ.US";
+const char GOLDEN_RAWDATA[] = "WS-1791900000000.7";
+
+InstrumentEntry goldenInstrument()
+{
+    InstrumentEntry val;
+    val.symbol_ = "EUR/USD.SP";
+    val.securityId_ = "GB00B03MLX29";
+    val.securityIdSource_ = "ISIN";
+    val.id_ = GOLDEN_INSTRUMENT_ID;
+    return val;
+}
+
+AccountEntry goldenAccount()
+{
+    AccountEntry val;
+    val.account_ = "TRADING-1.A";
+    val.firm_ = "HOUSE-CLEARING";
+    val.type_ = AGENCY_ACCOUNTTYPE;
+    val.id_ = GOLDEN_ACCOUNT_ID;
+    return val;
+}
+
+ClearingEntry goldenClearing()
+{
+    ClearingEntry val;
+    val.firm_ = "HOUSE.CLEARING";
+    val.id_ = GOLDEN_CLEARING_ID;
+    return val;
+}
+
+RawDataEntry goldenRawData()
+{
+    RawDataEntry val(STRING_RAWDATATYPE, GOLDEN_RAWDATA, static_cast<u32>(std::strlen(GOLDEN_RAWDATA)));
+    val.id_ = GOLDEN_RAWDATA_ID;
+    return val;
+}
+
+/// An order loads its instrument when it's constructed, so the golden order's must be in WideDataStorage first
+void restoreGoldenInstrument()
+{
+    WideDataStorage::instance()->restore(new InstrumentEntry(goldenInstrument()));
+}
+
+std::unique_ptr<OrderEntry> goldenOrder()
+{
+    // source, destination, clOrderId, origClOrderId, instrument, account, clearing, executions
+    auto val = std::make_unique<OrderEntry>(SourceIdT(11, 1), SourceIdT(12, 2), SourceIdT(13, 3), SourceIdT(14, 4),
+                                            GOLDEN_INSTRUMENT_ID, SourceIdT(16, 6), SourceIdT(17, 7), SourceIdT(18, 8));
+    val->orderId_ = GOLDEN_ORDER_ID;
+    val->origOrderId_ = IdT(4443, 20261012);
+    val->creationTime_ = 1791900000001ULL;
+    val->lastUpdateTime_ = 1791900000002ULL;
+    val->expireTime_ = 1791900000003ULL;
+    val->settlDate_ = 1791900000004ULL;
+    val->price_ = 101.25;
+    val->stopPx_ = 100.5;
+    val->avgPx_ = 101.125;
+    val->dayAvgPx_ = 101.0625;
+    val->status_ = PARTFILL_ORDSTATUS;
+    val->side_ = SELL_SIDE;
+    val->ordType_ = STOPLIMIT_ORDERTYPE;
+    val->tif_ = GTC_TIF;
+    val->settlType_ = _3_SETTLTYPE;
+    val->capacity_ = PRINCIPAL_CAPACITY;
+    val->currency_ = EUR_CURRENCY;
+    val->minQty_ = 5;
+    val->orderQty_ = 1000;
+    val->leavesQty_ = 600;
+    val->cumQty_ = 400;
+    val->dayOrderQty_ = 1001;
+    val->dayCumQty_ = 401;
+    val->stateMachinePersistance_.orderData_ = val.get();
+    val->stateMachinePersistance_.stateZone1Id_ = 3;
+    val->stateMachinePersistance_.stateZone2Id_ = 2;
+    return val;
+}
+
+// Written by the codecs as of ea18de7, before #149 changed them
+const char *const GOLDEN_INSTRUMENT_RECORD = "010000000a000000000000004555522f5553442e53502e0c0000000000000047"
+                                             "4230304230334d4c5832392e04000000000000004953494e";
+const char *const GOLDEN_STRING_RECORD = "0200000009000000000000004e41534441512e5553";
+const char *const GOLDEN_ACCOUNT_RECORD = "030000000b0000000000000054524144494e472d312e412e0e00000000000000"
+                                          "484f5553452d434c454152494e472e02000000";
+const char *const GOLDEN_CLEARING_RECORD = "040000000e00000000000000484f5553452e434c454152494e47";
+const char *const GOLDEN_RAWDATA_RECORD = "05000000010000002e120000002e57532d313739313930303030303030302e37";
+const char *const GOLDEN_ORDER_RECORD = "06000000952835013a65000000000000002e060000003a10000000000000002e"
+                                        "070000003a11000000000000002e020000003a0c000000000000002e03000000"
+                                        "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
+                                        "00000000002e080000003a12000000000000002e942835013a5b110000000000"
+                                        "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
+                                        "35a10100002e00000000005059402e00000000002059402e0000000000485940"
+                                        "2e00000000004459402e060000002e020000002e040000002e030000002e0400"
+                                        "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
+                                        "2ee90300002e910100002e030000003a02000000";
+const char *const GOLDEN_ID_LIMIT_RECORD = "09000000cb04fb711f010000";
+
+} // namespace
+
+TEST_F(StorageRecordDispatcherTest, WritesTheGoldenRecords)
+{
+    restoreGoldenInstrument();
+    dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+
+    dispatcher_->save(goldenInstrument());
+    dispatcher_->save(GOLDEN_STRING_ID, GOLDEN_STRING);
+    dispatcher_->save(goldenAccount());
+    dispatcher_->save(goldenClearing());
+    dispatcher_->save(goldenRawData());
+    const std::unique_ptr<OrderEntry> order = goldenOrder();
+    dispatcher_->save(*order);
+    dispatcher_->saveIdLimit(GOLDEN_ID_LIMIT);
+
+    const auto written = [this](const IdT &id) -> std::string
+    {
+        const auto it = saver_->records_.find(id);
+        return (saver_->records_.end() == it) ? std::string() : it->second.record_;
+    };
+    expectGolden("GOLDEN_INSTRUMENT_RECORD", written(GOLDEN_INSTRUMENT_ID), GOLDEN_INSTRUMENT_RECORD);
+    expectGolden("GOLDEN_STRING_RECORD", written(GOLDEN_STRING_ID), GOLDEN_STRING_RECORD);
+    expectGolden("GOLDEN_ACCOUNT_RECORD", written(GOLDEN_ACCOUNT_ID), GOLDEN_ACCOUNT_RECORD);
+    expectGolden("GOLDEN_CLEARING_RECORD", written(GOLDEN_CLEARING_ID), GOLDEN_CLEARING_RECORD);
+    expectGolden("GOLDEN_RAWDATA_RECORD", written(GOLDEN_RAWDATA_ID), GOLDEN_RAWDATA_RECORD);
+    expectGolden("GOLDEN_ORDER_RECORD", written(GOLDEN_ORDER_ID), GOLDEN_ORDER_RECORD);
+    expectGolden("GOLDEN_ID_LIMIT_RECORD", written(IdT(0, 1)), GOLDEN_ID_LIMIT_RECORD);
+}
+
+TEST_F(StorageRecordDispatcherTest, ReadsEveryFieldOfTheGoldenRecords)
+{
+    restoreGoldenInstrument();
+    dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+    dispatcher_->startLoad();
+    const auto load = [this](const IdT &id, const char *golden)
+    {
+        const std::string record = fromHex(golden);
+        dispatcher_->onRecordLoaded(id, 0, record.data(), record.size());
+    };
+    load(GOLDEN_INSTRUMENT_ID, GOLDEN_INSTRUMENT_RECORD);
+    load(GOLDEN_STRING_ID, GOLDEN_STRING_RECORD);
+    load(GOLDEN_ACCOUNT_ID, GOLDEN_ACCOUNT_RECORD);
+    load(GOLDEN_CLEARING_ID, GOLDEN_CLEARING_RECORD);
+    load(GOLDEN_RAWDATA_ID, GOLDEN_RAWDATA_RECORD);
+    load(IdT(0, 1), GOLDEN_ID_LIMIT_RECORD);
+    dispatcher_->finishLoad();
+
+    const InstrumentEntry instrument = goldenInstrument();
+    ASSERT_EQ(1u, restore_->instruments_.size());
+    EXPECT_EQ(instrument.symbol_, restore_->instruments_.at(0)->symbol_);
+    EXPECT_EQ(instrument.securityId_, restore_->instruments_.at(0)->securityId_);
+    EXPECT_EQ(instrument.securityIdSource_, restore_->instruments_.at(0)->securityIdSource_);
+    EXPECT_EQ(instrument.id_, restore_->instruments_.at(0)->id_);
+
+    ASSERT_EQ(1u, restore_->strings_.size());
+    EXPECT_EQ(GOLDEN_STRING, *restore_->strings_.at(0).str_);
+    EXPECT_EQ(GOLDEN_STRING_ID, restore_->strings_.at(0).id_);
+
+    const AccountEntry account = goldenAccount();
+    ASSERT_EQ(1u, restore_->accounts_.size());
+    EXPECT_EQ(account.account_, restore_->accounts_.at(0)->account_);
+    EXPECT_EQ(account.firm_, restore_->accounts_.at(0)->firm_);
+    EXPECT_EQ(account.type_, restore_->accounts_.at(0)->type_);
+    EXPECT_EQ(account.id_, restore_->accounts_.at(0)->id_);
+
+    ASSERT_EQ(1u, restore_->clearings_.size());
+    EXPECT_EQ(goldenClearing().firm_, restore_->clearings_.at(0)->firm_);
+    EXPECT_EQ(GOLDEN_CLEARING_ID, restore_->clearings_.at(0)->id_);
+
+    ASSERT_EQ(1u, restore_->rawDatas_.size());
+    const RawDataEntry &raw = *restore_->rawDatas_.at(0);
+    EXPECT_EQ(STRING_RAWDATATYPE, raw.type_);
+    ASSERT_EQ(std::strlen(GOLDEN_RAWDATA), raw.length_);
+    EXPECT_EQ(std::string(GOLDEN_RAWDATA), std::string(raw.data_, raw.length_));
+    EXPECT_EQ(GOLDEN_RAWDATA_ID, raw.id_);
+
+    EXPECT_EQ(GOLDEN_ID_LIMIT, dispatcher_->restoredIdLimit());
+
+    // The order's codec, by itself: restoring an order looks its ClOrdID up in WideDataStorage, which the golden
+    // record's ids don't name
+    const std::string record = fromHex(GOLDEN_ORDER_RECORD);
+    ASSERT_LT(sizeof(int), record.size());
+    int type = 0;
+    std::memcpy(&type, record.data(), sizeof(type));
+    EXPECT_EQ(StorageRecordDispatcher::ORDER_RECORDTYPE, type);
+    const std::unique_ptr<OrderEntry> expected = goldenOrder();
+    const std::unique_ptr<OrderEntry> order(
+        OrderCodec::decode(GOLDEN_ORDER_ID, 0, record.data() + sizeof(type), record.size() - sizeof(type)));
+    ASSERT_NE(nullptr, order);
+    EXPECT_EQ(GOLDEN_ORDER_ID, order->orderId_);
+    EXPECT_EQ(expected->source_.getId(), order->source_.getId());
+    EXPECT_EQ(expected->destination_.getId(), order->destination_.getId());
+    EXPECT_EQ(expected->clOrderId_.getId(), order->clOrderId_.getId());
+    EXPECT_EQ(expected->origClOrderId_.getId(), order->origClOrderId_.getId());
+    EXPECT_EQ(expected->instrument_.getId(), order->instrument_.getId());
+    EXPECT_EQ(expected->account_.getId(), order->account_.getId());
+    EXPECT_EQ(expected->clearing_.getId(), order->clearing_.getId());
+    EXPECT_EQ(expected->executions_.getId(), order->executions_.getId());
+    EXPECT_EQ(expected->origOrderId_, order->origOrderId_);
+    EXPECT_EQ(expected->creationTime_, order->creationTime_);
+    EXPECT_EQ(expected->lastUpdateTime_, order->lastUpdateTime_);
+    EXPECT_EQ(expected->expireTime_, order->expireTime_);
+    EXPECT_EQ(expected->settlDate_, order->settlDate_);
+    EXPECT_EQ(expected->price_, order->price_);
+    EXPECT_EQ(expected->stopPx_, order->stopPx_);
+    EXPECT_EQ(expected->avgPx_, order->avgPx_);
+    EXPECT_EQ(expected->dayAvgPx_, order->dayAvgPx_);
+    EXPECT_EQ(expected->status_, order->status_);
+    EXPECT_EQ(expected->side_, order->side_);
+    EXPECT_EQ(expected->ordType_, order->ordType_);
+    EXPECT_EQ(expected->tif_, order->tif_);
+    EXPECT_EQ(expected->settlType_, order->settlType_);
+    EXPECT_EQ(expected->capacity_, order->capacity_);
+    EXPECT_EQ(expected->currency_, order->currency_);
+    EXPECT_EQ(expected->minQty_, order->minQty_);
+    EXPECT_EQ(expected->orderQty_, order->orderQty_);
+    EXPECT_EQ(expected->leavesQty_, order->leavesQty_);
+    EXPECT_EQ(expected->cumQty_, order->cumQty_);
+    EXPECT_EQ(expected->dayOrderQty_, order->dayOrderQty_);
+    EXPECT_EQ(expected->dayCumQty_, order->dayCumQty_);
+    EXPECT_EQ(expected->stateMachinePersistance_.stateZone1Id_, order->stateMachinePersistance_.stateZone1Id_);
+    EXPECT_EQ(expected->stateMachinePersistance_.stateZone2Id_, order->stateMachinePersistance_.stateZone2Id_);
+}
+
+namespace
+{
+/// A copy of bytes in a heap block of exactly their size, so that ASan reports any read past the end
+std::unique_ptr<char[]> exactCopy(const std::string &bytes)
+{
+    std::unique_ptr<char[]> copy(new char[bytes.size()]);
+    std::memcpy(copy.get(), bytes.data(), bytes.size());
+    return copy;
+}
+
+/// The golden records the dispatcher decodes when it loads them; an order's record is decoded at finishLoad()
+const std::vector<std::pair<IdT, const char *>> &goldenLoadedRecords()
+{
+    static const std::vector<std::pair<IdT, const char *>> records = {
+        { GOLDEN_INSTRUMENT_ID, GOLDEN_INSTRUMENT_RECORD }, { GOLDEN_STRING_ID, GOLDEN_STRING_RECORD },
+        { GOLDEN_ACCOUNT_ID, GOLDEN_ACCOUNT_RECORD },       { GOLDEN_CLEARING_ID, GOLDEN_CLEARING_RECORD },
+        { GOLDEN_RAWDATA_ID, GOLDEN_RAWDATA_RECORD },       { IdT(0, 1), GOLDEN_ID_LIMIT_RECORD }
+    };
+    return records;
+}
+} // namespace
+
+TEST_F(StorageRecordDispatcherTest, EveryRecordCutShortIsRejected)
+{
+    // A decoder used to read the '.' after a field without checking that the record went on that far, and a string's
+    // length was checked only by an assert (#149). Every prefix of every golden record must now be refused, and under
+    // ASan none may be read past its end.
+    restoreGoldenInstrument();
+    dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+    for (const auto &golden : goldenLoadedRecords())
+    {
+        const std::string record = fromHex(golden.second);
+        for (size_t length = 0; length < record.size(); ++length)
+        {
+            const std::unique_ptr<char[]> cut = exactCopy(record.substr(0, length));
+            EXPECT_THROW(dispatcher_->onRecordLoaded(golden.first, 0, cut.get(), length), std::runtime_error)
+                << toHex(record.substr(0, 4)) << " record cut to " << length << " of " << record.size() << " bytes";
+        }
+    }
+
+    const std::string order = fromHex(GOLDEN_ORDER_RECORD).substr(sizeof(u32));
+    for (size_t length = 0; length < order.size(); ++length)
+    {
+        const std::unique_ptr<char[]> cut = exactCopy(order.substr(0, length));
+        EXPECT_THROW(std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_ORDER_ID, 0, cut.get(), length)),
+                     std::runtime_error)
+            << "order record cut to " << length << " of " << order.size() << " bytes";
+    }
+}
+
+TEST_F(StorageRecordDispatcherTest, EveryRecordWithAByteMoreIsRejected)
+{
+    // Bytes after the last field mean a layout this build doesn't know (#149). The extra byte is a '.', the codecs'
+    // separator, the likeliest to pass for part of the record.
+    restoreGoldenInstrument();
+    dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+    for (const auto &golden : goldenLoadedRecords())
+    {
+        const std::string record = fromHex(golden.second) + '.';
+        const std::unique_ptr<char[]> longer = exactCopy(record);
+        EXPECT_THROW(dispatcher_->onRecordLoaded(golden.first, 0, longer.get(), record.size()), std::runtime_error)
+            << toHex(record.substr(0, 4)) << " record with a byte more";
+    }
+
+    const std::string order = fromHex(GOLDEN_ORDER_RECORD).substr(sizeof(u32)) + '.';
+    const std::unique_ptr<char[]> longer = exactCopy(order);
+    EXPECT_THROW(std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_ORDER_ID, 0, longer.get(), order.size())),
+                 std::runtime_error);
+}
+
+TEST_F(StorageRecordDispatcherTest, ARecordInANewerFormatIsRejected)
+{
+    // A record's first 4 bytes are its type, and in the high 16 bits the version of the layout its codec wrote (#149).
+    // A version this build doesn't know is refused by name, rather than misread as the layout it does know.
+    restoreGoldenInstrument();
+    dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+    for (const auto &golden : goldenLoadedRecords())
+    {
+        std::string record = fromHex(golden.second);
+        record[2] = 1; // format version 1
+        try
+        {
+            dispatcher_->onRecordLoaded(golden.first, 0, record.data(), record.size());
+            ADD_FAILURE() << toHex(record.substr(0, 4)) << " record in format version 1 was loaded";
+        }
+        catch (const std::runtime_error &ex)
+        {
+            EXPECT_NE(std::string::npos, std::string(ex.what()).find("format version 1"))
+                << toHex(record.substr(0, 4)) << ": " << ex.what();
+        }
+    }
+    std::string order = fromHex(GOLDEN_ORDER_RECORD);
+    order[2] = 1;
+    EXPECT_THROW(dispatcher_->onRecordLoaded(GOLDEN_ORDER_ID, 0, order.data(), order.size()), std::runtime_error);
+
+    // A type no build has written is still refused as one
+    std::string unknown = fromHex(GOLDEN_STRING_RECORD);
+    unknown[0] = 77;
+    try
+    {
+        dispatcher_->onRecordLoaded(GOLDEN_STRING_ID, 0, unknown.data(), unknown.size());
+        ADD_FAILURE() << "a record of type 77 was loaded";
+    }
+    catch (const std::runtime_error &ex)
+    {
+        EXPECT_NE(std::string::npos, std::string(ex.what()).find("Invalid record type")) << ex.what();
+    }
+}
+
+// =============================================================================
+// Golden swap record (#149, FX)
+// =============================================================================
+//
+// A swap's record is an order's, then '.', its far price, '.', and its far settlement date (#144). The bytes are what
+// this branch's codec wrote before #149, which changes no byte of it: the record still starts with its type alone.
+
+namespace
+{
+const IdT GOLDEN_SWAP_ID(4446, 20261013);
+
+std::unique_ptr<OrderEntry> goldenSwap()
+{
+    std::unique_ptr<OrderEntry> val = goldenOrder();
+    val->orderId_ = GOLDEN_SWAP_ID;
+    val->ordType_ = FXSWAP_ORDERTYPE;
+    val->farPrice_ = 1.0625;
+    val->farSettlDate_ = 1792000000005ULL;
+    return val;
+}
+
+const char *const GOLDEN_SWAP_RECORD = "06000000952835013a65000000000000002e060000003a10000000000000002e"
+                                       "070000003a11000000000000002e020000003a0c000000000000002e03000000"
+                                       "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
+                                       "00000000002e080000003a12000000000000002e942835013a5b110000000000"
+                                       "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
+                                       "35a10100002e00000000005059402e00000000002059402e0000000000485940"
+                                       "2e00000000004459402e060000002e020000002e050000002e030000002e0400"
+                                       "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
+                                       "2ee90300002e910100002e030000003a020000002e000000000000f13f2e0500"
+                                       "863ba1010000";
+
+/// The swap's record without its 4-byte type: what OrderCodec::decode() reads
+std::string goldenSwapPayload()
+{
+    return fromHex(GOLDEN_SWAP_RECORD).substr(sizeof(u32));
+}
+} // namespace
+
+TEST_F(StorageRecordDispatcherTest, WritesAndReadsTheGoldenSwapRecord)
+{
+    restoreGoldenInstrument();
+    dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+    const std::unique_ptr<OrderEntry> swap = goldenSwap();
+    dispatcher_->save(*swap);
+    const auto it = saver_->records_.find(GOLDEN_SWAP_ID);
+    ASSERT_NE(saver_->records_.end(), it);
+    expectGolden("GOLDEN_SWAP_RECORD", it->second.record_, GOLDEN_SWAP_RECORD);
+
+    const std::string payload = goldenSwapPayload();
+    const std::unique_ptr<OrderEntry> order(OrderCodec::decode(GOLDEN_SWAP_ID, 0, payload.data(), payload.size()));
+    ASSERT_NE(nullptr, order);
+    EXPECT_EQ(FXSWAP_ORDERTYPE, order->ordType_);
+    EXPECT_EQ(swap->farPrice_, order->farPrice_);
+    EXPECT_EQ(swap->farSettlDate_, order->farSettlDate_);
+    EXPECT_EQ(swap->price_, order->price_);
+    EXPECT_EQ(swap->settlDate_, order->settlDate_);
+    EXPECT_EQ(swap->orderQty_, order->orderQty_);
+    EXPECT_EQ(swap->stateMachinePersistance_.stateZone2Id_, order->stateMachinePersistance_.stateZone2Id_);
+}
+
+TEST_F(StorageRecordDispatcherTest, ASwapRecordCutShortOrWithAByteMoreIsRejected)
+{
+    // Cut right before its far leg, a swap's record used to restore as a swap with a far leg of 0: the decoder took the
+    // missing marker for an order without one. A swap now needs its far leg (#149).
+    restoreGoldenInstrument();
+    const std::string payload = goldenSwapPayload();
+    for (size_t length = 0; length < payload.size(); ++length)
+    {
+        const std::unique_ptr<char[]> cut = exactCopy(payload.substr(0, length));
+        EXPECT_THROW(std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_SWAP_ID, 0, cut.get(), length)),
+                     std::runtime_error)
+            << "swap record cut to " << length << " of " << payload.size() << " bytes";
+    }
+
+    const std::string longer = payload + '.';
+    const std::unique_ptr<char[]> copy = exactCopy(longer);
+    EXPECT_THROW(std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_SWAP_ID, 0, copy.get(), longer.size())),
+                 std::runtime_error);
 }
