@@ -55,6 +55,9 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.oms-server
     restart: unless-stopped
+    # A small init runs as PID 1 and starts the server (#203). As PID 1 itself, the server ignored SIGTERM until its
+    # handler was set, after the data directory's restore, and an abort became a SIGSEGV.
+    init: true
     ports:
       - "8080:8080"
     # Room for a large book and LMDB's map; raise it with them (#158)

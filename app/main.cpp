@@ -1,9 +1,16 @@
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <string>
 #include <csignal>
 #include <memory>
 #include <thread>
+
+#include <spdlog/spdlog.h>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
@@ -37,6 +44,65 @@ namespace
 /// Ids reserved ahead of the counter, and saved as one record (#81). A block costs a write each time the counter
 /// reaches it, and after a crash the next run's ids jump by up to this much; a clean stop saves the exact next id.
 const u64 ID_RESERVATION_BLOCK = 10000;
+
+// What an exception that nothing catches does (#203). It reaches std::terminate where it was thrown, before any
+// destructor runs, so a half-built engine is never torn down, and onTerminate takes over from there:
+//  - Until the server listens, it's a server that can't start: a data directory it can't open, a port in use, a bad
+//    flag. onTerminate logs the reason at Fatal, writes the log out, and exits with 1. It doesn't abort: the reason
+//    would be lost from the log, and in the image every restart would dump core.
+//  - Once the server listens, an exception that escapes is a bug. onTerminate logs it the same way, then aborts, so it
+//    leaves a core dump.
+std::atomic<bool> loggerReady{ false };
+std::atomic<bool> listening{ false };
+std::atomic<bool> terminating{ false };
+
+[[noreturn]] void onTerminate()
+{
+    static thread_local bool reporting = false;
+    if (reporting)
+    {
+        std::abort(); // the report itself failed
+    }
+    reporting = true;
+    if (terminating.exchange(true))
+    {
+        // Another thread is reporting, and will end the process
+        for (;;)
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+
+    std::string reason = "std::terminate without an exception";
+    if (const std::exception_ptr ex = std::current_exception())
+    {
+        try
+        {
+            std::rethrow_exception(ex);
+        }
+        catch (const std::exception &e)
+        {
+            reason = e.what();
+        }
+        catch (...)
+        {
+            reason = "an exception that isn't a std::exception";
+        }
+    }
+    const bool started = listening.load();
+    const std::string message = (started ? "Fatal: " : "Can't start: ") + reason;
+    std::fprintf(stderr, "orderProcessorServer: %s\n", message.c_str());
+    if (loggerReady.load())
+    {
+        aux::ExchLogger::instance()->fatal(message);
+        spdlog::shutdown(); // writes out what the asynchronous logger holds, and joins its thread
+    }
+    if (started)
+    {
+        std::abort();
+    }
+    std::_Exit(1);
+}
 
 struct Config
 {
@@ -102,10 +168,12 @@ Config parseArgs(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
+    std::set_terminate(onTerminate);
     Config cfg = parseArgs(argc, argv);
 
     // 1. Create singletons
     aux::ExchLogger::create();
+    loggerReady = true;
     aux::ExchLogger::instance()->setNoteOn(true);
     aux::ExchLogger::instance()->setWarnOn(true);
     aux::ExchLogger::instance()->setErrorOn(true);
@@ -291,6 +359,7 @@ int main(int argc, char *argv[])
 
     aux::ExchLogger::instance()->note(std::string("OrderProcessor WebSocket Server listening on port ") +
                                       std::to_string(cfg.port));
+    listening = true; // started: from here an exception that escapes is a bug (onTerminate)
 
     // 12. Run io_context on main thread
     ioc.run();
