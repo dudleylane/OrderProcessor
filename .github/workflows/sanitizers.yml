@@ -37,6 +37,10 @@ jobs:
             cxxflags: "-fsanitize=address,undefined -fno-omit-frame-pointer -g"
             ldflags: "-fsanitize=address,undefined"
             allow_failure: false
+            # This job also builds the benchmarks and the fuzz target (#155): it runs every benchmark once, and ctest
+            # replays the fuzz corpus. Nothing else in CI runs either; BM_TaskManagerThroughput aborted in every Debug
+            # build for weeks before anyone noticed (#125).
+            extras: "ON"
           # TSan runs against a TSan-instrumented oneTBB (built below),
           # because the system libtbb is not instrumented: TSan could not
           # see the task scheduler's handoffs and reported every task
@@ -58,6 +62,7 @@ jobs:
             cxxflags: "-fsanitize=thread -fno-omit-frame-pointer -g"
             ldflags: "-fsanitize=thread"
             allow_failure: false
+            extras: "OFF"
     env:
       PATH: /opt/rh/gcc-toolset-15/root/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       LD_LIBRARY_PATH: /opt/rh/gcc-toolset-15/root/usr/lib64
@@ -102,7 +107,8 @@ jobs:
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DBUILD_TESTS=ON \
-            -DBUILD_BENCHMARKS=OFF \
+            -DBUILD_BENCHMARKS=${{ matrix.extras }} \
+            -DBUILD_FUZZ=${{ matrix.extras }} \
             -DBUILD_APP=ON \
             -DBUILD_PG=OFF \
             -DBUILD_FIX=${{ matrix.fix }} \
@@ -138,3 +144,29 @@ jobs:
           UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
           TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1"
         run: ctest --test-dir build --output-on-failure --timeout 600 -j1
+
+      - name: Benchmark smoke run
+        # Every benchmark once (#155), to show they run at all: not a timing, which #12 ruled out gating on. The
+        # binary exits 0 even when a benchmark fails with SkipWithError, so the step reads the JSON report for
+        # errors. In a scratch directory, so the exchange.log the benchmarks write stays out of the checkout.
+        if: matrix.extras == 'ON'
+        shell: bash
+        env:
+          ASAN_OPTIONS: "abort_on_error=1:halt_on_error=1:detect_leaks=1"
+          UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+        run: |
+          scratch=$(mktemp -d)
+          trap 'rm -rf -- "${scratch:?}"' EXIT
+          cd "$scratch"
+          "$GITHUB_WORKSPACE/build/orderProcessorBench" --benchmark_min_time=1x \
+            --benchmark_out=smoke.json --benchmark_out_format=json
+          python3 -I - smoke.json <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1]))
+          ran = [b for b in report["benchmarks"] if b.get("run_type") != "aggregate"]
+          failed = [b for b in ran if b.get("error_occurred")]
+          for b in failed:
+              print(f"{b['name']}: {b.get('error_message', 'error')}")
+          print(f"{len(ran)} benchmarks ran, {len(failed)} failed")
+          sys.exit(1 if failed or not ran else 0)
+          PY
