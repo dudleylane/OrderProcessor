@@ -147,6 +147,8 @@ Server options:
 | `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock |
 | `--lmdb-map-mb` | 256 | LMDB's starting map, in MiB. A write that finds the map full doubles it, and logs a warning |
 
+The log goes to `exchange.log` in the working directory. The environment variable `EXCHANGE_LOG` sends it elsewhere: a file's path, or `-` for standard output, which the Docker image uses, so `docker compose logs` shows it.
+
 ### Docker Compose (Full Stack)
 
 ```bash
