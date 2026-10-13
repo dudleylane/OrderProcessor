@@ -1327,14 +1327,18 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                      Codec Interface                                         │
 │                                                                              │
-│   template<typename T>                                                       │
-│   class Codec {                                                              │
-│       static size_t encode(const T& obj, char* buffer);                     │
-│       static size_t decode(T& obj, const char* buffer);                     │
-│       static size_t size(const T& obj);                                     │
+│   class InstrumentCodec {   // and the other codecs alike                    │
+│       static constexpr u32 FORMAT_VERSION = 0;      // #149                  │
+│       static void encode(const InstrumentEntry &, std::string *buf,          │
+│                          IdT *id, u32 *version);                             │
+│       static void decode(const IdT &id, u32 formatVersion,                   │
+│                          const char *buf, size_t size, InstrumentEntry *);   │
 │   };                                                                         │
 │                                                                              │
-│   Binary Format: Fixed fields + variable length data                        │
+│   Record: a 4-byte word (type in the low 16 bits, FORMAT_VERSION in the      │
+│   high 16), then the codec's fields, most followed by '.'. Fields are their  │
+│   in-memory bytes, x86-64 little-endian; a string is an 8-byte size_t        │
+│   length, then its bytes.                                                    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1344,13 +1348,17 @@ From then on, no id is returned before a limit above it is saved. `reserve()` sa
 
 The record is keyed (0,1), and only its newest version is kept. A data directory written with it can't be loaded by an older server, which throws on the unknown record type.
 
+**Record format (#149).** A record's first 4 bytes hold its type in the low 16 bits and, in the high 16, the version of the layout its codec wrote (`FORMAT_VERSION`, 0 for every codec so far, so those bytes are the type alone, as they always were). The dispatcher refuses a version newer than the codec reads, by name. Each decoder checks that the record holds every field it reads and that it has read the whole record, so a record cut short or with bytes after its last field is refused rather than misread. `static_assert`s pin the size of every field stored as its in-memory bytes.
+
+`StorageRecordDispatcherTest` holds golden records: the bytes each record type was written as before #149. The build must still write them and read every field back from them, and every prefix of them, and every one with a byte more, must be refused. To change a layout on purpose, bump that codec's `FORMAT_VERSION`, keep decoding the old version, and add golden records for the new one; running the suite with `GOLDEN_PRINT=1` prints what the build writes.
+
 **Associated Test Cases:**
 
 | Test File | Test Cases | Coverage |
 |-----------|------------|----------|
 | `CodecsTest.cpp` | `InstrumentCodecFilled`, `OrderCodecFilled`, etc. | All codec types |
 | `FileStorageTest.cpp` | `FileStorageTest.*` | File I/O operations |
-| `StorageRecordDispatcherTest.cpp` | `StorageRecordDispatcherTest.*` | Record routing |
+| `StorageRecordDispatcherTest.cpp` | `StorageRecordDispatcherTest.*` | Record routing; golden records (#149) |
 | `OrderStorageTest.cpp` | `OrderStorageTest.*` | Order storage operations |
 | `WideDataStorageTest.cpp` | `WideDataStorageTest.*` | Reference data storage |
 | `LMDBStorageTest.cpp` | `LMDBStorageTest.*` | LMDB key-value backend |
