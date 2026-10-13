@@ -35,7 +35,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebI
         -march=native          # CPU-specific optimizations
         -mtune=native          # CPU-specific tuning
         -flto                  # Link-time optimization
-        -ffast-math            # Fast floating-point (safe for price comparisons)
+        -ffast-math            # Fast floating-point, but its -ffinite-math-only lets the compiler delete every
+        -fno-finite-math-only  # inf/NaN check (#142: a price of 1e400 parsed as inf), so turn that part back off
         -funroll-loops         # Loop unrolling
         -fomit-frame-pointer   # Free up register for hot paths
     )

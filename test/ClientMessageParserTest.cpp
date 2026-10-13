@@ -149,6 +149,46 @@ TEST(ClientMessageParserTest, NonNumericPriceIsRejected)
     EXPECT_NE(std::string::npos, msg.error.find("price"));
 }
 
+// --- Prices beyond double's range (issue #142) ---
+// Release builds compile with -ffast-math. Until #142 its -ffinite-math-only let the compiler delete both nlohmann's
+// overflow check and readPrice's std::isfinite, so these parsed as +-inf in Release while Debug rejected them. These
+// tests matter in the Release ctest (CI's Build & Test job and the pre-push hook).
+
+TEST(ClientMessageParserTest, PriceBeyondDoubleRangeIsRejected)
+{
+    auto msg = parse(
+        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","price":1e400,"orderQty":5}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("overflow"));
+}
+
+TEST(ClientMessageParserTest, NegativePriceBeyondDoubleRangeIsRejected)
+{
+    auto msg = parse(
+        R"({"type":"new_order","data":{"symbol":"AAPL","side":"SELL","ordType":"LIMIT","price":-1e400,"orderQty":5}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("overflow"));
+}
+
+TEST(ClientMessageParserTest, StopPriceBeyondDoubleRangeIsRejected)
+{
+    auto msg = parse(R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"STOPLIMIT","price":10,)"
+                     R"("stopPx":1e400,"orderQty":5}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("overflow"));
+}
+
+TEST(ClientMessageParserTest, ReplacePriceBeyondDoubleRangeIsRejected)
+{
+    auto msg = parse(R"({"type":"replace_order","data":{"orderId":7,"price":1e400}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("overflow"));
+}
+
 // --- Rejected message shapes ---
 
 TEST(ClientMessageParserTest, DataMustBeAnObject)
