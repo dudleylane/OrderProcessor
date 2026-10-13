@@ -3,6 +3,7 @@
 #ifdef BUILD_FIX
 
 #include <quickfix/Application.h>
+#include <optional>
 #include <unordered_map>
 #include <oneapi/tbb/spin_rw_mutex.h>
 #include <quickfix/SessionID.h>
@@ -88,6 +89,8 @@ private:
     void rejectContained(const FIX::Message &msg, const FIX::SessionID &sid, const char *what);
     /// answers the one message with a BusinessMessageReject to its sender, quoting its MsgSeqNum, MsgType and ClOrdID
     void rejectMessage(const FIX::Message &msg, const FIX::SessionID &sid, int reason, const std::string &text);
+    /// refuses a new order to its sender with buildOrderRefusal()'s ExecutionReport, before the engine sees it (#145)
+    void refuseOrder(const FIX::Message &msg, const FIX::SessionID &sid, int ordRejReason, const std::string &text);
     /// The order a request from the session source names by ClOrdID (#71): the one stored under the session's key, or,
     /// failing that, the one stored under the ClOrdID alone if this session placed it, as an order stored before #71
     /// was. Another session's order is not found.
@@ -109,6 +112,14 @@ public:
     static OrderType toOrdType(char fixOrdType);
     static TimeInForce toTif(char fixTif);
     static Currency toCurrency(const std::string &fixCcy);
+    /// OrderQty (38) as the engine's quantity: a whole number from 1 to the largest QuantityT, or nothing. QuickFIX hands
+    /// a QTY field over as a double with no range check, and converting a double outside QuantityT's range is undefined
+    /// behaviour (#145, as #16 was in the JSON parser).
+    static std::optional<QuantityT> toQuantity(double orderQty);
+    /// Whether an order of ordType can trade at price, a Price (44), LegPrice (566) or a swap's far price (6500): finite,
+    /// and above zero unless the order is a market order, which trades at no price of its own. QuickFIX accepts any
+    /// number of digits in a PRICE field, and 310 of them convert to infinity (#145).
+    static bool isTradablePrice(double price, OrderType ordType);
 
     // Internal → FIX enum conversions
     static char fromOrdStatus(OrderStatus s);
@@ -129,6 +140,11 @@ public:
     /// Text (58). sendOrderReject() draws execId from the shared id generator, so it doesn't repeat after a restart
     /// (#81).
     static FIX44::ExecutionReport buildOrderReject(const Queues::OrderRejectEvent &evnt, u64 execId);
+    /// The ExecutionReport (35=8) refusing a new order the gateway rejects itself, before the engine sees it (#145): as
+    /// buildOrderReject() builds one, with the order's ClOrdID, Symbol, and its Side and OrderQty as they were sent,
+    /// ordRejReason in OrdRejReason (103) and text in Text (58)
+    static FIX44::ExecutionReport buildOrderRefusal(const FIX::Message &order, int ordRejReason,
+                                                    const std::string &text, u64 execId);
     /// The OrderCancelReject (35=9) answering a cancel/replace request the engine refused (#67, #74): 434=2,
     /// CxlRejReason 6 when the replacement's ClOrdID is already in use, else from the engine's reason as for a cancel
     /// (0 too late, 1 unknown order, 3 a cancel or replace pending, 99 other), and the reason in Text (58). origOrderId
