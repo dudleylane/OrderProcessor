@@ -1655,6 +1655,50 @@ TEST_F(MultiOutQueuesTest, EmptyDelegatesNoCrash)
     SUCCEED();
 }
 
+TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsLegsCarryTheirSideDateAndPrice)
+{
+    // A swap's near leg trades on the order's side and settles on its near date; its far leg trades the other way and
+    // settles on its far date. Each report carries its leg in a NoLegs group and a TradeLinkID (820) (#153).
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    order->side_ = BUY_SIDE;
+    order->ordType_ = FXSWAP_ORDERTYPE;
+    order->settlDate_ = 1000;
+    order->farSettlDate_ = 2000;
+    order->farPrice_ = 1.0872;
+    for (const ExecLegType leg : { NEAR_LEG, FAR_LEG })
+    {
+        auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+        trade.execLegType_ = leg;
+        trade.lastQty_ = 100;
+        trade.lastPx_ = (NEAR_LEG == leg) ? 1.0850 : 1.0872;
+
+        FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+
+        ASSERT_EQ(1u, report.groupCount(FIX::FIELD::NoLegs)) << "leg " << leg;
+        FIX44::ExecutionReport::NoLegs group;
+        report.getGroup(1, group);
+        FIX::LegSide side;
+        group.get(side);
+        EXPECT_EQ((NEAR_LEG == leg) ? FIX::Side_BUY : FIX::Side_SELL, side.getValue()) << "leg " << leg;
+        // Which date each leg gets. The format is still the engine's milliseconds, where FIX wants YYYYMMDD (#198).
+        FIX::LegSettlDate date;
+        group.get(date);
+        EXPECT_EQ((NEAR_LEG == leg) ? "1000" : "2000", date.getString()) << "leg " << leg;
+        FIX::LegLastPx px;
+        group.get(px);
+        EXPECT_DOUBLE_EQ(trade.lastPx_, px.getValue()) << "leg " << leg;
+        // Present on both legs; whether the two match is #199
+        EXPECT_TRUE(report.isSetField(820)) << "leg " << leg;
+    }
+
+    // A plain fill has no legs
+    auto plain = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&plain, *order);
+    EXPECT_EQ(0u, report.groupCount(FIX::FIELD::NoLegs));
+    EXPECT_FALSE(report.isSetField(820));
+}
+
 } // anonymous namespace
 
 #endif // BUILD_FIX

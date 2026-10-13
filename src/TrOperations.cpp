@@ -283,13 +283,16 @@ void CreateCancelExecReportTrOperation::rollback(const Context &) {}
 
 CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(const TradeExecEntry *trade, OrderStatus status,
                                                                    const OrderEntry &order)
-    : Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), status_(status), execLegType_(SINGLE_LEG)
+    : Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), status_(status)
 {
     assert(nullptr != trade);
     lastQty_ = trade->lastQty_;
     lastPx_ = trade->lastPx_;
     tradeDate_ = trade->tradeDate_;
     currency_ = trade->currency_;
+    // The leg comes from the trade: a swap's near leg reaches this report through the state machine, and its report used
+    // to say SINGLE_LEG (#153). A plain fill's trade says SINGLE_LEG itself.
+    execLegType_ = trade->execLegType_;
 }
 
 CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx, Currency currency,

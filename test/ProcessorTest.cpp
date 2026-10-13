@@ -1098,3 +1098,88 @@ TEST_F(ProcessorTest, ReplaceWaitsForTheTransactionThatBooksTheOriginal)
     ASSERT_EQ(1u, marks.size());
     EXPECT_FALSE(marks.front()) << "the replace was enqueued before the transaction that books the original";
 }
+
+// =============================================================================
+// A swap's fill is reported per leg (#153)
+// =============================================================================
+
+namespace
+{
+/// Keeps what a test needs of each execution report: whose it is, its type, its leg and its price
+class LegRecordingOutQueues final : public Queues::OutQueues
+{
+public:
+    struct Report
+    {
+        IdT orderId_;
+        ExecType type_;
+        ExecLegType leg_;
+        PriceT lastPx_;
+    };
+
+    void push(const ExecReportEvent &evnt, const std::string &) override
+    {
+        const auto *trade = dynamic_cast<const TradeExecEntry *>(evnt.exec_);
+        reports_.push_back(Report{ evnt.exec_->orderId_, evnt.exec_->type_, evnt.exec_->execLegType_,
+                                   (nullptr != trade) ? trade->lastPx_ : 0.0 });
+    }
+    void push(const CancelRejectEvent &, const std::string &) override {}
+    void push(const BusinessRejectEvent &, const std::string &) override {}
+
+    std::vector<Report> reports_;
+};
+} // namespace
+
+TEST_F(ProcessorTest, ASwapFillIsReportedAsItsNearLegAndItsFarLeg)
+{
+    // Each side of a swap fill gets two trade reports, its near leg at the near price and its far leg at the far price.
+    // The near leg's report used to say SINGLE_LEG, so neither JSON nor FIX clients could tell it from a plain fill.
+    LegRecordingOutQueues outQueues;
+    ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
+                           &outQueues, inQueues_.get(), transMgr_.get());
+    Processor processor;
+    processor.init(params);
+    transMgr_->proc_ = &processor;
+
+    const auto swap = [this](Side side)
+    {
+        auto order = createTestOrder(instrId1_, side, 1.0850, 100);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->farPrice_ = 1.0872;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        return order;
+    };
+    auto sell = swap(SELL_SIDE);
+    const RawDataEntry sellClOrdId = sell->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(sell.release()));
+    processor.process();
+    auto buy = swap(BUY_SIDE);
+    const RawDataEntry buyClOrdId = buy->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(buy.release()));
+    processor.process();
+
+    const OrderEntry *savedSell = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
+    const OrderEntry *savedBuy = OrderStorage::instance()->locateByClOrderId(buyClOrdId);
+    ASSERT_NE(nullptr, savedSell);
+    ASSERT_NE(nullptr, savedBuy);
+    ASSERT_EQ(FILLED_ORDSTATUS, savedBuy->status_) << "the swaps didn't match";
+
+    for (const OrderEntry *order : { savedSell, savedBuy })
+    {
+        std::vector<std::pair<ExecLegType, PriceT>> legs;
+        for (const auto &report : outQueues.reports_)
+        {
+            if ((report.orderId_ == order->orderId_) && (TRADE_EXECTYPE == report.type_))
+            {
+                legs.emplace_back(report.leg_, report.lastPx_);
+            }
+        }
+        ASSERT_EQ(2u, legs.size()) << "trade reports for order " << order->orderId_.id_;
+        // as ints: ExecLegType is a uint8_t, which gtest would print as a character
+        EXPECT_EQ(static_cast<int>(NEAR_LEG), static_cast<int>(legs[0].first)) << "order " << order->orderId_.id_;
+        EXPECT_DOUBLE_EQ(1.0850, legs[0].second);
+        EXPECT_EQ(static_cast<int>(FAR_LEG), static_cast<int>(legs[1].first)) << "order " << order->orderId_.id_;
+        EXPECT_DOUBLE_EQ(1.0872, legs[1].second);
+    }
+}

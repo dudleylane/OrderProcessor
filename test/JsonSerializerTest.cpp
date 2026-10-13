@@ -168,4 +168,24 @@ TEST(JsonSerializerMetricsTest, MetricsUpdateCarriesLmdbsMap)
     EXPECT_EQ(300UL * 1024 * 1024, msg["data"].value("storageMapUsed", size_t(0)));
 }
 
+// A swap's report names its leg, and a plain fill's names none (#153)
+TEST(JsonSerializerLegTest, ASwapLegIsNamedOnTheWire)
+{
+    TradeExecEntry trade;
+    trade.type_ = TRADE_EXECTYPE;
+    trade.orderStatus_ = PARTFILL_ORDSTATUS;
+    trade.orderId_ = IdT(7, 1);
+    trade.execId_ = IdT(8, 1);
+    trade.lastQty_ = 100;
+    trade.lastPx_ = 1.0850;
+    trade.currency_ = EUR_CURRENCY;
+
+    trade.execLegType_ = NEAR_LEG;
+    EXPECT_EQ("NEAR", nlohmann::json::parse(App::serializeExecReport(&trade))["data"].value("execLegType", "?"));
+    trade.execLegType_ = FAR_LEG;
+    EXPECT_EQ("FAR", nlohmann::json::parse(App::serializeExecReport(&trade))["data"].value("execLegType", "?"));
+    trade.execLegType_ = SINGLE_LEG;
+    EXPECT_FALSE(nlohmann::json::parse(App::serializeExecReport(&trade))["data"].contains("execLegType"));
+}
+
 } // namespace
