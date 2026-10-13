@@ -599,6 +599,24 @@ TEST_F(TransactionScopeTest, ArenaArenaSizeConstant)
     EXPECT_GE(TransactionScope::ARENA_SIZE, 1024u);
 }
 
+// Processor persists an order once per scope by asking this (#148): LMDBStorage::update() keeps only the newest version
+// it finds besides its own, so two versions of one order from one transaction would leave nothing if it rolled back
+TEST_F(TransactionScopeTest, HasOperationFindsAnOperationByItsTypeAndObject)
+{
+    TransactionScope scope;
+    EXPECT_FALSE(scope.hasOperation(MATCH_ORDER_TROPERATION, IdT(7, 1)));
+    std::unique_ptr<Operation> op(new TrackingOperation(7, &execOrder_, &rollbackOrder_));
+    scope.addOperation(op);
+    std::unique_ptr<Operation> front(new TrackingOperation(9, &execOrder_, &rollbackOrder_));
+    scope.addOperationFirst(front);
+
+    EXPECT_TRUE(scope.hasOperation(MATCH_ORDER_TROPERATION, IdT(7, 1)));
+    EXPECT_TRUE(scope.hasOperation(MATCH_ORDER_TROPERATION, IdT(9, 1)));
+    EXPECT_FALSE(scope.hasOperation(MATCH_ORDER_TROPERATION, IdT(8, 1)));
+    EXPECT_FALSE(scope.hasOperation(PERSIST_ORDER_TROPERATION, IdT(7, 1)));
+    EXPECT_EQ(2u, scope.operationCount());
+}
+
 } // namespace
 
 // =============================================================================

@@ -488,6 +488,13 @@ void Processor::removeDeferedEventsFrom(size_t startIndex)
 void Processor::persistOrder(ACID::Scope *transaction, const OrderEntry &order)
 {
     assert(nullptr != transaction);
+    // Once per transaction (#148). A second operation would write the same record, since the codec reads the order
+    // when the operation executes. And LMDBStorage::update() keeps only the newest version it finds besides the one it
+    // writes, so two versions of the order from one transaction would leave nothing to restore if it rolled back.
+    if (transaction->hasOperation(ACID::PERSIST_ORDER_TROPERATION, order.orderId_))
+    {
+        return;
+    }
     std::unique_ptr<ACID::Operation> op(new ACID::PersistOrderTrOperation(order));
     // First, not last: CreateExecReportTrOperation publishes during execute and WsOutQueues
     // broadcasts straight away, so persisting afterwards let a client see a fill before it was

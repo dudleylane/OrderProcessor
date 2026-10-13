@@ -1279,6 +1279,10 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │   │     • ACID-compliant transactions at the storage level                │ │
 │   │     • Zero-copy reads via memory mapping                              │ │
 │   │     • Concurrent reader access (single writer)                        │ │
+│   │     • Map doubles when a write finds it full (#148);                  │ │
+│   │       starts at --lmdb-map-mb, 256 MB by default                      │ │
+│   │     • An order keeps its newest version and the one                   │ │
+│   │       before it; update() erases older ones (#148)                    │ │
 │   │                                                                        │ │
 │   │   API: put(key, value), get(key), del(key), iterate()                │ │
 │   └───────────────────────────────────────────────────────────────────────┘ │

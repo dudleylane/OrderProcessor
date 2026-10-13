@@ -348,8 +348,9 @@ void StorageRecordDispatcher::saveIdLimit(u64 limit)
     const int t = StorageRecordDispatcher::IDLIMIT_RECORDTYPE;
     buffer.append(reinterpret_cast<const char *>(&t), sizeof(t));
     buffer.append(reinterpret_cast<const char *>(&limit), sizeof(limit));
-    // update() makes the new version durable before the old ones are erased, so a crash in between leaves both, and
-    // the load keeps the larger limit. replace() would do both in one write, but it walks the whole database.
+    // update() makes the new version durable and erases all but the newest older one with it (#148). Erasing that one
+    // takes another write, so a crash in between leaves two, and the load keeps the larger limit. replace() would do
+    // both in one write, but it walks the whole database.
     const u32 written = fileStorage_->update(ID_LIMIT_RECORD_ID, buffer.data(), buffer.size());
     for (u32 version : idLimitVersions_)
     {

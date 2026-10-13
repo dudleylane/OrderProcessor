@@ -19,7 +19,8 @@ class InQueuesContainer;
 namespace Store
 {
 class OrderDataStorage;
-}
+class LMDBStorage;
+} // namespace Store
 namespace ACID
 {
 class TransactionScopePool;
@@ -35,7 +36,7 @@ class MetricsPublisher : public std::enable_shared_from_this<MetricsPublisher>
 public:
     MetricsPublisher(boost::asio::io_context &ioc, SessionManager *sessionMgr, Tasks::TaskManager *taskMgr,
                      Queues::InQueuesContainer *inQueues, Store::OrderDataStorage *orderStorage,
-                     const ACID::TransactionScopePool *scopePool,
+                     const ACID::TransactionScopePool *scopePool, const Store::LMDBStorage *storage,
                      std::chrono::milliseconds interval = std::chrono::milliseconds{ 1000 });
 
     void start();
@@ -54,6 +55,7 @@ private:
     Queues::InQueuesContainer *inQueues_;
     Store::OrderDataStorage *orderStorage_;
     const ACID::TransactionScopePool *scopePool_;
+    const Store::LMDBStorage *storage_;
 };
 
 } // namespace App
