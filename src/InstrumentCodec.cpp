@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include "InstrumentCodec.h"
 #include "StringTCodec.h"
+#include "CodecChecks.h"
 
 using namespace COP;
 using namespace COP::Codec;
@@ -51,24 +52,18 @@ void InstrumentCodec::encode(const InstrumentEntry &instr, std::string *buf, IdT
     StringTCodec::serialize(instr.securityIdSource_, buf);
 }
 
-void InstrumentCodec::decode(const IdT &id, u32 /*version*/, const char *buf, size_t size, InstrumentEntry *instr)
+void InstrumentCodec::decode(const IdT &id, u32 /*formatVersion*/, const char *buf, size_t size, InstrumentEntry *instr)
 {
     assert(nullptr != buf);
     assert(nullptr != instr);
-    assert(0 < size);
+    expectNotEmpty(size, "Instrument");
+    const char *const end = buf + size;
 
     instr->id_ = id;
     const char *p = StringTCodec::restore(buf, size, &(instr->symbol_));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded Instrument - missed '.' after symbol!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded Instrument - missed '.' after symbol!");
     p = StringTCodec::restore(p, size - (p - buf), &(instr->securityId_));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded Instrument - missed '.' after securityId!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded Instrument - missed '.' after securityId!");
     p = StringTCodec::restore(p, size - (p - buf), &(instr->securityIdSource_));
+    expectConsumed(p, end, "Instrument");
 }

@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include "OrderCodec.h"
 #include "StringTCodec.h"
+#include "CodecChecks.h"
 
 using namespace std;
 using namespace COP;
@@ -22,7 +23,21 @@ using namespace COP::Codec;
 namespace
 {
 const int BUFFER_SIZE = 256;
-}
+// The record holds each of these as its in-memory bytes, so a type that changes size misreads every order already
+// written (#149): narrowing an enum's underlying type, or a wider QuantityT, has to come with a new FORMAT_VERSION.
+static_assert(sizeof(OrderStatus) == 4, "an order's status is stored as 4 bytes");
+static_assert(sizeof(Side) == 4, "an order's side is stored as 4 bytes");
+static_assert(sizeof(OrderType) == 4, "an order's type is stored as 4 bytes");
+static_assert(sizeof(TimeInForce) == 4, "an order's time in force is stored as 4 bytes");
+static_assert(sizeof(SettlTypeBase) == 4, "an order's settlement type is stored as 4 bytes");
+static_assert(sizeof(Capacity) == 4, "an order's capacity is stored as 4 bytes");
+static_assert(sizeof(Currency) == 4, "an order's currency is stored as 4 bytes");
+static_assert(sizeof(QuantityT) == 4, "quantities are stored as 4 bytes");
+static_assert(sizeof(PriceT) == 8, "prices are stored as 8 bytes");
+static_assert(sizeof(DateTimeT) == 8, "times and dates are stored as 8 bytes");
+static_assert(sizeof(OrdState::OrderStatePersistence::stateZone1Id_) == 4, "state ids are stored as 4 bytes");
+static_assert(sizeof(OrdState::OrderStatePersistence::stateZone2Id_) == 4, "state ids are stored as 4 bytes");
+} // namespace
 
 OrderCodec::OrderCodec(void) {}
 
@@ -317,40 +332,25 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     return p;
 }
 
-OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, size_t size)
+OrderEntry *OrderCodec::decode(const IdT &id, u32 /*formatVersion*/, const char *buf, size_t size)
 {
     assert(nullptr != buf);
-    assert(0 < size);
+    expectNotEmpty(size, "OrderEntry");
+    const char *const end = buf + size;
 
     SourceIdT sourceId, destId, clOrderId, origClOrderID, instrumentId, accountId, clearingId, executionsId;
 
     const char *p = instrumentId.restore(buf, size);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after instrumentId!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after instrumentId!");
 
     p = accountId.restore(p, size - (p - buf));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after accountId!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after accountId!");
 
     p = clearingId.restore(p, size - (p - buf));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after cleaingId!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after cleaingId!");
 
     p = destId.restore(p, size - (p - buf));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after destinationId!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after destinationId!");
 
     /* todo: implement
 	p = val->execInstruct_.id_.restore(p, size - (p - buf));
@@ -359,43 +359,23 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
 	++p;*/
 
     p = clOrderId.restore(p, size - (p - buf));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after clOrderId_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after clOrderId_!");
 
     p = origClOrderID.restore(p, size - (p - buf));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after origClOrderId_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after origClOrderId_!");
 
     p = sourceId.restore(p, size - (p - buf));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after source_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after source_!");
 
     p = executionsId.restore(p, size - (p - buf));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after executions_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after executions_!");
 
     std::unique_ptr<OrderEntry> val(
         new OrderEntry(sourceId, destId, clOrderId, origClOrderID, instrumentId, accountId, clearingId, executionsId));
     val->orderId_ = id;
 
     p = val->origOrderId_.restore(p, size - (p - buf));
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after origOrderId_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after origOrderId_!");
 
     if (size < (p - buf) + sizeof(val->creationTime_))
     {
@@ -404,11 +384,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->creationTime_), p, sizeof(val->creationTime_));
     p += sizeof(val->creationTime_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after creationTime!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after creationTime!");
 
     if (size < (p - buf) + sizeof(val->lastUpdateTime_))
     {
@@ -417,11 +393,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->lastUpdateTime_), p, sizeof(val->lastUpdateTime_));
     p += sizeof(val->lastUpdateTime_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after lastUpdateTime_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after lastUpdateTime_!");
 
     if (size < (p - buf) + sizeof(val->expireTime_))
     {
@@ -430,11 +402,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->expireTime_), p, sizeof(val->expireTime_));
     p += sizeof(val->expireTime_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after expireTime_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after expireTime_!");
 
     if (size < (p - buf) + sizeof(val->settlDate_))
     {
@@ -443,11 +411,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->settlDate_), p, sizeof(val->settlDate_));
     p += sizeof(val->settlDate_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after settlDate_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after settlDate_!");
 
     if (size < (p - buf) + sizeof(val->price_))
     {
@@ -456,11 +420,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->price_), p, sizeof(val->price_));
     p += sizeof(val->price_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after price_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after price_!");
 
     if (size < (p - buf) + sizeof(val->stopPx_))
     {
@@ -469,11 +429,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->stopPx_), p, sizeof(val->stopPx_));
     p += sizeof(val->stopPx_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after stopPx_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after stopPx_!");
 
     if (size < (p - buf) + sizeof(val->avgPx_))
     {
@@ -482,11 +438,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->avgPx_), p, sizeof(val->avgPx_));
     p += sizeof(val->avgPx_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after avgPx_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after avgPx_!");
 
     if (size < (p - buf) + sizeof(val->dayAvgPx_))
     {
@@ -495,11 +447,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->dayAvgPx_), p, sizeof(val->dayAvgPx_));
     p += sizeof(val->dayAvgPx_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after dayAvgPx_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after dayAvgPx_!");
 
     if (size < (p - buf) + sizeof(val->status_))
     {
@@ -508,11 +456,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->status_), p, sizeof(val->status_));
     p += sizeof(val->status_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after status_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after status_!");
 
     if (size < (p - buf) + sizeof(val->side_))
     {
@@ -521,11 +465,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->side_), p, sizeof(val->side_));
     p += sizeof(val->side_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after side_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after side_!");
 
     if (size < (p - buf) + sizeof(val->ordType_))
     {
@@ -534,11 +474,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->ordType_), p, sizeof(val->ordType_));
     p += sizeof(val->ordType_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after ordType_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after ordType_!");
 
     if (size < (p - buf) + sizeof(val->tif_))
     {
@@ -547,11 +483,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->tif_), p, sizeof(val->tif_));
     p += sizeof(val->tif_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after tif_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after tif_!");
 
     if (size < (p - buf) + sizeof(val->settlType_))
     {
@@ -560,11 +492,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->settlType_), p, sizeof(val->settlType_));
     p += sizeof(val->settlType_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after settlType_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after settlType_!");
 
     if (size < (p - buf) + sizeof(val->capacity_))
     {
@@ -573,11 +501,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->capacity_), p, sizeof(val->capacity_));
     p += sizeof(val->capacity_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after capacity_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after capacity_!");
 
     if (size < (p - buf) + sizeof(val->currency_))
     {
@@ -586,11 +510,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->currency_), p, sizeof(val->currency_));
     p += sizeof(val->currency_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after currency_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after currency_!");
 
     if (size < (p - buf) + sizeof(val->minQty_))
     {
@@ -599,11 +519,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->minQty_), p, sizeof(val->minQty_));
     p += sizeof(val->minQty_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after minQty_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after minQty_!");
 
     if (size < (p - buf) + sizeof(val->orderQty_))
     {
@@ -612,11 +528,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->orderQty_), p, sizeof(val->orderQty_));
     p += sizeof(val->orderQty_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after orderQty_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after orderQty_!");
 
     if (size < (p - buf) + sizeof(val->leavesQty_))
     {
@@ -625,11 +537,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->leavesQty_), p, sizeof(val->leavesQty_));
     p += sizeof(val->leavesQty_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after leavesQty_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after leavesQty_!");
 
     if (size < (p - buf) + sizeof(val->cumQty_))
     {
@@ -638,11 +546,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->cumQty_), p, sizeof(val->cumQty_));
     p += sizeof(val->cumQty_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after cumQty_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after cumQty_!");
 
     if (size < (p - buf) + sizeof(val->dayOrderQty_))
     {
@@ -651,11 +555,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->dayOrderQty_), p, sizeof(val->dayOrderQty_));
     p += sizeof(val->dayOrderQty_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after dayOrderQty_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after dayOrderQty_!");
 
     if (size < (p - buf) + sizeof(val->dayCumQty_))
     {
@@ -664,13 +564,10 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*version*/, const char *buf, 
     }
     memcpy(&(val->dayCumQty_), p, sizeof(val->dayCumQty_));
     p += sizeof(val->dayCumQty_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after dayCumQty_!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after dayCumQty_!");
 
     p = val->stateMachinePersistance_.restore(p, size - (p - buf));
+    expectConsumed(p, end, "OrderEntry");
 
     return val.release();
 }

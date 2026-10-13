@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include "RawDataCodec.h"
 #include "StringTCodec.h"
+#include "CodecChecks.h"
 
 using namespace std;
 using namespace COP;
@@ -22,7 +23,10 @@ using namespace COP::Codec;
 namespace
 {
 const int BUFFER_SIZE = 128;
-}
+// The record holds these as their in-memory bytes (#149)
+static_assert(sizeof(RawDataType) == 4, "raw data's type is stored as 4 bytes");
+static_assert(sizeof(RawDataEntry::length_) == 4, "raw data's length is stored as 4 bytes");
+} // namespace
 
 /*	
 	struct RawDataEntry{
@@ -65,11 +69,12 @@ void RawDataCodec::encode(const RawDataEntry &val, std::string *buf, IdT *id, u3
     }
 }
 
-void RawDataCodec::decode(const IdT &id, u32 /*version*/, const char *buf, size_t size, RawDataEntry *val)
+void RawDataCodec::decode(const IdT &id, u32 /*formatVersion*/, const char *buf, size_t size, RawDataEntry *val)
 {
     assert(nullptr != buf);
     assert(nullptr != val);
-    assert(0 < size);
+    expectNotEmpty(size, "RawData");
+    const char *const end = buf + size;
 
     val->id_ = id;
     val->type_ = INVALID_RAWDATATYPE;
@@ -80,11 +85,7 @@ void RawDataCodec::decode(const IdT &id, u32 /*version*/, const char *buf, size_
     }
     memcpy(&(val->type_), buf, sizeof(val->type_));
     const char *p = buf + sizeof(val->type_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded RawData - missed '.' after type!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded RawData - missed '.' after type!");
 
     val->length_ = 0;
     if (size < (p - buf) + sizeof(val->length_))
@@ -94,14 +95,11 @@ void RawDataCodec::decode(const IdT &id, u32 /*version*/, const char *buf, size_
     }
     memcpy(&(val->length_), p, sizeof(val->length_));
     p += sizeof(val->length_);
-    if ('.' != *p)
-    {
-        throw std::runtime_error("Invalid format of the encoded RawData - missed '.' after length!");
-    }
-    ++p;
+    p = skipSeparator(p, end, "Invalid format of the encoded RawData - missed '.' after length!");
 
     if (0 == val->length_)
     {
+        expectConsumed(p, end, "RawData");
         return;
     }
     if (size < static_cast<size_t>(p - buf) + val->length_)
@@ -111,5 +109,6 @@ void RawDataCodec::decode(const IdT &id, u32 /*version*/, const char *buf, size_
     }
     std::unique_ptr<char[]> arr(new char[val->length_]);
     memcpy(arr.get(), p, val->length_);
+    expectConsumed(p + val->length_, end, "RawData");
     val->data_ = arr.release();
 }
