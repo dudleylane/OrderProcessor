@@ -24,6 +24,9 @@ namespace
 const int BUFFER_SIZE = 128;
 // The record holds the type as its in-memory bytes (#149)
 static_assert(sizeof(AccountType) == 4, "an account's type is stored as 4 bytes");
+// and as its value, so the values are pinned too (#150)
+static_assert((INVALID_ACCOUNTTYPE == 0) && (PRINCIPAL_ACCOUNTTYPE == 1) && (AGENCY_ACCOUNTTYPE == 2),
+              "AccountType values are persisted");
 } // namespace
 
 /*	

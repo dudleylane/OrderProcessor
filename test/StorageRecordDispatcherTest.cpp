@@ -1129,6 +1129,9 @@ TEST_F(StorageRecordDispatcherTest, OrderWhoseKeySortsBeforeItsInstrumentSurvive
         order.ordType_ = LIMIT_ORDERTYPE;
         order.orderQty_ = 100;
         order.leavesQty_ = 100;
+        // the states every persisted order has been through: New, and no cancel or replace (#150)
+        order.stateMachinePersistance_.stateZone1Id_ = 2;
+        order.stateMachinePersistance_.stateZone2Id_ = 8;
         dispatcher_->save(order);
     }
 
@@ -1311,6 +1314,9 @@ TEST_F(StorageRecordDispatcherTest, ExecutionIdsContinueAfterACrash)
         order->status_ = NEW_ORDSTATUS;
         OrderEntry *saved = orderStorage_->save(*order, &generator);
         ASSERT_NE(nullptr, saved);
+        // the states Processor gives a stored order before it's persisted: New, and no cancel or replace (#150)
+        saved->stateMachinePersistance_.stateZone1Id_ = 2;
+        saved->stateMachinePersistance_.stateZone2Id_ = 8;
         dispatcher_->save(*saved); // persisted, as PersistOrderTrOperation does
         for (int i = 0; i < 5; ++i)
         {

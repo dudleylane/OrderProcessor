@@ -42,6 +42,14 @@ const u32 FORMAT_VERSION_SHIFT = 16;
 const u32 ID_LIMIT_FORMAT_VERSION = 0;
 static_assert(sizeof(u32) == 4, "a record starts with a 4-byte word (#149)");
 static_assert(sizeof(u64) == 8, "an id limit is stored as 8 bytes (#149)");
+// A record's type is stored as its value (#150)
+static_assert(
+    (StorageRecordDispatcher::INVALID_RECORDTYPE == 0) && (StorageRecordDispatcher::INSTRUMENT_RECORDTYPE == 1) &&
+        (StorageRecordDispatcher::STRING_RECORDTYPE == 2) && (StorageRecordDispatcher::ACCOUNT_RECORDTYPE == 3) &&
+        (StorageRecordDispatcher::CLEARING_RECORDTYPE == 4) && (StorageRecordDispatcher::RAWDATA_RECORDTYPE == 5) &&
+        (StorageRecordDispatcher::ORDER_RECORDTYPE == 6) && (StorageRecordDispatcher::EXECUTION_RECORDTYPE == 7) &&
+        (StorageRecordDispatcher::EXECUTIONS_RECORDTYPE == 8) && (StorageRecordDispatcher::IDLIMIT_RECORDTYPE == 9),
+    "RecordType values are persisted");
 
 std::string recordWord(StorageRecordDispatcher::RecordType type, u32 formatVersion)
 {

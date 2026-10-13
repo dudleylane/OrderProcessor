@@ -19,6 +19,10 @@ struct OrderEntry;
 namespace OrdState
 {
 
+/// The order state machine's states. A persisted state id is an index below this (#150); StateMachine.cpp checks it,
+/// and every state's id, against the machine's transition table at compile time.
+constexpr int ORDER_STATE_COUNT = 13;
+
 struct OrderStatePersistence
 {
     OrderEntry *orderData_;
