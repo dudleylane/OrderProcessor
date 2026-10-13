@@ -6,7 +6,7 @@ WORKDIR /app
 COPY src/oms-frontend/package*.json ./
 RUN npm ci
 COPY src/oms-frontend/ .
-ENV VITE_WS_URL=ws://localhost:3000/ws
+# No VITE_WS_URL: the app connects to /ws on the page's own host and port, which nginx.conf passes to the server (#157)
 RUN npm run build
 
 FROM nginx:alpine
