@@ -132,6 +132,7 @@ export default function App() {
               instruments={oms.instruments}
               accounts={oms.accounts}
               sendOrder={oms.sendOrder}
+              sendSwapOrder={oms.sendSwapOrder}
               connected={oms.connected}
             />
           </div>

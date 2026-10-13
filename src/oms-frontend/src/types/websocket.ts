@@ -24,6 +24,7 @@ export type ServerMessage =
 /** Client → Server messages */
 export type ClientMessage =
   | { type: 'new_order'; data: import('./index').NewOrderRequest }
+  | { type: 'new_swap_order'; data: import('./index').NewSwapOrderRequest }
   | { type: 'cancel_order'; data: import('./index').CancelOrderRequest }
   | { type: 'replace_order'; data: import('./index').ReplaceOrderRequest }
   | { type: 'subscribe_book'; symbol: string }

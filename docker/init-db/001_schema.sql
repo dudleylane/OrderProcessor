@@ -20,7 +20,8 @@ CREATE TYPE order_type AS ENUM (
     'MARKET',
     'LIMIT',
     'STOP',
-    'STOPLIMIT'
+    'STOPLIMIT',
+    'FX_SWAP'
 );
 
 CREATE TYPE exec_type AS ENUM (
@@ -41,7 +42,13 @@ CREATE TYPE exec_type AS ENUM (
 
 CREATE TYPE currency AS ENUM (
     'USD',
-    'EUR'
+    'EUR',
+    'GBP',
+    'JPY',
+    'CHF',
+    'AUD',
+    'CAD',
+    'NZD'
 );
 
 CREATE TYPE capacity AS ENUM (

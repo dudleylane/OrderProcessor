@@ -53,6 +53,12 @@ export interface Order {
   creationTime: number;
   lastUpdateTime: number;
   expireTime: number;
+  /** Only on an FX swap: its near leg's settlement date (ms since the epoch) */
+  settlDate?: number;
+  /** Only on an FX swap: its far leg's price */
+  farPrice?: number;
+  /** Only on an FX swap: its far leg's settlement date (ms since the epoch) */
+  farSettlDate?: number;
 }
 
 /** Maps to C++ ExecParams (base execution report) */
@@ -63,6 +69,8 @@ export interface ExecutionReport {
   orderStatus: OrderStatus;
   market: string;
   transactTime: number;
+  /** Only on an FX swap's fill: the leg it reports */
+  execLegType?: 'NEAR' | 'FAR';
 }
 
 /** Maps to C++ TradeExecEntry */
@@ -126,6 +134,23 @@ export interface NewOrderRequest {
   account?: string;
   currency?: Currency;
   capacity?: Capacity;
+}
+
+/** An FX swap: buy (or sell) at the near price, and the reverse at the far price */
+export interface NewSwapOrderRequest {
+  symbol: string;
+  side: Side;
+  nearPrice: number;
+  farPrice: number;
+  /** the near leg's settlement date, ms since the epoch */
+  settlDate: number;
+  /** the far leg's settlement date, ms since the epoch; after the near one */
+  farSettlDate: number;
+  orderQty: number;
+  account?: string;
+  currency?: Currency;
+  capacity?: Capacity;
+  tif?: TimeInForce;
 }
 
 export interface CancelOrderRequest {

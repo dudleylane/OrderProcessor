@@ -61,6 +61,8 @@ target_sources(orderProcessorTest
 
         # Doc-code consistency enforcement
         DocConsistencyTest.cpp
+        # The C++ enums against the frontend's and the Postgres schema's (#154)
+        EnumCouplingTest.cpp
 
         # WebSocket session, served on loopback (built from app/, which the test target does not link)
         WsSessionTest.cpp

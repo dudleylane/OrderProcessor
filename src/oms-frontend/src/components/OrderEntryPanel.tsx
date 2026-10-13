@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { OrderType, Side, TimeInForce, Currency, Capacity } from '../types/enums';
-import type { Instrument, Account, NewOrderRequest } from '../types';
+import type { Instrument, Account, NewOrderRequest, NewSwapOrderRequest } from '../types';
 
 interface OrderEntryPanelProps {
   instruments: Instrument[];
   accounts: Account[];
   sendOrder: (req: NewOrderRequest) => void;
+  sendSwapOrder: (req: NewSwapOrderRequest) => void;
   connected: boolean;
 }
 
@@ -16,6 +17,7 @@ export function OrderEntryPanel({
   instruments,
   accounts,
   sendOrder,
+  sendSwapOrder,
   connected,
 }: OrderEntryPanelProps) {
   const [symbol, setSymbol] = useState('');
@@ -30,9 +32,16 @@ export function OrderEntryPanel({
   const [currency, setCurrency] = useState<Currency>(Currency.USD);
   const [capacity, setCapacity] = useState<Capacity>(Capacity.AGENCY);
   const [lastResult, setLastResult] = useState<string | null>(null);
+  // An FX swap's far leg, and both legs' settlement dates (YYYY-MM-DD)
+  const [farPrice, setFarPrice] = useState('');
+  const [settlDate, setSettlDate] = useState('');
+  const [farSettlDate, setFarSettlDate] = useState('');
 
-  const needsPrice = ordType === OrderType.LIMIT || ordType === OrderType.STOPLIMIT;
+  const isSwap = ordType === OrderType.FXSWAP;
+  const needsPrice = ordType === OrderType.LIMIT || ordType === OrderType.STOPLIMIT || isSwap;
   const needsStopPx = ordType === OrderType.STOP || ordType === OrderType.STOPLIMIT;
+  // The engine keeps a settlement date as ms since the epoch; a date is taken at midnight UTC
+  const toEpochMs = (date: string) => Date.parse(`${date}T00:00:00Z`);
 
   const validate = (): string | null => {
     if (!symbol) return 'Select an instrument';
@@ -46,6 +55,12 @@ export function OrderEntryPanel({
       const sp = parseFloat(stopPx);
       if (!sp || sp <= 0) return 'Stop price must be > 0 for STOP orders';
     }
+    if (isSwap) {
+      const fp = parseFloat(farPrice);
+      if (!fp || fp <= 0) return 'Far price must be > 0 for a swap';
+      if (!settlDate || !farSettlDate) return 'A swap needs both settlement dates';
+      if (toEpochMs(farSettlDate) <= toEpochMs(settlDate)) return 'The far settlement date must be after the near one';
+    }
     return null;
   };
 
@@ -53,6 +68,25 @@ export function OrderEntryPanel({
     const error = validate();
     if (error) {
       setLastResult(error);
+      return;
+    }
+
+    if (isSwap) {
+      const swap: NewSwapOrderRequest = {
+        symbol,
+        side,
+        nearPrice: parseFloat(price),
+        farPrice: parseFloat(farPrice),
+        settlDate: toEpochMs(settlDate),
+        farSettlDate: toEpochMs(farSettlDate),
+        orderQty: parseInt(orderQty),
+        tif,
+        currency,
+        capacity,
+      };
+      if (account) swap.account = account;
+      sendSwapOrder(swap);
+      setLastResult('Swap submitted');
       return;
     }
 
@@ -149,7 +183,7 @@ export function OrderEntryPanel({
         <div className="flex gap-2">
           {needsPrice && (
             <div className="flex-1">
-              <label className="block text-xs text-gray-500 mb-1">Price</label>
+              <label className="block text-xs text-gray-500 mb-1">{isSwap ? 'Near Price' : 'Price'}</label>
               <input
                 type="text"
                 value={price}
@@ -171,7 +205,43 @@ export function OrderEntryPanel({
               />
             </div>
           )}
+          {isSwap && (
+            <div className="flex-1">
+              <label className="block text-xs text-gray-500 mb-1">Far Price</label>
+              <input
+                type="text"
+                value={farPrice}
+                onChange={e => setFarPrice(e.target.value.replace(/[^0-9.]/g, ''))}
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono"
+                placeholder="0.0000"
+              />
+            </div>
+          )}
         </div>
+
+        {/* A swap's settlement dates */}
+        {isSwap && (
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="block text-xs text-gray-500 mb-1">Near Settlement</label>
+              <input
+                type="date"
+                value={settlDate}
+                onChange={e => setSettlDate(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-gray-500 mb-1">Far Settlement</label>
+              <input
+                type="date"
+                value={farSettlDate}
+                onChange={e => setFarSettlDate(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Qty + Min Qty */}
         <div className="flex gap-2">
