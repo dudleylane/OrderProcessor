@@ -98,6 +98,8 @@ docker compose restart oms-server  # Restart just the server
 
 ### Logs
 
+The server logs to standard output in its image (`EXCHANGE_LOG=-`), so its log is what `docker compose logs` shows. Compose keeps at most three 10 MB files of it. Run outside a container, the server writes `exchange.log` in its working directory instead.
+
 ```bash
 docker compose logs -f               # Follow all service logs
 docker compose logs -f oms-server    # Server logs only

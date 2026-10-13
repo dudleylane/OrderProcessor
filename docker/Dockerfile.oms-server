@@ -37,5 +37,9 @@ COPY --from=builder /build/out/seedData /usr/local/bin/
 EXPOSE 8080
 VOLUME /data
 
+# The log goes to standard output (#156), so `docker compose logs` shows it and the runtime rotates it. Without this it
+# was /exchange.log in the container's own layer: outside the volume, lost on every rebuild, and never rotated.
+ENV EXCHANGE_LOG=-
+
 ENTRYPOINT ["orderProcessorServer"]
 CMD ["--port", "8080", "--data-dir", "/data"]

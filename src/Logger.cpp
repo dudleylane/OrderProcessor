@@ -16,12 +16,14 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <cstdlib>
 #include <cstring>
 #include <format>
 #include <spdlog/spdlog.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/sinks/stdout_sinks.h>
 
 using namespace aux;
 
@@ -83,7 +85,19 @@ struct LoggerImpl
             // Use async logging to avoid blocking the hot path.
             // Queue size 8192 slots, single background thread.
             spdlog::init_thread_pool(8192, 1);
-            logger_ = spdlog::basic_logger_mt<spdlog::async_factory>("exchange", "exchange.log");
+            // EXCHANGE_LOG says where the log goes (#156). Unset or empty, it's exchange.log in the working directory,
+            // as before. "-" means standard output: the server's image uses that, so `docker compose logs` shows the
+            // log and the container runtime rotates it. Anything else is a file's path.
+            const char *target = std::getenv("EXCHANGE_LOG");
+            if ((nullptr != target) && (0 == std::strcmp(target, "-")))
+            {
+                logger_ = spdlog::stdout_logger_mt<spdlog::async_factory>("exchange");
+            }
+            else
+            {
+                logger_ = spdlog::basic_logger_mt<spdlog::async_factory>(
+                    "exchange", ((nullptr != target) && ('\0' != *target)) ? target : "exchange.log");
+            }
         }
         catch (const spdlog::spdlog_ex &)
         {
