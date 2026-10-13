@@ -13,7 +13,9 @@
 #      whether or not anything listens behind it.
 #   4. /ws, through the published port, answers a WebSocket upgrade with 101.
 #   5. SIGTERM stops the server with exit code 0, the clean stop that saves the next
-#      id (#81), and its exchange.log has no errors.
+#      id (#81), and its log has no errors. The image logs to standard output
+#      (EXCHANGE_LOG=-, #156), so the log is the container's output, and nothing
+#      may write /exchange.log into the container's layer.
 # The image, container and volume it creates are removed when it exits, pass or fail.
 # The base image stays, so the next build only checks it for an update.
 #
@@ -73,10 +75,6 @@ cleanup() {
     if (( status != 0 )) && podman container exists "$NAME" 2>/dev/null; then
         step "the server's output"
         podman logs "$NAME" 2>&1 | tail -n 50 || true
-        if [[ -f "$WORK/exchange.log" ]] || podman cp "$NAME:/exchange.log" "$WORK/" >/dev/null 2>&1; then
-            step "the end of its exchange.log"
-            tail -n 50 "$WORK/exchange.log"
-        fi
     fi
     podman rm -f -t 0 "$NAME" >/dev/null 2>&1 || true
     podman volume rm -f "$NAME" >/dev/null 2>&1 || true
@@ -153,7 +151,14 @@ step "stop the server with SIGTERM"
 podman stop -t 30 "$NAME" >/dev/null || fail "podman stop failed"
 code="$(podman inspect --format '{{.State.ExitCode}}' "$NAME")"
 [[ "$code" == 0 ]] || fail "the server exited with code $code (137: still running 30s after SIGTERM, so killed)"
-podman cp "$NAME:/exchange.log" "$WORK/" >/dev/null || fail "the container has no /exchange.log"
+# The image logs to standard output (EXCHANGE_LOG=-, #156), so its log is the container's output. A server that wrote
+# /exchange.log in the container's layer again would lose it on every rebuild.
+if podman cp "$NAME:/exchange.log" "$WORK/layer.log" >/dev/null 2>&1; then
+    fail "the server wrote /exchange.log into the container's layer, not to its output"
+fi
+podman logs "$NAME" > "$WORK/exchange.log" 2>&1 || fail "podman logs failed"
+grep -q 'Phase 2 LMDB load complete' "$WORK/exchange.log" \
+    || fail "the container's output has no server log (no 'Phase 2 LMDB load complete')"
 errors="$(grep -c -E ': \[(Error|Fatal)\]\[' "$WORK/exchange.log" || true)"
 # The logger reports its own settings at Warn level ("Debug logging turned off."); leave those out.
 grep -E ': \[Warn\]\[' "$WORK/exchange.log" | grep -v -E '\] [A-Za-z]+ logging turned (on|off)\.$' \
