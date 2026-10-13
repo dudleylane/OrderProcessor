@@ -10,11 +10,14 @@
 */
 
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <atomic>
 #include <vector>
 #include <string>
 #include <cstring>
 #include <cstdio>
 #include <filesystem>
+#include <thread>
 
 #include "LMDBStorage.h"
 #include "TestAux.h"
@@ -97,6 +100,10 @@ protected:
 protected:
     std::string testDir_;
 };
+
+// The map a test fills quickly, and records 16 of which fill it (#148)
+const size_t SMALL_MAP = 1024 * 1024;
+const std::string BIG_RECORD(64 * 1024, 'r');
 
 // =============================================================================
 // Basic Initialization Tests
@@ -234,7 +241,7 @@ TEST_F(LMDBStorageTest, UpdateNonExistentCreatesVersion0)
     EXPECT_EQ(0u, result);
 }
 
-TEST_F(LMDBStorageTest, UpdatePersistsAllVersions)
+TEST_F(LMDBStorageTest, UpdatePersistsBothVersions)
 {
     {
         TestLMDBObserver observer;
@@ -263,6 +270,84 @@ TEST_F(LMDBStorageTest, UpdatePersistsAllVersions)
         EXPECT_TRUE(foundV0);
         EXPECT_TRUE(foundV1);
     }
+}
+
+// update() erases the versions it supersedes, keeping the newest one it finds besides its own (#148). The transaction
+// that wrote the new version can still roll it back, which erases just that one, and the one kept is then the newest
+// again. Before #148 every version stayed, and an order's changes filled the map.
+TEST_F(LMDBStorageTest, UpdateKeepsTheNewestVersionBeforeItsOwn)
+{
+    {
+        TestLMDBObserver observer;
+        LMDBStorage storage(testDir_, &observer);
+        EXPECT_EQ(0u, storage.update(IdT(1, 1), "v0", 2));
+        EXPECT_EQ(0u, storage.update(IdT(2, 1), "w0", 2));
+        EXPECT_EQ(1u, storage.update(IdT(1, 1), "v1", 2));
+        EXPECT_EQ(2u, storage.update(IdT(1, 1), "v2", 2));
+        EXPECT_FALSE(storage.isExists(IdT(1, 1), 0));
+        EXPECT_TRUE(storage.isExists(IdT(1, 1), 1));
+        EXPECT_TRUE(storage.isExists(IdT(1, 1), 2));
+        EXPECT_TRUE(storage.isExists(IdT(2, 1), 0)) << "another record's version was erased";
+
+        // A rollback erases the version it wrote, and leaves the one before it
+        storage.erase(IdT(1, 1), 2);
+        EXPECT_TRUE(storage.isExists(IdT(1, 1), 1));
+        EXPECT_EQ(2u, storage.update(IdT(1, 1), "v2b", 3));
+    }
+
+    TestLMDBObserver observer;
+    LMDBStorage storage(testDir_, &observer);
+    std::vector<std::string> loaded = observer.records_;
+    std::sort(loaded.begin(), loaded.end());
+    EXPECT_EQ((std::vector<std::string>{ "v1", "v2b", "w0" }), loaded);
+}
+
+// A directory written before #148 holds every version of an order, and the first update() since erases all but the
+// newest of them, one after another
+TEST_F(LMDBStorageTest, UpdateErasesEveryVersionOlderThanTheNewest)
+{
+    TestLMDBObserver observer;
+    LMDBStorage storage(testDir_, &observer);
+    for (const char *v : { "v0", "v1", "v2" })
+    {
+        storage.update(IdT(1, 1), v, 2);
+    }
+    // save() writes version 0, which update() erased, so versions 0, 1 and 2 are there, as they were before #148
+    storage.save(IdT(1, 1), "s0", 2);
+    ASSERT_TRUE(storage.isExists(IdT(1, 1), 0));
+    ASSERT_TRUE(storage.isExists(IdT(1, 1), 1));
+
+    EXPECT_EQ(3u, storage.update(IdT(1, 1), "v3", 2));
+    EXPECT_FALSE(storage.isExists(IdT(1, 1), 0));
+    EXPECT_FALSE(storage.isExists(IdT(1, 1), 1));
+    EXPECT_TRUE(storage.isExists(IdT(1, 1), 2));
+    EXPECT_TRUE(storage.isExists(IdT(1, 1), 3));
+}
+
+// A version is a little-endian u32 in the key, so the keys aren't in numeric order: 256 comes before 255. update() keeps
+// the newest by value, whether it comes before the versions it erases or after them.
+TEST_F(LMDBStorageTest, UpdateKeepsTheNewestVersionByValueNotByKeyOrder)
+{
+    {
+        TestLMDBObserver observer;
+        LMDBStorage storage(testDir_, &observer);
+        for (u32 v = 0; v <= 256; ++v)
+        {
+            ASSERT_EQ(v, storage.update(IdT(1, 1), "v", 1));
+        }
+        storage.save(IdT(1, 1), "s0", 2); // versions 0, 255 and 256, which the keys order 0, 256, 255
+        EXPECT_EQ(257u, storage.update(IdT(1, 1), "new", 3));
+        EXPECT_FALSE(storage.isExists(IdT(1, 1), 0));
+        EXPECT_FALSE(storage.isExists(IdT(1, 1), 255));
+        EXPECT_TRUE(storage.isExists(IdT(1, 1), 256));
+        EXPECT_TRUE(storage.isExists(IdT(1, 1), 257));
+    }
+
+    TestLMDBObserver observer;
+    LMDBStorage storage(testDir_, &observer);
+    std::vector<u32> versions = observer.versions_;
+    std::sort(versions.begin(), versions.end());
+    EXPECT_EQ((std::vector<u32>{ 256, 257 }), versions);
 }
 
 // =============================================================================
@@ -481,6 +566,89 @@ TEST_F(LMDBStorageTest, MultipleRecordsDifferentIds)
         std::string expected = "record_" + std::to_string(i);
         EXPECT_EQ(expected.size(), storage.recordSize(IdT(i, 1), 0));
     }
+}
+
+// =============================================================================
+// Map size (#148)
+// =============================================================================
+
+// The map was fixed at 256 MB, and once it was full every write threw MDB_MAP_FULL, after a restart too (#148). A write
+// that finds it full now doubles it and goes through.
+TEST_F(LMDBStorageTest, AWriteThatFindsTheMapFullGrowsIt)
+{
+    const u64 count = 48;
+    {
+        TestLMDBObserver observer;
+        LMDBStorage storage(SMALL_MAP);
+        storage.load(testDir_, &observer);
+        EXPECT_EQ(SMALL_MAP, storage.mapSize());
+        for (u64 i = 1; i <= count; ++i)
+        {
+            ASSERT_NO_THROW(storage.update(IdT(i, 1), BIG_RECORD.data(), BIG_RECORD.size())) << "record " << i;
+        }
+        EXPECT_GE(storage.mapSize(), 4 * SMALL_MAP);
+        EXPECT_GE(storage.mapUsed(), count * BIG_RECORD.size());
+        EXPECT_LE(storage.mapUsed(), storage.mapSize());
+    }
+
+    // A directory bigger than the map asked for opens with every record, and grows again when it must
+    TestLMDBObserver observer;
+    LMDBStorage storage(SMALL_MAP);
+    storage.load(testDir_, &observer);
+    EXPECT_EQ(count, observer.records_.size());
+    EXPECT_NO_THROW(storage.save(IdT(count + 1, 1), BIG_RECORD.data(), BIG_RECORD.size()));
+}
+
+// Writers on several threads, as the transaction workers and the IO thread are, while the map grows under them. LMDB
+// lets the size change only while no transaction is open in the process (#148).
+TEST_F(LMDBStorageTest, TheMapGrowsWhileSeveralThreadsWrite)
+{
+    const u64 threads = 4;
+    const u64 perThread = 12;
+    {
+        TestLMDBObserver observer;
+        LMDBStorage storage(SMALL_MAP);
+        storage.load(testDir_, &observer);
+        std::atomic<int> failures(0);
+        std::vector<std::thread> writers;
+        for (u64 t = 0; t < threads; ++t)
+        {
+            writers.emplace_back(
+                [&storage, &failures, t, perThread]()
+                {
+                    for (u64 i = 0; i < perThread; ++i)
+                    {
+                        const IdT id(t * perThread + i + 1, 1);
+                        try
+                        {
+                            if (0 == i % 2)
+                            {
+                                storage.save(id, BIG_RECORD.data(), BIG_RECORD.size());
+                            }
+                            else
+                            {
+                                storage.update(id, BIG_RECORD.data(), BIG_RECORD.size());
+                            }
+                        }
+                        catch (const std::exception &)
+                        {
+                            ++failures;
+                        }
+                    }
+                });
+        }
+        for (std::thread &w : writers)
+        {
+            w.join();
+        }
+        EXPECT_EQ(0, failures.load());
+        EXPECT_GE(storage.mapSize(), 4 * SMALL_MAP);
+    }
+
+    TestLMDBObserver observer;
+    LMDBStorage storage(SMALL_MAP);
+    storage.load(testDir_, &observer);
+    EXPECT_EQ(threads * perThread, observer.records_.size());
 }
 
 } // namespace

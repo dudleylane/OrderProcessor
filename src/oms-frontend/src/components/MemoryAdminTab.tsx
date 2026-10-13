@@ -9,6 +9,8 @@ interface Props {
   metricsHistory: SystemMetrics[];
 }
 
+const MIB = 1024 * 1024;
+
 const ALLOC_MODES: Record<number, string> = {
   0: 'Default (heap)',
   1: 'Huge Pages (2MB)',
@@ -92,6 +94,15 @@ export function MemoryAdminTab({ metricsHistory }: Props) {
             Default (heap)
           </div>
         </div>
+      </div>
+
+      {/* LMDB map (#148) */}
+      <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+        <div className="text-xs text-gray-500 mb-1">LMDB Map</div>
+        <div className="text-xl font-semibold text-gray-100 font-mono">
+          {(latest.storageMapUsed / MIB).toFixed(1)} / {(latest.storageMapSize / MIB).toFixed(1)} MiB
+        </div>
+        <div className="text-xs text-gray-500 mt-1">in use / mapped; the map doubles when a write finds it full</div>
       </div>
 
       {/* Cache miss rate chart */}

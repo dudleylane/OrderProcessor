@@ -182,5 +182,9 @@ export interface SystemMetrics {
   poolArenaSize: number;
   activeSessions: number;
   activeOrders: number;
+  /** LMDB's map in bytes, which doubles when a write finds it full (#148) */
+  storageMapSize: number;
+  /** bytes of the map in use: the high-water mark of its pages */
+  storageMapUsed: number;
   timestamp: number;
 }

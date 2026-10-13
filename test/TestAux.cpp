@@ -97,6 +97,18 @@ size_t TestTransactionContext::startNewStage()
 
 void TestTransactionContext::removeStage(const size_t &) {}
 
+bool TestTransactionContext::hasOperation(OperationType type, const IdT &id) const
+{
+    for (const Operation *op : op_)
+    {
+        if ((type == op->type()) && (id == op->getObjectId()))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 const std::string &TestTransactionContext::invalidReason() const
 {
     return reason_;
