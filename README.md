@@ -182,7 +182,7 @@ npm install
 npm run dev                         # Vite dev server at http://localhost:3000
 ```
 
-The dev server proxies WebSocket connections to `ws://localhost:8080/ws` by default. Override with the `VITE_WS_URL` environment variable.
+The app connects to `/ws` on the host and port it was loaded from, and the dev server passes that on to the server at `ws://localhost:8080/ws`. The image's nginx does the same for the server's container. To point a build somewhere else, set `VITE_WS_URL` when building.
 
 ---
 
