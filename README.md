@@ -255,6 +255,13 @@ arena, pool, NUMA, field-layout and FIX gateway microbenchmarks, run the binary:
 `./build/orderProcessorBench --benchmark_list_tests` shows everything available, and
 `scripts/benchmark-regression.sh` compares two builds (above).
 
+`BM_ProcessNewOrder`, `BM_ProcessNewOrderWithMatch` and `BM_ProcessCancelOrder` drive a real `Processor`
+through the state machine, `OrderDataStorage::save`, the book and the transaction, executed inline, and
+`BM_TaskManagerThroughput/N` runs batches of orders through `TaskManager` with N event and N transaction
+processors (#162). This branch's `BM_ProcessSwapWithMatch` times a swap that crosses: OrderMatcher's swap
+matching, and the deferred events that report and book each leg. No `OrderSaver` is attached, so nothing
+reaches LMDB.
+
 ---
 
 ## Architecture
