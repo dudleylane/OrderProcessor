@@ -39,6 +39,10 @@ static_assert(sizeof(OrdState::OrderStatePersistence::stateZone1Id_) == 4, "stat
 static_assert(sizeof(OrdState::OrderStatePersistence::stateZone2Id_) == 4, "state ids are stored as 4 bytes");
 // The record holds each enum's value, so the values are pinned too (#150): renumbering or reordering an enumerator
 // misreads every order already written. A new enumerator goes at the end, with its value added here.
+static_assert((INVALID_INSTRUCTION == 0) && (STAY_ON_OFFER_SIDE_INSTRUCTION == 1) && (NOT_HELD_INSTRUCTION == 2) &&
+                  (WORK_INSTRUCTION == 3) && (GO_ALONG_INSTRUCTION == 4) && (_INSTRUCTION == 5),
+              "Instructions values are persisted, as the bits of a 4-byte mask (#172)");
+static_assert(_INSTRUCTION < 32, "each execution instruction needs a bit of the 4-byte mask");
 static_assert((INVALID_ORDSTATUS == 0) && (RECEIVEDNEW_ORDSTATUS == 1) && (REJECTED_ORDSTATUS == 2) &&
                   (PENDINGNEW_ORDSTATUS == 3) && (PENDINGREPLACE_ORDSTATUS == 4) && (NEW_ORDSTATUS == 5) &&
                   (PARTFILL_ORDSTATUS == 6) && (FILLED_ORDSTATUS == 7) && (EXPIRED_ORDSTATUS == 8) &&
@@ -64,6 +68,35 @@ static_assert((INVALID_CAPACITY == 0) && (AGENCY_CAPACITY == 1) && (PRINCIPAL_CA
                   (AGENT_FOR_ANOTHER_MEMBER_CAPACITY == 6),
               "Capacity values are persisted");
 static_assert((INVALID_CURRENCY == 0) && (USD_CURRENCY == 1) && (EUR_CURRENCY == 2), "Currency values are persisted");
+
+/// The execution instructions as stored: bit n set for the instruction whose value is n (#172)
+u32 instructionMask(const InstructionSetT &instructions)
+{
+    u32 mask = 0;
+    for (const Instructions instruction : instructions)
+    {
+        mask |= 1u << static_cast<u32>(instruction);
+    }
+    return mask;
+}
+
+/// The execution instructions a stored mask names. A bit no instruction has is refused, not dropped.
+InstructionSetT instructionsFromMask(u32 mask)
+{
+    if (0 != (mask >> (static_cast<u32>(_INSTRUCTION) + 1)))
+    {
+        throw std::runtime_error("Invalid format of the encoded OrderEntry - unknown execution instruction!");
+    }
+    InstructionSetT instructions;
+    for (u32 value = 0; value <= static_cast<u32>(_INSTRUCTION); ++value)
+    {
+        if (0 != (mask & (1u << value)))
+        {
+            instructions.insert(static_cast<Instructions>(value));
+        }
+    }
+    return instructions;
+}
 } // namespace
 
 OrderCodec::OrderCodec(void) {}
@@ -92,10 +125,6 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
 
     val.destination_.getId().serialize(*buf);
     buf->append(1, '.');
-
-    // todo: implement
-    //val.execInstruct_.id_.serialize(*buf);
-    //buf->append(1, '.');
 
     val.clOrderId_.getId().serialize(*buf);
     buf->append(1, '.');
@@ -198,6 +227,12 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
     buf->append(1, '.');
 
     val.stateMachinePersistance_.serialize(*buf);
+    buf->append(1, '.');
+
+    // Format version 1 (#172)
+    const u32 instructions = instructionMask(val.execInstruct_);
+    memcpy(typebuf, &instructions, sizeof(instructions));
+    buf->append(typebuf, sizeof(instructions));
 }
 
 char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version)
@@ -225,10 +260,6 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     p = val.destination_.getId().serialize(p);
     *p = '.';
     ++p;
-
-    // todo: implement
-    //val.execInstruct_.id_.serialize(*buf);
-    //buf->append(1, '.');
 
     p = val.clOrderId_.getId().serialize(p);
     *p = '.';
@@ -356,10 +387,17 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     ++p;
 
     p = val.stateMachinePersistance_.serialize(p);
+    *p = '.';
+    ++p;
+
+    // Format version 1 (#172)
+    const u32 instructions = instructionMask(val.execInstruct_);
+    memcpy(p, &instructions, sizeof(instructions));
+    p += sizeof(instructions);
     return p;
 }
 
-OrderEntry *OrderCodec::decode(const IdT &id, u32 /*formatVersion*/, const char *buf, size_t size)
+OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf, size_t size)
 {
     assert(nullptr != buf);
     expectNotEmpty(size, "OrderEntry");
@@ -378,12 +416,6 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*formatVersion*/, const char 
 
     p = destId.restore(p, size - (p - buf));
     p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after destinationId!");
-
-    /* todo: implement
-	p = val->execInstruct_.id_.restore(p, size - (p - buf));
-	if('.' != *p)
-		throw std::runtime_error("Invalid format of the encoded OrderEntry - missed '.' after execInstructId!");
-	++p;*/
 
     p = clOrderId.restore(p, size - (p - buf));
     p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after clOrderId_!");
@@ -594,6 +626,20 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 /*formatVersion*/, const char 
     p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after dayCumQty_!");
 
     p = val->stateMachinePersistance_.restore(p, size - (p - buf));
+    if (1 <= formatVersion)
+    {
+        // Format version 1 (#172): the execution instructions. A version 0 record has none.
+        p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after its state ids!");
+        u32 instructions = 0;
+        if (static_cast<size_t>(end - p) < sizeof(instructions))
+        {
+            throw std::runtime_error(
+                "Invalid format of the encoded OrderEntry - size less than required, unable decode execInstruct_!");
+        }
+        memcpy(&instructions, p, sizeof(instructions));
+        p += sizeof(instructions);
+        val->execInstruct_ = instructionsFromMask(instructions);
+    }
     expectConsumed(p, end, "OrderEntry");
 
     return val.release();
