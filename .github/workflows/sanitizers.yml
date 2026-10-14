@@ -9,6 +9,13 @@ on:
 jobs:
   sanitizer:
     name: ${{ matrix.sanitizer }} (FIX ${{ matrix.fix }})${{ matrix.allow_failure && ' (advisory)' || '' }}
+    # Self-hosted runner on the dev box.  The toolchain CI used to
+    # install via `dnf install -y gcc-toolset-15* tbb-devel ...` is
+    # already on this host (verified before the migration).  Matrix
+    # jobs serialise on a single self-hosted runner — they'll run
+    # sequentially rather than in parallel, so total wall-clock is the
+    # sum (asan_ubsan + tsan, each with FIX off and on) rather than the
+    # max.  Acceptable trade for the budget.
     # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
     # A pull request can delete this line, so the runner's job-started hook,
     # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
@@ -106,12 +113,12 @@ jobs:
           fi
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_FIX=${{ matrix.fix }} \
             -DBUILD_TESTS=ON \
             -DBUILD_BENCHMARKS=${{ matrix.extras }} \
             -DBUILD_FUZZ=${{ matrix.extras }} \
             -DBUILD_APP=ON \
             -DBUILD_PG=OFF \
-            -DBUILD_FIX=${{ matrix.fix }} \
             "${TBB_PREFIX_ARG[@]}" \
             -DCMAKE_CXX_FLAGS="${{ matrix.cxxflags }}" \
             -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.ldflags }}" \
