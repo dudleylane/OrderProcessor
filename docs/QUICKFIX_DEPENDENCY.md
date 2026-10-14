@@ -57,7 +57,9 @@ FIX 4.4 only:
 - **Messages:** `NewOrderSingle`, `NewOrderMultileg` (FX swaps, with the `NoLegs` group),
   `OrderCancelRequest`, `OrderCancelReplaceRequest`, `ExecutionReport`, `OrderCancelReject`,
   `BusinessMessageReject`, `News`.
-- **Settings:** `config/fix.cfg` (acceptor on port 5001, `ResetOnLogon=Y`).
+- **Settings:** `config/fix.cfg` (acceptor on port 5001, `ResetOnLogon=N`, one session a day from 00:00 UTC).
+  The logs come from the project's `FixRotatingLogFactory` (`app/FixRotatingLog.cpp`), not `FileLog`:
+  the same files and lines, rotated at `FileLogMaxMB` with `FileLogBackups` kept (#160).
 
 The data dictionary is the project's own copy, `config/spec/FIX44.xml`. It differs from the
 `FIX44.xml` that QuickFIX installs only in the types of fields 139 (MiscFeeType) and 532

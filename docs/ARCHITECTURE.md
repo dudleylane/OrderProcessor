@@ -508,6 +508,8 @@ COP (Concurrent Order Processor)
 | `FixGatewayTest.cpp` | `FixEnumTest.*` | Enum conversion round-trips (7 tests) |
 | `FixGatewayTest.cpp` | `FixGatewayInboundTest.*` | FIX message translation (7 tests) |
 | `FixGatewayTest.cpp` | `MultiOutQueuesTest.*` | Fan-out adapter (4 tests) |
+| `FixRotatingLogTest.cpp` | `FixRotatingLogTest.*` | The FIX log's files rotate and stay bounded (#160) |
+| `FixResendTest.py` | `FixClientRecoversMissedReports` (ctest) | A real server: a client that reconnects gets back, with a ResendRequest, the reports it missed (#160) |
 
 ---
 

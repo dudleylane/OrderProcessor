@@ -5,6 +5,7 @@
 #include <quickfix/Application.h>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <oneapi/tbb/spin_rw_mutex.h>
 #include <quickfix/SessionID.h>
 #include <quickfix/Session.h>
@@ -100,8 +101,11 @@ private:
     Store::WideParamsDataStorage *wideData_;
     Store::OrderDataStorage *orderStorage_;
 
+    /// Every session QuickFIX has created, by source string: from onCreate, not from logon. A report for a session's
+    /// order goes to QuickFIX while the client is logged out too, and QuickFIX keeps it for a ResendRequest (#160).
     std::unordered_map<std::string, FIX::SessionID> sessionMap_;
-    mutable oneapi::tbb::spin_rw_mutex sessionMapLock_;
+    std::unordered_set<std::string> loggedOn_;          // the sessions logged on now, by source string
+    mutable oneapi::tbb::spin_rw_mutex sessionMapLock_; // guards both
 
     SourceIdT defaultClearingId_; // pre-resolved clearing for FIX orders
     SourceIdT defaultAccountId_;  // pre-resolved account for FIX orders that name none (#34)
