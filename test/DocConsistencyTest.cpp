@@ -34,15 +34,21 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <vector>
+
+#include <boost/mpl/size.hpp>
 
 #include "DataModelDef.h"
 #include "ServerDefaults.h"
+#include "StateMachine.h"
+#include "StateMachineDef.h"
 #include "TransactionScope.h"
 #include "TransactionScopePool.h"
 
@@ -53,16 +59,22 @@ namespace
 // DOC_CHECK marker parser
 // ----------------------------------------------------------------------------
 
-using DocMap = std::map<std::string, std::string>;
-
-DocMap parseDocCheckMarkers(const std::filesystem::path &filePath)
+// A marker's value in one documentation file. A fact may be marked in more than one file, and each is checked.
+struct DocValue
 {
-    DocMap result;
-    std::ifstream f(filePath);
+    std::string file;
+    std::string value;
+};
+using DocMap = std::map<std::string, std::vector<DocValue>>;
+
+// Adds the markers in root/file to result
+void parseDocCheckMarkers(const std::filesystem::path &root, const std::string &file, DocMap &result)
+{
+    std::ifstream f(root / file);
     if (!f)
     {
-        ADD_FAILURE() << "Could not open documentation file: " << filePath;
-        return result;
+        ADD_FAILURE() << "Could not open documentation file: " << root / file;
+        return;
     }
     std::stringstream buf;
     buf << f.rdbuf();
@@ -79,14 +91,18 @@ DocMap parseDocCheckMarkers(const std::filesystem::path &filePath)
     {
         const std::string name = (*it)[1].str();
         const std::string value = (*it)[2].str();
-        if (result.count(name))
+        auto &values = result[name];
+        if (std::any_of(values.begin(), values.end(),
+                        [&](const DocValue &v)
+                        {
+                            return v.file == file;
+                        }))
         {
-            ADD_FAILURE() << "Duplicate DOC_CHECK marker '" << name << "' in " << filePath;
+            ADD_FAILURE() << "Duplicate DOC_CHECK marker '" << name << "' in " << file;
             continue;
         }
-        result[name] = value;
+        values.push_back({ file, value });
     }
-    return result;
 }
 
 // Locate the project root by walking up from the test binary directory until
@@ -111,7 +127,7 @@ std::filesystem::path projectRoot()
 }
 
 // ----------------------------------------------------------------------------
-// Test fixture: parses README.md once and exposes the marker map
+// Test fixture: parses README.md and docs/ARCHITECTURE.md once and exposes the marker map
 // ----------------------------------------------------------------------------
 
 class DocConsistencyTest : public ::testing::Test
@@ -122,20 +138,25 @@ protected:
     static void SetUpTestSuite()
     {
         const auto root = projectRoot();
-        docs_ = parseDocCheckMarkers(root / "README.md");
+        parseDocCheckMarkers(root, "README.md", docs_);
+        parseDocCheckMarkers(root, "docs/ARCHITECTURE.md", docs_);
     }
 
-    // Helper: assert a documented value equals an actual code value.
+    // Helper: assert that every documented value of a marker equals an actual code value.
     template <typename T> void expectDocEq(const std::string &marker, T actual)
     {
-        ASSERT_TRUE(docs_.count(marker)) << "Missing DOC_CHECK marker '" << marker << "' in README.md. "
+        ASSERT_TRUE(docs_.count(marker)) << "Missing DOC_CHECK marker '" << marker
+                                         << "' in README.md and docs/ARCHITECTURE.md. "
                                          << "Either add the marker to the doc or remove the assertion.";
         std::ostringstream oss;
         oss << actual;
-        EXPECT_EQ(docs_[marker], oss.str()) << "DOC_CHECK marker '" << marker << "': "
-                                            << "doc says \"" << docs_[marker] << "\", "
+        for (const DocValue &doc : docs_[marker])
+        {
+            EXPECT_EQ(doc.value, oss.str()) << "DOC_CHECK marker '" << marker << "' in " << doc.file << ": "
+                                            << "doc says \"" << doc.value << "\", "
                                             << "code says \"" << oss.str() << "\". "
-                                            << "Update README.md or the code to make them agree.";
+                                            << "Update " << doc.file << " or the code to make them agree.";
+        }
     }
 };
 
@@ -147,8 +168,19 @@ DocMap DocConsistencyTest::docs_;
 
 TEST_F(DocConsistencyTest, ParserFoundMarkers)
 {
-    EXPECT_FALSE(docs_.empty()) << "No DOC_CHECK markers found in README.md. The parser may be broken "
-                                << "or all markers may have been removed.";
+    EXPECT_FALSE(docs_.empty()) << "No DOC_CHECK markers found in README.md or docs/ARCHITECTURE.md. The parser may "
+                                << "be broken or all markers may have been removed.";
+}
+
+// The order state machine's size. Both README.md and docs/ARCHITECTURE.md give it, and both had drifted (#171).
+TEST_F(DocConsistencyTest, OrderStateCount)
+{
+    expectDocEq("order_state_count", COP::OrdState::ORDER_STATE_COUNT);
+}
+
+TEST_F(DocConsistencyTest, TransitionCount)
+{
+    expectDocEq("transition_count", boost::mpl::size<COP::OrdState::OrderState::stt>::value);
 }
 
 TEST_F(DocConsistencyTest, PoolSize)
