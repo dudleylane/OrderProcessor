@@ -195,7 +195,7 @@ CI builds and runs this image on every push (`.github/workflows/docker.yml`), wi
 
 | Stage | Base Image | Purpose |
 |-------|-----------|---------|
-| Builder | `node:20-slim` | Runs `npm ci` and `npm run build` (TypeScript + Vite) |
+| Builder | `node:24-slim` | Runs `npm ci` and `npm run build` (TypeScript + Vite) |
 | Runtime | `nginx:alpine` | Serves the built SPA; uses custom `nginx.conf` for WebSocket proxying |
 
 The frontend connects to `/ws` on whatever host and port served the page, and nginx passes that on to the server. So it works from another machine and behind a remapped port, such as `"3001:3000"`.

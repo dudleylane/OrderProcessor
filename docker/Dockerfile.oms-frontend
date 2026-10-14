@@ -1,7 +1,7 @@
 # OMS Frontend Dockerfile
 # Multi-stage: build with Node, serve with nginx
 
-FROM node:20-slim AS builder
+FROM node:24-slim AS builder
 WORKDIR /app
 COPY src/oms-frontend/package*.json ./
 RUN npm ci
