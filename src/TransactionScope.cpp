@@ -16,6 +16,7 @@
 #include <cstring> // For ::memcpy
 #include "TransactionScope.h"
 #include "TrOperations.h"
+#include "OrderStorage.h"
 
 using namespace std;
 using namespace COP::ACID;
@@ -288,13 +289,44 @@ bool TransactionScope::executeTransaction(const Context &cnxt)
         return true;
     }
 
+    // The persist operations come first (Scope::addOperationFirst, #28). When there are several, one for each order a
+    // trade fills, their records go to storage as one write, committed before the first operation that publishes: a
+    // crash leaves all of this transaction's orders durable, or none of them (#163). Each used to commit on its own, and
+    // a crash between two commits left half a trade.
+    size_t persists = 0;
+    while ((persists < operations_.size()) && (PERSIST_ORDER_TROPERATION == operations_[persists]->type()))
+    {
+        ++persists;
+    }
+    const bool grouped = (1 < persists) && (nullptr != cnxt.orderStorage_);
+    bool groupOpen = false;
+    bool committing = false;
+
     size_t pos = 0;
     // execute commit
     try
     {
+        if (grouped)
+        {
+            cnxt.orderStorage_->beginPersistGroup();
+            groupOpen = true;
+        }
         for (; pos < operations_.size(); ++pos)
         {
+            if (groupOpen && (persists == pos))
+            {
+                committing = true;
+                groupOpen = false;
+                cnxt.orderStorage_->commitPersistGroup();
+                committing = false;
+            }
             operations_[pos]->execute(cnxt);
+        }
+        if (groupOpen)
+        {
+            committing = true;
+            groupOpen = false;
+            cnxt.orderStorage_->commitPersistGroup();
         }
         return true;
     }
@@ -303,6 +335,17 @@ bool TransactionScope::executeTransaction(const Context &cnxt)
     }
     catch (...)
     {
+    }
+
+    if (groupOpen)
+    {
+        cnxt.orderStorage_->abortPersistGroup();
+    }
+    if (committing)
+    {
+        // The group failed to commit, before the operation at pos ran: roll back from the last persist. Their records
+        // never reached storage, so erasing their versions finds nothing.
+        pos = persists - 1;
     }
 
     // commit failed - execute rollback

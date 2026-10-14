@@ -461,6 +461,11 @@ public:
     virtual u32 save(const OrderEntry &order) = 0;
     /// Erases one persisted version, undoing a save().
     virtual void erase(const IdT &orderId, u32 version) = 0;
+    /// The saves a thread makes between beginGroup() and commitGroup() become durable together, or none of them do
+    /// (#163). A saver that can't group writes each save at once, and these do nothing.
+    virtual void beginGroup() {}
+    virtual void commitGroup() {}
+    virtual void abortGroup() noexcept {}
 };
 
 } // namespace COP

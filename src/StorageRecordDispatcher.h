@@ -71,6 +71,10 @@ public:
     /// reimplemented from OrderSaver
     virtual u32 save(const OrderEntry &val);
     virtual void erase(const IdT &orderId, u32 version);
+    /// A group of orders' saves, written as one by the file storage (#163)
+    void beginGroup() override;
+    void commitGroup() override;
+    void abortGroup() noexcept override;
 
 public:
     /// reimplemented from IdLimitSaver: one record, the newest version kept (#81)

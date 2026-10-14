@@ -48,6 +48,13 @@ public:
     virtual void erase(const IdT &id, u32 version) = 0;
     /// erases all versions of record from file
     virtual void erase(const IdT &id) = 0;
+
+    /// A group of updates written as one (#163): the updates a thread makes between beginGroup() and commitGroup() reach
+    /// the file together, in one transaction, or none of them do. A storage that can't group writes each update at once,
+    /// and these do nothing.
+    virtual void beginGroup() {}
+    virtual void commitGroup() {}
+    virtual void abortGroup() noexcept {}
 };
 
 /// observer for the storage loader. handles loaded records and start/end loading events

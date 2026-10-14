@@ -13,6 +13,8 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <set>
 
@@ -25,6 +27,9 @@
 #include "DeferedEvents.h"
 #include "OrderMatcher.h"
 #include "mocks/MockOrderBook.h"
+#include "LMDBStorage.h"
+#include "StorageRecordDispatcher.h"
+#include "WideDataStorage.h"
 
 using namespace COP;
 using namespace COP::ACID;
@@ -771,4 +776,229 @@ TEST_F(MatchOrderOperationTest, PersistOrderRollbackWritesNothingWithoutASaver)
 
     op.execute(ctx);
     op.rollback(ctx);
+}
+
+// =============================================================================
+// A transaction's persists, written as one (#163)
+// =============================================================================
+
+namespace
+{
+/// An operation that publishes, as an execution report's does. It notes that it ran, and whether the persists before it
+/// had been committed by then.
+class PublishingOperation final : public Operation
+{
+public:
+    PublishingOperation(const IdT &id, const bool *committed, bool *ran, bool *ranAfterCommit)
+        : Operation(CREATE_EXECREPORT_TROPERATION, id), committed_(committed), ran_(ran),
+          ranAfterCommit_(ranAfterCommit)
+    {
+    }
+    void execute(const Context &) override
+    {
+        *ran_ = true;
+        *ranAfterCommit_ = *committed_;
+    }
+    void rollback(const Context &) override {}
+
+private:
+    const bool *committed_;
+    bool *ran_;
+    bool *ranAfterCommit_;
+};
+
+/// A trade's transaction as Processor builds it: each order's persist first, then what publishes
+void buildTrade(TransactionScope *scope, const OrderEntry &buy, const OrderEntry &sell, Operation *publishing)
+{
+    if (nullptr != publishing)
+    {
+        std::unique_ptr<Operation> op(publishing);
+        scope->addOperation(op);
+    }
+    std::unique_ptr<Operation> persistSell = std::make_unique<PersistOrderTrOperation>(sell);
+    scope->addOperationFirst(persistSell);
+    std::unique_ptr<Operation> persistBuy = std::make_unique<PersistOrderTrOperation>(buy);
+    scope->addOperationFirst(persistBuy);
+}
+
+/// LMDB, wired to the order storage as the server wires it, without restoring what the directory holds
+class LmdbOrders
+{
+public:
+    explicit LmdbOrders(const std::string &dir)
+    {
+        storage_.load(dir, &ignore_);
+        dispatcher_.init(WideDataStorage::instance(), nullptr, &storage_, OrderStorage::instance());
+    }
+    LMDBStorage &storage()
+    {
+        return storage_;
+    }
+    StorageRecordDispatcher &dispatcher()
+    {
+        return dispatcher_;
+    }
+
+private:
+    class Ignore final : public FileStorageObserver
+    {
+    public:
+        void startLoad() override {}
+        void onRecordLoaded(const IdT &, u32, const char *, size_t) override {}
+        void finishLoad() override {}
+    };
+    Ignore ignore_;
+    LMDBStorage storage_;
+    StorageRecordDispatcher dispatcher_;
+};
+
+/// The dispatcher, except that the process ends while it saves one order: a crash in the middle of a transaction's
+/// persists
+class CrashingSaver final : public OrderSaver
+{
+public:
+    CrashingSaver(OrderSaver *inner, const OrderEntry *crashOn) : inner_(inner), crashOn_(crashOn) {}
+    u32 save(const OrderEntry &order) override
+    {
+        if (&order == crashOn_)
+        {
+            std::_Exit(0);
+        }
+        return inner_->save(order);
+    }
+    void erase(const IdT &orderId, u32 version) override
+    {
+        inner_->erase(orderId, version);
+    }
+    void beginGroup() override
+    {
+        inner_->beginGroup();
+    }
+    void commitGroup() override
+    {
+        inner_->commitGroup();
+    }
+    void abortGroup() noexcept override
+    {
+        inner_->abortGroup();
+    }
+
+private:
+    OrderSaver *inner_;
+    const OrderEntry *crashOn_;
+};
+} // namespace
+
+TEST_F(MatchOrderOperationTest, ATradesPersistsAreCommittedTogetherBeforeItPublishes)
+{
+    // Both orders reach storage in one write, and before the report goes out (#28)
+    ::testing::StrictMock<MockOrderSaver> saver;
+    OrderStorage::instance()->attach(&saver);
+    bool committed = false;
+    bool ran = false;
+    bool ranAfterCommit = false;
+    {
+        ::testing::InSequence order;
+        EXPECT_CALL(saver, beginGroup());
+        EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_))).WillOnce(::testing::Return(3u));
+        EXPECT_CALL(saver, save(::testing::Ref(*sellOrder_))).WillOnce(::testing::Return(5u));
+        EXPECT_CALL(saver, commitGroup())
+            .WillOnce(
+                [&committed]
+                {
+                    committed = true;
+                });
+    }
+    TransactionScope scope;
+    buildTrade(&scope, *buyOrder_, *sellOrder_,
+               new PublishingOperation(buyOrder_->orderId_, &committed, &ran, &ranAfterCommit));
+
+    EXPECT_TRUE(scope.executeTransaction(createContext()));
+    EXPECT_TRUE(ran);
+    EXPECT_TRUE(ranAfterCommit) << "the report went out before the orders were durable";
+}
+
+TEST_F(MatchOrderOperationTest, ATradeWhosePersistsFailToCommitPublishesNothing)
+{
+    ::testing::NiceMock<MockOrderSaver> saver;
+    OrderStorage::instance()->attach(&saver);
+    ON_CALL(saver, save(::testing::_)).WillByDefault(::testing::Return(1u));
+    EXPECT_CALL(saver, commitGroup()).WillOnce(::testing::Throw(std::runtime_error("injected: the commit failed")));
+    bool committed = false;
+    bool ran = false;
+    bool ranAfterCommit = false;
+    TransactionScope scope;
+    buildTrade(&scope, *buyOrder_, *sellOrder_,
+               new PublishingOperation(buyOrder_->orderId_, &committed, &ran, &ranAfterCommit));
+
+    EXPECT_FALSE(scope.executeTransaction(createContext()));
+    EXPECT_FALSE(ran) << "a transaction whose orders aren't durable published";
+}
+
+TEST_F(MatchOrderOperationTest, OnePersistIsWrittenAsBefore)
+{
+    // Nothing to group: a transaction that persists one order writes it at once
+    ::testing::StrictMock<MockOrderSaver> saver;
+    OrderStorage::instance()->attach(&saver);
+    EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_))).WillOnce(::testing::Return(2u));
+    TransactionScope scope;
+    std::unique_ptr<Operation> persist = std::make_unique<PersistOrderTrOperation>(*buyOrder_);
+    scope.addOperationFirst(persist);
+
+    EXPECT_TRUE(scope.executeTransaction(createContext()));
+}
+
+TEST_F(MatchOrderOperationTest, ATradesOrdersReachLmdbInOneCommit)
+{
+    const std::string dir = test::uniqueTestPath("trade-one-commit");
+    std::filesystem::remove_all(dir);
+    {
+        LmdbOrders lmdb(dir);
+        OrderStorage::instance()->attach(&lmdb.dispatcher());
+        TransactionScope scope;
+        buildTrade(&scope, *buyOrder_, *sellOrder_, nullptr);
+        const u64 before = lmdb.storage().commits();
+
+        EXPECT_TRUE(scope.executeTransaction(createContext()));
+
+        EXPECT_EQ(before + 1, lmdb.storage().commits()) << "the trade's orders took more than one LMDB commit";
+        EXPECT_TRUE(lmdb.storage().isExists(buyOrder_->orderId_, 0));
+        EXPECT_TRUE(lmdb.storage().isExists(sellOrder_->orderId_, 0));
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(MatchOrderOperationTest, ACrashWhileATradesOrdersArePersistedLeavesBothOrNeither)
+{
+    // The process ends while the second of the two orders is being saved, as a host crash would end it. A restart must
+    // find both orders' new versions, or neither: one without the other is half a trade (#163).
+    const std::string dir = test::uniqueTestPath("trade-crash");
+    std::filesystem::remove_all(dir);
+    {
+        // The versions the orders' earlier transactions wrote
+        LmdbOrders lmdb(dir);
+        lmdb.dispatcher().save(*buyOrder_);
+        lmdb.dispatcher().save(*sellOrder_);
+    }
+
+    EXPECT_EXIT(
+        {
+            LmdbOrders lmdb(dir);
+            CrashingSaver crashing(&lmdb.dispatcher(), sellOrder_);
+            OrderStorage::instance()->attach(&crashing);
+            TransactionScope scope;
+            buildTrade(&scope, *buyOrder_, *sellOrder_, nullptr);
+            scope.executeTransaction(createContext());
+            std::_Exit(1); // the crash didn't happen
+        },
+        ::testing::ExitedWithCode(0), "");
+
+    LmdbOrders restarted(dir);
+    const bool buyNew = restarted.storage().isExists(buyOrder_->orderId_, 1);
+    const bool sellNew = restarted.storage().isExists(sellOrder_->orderId_, 1);
+    EXPECT_EQ(buyNew, sellNew) << "half the trade is durable: the buy's new version " << (buyNew ? "is" : "isn't")
+                               << " on disk, the sell's " << (sellNew ? "is" : "isn't");
+    EXPECT_TRUE(restarted.storage().isExists(buyOrder_->orderId_, 0));
+    EXPECT_TRUE(restarted.storage().isExists(sellOrder_->orderId_, 0));
+    std::filesystem::remove_all(dir);
 }

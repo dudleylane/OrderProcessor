@@ -651,4 +651,88 @@ TEST_F(LMDBStorageTest, TheMapGrowsWhileSeveralThreadsWrite)
     EXPECT_EQ(threads * perThread, observer.records_.size());
 }
 
+// =============================================================================
+// Groups (#163): several updates in one transaction
+// =============================================================================
+
+TEST_F(LMDBStorageTest, AGroupWritesItsUpdatesInOneTransaction)
+{
+    // A trade's two orders were committed one after the other, so a crash between the commits left half a trade (#163)
+    TestLMDBObserver observer;
+    LMDBStorage storage;
+    storage.load(testDir_, &observer);
+    const IdT buy(1, 1);
+    const IdT sell(2, 1);
+    ASSERT_EQ(0u, storage.update(buy, "buy-0", 5));
+    ASSERT_EQ(0u, storage.update(sell, "sell-0", 6));
+    const u64 before = storage.commits();
+
+    storage.beginGroup();
+    EXPECT_EQ(1u, storage.update(buy, "buy-1", 5));
+    EXPECT_EQ(1u, storage.update(sell, "sell-1", 6));
+    EXPECT_FALSE(storage.isExists(buy, 1)) << "a group's update was written before the group committed";
+    storage.commitGroup();
+
+    EXPECT_EQ(before + 1, storage.commits()) << "the group took more than one transaction";
+    EXPECT_TRUE(storage.isExists(buy, 1));
+    EXPECT_TRUE(storage.isExists(sell, 1));
+    EXPECT_TRUE(storage.isExists(buy, 0)) << "the version before the new one is kept (#148)";
+}
+
+TEST_F(LMDBStorageTest, AnAbortedGroupWritesNothing)
+{
+    TestLMDBObserver observer;
+    LMDBStorage storage;
+    storage.load(testDir_, &observer);
+    const IdT buy(1, 1);
+    const IdT sell(2, 1);
+    ASSERT_EQ(0u, storage.update(buy, "buy-0", 5));
+    const u64 before = storage.commits();
+
+    storage.beginGroup();
+    EXPECT_EQ(1u, storage.update(buy, "buy-1", 5));
+    EXPECT_EQ(0u, storage.update(sell, "sell-0", 6));
+    storage.abortGroup();
+
+    EXPECT_EQ(before, storage.commits());
+    EXPECT_FALSE(storage.isExists(buy, 1));
+    EXPECT_FALSE(storage.isExists(sell, 0));
+    EXPECT_EQ(1u, storage.update(buy, "buy-1", 5)) << "an update after the abort found a version the group held";
+}
+
+TEST_F(LMDBStorageTest, AGroupThatFillsTheMapGrowsItAndWritesItAll)
+{
+    // The whole group runs again once the map has grown (#148), in one transaction still
+    const u64 count = 48;
+    TestLMDBObserver observer;
+    LMDBStorage storage(SMALL_MAP);
+    storage.load(testDir_, &observer);
+    storage.beginGroup();
+    for (u64 i = 1; i <= count; ++i)
+    {
+        ASSERT_EQ(0u, storage.update(IdT(i, 1), BIG_RECORD.data(), BIG_RECORD.size())) << "record " << i;
+    }
+    ASSERT_NO_THROW(storage.commitGroup());
+
+    EXPECT_GE(storage.mapSize(), 4 * SMALL_MAP);
+    for (u64 i = 1; i <= count; ++i)
+    {
+        EXPECT_TRUE(storage.isExists(IdT(i, 1), 0)) << "record " << i;
+    }
+}
+
+TEST_F(LMDBStorageTest, AGroupUpdatesARecordOnceAndAThreadHasOneGroup)
+{
+    // A transaction persists an order once (Processor::persistOrder), so a second update in its group is a bug
+    TestLMDBObserver observer;
+    LMDBStorage storage;
+    storage.load(testDir_, &observer);
+    storage.beginGroup();
+    EXPECT_THROW(storage.beginGroup(), std::logic_error);
+    storage.update(IdT(1, 1), "a", 1);
+    EXPECT_THROW(storage.update(IdT(1, 1), "b", 1), std::logic_error);
+    storage.abortGroup();
+    EXPECT_FALSE(storage.isExists(IdT(1, 1), 0));
+}
+
 } // namespace
