@@ -111,6 +111,14 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
                 msg.newOrder.account = d.value("account", "");
                 msg.newOrder.currency = currencyFromJson(d.value("currency", ""));
                 msg.newOrder.capacity = capacityFromJson(d.value("capacity", ""));
+                // A limit price is required, and above 0 (#188): an absent one was 0, and a limit sell at 0 sold at any
+                // bid
+                const bool limit =
+                    (LIMIT_ORDERTYPE == msg.newOrder.ordType) || (STOPLIMIT_ORDERTYPE == msg.newOrder.ordType);
+                if (limit && !(msg.newOrder.price > 0))
+                {
+                    markInvalid(&msg, "invalid price: a LIMIT or STOPLIMIT order needs one above 0");
+                }
             }
         }
         else if (msg.type == "cancel_order")
@@ -135,6 +143,11 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
                 msg.replaceOrder.hasTif = d.contains("tif");
                 msg.replaceOrder.orderQty = static_cast<unsigned int>(orderQty);
                 msg.replaceOrder.tif = tifFromJson(d.value("tif", ""));
+                // A new price is above 0 (#188)
+                if (msg.replaceOrder.hasPrice && !(msg.replaceOrder.price > 0))
+                {
+                    markInvalid(&msg, "invalid price: expected a number above 0");
+                }
             }
         }
         else if (msg.type == "subscribe_book" || msg.type == "unsubscribe_book")
