@@ -271,6 +271,32 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_DuplicateClOrdId)
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 }
 
+TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_ZeroQuantity)
+{
+    // An order for nothing was accepted, and traded for 0 (#187)
+    TestTransactionContext trCntxt;
+    OrderStateWrapper p;
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+
+    p.start();
+    p.checkStates("Rcvd_New", "NoCnlReplace");
+
+    onOrderReceived recvevnt;
+    recvevnt.order_ = order.get();
+    recvevnt.generator_ = IdTGenerator::instance();
+    recvevnt.transaction_ = &trCntxt;
+    recvevnt.orderStorage_ = OrderStorage::instance();
+    recvevnt.order_->orderQty_ = 0;
+    recvevnt.order_->leavesQty_ = 0;
+
+    p.processEvent(recvevnt);
+    p.checkStates("Rejected", "NoCnlReplace");
+    EXPECT_FALSE(recvevnt.order_->orderId_.isValid());
+    EXPECT_EQ(1u, trCntxt.op_.size());
+    EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
+}
+
 TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_InvalidSide)
 {
     TestTransactionContext trCntxt;
