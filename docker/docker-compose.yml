@@ -6,8 +6,8 @@ services:
     image: docker.io/library/postgres:16-alpine
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    # No host port (#146): services reach it as oms-db:5432 on the stack's network, and the host through
+    # `docker compose exec oms-db psql`
     volumes:
       - oms-pgdata:/var/lib/postgresql/data
       # z: on an SELinux host, relabel the scripts so a container may read them (#201). Without it Postgres can't list
@@ -31,6 +31,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.oms-frontend
     restart: unless-stopped
+    # The stack's only published port (#146): the app, and /ws, which nginx passes on to the server
     ports:
       - "3000:3000"
     mem_limit: 128m
@@ -65,9 +66,15 @@ services:
     # A small init runs as PID 1 and starts the server (#203). As PID 1 itself, the server ignored SIGTERM until its
     # handler was set, after the data directory's restore, and an abort became a SIGSEGV.
     init: true
+    # No WebSocket port on the host (#146): WebSocket clients reach the server through the frontend's /ws. A client must
+    # offer this access token, which the app asks for; set it in .env (`openssl rand -hex 32` makes one), or compose
+    # refuses to start. A browser page must also come from one of OMS_ALLOWED_ORIGINS, comma-separated, when it's set.
+    # FIX clients connect to the acceptor's 5001, which stays published.
     ports:
-      - "8080:8080"
       - "5001:5001"
+    environment:
+      OMS_WS_TOKEN: "${OMS_WS_TOKEN:?set OMS_WS_TOKEN in docker/.env, as docker/README.md says}"
+      OMS_ALLOWED_ORIGINS: "${OMS_ALLOWED_ORIGINS:-}"
     # Room for a large book and LMDB's map; raise it with them (#158)
     mem_limit: 2g
     pids_limit: 512

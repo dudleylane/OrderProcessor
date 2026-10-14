@@ -13,6 +13,7 @@
 #include <exception>
 
 namespace beast = boost::beast;
+namespace http = beast::http;
 namespace websocket = beast::websocket;
 namespace net = boost::asio;
 using tcp = net::ip::tcp;
@@ -67,8 +68,8 @@ void logContained(const char *where, const std::string &request, const char *wha
 WsSession::WsSession(tcp::socket &&socket, SessionManager *sessionMgr, Store::WideParamsDataStorage *wideData,
                      Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues, IdTValueGenerator *idGen,
                      OrderBookImpl *orderBook, SourceIdT defaultClearingId, SourceIdT defaultAccountId,
-                     const WsLimits &limits, std::shared_ptr<std::atomic<std::size_t>> connections)
-    : ws_(std::move(socket)), sessionMgr_(sessionMgr), wideData_(wideData), orderStorage_(orderStorage),
+                     const WsLimits &limits, std::shared_ptr<std::atomic<std::size_t>> connections, const WsAuth &auth)
+    : ws_(std::move(socket)), auth_(auth), sessionMgr_(sessionMgr), wideData_(wideData), orderStorage_(orderStorage),
       inQueues_(inQueues), idGen_(idGen), orderBook_(orderBook), defaultClearingId_(defaultClearingId),
       defaultAccountId_(defaultAccountId), limits_(limits), connections_(std::move(connections))
 {
@@ -84,16 +85,76 @@ WsSession::~WsSession()
 
 void WsSession::run()
 {
+    // A client that connects and sends nothing is dropped, as the WebSocket's own timeouts drop one later
+    beast::get_lowest_layer(ws_).expires_after(std::chrono::seconds(30));
+    http::async_read(ws_.next_layer(), buffer_, upgradeRequest_,
+                     beast::bind_front_handler(&WsSession::onRequest, shared_from_this()));
+}
+
+void WsSession::onRequest(beast::error_code ec, std::size_t /*bytesTransferred*/)
+{
+    if (ec)
+    {
+        return;
+    }
+    // A plain HTTP request, such as the image's health check, gets an answer rather than a dropped connection
+    if (!websocket::is_upgrade(upgradeRequest_))
+    {
+        refuse(http::status::upgrade_required, "This is a WebSocket server: open a WebSocket on /ws.");
+        return;
+    }
+    // A client may send the header more than once; a browser sends one, comma-separated
+    std::string subprotocols;
+    const auto fields = upgradeRequest_.equal_range(http::field::sec_websocket_protocol);
+    for (auto field = fields.first; field != fields.second; ++field)
+    {
+        subprotocols.append(subprotocols.empty() ? "" : ",").append(field->value());
+    }
+    switch (decideUpgrade(auth_, subprotocols, upgradeRequest_[http::field::origin]))
+    {
+    case WsUpgrade::ForbiddenOrigin:
+        refuse(http::status::forbidden, "This server doesn't accept WebSocket connections from that Origin.");
+        return;
+    case WsUpgrade::MissingToken:
+    case WsUpgrade::WrongToken:
+        refuse(http::status::unauthorized, "A WebSocket connection to this server needs its access token.");
+        return;
+    case WsUpgrade::Accept:
+        break;
+    }
+
+    beast::get_lowest_layer(ws_).expires_never();
     ws_.set_option(websocket::stream_base::timeout::suggested(beast::role_type::server));
     // A larger message fails the read, and the session ends: Beast's default let a client send 16 MiB (#159)
     ws_.read_message_max(limits_.maxMessageBytes);
+    const bool answerSubprotocol = offersSubprotocol(subprotocols);
     ws_.set_option(websocket::stream_base::decorator(
-        [](websocket::response_type &res)
+        [answerSubprotocol](websocket::response_type &res)
         {
-            res.set(boost::beast::http::field::server, "OrderProcessorServer");
+            res.set(http::field::server, "OrderProcessorServer");
+            // Never the token's entry: the answer names one of the client's offers, and only ours
+            if (answerSubprotocol)
+            {
+                res.set(http::field::sec_websocket_protocol, std::string(WS_SUBPROTOCOL));
+            }
         }));
+    ws_.async_accept(upgradeRequest_, beast::bind_front_handler(&WsSession::onAccept, shared_from_this()));
+}
 
-    ws_.async_accept(beast::bind_front_handler(&WsSession::onAccept, shared_from_this()));
+void WsSession::refuse(http::status status, const std::string &reason)
+{
+    auto response = std::make_shared<http::response<http::string_body>>(status, upgradeRequest_.version());
+    response->set(http::field::server, "OrderProcessorServer");
+    response->set(http::field::content_type, "text/plain");
+    response->keep_alive(false);
+    response->body() = reason + "\n";
+    response->prepare_payload();
+    http::async_write(ws_.next_layer(), *response,
+                      [self = shared_from_this(), response](beast::error_code, std::size_t)
+                      {
+                          beast::error_code ignored;
+                          beast::get_lowest_layer(self->ws_).socket().shutdown(tcp::socket::shutdown_send, ignored);
+                      });
 }
 
 void WsSession::onAccept(beast::error_code ec)

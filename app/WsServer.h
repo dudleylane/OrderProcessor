@@ -12,6 +12,7 @@
 
 #include "TypesDef.h"
 #include "ServerDefaults.h"
+#include "WsAuth.h"
 
 namespace COP
 {
@@ -40,7 +41,7 @@ public:
     WsServer(boost::asio::io_context &ioc, boost::asio::ip::tcp::endpoint endpoint, SessionManager *sessionMgr,
              Store::WideParamsDataStorage *wideData, Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues,
              IdTValueGenerator *idGen, OrderBookImpl *orderBook, SourceIdT defaultClearingId,
-             SourceIdT defaultAccountId, const WsLimits &limits = WsLimits());
+             SourceIdT defaultAccountId, const WsLimits &limits = WsLimits(), const WsAuth &auth = WsAuth());
 
     void run();
     /// Where the server listens: the port the system chose, when the endpoint asked for port 0
@@ -74,6 +75,7 @@ private:
     SourceIdT defaultClearingId_; // passed to every session; see WsSession (#34)
     SourceIdT defaultAccountId_;
     WsLimits limits_;
+    WsAuth auth_; // who may open a session, which each session checks (#146)
     /// Sessions alive, against limits_.maxConnections: each one's destructor counts itself out (#159)
     std::shared_ptr<std::atomic<std::size_t>> connections_ = std::make_shared<std::atomic<std::size_t>>(0);
     boost::asio::steady_timer acceptRetry_; // the pause before accepting again after an accept failed (#202)
