@@ -75,6 +75,10 @@ target_sources(orderProcessorTest
 
         # seedData's argument parsing (header-only, in app/)
         SeedDataArgsTest.cpp
+
+        # The server's load of its data directory (#165)
+        ServerDataTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/ServerData.cpp
         ${CMAKE_SOURCE_DIR}/app/WsSession.cpp
         ${CMAKE_SOURCE_DIR}/app/WsServer.cpp
         ${CMAKE_SOURCE_DIR}/app/SessionManager.cpp
