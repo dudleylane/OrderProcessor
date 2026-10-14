@@ -342,6 +342,33 @@ int main(int argc, char *argv[])
 
     auto taskMgr = std::make_unique<Tasks::TaskManager>(taskParams);
 
+    // 9b. A crash after the transaction that booked an order committed, and before the one with its fills did, leaves
+    // the order restored without its fills: Phase 2 left each such order out of the book, which it would cross (#207).
+    // Match them now, in the order they arrived and before any client can send an order, as their bookings did. Their
+    // fills persist and report through the transaction workers. One that can't be matched is no reason not to start.
+    const std::vector<OrderEntry *> &ordersToMatch = dispatcher->ordersToMatch();
+    if (!ordersToMatch.empty())
+    {
+        auto *restoreProcessor = static_cast<Proc::Processor *>(evntProcessors[0]);
+        size_t matched = 0;
+        for (OrderEntry *order : ordersToMatch)
+        {
+            try
+            {
+                restoreProcessor->matchRestored(order);
+                ++matched;
+            }
+            catch (const std::exception &ex)
+            {
+                aux::ExchLogger::instance()->error("Restored order " + std::to_string(order->orderId_.id_) +
+                                                   " lost its fills and could not be matched: " + ex.what());
+            }
+        }
+        aux::ExchLogger::instance()->warn(std::to_string(ordersToMatch.size()) +
+                                          " restored order(s) had lost their fills; matched " +
+                                          std::to_string(matched) + " of them before taking orders");
+    }
+
     // 10. Create Beast io_context and WsServer
     boost::asio::io_context ioc{ 1 };
 

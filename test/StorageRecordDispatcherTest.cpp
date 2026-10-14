@@ -36,6 +36,7 @@
 #include "OrderStorage.h"
 #include "LMDBStorage.h"
 #include "IdTGenerator.h"
+#include "OrderBookImpl.h"
 
 #include <filesystem>
 
@@ -1808,4 +1809,68 @@ TEST_F(StorageRecordDispatcherTest, ARecordInANewerFormatIsRejected)
     {
         EXPECT_NE(std::string::npos, std::string(ex.what()).find("Invalid record type")) << ex.what();
     }
+}
+
+// =============================================================================
+// Orders that lost their fills (#207)
+// =============================================================================
+
+namespace
+{
+/// An open limit order on the instrument, as the transaction that booked it wrote it
+std::unique_ptr<OrderEntry> bookedOrder(const SourceIdT &instrument, u64 number, Side side, PriceT price, QuantityT qty)
+{
+    std::unique_ptr<OrderEntry> order = test::createCorrectOrder(instrument);
+    test::assignClOrderId(order.get());
+    order->orderId_ = IdT(number, 20261014);
+    order->status_ = NEW_ORDSTATUS;
+    order->side_ = side;
+    order->price_ = price;
+    order->orderQty_ = qty;
+    order->leavesQty_ = qty;
+    // In New, with no cancel or replace pending: the ids #150 pins
+    order->stateMachinePersistance_.orderData_ = order.get();
+    order->stateMachinePersistance_.stateZone1Id_ = 2;
+    order->stateMachinePersistance_.stateZone2Id_ = 8;
+    return order;
+}
+
+void loadOrderRecord(StorageRecordDispatcher &dispatcher, const OrderEntry &order)
+{
+    std::string buf = createRecordTypePrefix(StorageRecordDispatcher::ORDER_RECORDTYPE);
+    IdT id;
+    u32 version = 0;
+    OrderCodec::encode(order, &buf, &id, &version);
+    dispatcher.onRecordLoaded(id, version, buf.c_str(), buf.size());
+}
+} // namespace
+
+TEST_F(StorageRecordDispatcherTest, RestoredOrdersThatCrossAnEarlierOneAreLeftToMatch)
+{
+    // Each restored order is checked against the orders that arrived before it (#207). X rests. Y crosses X. W crosses Y,
+    // which waits to be matched: matched first, Y rests, and W then trades with it at Y's price, as it did. Booked now,
+    // W would rest, and Y would trade with it at W's. Z crosses nothing. Only X and Z are booked.
+    const SourceIdT instrument = test::addInstrument("UNCROSS");
+    OrderBookImpl book;
+    OrderBookImpl::InstrumentsT instruments;
+    instruments.insert(instrument);
+    book.init(instruments);
+    dispatcher_->init(restore_.get(), &book, saver_.get(), orderStorage_.get());
+    dispatcher_->startLoad();
+    std::unique_ptr<OrderEntry> x = bookedOrder(instrument, 11, SELL_SIDE, 100.0, 100);
+    std::unique_ptr<OrderEntry> y = bookedOrder(instrument, 12, BUY_SIDE, 101.0, 200);
+    std::unique_ptr<OrderEntry> w = bookedOrder(instrument, 13, SELL_SIDE, 100.5, 50);
+    std::unique_ptr<OrderEntry> z = bookedOrder(instrument, 14, BUY_SIDE, 99.0, 10);
+    // In any order: the dispatcher restores them in the order they arrived
+    loadOrderRecord(*dispatcher_, *z);
+    loadOrderRecord(*dispatcher_, *w);
+    loadOrderRecord(*dispatcher_, *x);
+    loadOrderRecord(*dispatcher_, *y);
+    dispatcher_->finishLoad();
+
+    EXPECT_EQ(x->orderId_, book.getTop(instrument, SELL_SIDE));
+    EXPECT_EQ(z->orderId_, book.getTop(instrument, BUY_SIDE));
+    ASSERT_EQ(2u, dispatcher_->ordersToMatch().size());
+    EXPECT_EQ(y->orderId_, dispatcher_->ordersToMatch()[0]->orderId_);
+    EXPECT_EQ(w->orderId_, dispatcher_->ordersToMatch()[1]->orderId_);
 }
