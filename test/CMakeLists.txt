@@ -64,7 +64,11 @@ target_sources(orderProcessorTest
         # The C++ enums against the frontend's and the Postgres schema's (#154)
         EnumCouplingTest.cpp
 
-        # WebSocket session, served on loopback (built from app/, which the test target does not link)
+        # WebSocket client-message parser (built from app/, which the test target does not link)
+        ClientMessageParserTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/ClientMessageParser.cpp
+
+        # WebSocket session, served on loopback (also built from app/)
         WsSessionTest.cpp
         JsonSerializerTest.cpp
 
@@ -73,10 +77,6 @@ target_sources(orderProcessorTest
         ${CMAKE_SOURCE_DIR}/app/WsSession.cpp
         ${CMAKE_SOURCE_DIR}/app/SessionManager.cpp
         ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
-
-        # WebSocket client-message parser (built from app/, which the test target does not link)
-        ClientMessageParserTest.cpp
-        ${CMAKE_SOURCE_DIR}/app/ClientMessageParser.cpp
 )
 
 target_include_directories(orderProcessorTest

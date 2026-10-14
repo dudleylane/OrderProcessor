@@ -4,8 +4,8 @@
 #include <nlohmann/json.hpp>
 #include "DataModelDef.h"
 #include "OrderBookImpl.h"
-#include "QueuesDef.h"
 #include "ClientMessageParser.h"
+#include "QueuesDef.h"
 
 namespace COP
 {
