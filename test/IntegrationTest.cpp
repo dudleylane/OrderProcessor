@@ -510,6 +510,78 @@ TEST_F(IntegrationTest, AnOrderForNothingIsRejectedAndTradesNothing)
     transMgr.stop();
 }
 
+TEST_F(IntegrationTest, ALimitSellAtZeroIsRejectedNotSoldAtTheBid)
+{
+    // A limit sell without a price, or at 0, was accepted and sold at the resting bid, as a market order does (#188)
+    aux::ExchLogger::instance()->setDebugOn(false);
+    aux::ExchLogger::instance()->setNoteOn(false);
+
+    DummyOrderSaver saver;
+    IncomingQueues inQueues;
+    OutgoingQueues outQueues;
+
+    OrderBookImpl books;
+    OrderBookImpl::InstrumentsT instr;
+    SourceIdT instrId1 = addInstrument("zero_price_test");
+    instr.insert(instrId1);
+    books.init(instr);
+
+    TransactionMgrParams transParams(IdTGenerator::instance());
+    TransactionMgr transMgr;
+    transMgr.init(transParams);
+
+    TaskManagerParams tmparams;
+    {
+        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues, &outQueues,
+                               &inQueues, &transMgr);
+        std::unique_ptr<Processor> proc(new Processor());
+        proc->init(params);
+        tmparams.evntProcessors_.push_back(proc.release());
+
+        std::unique_ptr<Processor> proc1(new Processor());
+        proc1->init(params);
+        tmparams.transactProcessors_.push_back(proc1.release());
+
+        tmparams.transactMgr_ = &transMgr;
+        tmparams.inQueues_ = &inQueues;
+    }
+    TaskManager manager(tmparams);
+
+    std::unique_ptr<OrderEntry> buyOrd(createCorrectOrder(instrId1));
+    assignClOrderId(buyOrd.get());
+    buyOrd->ordType_ = LIMIT_ORDERTYPE;
+    buyOrd->orderQty_ = 100;
+    buyOrd->leavesQty_ = 100;
+    buyOrd->side_ = BUY_SIDE;
+    buyOrd->price_ = 10.00;
+    RawDataEntry buyClOrdId = buyOrd->clOrderId_.get();
+    inQueues.push("test", OrderEvent(buyOrd.release()));
+    manager.waitUntilTransactionsFinished(5);
+
+    std::unique_ptr<OrderEntry> sellOrd(createCorrectOrder(instrId1));
+    assignClOrderId(sellOrd.get());
+    sellOrd->ordType_ = LIMIT_ORDERTYPE;
+    sellOrd->orderQty_ = 100;
+    sellOrd->leavesQty_ = 100;
+    sellOrd->side_ = SELL_SIDE;
+    sellOrd->price_ = 0;
+    RawDataEntry sellClOrdId = sellOrd->clOrderId_.get();
+    inQueues.push("test", OrderEvent(sellOrd.release()));
+    manager.waitUntilTransactionsFinished(5);
+
+    OrderEntry *sellOrder = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
+    ASSERT_NE(nullptr, sellOrder);
+    EXPECT_EQ(REJECTED_ORDSTATUS, sellOrder->status_);
+    EXPECT_EQ(0, sellOrder->cumQty_);
+    OrderEntry *buyOrder = OrderStorage::instance()->locateByClOrderId(buyClOrdId);
+    ASSERT_NE(nullptr, buyOrder);
+    EXPECT_EQ(NEW_ORDSTATUS, buyOrder->status_);
+    EXPECT_EQ(0, buyOrder->cumQty_);
+    EXPECT_EQ(100, buyOrder->leavesQty_);
+
+    transMgr.stop();
+}
+
 // =============================================================================
 // Multiple Instrument Tests
 // =============================================================================

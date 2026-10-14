@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include "TestFixtures.h"
 #include "TestAux.h"
 #include "MockDefered.h"
@@ -165,6 +167,36 @@ TEST_F(FxSwapTest, SwapValidation_FarPriceMustBePositive)
     std::string reason;
     EXPECT_FALSE(order->isValid(&reason));
     EXPECT_NE(std::string::npos, reason.find("far leg price"));
+}
+
+TEST_F(FxSwapTest, SwapValidation_BothLegPricesMustBeAboveZero)
+{
+    // The near leg is held to the far leg's rule, as a limit order's price is (#188): at 0 a swap sold its near leg at
+    // any bid. A NaN is refused on either leg
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const struct
+    {
+        double nearPrice, farPrice;
+        const char *reason;
+    } cases[] = { { 0.0, 1.0872, "near leg price" },
+                  { -1.5, 1.0872, "near leg price" },
+                  { nan, 1.0872, "near leg price" },
+                  { 1.0850, nan, "far leg price" } };
+    for (const auto &c : cases)
+    {
+        auto order = createCorrectOrder(instrumentId1_);
+        assignClOrderId(order.get());
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->price_ = c.nearPrice;
+        order->farPrice_ = c.farPrice;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        order->status_ = RECEIVEDNEW_ORDSTATUS;
+
+        std::string reason;
+        EXPECT_FALSE(order->isValid(&reason)) << c.nearPrice << " / " << c.farPrice;
+        EXPECT_NE(std::string::npos, reason.find(c.reason)) << reason;
+    }
 }
 
 TEST_F(FxSwapTest, SwapValidation_ValidSwapOrder)
