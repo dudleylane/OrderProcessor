@@ -18,6 +18,8 @@ ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
 RUN sed -i -e '/^user /d' -e 's,^pid .*,pid /tmp/nginx.pid;,' /etc/nginx/nginx.conf \
     && rm -f /etc/nginx/conf.d/default.conf \
     && chown -R nginx:nginx /var/cache/nginx /etc/nginx/conf.d
+# nginx, the base image's own user, whom the frontend image check names (hadolint's DL3066)
+# hadolint ignore=DL3066
 USER nginx
 EXPOSE 3000
 # Healthy once nginx serves the UI (#158). docker-compose.yml repeats this, because podman's OCI images don't keep it.

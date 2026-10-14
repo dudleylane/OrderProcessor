@@ -195,6 +195,10 @@ git config core.hooksPath scripts/hooks
 
 Bypass deliberately with `git push --no-verify` and record why in the commit message.
 
+### Lint
+
+`scripts/lint.sh` runs shellcheck over the shell scripts, actionlint over the workflows, with shellcheck over their `run:` blocks, and hadolint over the Dockerfiles (#174). Each runs from its official container image, pinned by digest, over a read-only copy of the tracked files, with no network. CI runs it on every push, in the Format Check workflow; the pre-push hook doesn't. It needs podman, and its first run pulls about 145 MB of images.
+
 ### Benchmarks
 
 ```bash

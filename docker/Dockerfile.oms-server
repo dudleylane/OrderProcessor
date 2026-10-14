@@ -3,6 +3,9 @@
 
 FROM quay.io/centos/centos:stream10 AS builder
 
+# Packages aren't pinned to versions (hadolint's DL3041): the image takes CentOS Stream 10's current ones on every
+# build, as the image check's --pull=newer intends (#135), so it gets their fixes. A pin would freeze them.
+# hadolint ignore=DL3041
 RUN dnf install -y epel-release 'dnf-command(config-manager)' \
     && dnf config-manager --set-enabled crb \
     && dnf install -y \
@@ -24,11 +27,14 @@ COPY app/ app/
 # itself is built for, so the image asks no more of a host's CPU than its base image does.
 RUN cmake -B out -DCMAKE_BUILD_TYPE=Release -DMARCH=x86-64-v3 \
         -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_APP=ON \
-    && cmake --build out -j$(nproc)
+    && cmake --build out -j"$(nproc)"
 
 # --- runtime stage ---
 FROM quay.io/centos/centos:stream10
 
+# Packages aren't pinned to versions (hadolint's DL3041): the image takes CentOS Stream 10's current ones on every
+# build, as the image check's --pull=newer intends (#135), so it gets their fixes. A pin would freeze them.
+# hadolint ignore=DL3041
 RUN dnf install -y epel-release \
     && dnf install -y tbb lmdb-libs spdlog numactl-libs \
     && dnf clean all
@@ -49,6 +55,8 @@ VOLUME /data
 # was /exchange.log in the container's own layer: outside the volume, lost on every rebuild, and never rotated.
 ENV EXCHANGE_LOG=-
 
+# oms, made above with uid 10001: the image check and docker-compose.yml name it (hadolint's DL3066)
+# hadolint ignore=DL3066
 USER oms
 
 # Healthy once the server answers HTTP on its port (#158). Any answer will do: a plain GET gets the WebSocket server's
