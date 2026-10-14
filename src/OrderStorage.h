@@ -99,6 +99,11 @@ public:
     bool persist(const OrderEntry &order, u32 *version);
     /// Erases one persisted version, undoing a persist().
     void unpersist(const IdT &orderId, u32 version);
+    /// The persists this thread makes between beginPersistGroup() and commitPersistGroup() become durable together, or
+    /// none of them do (#163). Without a saver, these do nothing.
+    void beginPersistGroup();
+    void commitPersistGroup();
+    void abortPersistGroup() noexcept;
 
 public:
     OrderEntry *locateByClOrderId(const RawDataEntry &clOrderId) const;

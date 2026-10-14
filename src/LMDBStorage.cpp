@@ -21,6 +21,9 @@
 using namespace COP;
 using namespace COP::Store;
 
+thread_local LMDBStorage *LMDBStorage::groupOwner_ = nullptr;
+thread_local std::vector<LMDBStorage::StagedUpdate> LMDBStorage::group_;
+
 namespace
 {
 
@@ -210,6 +213,7 @@ template <typename Body> void LMDBStorage::write(const char *context, Body &&bod
         if (MDB_MAP_FULL != rc)
         {
             checkLMDB(rc, context);
+            commits_.fetch_add(1, std::memory_order_relaxed);
             noteUsage();
             return;
         }
@@ -280,98 +284,214 @@ void LMDBStorage::save(const IdT &id, const char *buf, size_t size)
           });
 }
 
+int LMDBStorage::newestVersion(MDB_txn *txn, const IdT &id, bool *found, u32 *newest) const
+{
+    MDB_cursor *cursor = nullptr;
+    int rc = mdb_cursor_open(txn, dbi_, &cursor);
+    if (MDB_SUCCESS != rc)
+    {
+        return rc;
+    }
+
+    // The key is {id, version} compared byte-wise, so all versions of an id are contiguous: seek to the first one and
+    // walk just that range. Those bytes are not in numeric order (little-endian u32), so take the maximum by value rather
+    // than the last key.
+    const CompositeKey first(id, 0);
+    *found = false;
+    *newest = 0;
+    MDB_val curKey = makeKey(first);
+    MDB_val curData;
+    rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_SET_RANGE);
+    while (MDB_SUCCESS == rc)
+    {
+        if (curKey.mv_size == sizeof(CompositeKey))
+        {
+            const CompositeKey ck = readKey(curKey);
+            if (!(ck.id_ == id))
+            {
+                break;
+            }
+            if (!*found || (*newest < ck.version_))
+            {
+                *newest = ck.version_;
+            }
+            *found = true;
+        }
+        rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);
+    }
+    mdb_cursor_close(cursor);
+    return (MDB_NOTFOUND == rc) ? MDB_SUCCESS : rc;
+}
+
+int LMDBStorage::writeVersion(MDB_txn *txn, const IdT &id, const char *buf, size_t size, u32 *version, bool staged)
+{
+    bool found = false;
+    u32 newest = 0;
+    int rc = newestVersion(txn, id, &found, &newest);
+    if (MDB_SUCCESS != rc)
+    {
+        return rc;
+    }
+    const u32 next = found ? newest + 1 : 0;
+    if (staged && (next != *version))
+    {
+        // The transactions that persist an order run one after another, so nothing writes it between a group's update()
+        // and its commit
+        throw std::logic_error("LMDBStorage::commitGroup: record " + std::to_string(id.id_) + " is at version " +
+                               std::to_string(next) + ", not the " + std::to_string(*version) + " its group expected");
+    }
+
+    // Erase every version older than the newest (#148), in this transaction, so the erasing costs no commit of its own.
+    // The newest stays: the transaction writing the new version may still roll it back, and erase(id, version) then
+    // removes only that one, leaving the newest before it to restore. Every version older than that one is final,
+    // because the transactions that persist an order run one after another (TransactionMgr orders transactions that
+    // share an object, and a persist operation's object is its order), and Processor::persistOrder() persists an order
+    // once per transaction.
+    if (found)
+    {
+        MDB_cursor *cursor = nullptr;
+        rc = mdb_cursor_open(txn, dbi_, &cursor);
+        if (MDB_SUCCESS != rc)
+        {
+            return rc;
+        }
+        const CompositeKey first(id, 0);
+        MDB_val curKey = makeKey(first);
+        MDB_val curData;
+        rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_SET_RANGE);
+        while (MDB_SUCCESS == rc)
+        {
+            if (curKey.mv_size == sizeof(CompositeKey))
+            {
+                const CompositeKey ck = readKey(curKey);
+                if (!(ck.id_ == id))
+                {
+                    break;
+                }
+                if (ck.version_ != newest)
+                {
+                    // The cursor moves on to the next record, which MDB_GET_CURRENT reads
+                    rc = mdb_cursor_del(cursor, 0);
+                    if (MDB_SUCCESS == rc)
+                    {
+                        rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_GET_CURRENT);
+                    }
+                    continue;
+                }
+            }
+            rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);
+        }
+        mdb_cursor_close(cursor);
+        if ((MDB_SUCCESS != rc) && (MDB_NOTFOUND != rc))
+        {
+            return rc;
+        }
+    }
+
+    // Insert the new version
+    *version = next;
+    const CompositeKey ck(id, next);
+    MDB_val key = makeKey(ck);
+    MDB_val data;
+    data.mv_size = size;
+    data.mv_data = const_cast<char *>(buf);
+    return mdb_put(txn, dbi_, &key, &data, 0);
+}
+
 u32 LMDBStorage::update(const IdT &id, const char *buf, size_t size)
 {
     assert(nullptr != buf);
     assert(0 < size);
 
+    if (this == groupOwner_)
+    {
+        return stage(id, buf, size);
+    }
     u32 newVersion = 0;
     write("LMDBStorage::update",
           [&](MDB_txn *txn)
           {
-              MDB_cursor *cursor = nullptr;
-              int rc = mdb_cursor_open(txn, dbi_, &cursor);
-              if (MDB_SUCCESS != rc)
-              {
-                  return rc;
-              }
-
-              // Find the newest version of this ID. The key is {id, version} compared byte-wise, so all versions of an
-              // id are contiguous: seek to the first one and walk just that range. Those bytes are not in numeric
-              // order (little-endian u32), so take the maximum by value rather than the last key.
-              const CompositeKey first(id, 0);
-              bool found = false;
-              u32 newest = 0;
-              MDB_val curKey = makeKey(first);
-              MDB_val curData;
-              rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_SET_RANGE);
-              while (MDB_SUCCESS == rc)
-              {
-                  if (curKey.mv_size == sizeof(CompositeKey))
-                  {
-                      const CompositeKey ck = readKey(curKey);
-                      if (!(ck.id_ == id))
-                      {
-                          break;
-                      }
-                      if (!found || (newest < ck.version_))
-                      {
-                          newest = ck.version_;
-                      }
-                      found = true;
-                  }
-                  rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);
-              }
-
-              // Then erase every version older than the newest (#148), in this transaction, so the erasing costs no
-              // commit of its own. The newest stays: the transaction writing the new version may still roll it back,
-              // and erase(id, version) then removes only that one, leaving the newest before it to restore. Every
-              // version older than that one is final, because the transactions that persist an order run one after
-              // another (TransactionMgr orders transactions that share an object, and a persist operation's object
-              // is its order), and Processor::persistOrder() persists an order once per transaction.
-              if (found && ((MDB_SUCCESS == rc) || (MDB_NOTFOUND == rc)))
-              {
-                  curKey = makeKey(first);
-                  rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_SET_RANGE);
-                  while (MDB_SUCCESS == rc)
-                  {
-                      if (curKey.mv_size == sizeof(CompositeKey))
-                      {
-                          const CompositeKey ck = readKey(curKey);
-                          if (!(ck.id_ == id))
-                          {
-                              break;
-                          }
-                          if (ck.version_ != newest)
-                          {
-                              // The cursor moves on to the next record, which MDB_GET_CURRENT reads
-                              rc = mdb_cursor_del(cursor, 0);
-                              if (MDB_SUCCESS == rc)
-                              {
-                                  rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_GET_CURRENT);
-                              }
-                              continue;
-                          }
-                      }
-                      rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);
-                  }
-              }
-              mdb_cursor_close(cursor);
-              if ((MDB_SUCCESS != rc) && (MDB_NOTFOUND != rc))
-              {
-                  return rc;
-              }
-
-              // Insert the new version
-              newVersion = found ? newest + 1 : 0;
-              const CompositeKey ck(id, newVersion);
-              MDB_val key = makeKey(ck);
-              MDB_val data;
-              data.mv_size = size;
-              data.mv_data = const_cast<char *>(buf);
-              return mdb_put(txn, dbi_, &key, &data, 0);
+              return writeVersion(txn, id, buf, size, &newVersion, false);
           });
     return newVersion;
+}
+
+u32 LMDBStorage::stage(const IdT &id, const char *buf, size_t size)
+{
+    for (const StagedUpdate &staged : group_)
+    {
+        if (staged.id_ == id)
+        {
+            throw std::logic_error("LMDBStorage: record " + std::to_string(id.id_) + " is updated twice in one group");
+        }
+    }
+    bool found = false;
+    u32 newest = 0;
+    {
+        // A read transaction, under the lock every transaction takes (#148)
+        std::lock_guard<std::mutex> lock(txnLock_);
+        MDB_txn *txn = nullptr;
+        checkLMDB(mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn), "LMDBStorage::update (group)");
+        const int rc = newestVersion(txn, id, &found, &newest);
+        mdb_txn_abort(txn);
+        checkLMDB(rc, "LMDBStorage::update (group)");
+    }
+    const u32 version = found ? newest + 1 : 0;
+    group_.push_back(StagedUpdate{ id, version, std::vector<char>(buf, buf + size) });
+    return version;
+}
+
+void LMDBStorage::beginGroup()
+{
+    if (nullptr != groupOwner_)
+    {
+        throw std::logic_error("LMDBStorage::beginGroup: this thread has a group open already");
+    }
+    group_.clear();
+    groupOwner_ = this;
+}
+
+void LMDBStorage::commitGroup()
+{
+    assert(this == groupOwner_);
+    // Closed whatever happens: a commit that fails has written nothing
+    groupOwner_ = nullptr;
+    std::vector<StagedUpdate> staged;
+    staged.swap(group_);
+    if (staged.empty())
+    {
+        return;
+    }
+    // One transaction for them all. A map that fills runs the whole group again, after it grows (#148).
+    write("LMDBStorage::commitGroup",
+          [&](MDB_txn *txn)
+          {
+              for (StagedUpdate &record : staged)
+              {
+                  u32 version = record.version_;
+                  const int rc =
+                      writeVersion(txn, record.id_, record.data_.data(), record.data_.size(), &version, true);
+                  if (MDB_SUCCESS != rc)
+                  {
+                      return rc;
+                  }
+              }
+              return MDB_SUCCESS;
+          });
+}
+
+void LMDBStorage::abortGroup() noexcept
+{
+    if (this == groupOwner_)
+    {
+        group_.clear();
+        groupOwner_ = nullptr;
+    }
+}
+
+u64 LMDBStorage::commits() const noexcept
+{
+    return commits_.load(std::memory_order_relaxed);
 }
 
 u32 LMDBStorage::replace(const IdT &id, u32 version, const char *buf, size_t size)

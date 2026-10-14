@@ -48,6 +48,12 @@ public:
     u32 replace(const IdT &id, u32 version, const char *buf, size_t size) override;
     void erase(const IdT &id, u32 version) override;
     void erase(const IdT &id) override;
+    /// A thread's group (#163): between beginGroup() and commitGroup(), update() works out each record's new version and
+    /// holds it, and commitGroup() writes them all in one transaction. The versions update() returns are the ones
+    /// written. A record may be updated once in a group: a transaction persists an order once.
+    void beginGroup() override;
+    void commitGroup() override;
+    void abortGroup() noexcept override;
 
 public:
     /// return true if record exists
@@ -66,6 +72,8 @@ public:
     /// Safe from any thread.
     size_t mapSize() const noexcept;
     size_t mapUsed() const noexcept;
+    /// Write transactions committed since the storage was made (#163)
+    u64 commits() const noexcept;
 
 private:
     struct CompositeKey
@@ -85,8 +93,23 @@ private:
         }
     };
 
+    /// One record's new version, held until its group commits (#163)
+    struct StagedUpdate
+    {
+        IdT id_;
+        u32 version_;
+        std::vector<char> data_;
+    };
+
     static MDB_val makeKey(const CompositeKey &key);
     static CompositeKey readKey(const MDB_val &val);
+    /// id's newest version, in any transaction; *found is false when it has none
+    int newestVersion(MDB_txn *txn, const IdT &id, bool *found, u32 *newest) const;
+    /// update()'s work in a write transaction: the version after the newest, with every version but the newest erased
+    /// (#148). When staged, *version is the one a group's update() returned, which must still be the next.
+    int writeVersion(MDB_txn *txn, const IdT &id, const char *buf, size_t size, u32 *version, bool staged);
+    /// update() within this thread's group: works the version out now, and holds the record for commitGroup()
+    u32 stage(const IdT &id, const char *buf, size_t size);
 
     void close();
 
@@ -113,6 +136,11 @@ private:
     /// Held around every transaction. LMDB serializes writers itself, but it lets the map's size change only while no
     /// transaction is open in the process (#148), and only a lock of the storage's own can promise that.
     mutable std::mutex txnLock_;
+    std::atomic<u64> commits_{ 0 };
+
+    /// This thread's open group (#163): the storage it belongs to, and the records it holds
+    static thread_local LMDBStorage *groupOwner_;
+    static thread_local std::vector<StagedUpdate> group_;
 };
 
 } // namespace Store
