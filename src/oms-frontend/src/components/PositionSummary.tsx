@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
-import type { Execution, Order, TradeExecution, CorrectExecution, TradeCancelExecution } from '../types';
-import { ExecType, Side } from '../types/enums';
+import type { Execution, Order } from '../types';
+import { isCorrection, isTrade, isTradeCancel } from '../types';
+import { Side } from '../types/enums';
 import { formatQuantity, formatPrice, formatTime } from '../utils/format';
 
 interface PositionSummaryProps {
@@ -37,8 +38,8 @@ export function PositionSummary({ executions, orders }: PositionSummaryProps) {
         totalQty: 0,
       };
 
-      if (exec.type === ExecType.TRADE) {
-        const trade = exec as TradeExecution;
+      if (isTrade(exec)) {
+        const trade = exec;
         // Fix: use order side instead of hardcoded "BANK_DEMO"
         const direction =
           order.side === Side.BUY || order.side === Side.BUY_MINUS ? 1 : -1;
@@ -49,9 +50,9 @@ export function PositionSummary({ executions, orders }: PositionSummaryProps) {
         existing.totalCost += trade.lastPx * trade.lastQty;
         existing.totalQty += trade.lastQty;
         existing.lastTradeTime = Math.max(existing.lastTradeTime, trade.transactTime);
-      } else if (exec.type === ExecType.CORRECT) {
+      } else if (isCorrection(exec)) {
         // Correct adjusts position
-        const corr = exec as CorrectExecution;
+        const corr = exec;
         const direction =
           order.side === Side.BUY || order.side === Side.BUY_MINUS ? 1 : -1;
         const signedQty = corr.lastQty * direction;
@@ -59,9 +60,9 @@ export function PositionSummary({ executions, orders }: PositionSummaryProps) {
         existing.netQty += signedQty;
         existing.totalCost += corr.lastPx * corr.lastQty;
         existing.totalQty += corr.lastQty;
-      } else if (exec.type === ExecType.CANCEL) {
-        // Trade cancel reverses the original trade
-        const cancel = exec as TradeCancelExecution;
+      } else if (isTradeCancel(exec)) {
+        // Trade cancel reverses the original trade. An order cancel is type CANCEL too, and moves no position (#179).
+        const cancel = exec;
         // We don't have the original trade qty on the cancel exec itself,
         // so this is a placeholder -- real impl would look up the ref exec
         void cancel;
