@@ -412,7 +412,8 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
     SourceIdT instrId = wideData_->findInstrumentBySymbol(symbol.getString());
     if (!instrId.isValid())
     {
-        aux::ExchLogger::instance()->error("FIX: Unknown instrument: " + symbol.getString());
+        // Answered, as every other refusal is: the client used to wait for a report that never came (#189)
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNKNOWN_SYMBOL, "Order refused: unknown symbol " + symbol.getString());
         return;
     }
 
@@ -553,9 +554,9 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
     // Only handle FX Swap multileg orders
     if (FXSWAP_ORDERTYPE != toOrdType(ordType.getValue()))
     {
-        aux::ExchLogger::instance()->error("FIX Multileg: only FX Swap (OrdType=G) supported, got: " +
-                                           std::string(1, ordType.getValue()));
-        sendBusinessReject(IdT(), "NewOrderMultileg: only FX Swap supported");
+        // To its sender alone: these three refusals went to every session logged on, naming no order (#189)
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC,
+                    "Order refused: a NewOrderMultileg must be an FX swap, OrdType (40) G");
         return;
     }
 
@@ -573,8 +574,8 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
     size_t legCount = msg.groupCount(FIX::FIELD::NoLegs);
     if (legCount < 2)
     {
-        aux::ExchLogger::instance()->error("FIX Multileg: FX Swap requires 2 legs, got " + std::to_string(legCount));
-        sendBusinessReject(IdT(), "NewOrderMultileg: NoLegs < 2");
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC,
+                    "Order refused: an FX swap needs 2 legs, not " + std::to_string(legCount));
         return;
     }
 
@@ -648,8 +649,7 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
     SourceIdT instrId = wideData_->findInstrumentBySymbol(symStr);
     if (!instrId.isValid())
     {
-        aux::ExchLogger::instance()->error("FIX Multileg: Unknown instrument: " + symStr);
-        sendBusinessReject(IdT(), "Unknown instrument: " + symStr);
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNKNOWN_SYMBOL, "Order refused: unknown symbol " + symStr);
         return;
     }
 
@@ -1299,46 +1299,35 @@ void FixGateway::sendCancelReject(const Queues::CancelRejectEvent &evnt, const s
 
 void FixGateway::sendBusinessReject(const IdT &refOrderId, const std::string &reason)
 {
-    // Determine which FIX session to notify. If refOrderId is valid,
-    // route to the originating session; otherwise, broadcast to all sessions.
-    std::vector<FIX::SessionID> targets;
-
-    if (refOrderId.isValid())
+    // To the session of the order it names, and to nobody else. One that named no order went to every session logged on,
+    // so each got a refusal of an order it never sent (#189). The gateway answers its own refusals with refuseOrder().
+    if (!refOrderId.isValid())
     {
-        OrderEntry *order = orderStorage_->locateByOrderId(refOrderId);
-        if (order)
-        {
-            std::string source = order->source_.get();
-            oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, false);
-            auto it = sessionMap_.find(source);
-            if (it != sessionMap_.end())
-            {
-                targets.push_back(it->second);
-            }
-        }
+        aux::ExchLogger::instance()->warn("FixGateway: a business reject that names no order is not sent: " + reason);
+        return;
     }
-    else
+    const OrderEntry *order = orderStorage_->locateByOrderId(refOrderId);
+    if (nullptr == order)
     {
-        // No order reference — send to every live FIX session: those logged on, as before #160 kept the others known
+        return;
+    }
+    FIX::SessionID target;
+    {
+        const std::string source = order->source_.get();
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, false);
-        for (const auto &source : loggedOn_)
+        const auto it = sessionMap_.find(source);
+        if (sessionMap_.end() == it)
         {
-            targets.push_back(sessionMap_.at(source));
+            return; // not a FIX session's order
         }
+        target = it->second;
     }
-
-    for (const auto &sid : targets)
-    {
-        FIX44::BusinessMessageReject reject;
-        reject.set(FIX::RefMsgType("D")); // NewOrderSingle/NewOrderMultileg
-        reject.set(FIX::BusinessRejectReason(FIX::BusinessRejectReason_OTHER));
-        reject.set(FIX::Text(reason));
-        if (refOrderId.isValid())
-        {
-            reject.set(FIX::BusinessRejectRefID(std::to_string(refOrderId.id_)));
-        }
-        FIX::Session::sendToTarget(reject, sid);
-    }
+    FIX44::BusinessMessageReject reject;
+    reject.set(FIX::RefMsgType("D")); // NewOrderSingle/NewOrderMultileg
+    reject.set(FIX::BusinessRejectReason(FIX::BusinessRejectReason_OTHER));
+    reject.set(FIX::Text(reason));
+    reject.set(FIX::BusinessRejectRefID(std::to_string(refOrderId.id_)));
+    FIX::Session::sendToTarget(reject, target);
 }
 
 // =============================================================================

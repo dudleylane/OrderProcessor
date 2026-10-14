@@ -70,6 +70,7 @@ public:
                              const std::string &requestClOrdId = std::string());
     /// Refuses a cancel to the session that sent it, which target names (#73); silent when that is not a FIX session
     void sendCancelReject(const Queues::CancelRejectEvent &evnt, const std::string &target);
+    /// A BusinessMessageReject to the session of the order refOrderId names, and nothing when it names none (#189)
     void sendBusinessReject(const IdT &refOrderId, const std::string &reason);
     /// Refuses, to its sender, a new order or replacement the engine did not store (#67); source names the session
     void sendOrderReject(const Queues::OrderRejectEvent &evnt, const std::string &source);

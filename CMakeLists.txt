@@ -241,6 +241,11 @@ if(BUILD_APP)
                      COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixLogonTest.py
                              $<TARGET_FILE:orderProcessorServer> $<TARGET_FILE:seedData>
                              ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec/FIX44.xml)
+            # An order the gateway refuses is answered to its sender, and to nobody else (#189)
+            add_test(NAME FixRefusalsReachOnlyTheirSender
+                     COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixRefusalTest.py
+                             $<TARGET_FILE:orderProcessorServer> $<TARGET_FILE:seedData>
+                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec/FIX44.xml)
         endif()
     endif()
 endif()
