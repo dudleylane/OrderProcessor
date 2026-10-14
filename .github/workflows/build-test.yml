@@ -32,10 +32,30 @@ jobs:
       matrix:
         # Both configurations (#99). FIX ON builds the FIX gateway and runs its
         # tests; FIX OFF catches code that compiles only when FIX is on.
-        # QuickFIX is installed on the runner host (/usr/local/lib).
+        # FIX ON builds QuickFIX at the server image's ref (#178).
         fix: ['OFF', 'ON']
     steps:
       - uses: actions/checkout@v4
+
+      - name: Build QuickFIX at the image's ref (cached)
+        # FIX ON builds against the QuickFIX the server image ships: QUICKFIX_REF in
+        # docker/Dockerfile.oms-server, built by scripts/build-quickfix.sh under the runner's home and
+        # rebuilt only when the ref or the compiler changes (#178). CMake searches the
+        # CMAKE_PREFIX_PATH environment variable before /usr/local, so the QuickFIX the runner host
+        # has installed, which changes outside this repository, isn't used.
+        if: matrix.fix == 'ON'
+        shell: bash
+        run: |
+          REF="$(sed -n 's/^ARG QUICKFIX_REF=//p' docker/Dockerfile.oms-server | tr -d '\r')"
+          [ -n "$REF" ] || { echo "::error::docker/Dockerfile.oms-server pins no QUICKFIX_REF (#178)"; exit 1; }
+          PREFIX="$HOME/.cache/orderprocessor/quickfix-$REF-gcc$(g++ -dumpfullversion)"
+          if [ ! -f "$PREFIX/quickfix-ref" ]; then
+            rm -rf "${PREFIX:?}"
+            scripts/build-quickfix.sh "$REF" "$PREFIX"
+          fi
+          echo "QuickFIX $(cat "$PREFIX/quickfix-ref"), in $PREFIX"
+          echo "QUICKFIX_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$PREFIX" >> "$GITHUB_ENV"
 
       - name: Configure
         shell: bash
@@ -51,6 +71,14 @@ jobs:
       - name: Build
         shell: bash
         run: cmake --build build -j"$(nproc)"
+
+      - name: Check the tests load the pinned QuickFIX
+        if: matrix.fix == 'ON'
+        shell: bash
+        run: |
+          ldd build/orderProcessorTest | grep -E 'libquickfix'
+          ldd build/orderProcessorTest | grep -qE "libquickfix\.so\.[0-9]+ => $QUICKFIX_PREFIX/" \
+            || { echo "orderProcessorTest does not load QuickFIX from $QUICKFIX_PREFIX" >&2; exit 1; }
 
       - name: Test
         # Tests run in parallel: fixtures that touch the filesystem build
