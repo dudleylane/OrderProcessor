@@ -110,6 +110,7 @@ cmake --build . -j$(nproc)
 | `BUILD_APP` | ON | Build WebSocket server and seed data utility |
 | `BUILD_PG` | OFF | Build PostgreSQL write-behind layer (requires libpqxx) |
 | `BUILD_FIX` | OFF | Build FIX 4.4 protocol gateway (requires QuickFIX/C++) |
+| `MARCH` | `native` | The CPU a Release build targets (`-march`): `native`, this machine's, or an ISA level such as `x86-64-v3`. The server image builds for `x86-64-v3` (#170) |
 
 ### Build Outputs
 
