@@ -24,6 +24,9 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
+    # A hung step would hold the only runner for GitHub's six-hour default (#169). The job's last 25 successful runs, on
+    # either branch to 2026-10-14, took 2.3 minutes at most.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
