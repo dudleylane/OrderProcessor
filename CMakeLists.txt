@@ -139,6 +139,13 @@ if(BUILD_TESTS)
 
     include(GoogleTest)
     gtest_discover_tests(orderProcessorTest)
+
+    # The runner's job-started hook against the payloads it decides on (#143, #168). It needs jq, as the hook does: without
+    # it the test is skipped.
+    add_test(NAME JobStartedHookDecides
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/JobStartedHookTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/runner/job-started.sh)
+    set_tests_properties(JobStartedHookDecides PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 if(BUILD_BENCHMARKS)
