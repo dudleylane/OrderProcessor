@@ -75,6 +75,7 @@ target_sources(orderProcessorTest
 
         # seedData's argument parsing (header-only, in app/)
         SeedDataArgsTest.cpp
+        ServerArgsTest.cpp
 
         # The server's load of its data directory (#165)
         ServerDataTest.cpp

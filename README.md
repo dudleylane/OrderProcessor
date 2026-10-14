@@ -158,6 +158,8 @@ Server options:
 | `--max-connections` | <!-- DOC_CHECK:ws_max_connections -->256<!-- /DOC_CHECK --> | WebSocket clients connected at once. One more is closed as soon as it's accepted |
 | `--max-session-queue-mb` | <!-- DOC_CHECK:ws_max_session_queue_mb -->16<!-- /DOC_CHECK --> | What may wait to be sent to one client, in MiB. A client that doesn't read is dropped once more waits, and gets the current state again when it reconnects |
 
+An option the server doesn't know, an option without its value, or a number outside the option's range is a usage error: the server prints why and its usage on standard error, and exits with status 2 (#173). `--help` prints the usage.
+
 The log goes to `exchange.log` in the working directory. The environment variable `EXCHANGE_LOG` sends it elsewhere: a file's path, or `-` for standard output, which the Docker image uses, so `docker compose logs` shows it.
 
 ### Docker Compose (Full Stack)
