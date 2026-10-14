@@ -55,7 +55,12 @@ export interface Order {
   expireTime: number;
 }
 
-/** Maps to C++ ExecParams (base execution report) */
+/**
+ * Maps to C++ ExecParams (base execution report). The server sends the fields of the report's C++ class, not of its
+ * type (#179): a report's type alone doesn't tell a refused replace from a replacement, or an order cancel from a trade
+ * cancel. A plain ExecutionEntry carries only these fields: a new order's NEW, an order cancel's CANCEL, an expiry and
+ * the rest. The is* guards below tell the classes apart by the fields each adds.
+ */
 export interface ExecutionReport {
   execId: number;
   orderId: number;
@@ -74,9 +79,12 @@ export interface TradeExecution extends ExecutionReport {
   tradeDate: number;
 }
 
-/** Maps to C++ RejectExecEntry */
+/**
+ * Maps to C++ RejectExecEntry: a refused order is type REJECT, and a refused replace type REPLACE (#56). PEND_REPLACE
+ * comes only from the legacy replace path, which the server no longer raises (#74).
+ */
 export interface RejectExecution extends ExecutionReport {
-  type: ExecType.REJECT;
+  type: ExecType.REJECT | ExecType.REPLACE | ExecType.PEND_REPLACE;
   rejectReason: string;
 }
 
@@ -99,7 +107,7 @@ export interface CorrectExecution extends ExecutionReport {
   execRefId: number;
 }
 
-/** Maps to C++ TradeCancelExecEntry */
+/** Maps to C++ TradeCancelExecEntry. An order cancel has the same type, CANCEL, but no execRefId: it's a plain report. */
 export interface TradeCancelExecution extends ExecutionReport {
   type: ExecType.CANCEL;
   execRefId: number;
@@ -112,6 +120,29 @@ export type Execution =
   | CorrectExecution
   | TradeCancelExecution
   | ExecutionReport;
+
+/** A refused order or replace: any report with a reject reason (#179) */
+export function isRejection(exec: Execution): exec is RejectExecution {
+  return 'rejectReason' in exec;
+}
+
+export function isTrade(exec: Execution): exec is TradeExecution {
+  return exec.type === ExecType.TRADE && 'lastQty' in exec;
+}
+
+/** A replacement, as opposed to a refused replace, which has the same type (#179) */
+export function isReplacement(exec: Execution): exec is ReplaceExecution {
+  return exec.type === ExecType.REPLACE && 'origOrderId' in exec;
+}
+
+export function isCorrection(exec: Execution): exec is CorrectExecution {
+  return exec.type === ExecType.CORRECT && 'execRefId' in exec;
+}
+
+/** A trade cancel, as opposed to an order cancel, which has the same type (#179) */
+export function isTradeCancel(exec: Execution): exec is TradeCancelExecution {
+  return exec.type === ExecType.CANCEL && 'execRefId' in exec;
+}
 
 /** Client submission types */
 export interface NewOrderRequest {
