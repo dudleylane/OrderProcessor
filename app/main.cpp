@@ -129,6 +129,13 @@ int main(int argc, char *argv[])
         return 0;
     }
     App::ServerArgs cfg = *parsed;
+    // Who may open a WebSocket session (#146). A token that can't be used is a usage error too.
+    App::WsAuth wsAuth;
+    if (!App::resolveWsAuth(cfg, std::getenv("OMS_WS_TOKEN"), std::getenv("OMS_ALLOWED_ORIGINS"), &wsAuth, &usageError))
+    {
+        std::cerr << "orderProcessorServer: " << usageError << "\n";
+        return 2;
+    }
 
     // 1. Create singletons
     aux::ExchLogger::create();
@@ -265,10 +272,25 @@ int main(int argc, char *argv[])
     boost::asio::io_context ioc{ 1 };
 
     auto server = std::make_shared<App::WsServer>(
-        ioc, boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("0.0.0.0"), cfg.port), sessionMgr.get(),
+        ioc, boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address(cfg.bindAddress), cfg.port), sessionMgr.get(),
         Store::WideDataStorage::instance(), Store::OrderStorage::instance(), inQueues.get(), IdTGenerator::instance(),
-        orderBook.get(), defaultClearingId, defaultAccountId, cfg.wsLimits);
+        orderBook.get(), defaultClearingId, defaultAccountId, cfg.wsLimits, wsAuth);
     server->run();
+    if (wsAuth.token.empty())
+    {
+        aux::ExchLogger::instance()->warn(
+            "No WebSocket access token is set (OMS_WS_TOKEN or --ws-token-file): any client that reaches " +
+            cfg.bindAddress + ":" + std::to_string(cfg.port) + " can read every order and trade on any account (#146)");
+    }
+    else
+    {
+        aux::ExchLogger::instance()->note(
+            "WebSocket clients must offer the access token, from " +
+            std::string(cfg.wsTokenFile.empty() ? "OMS_WS_TOKEN" : "--ws-token-file") + ", and come from " +
+            (wsAuth.allowedOrigins.empty() ? std::string("any Origin")
+                                           : std::to_string(wsAuth.allowedOrigins.size()) + " allowed Origin(s)") +
+            " (#146)");
+    }
 
     // 10b. Create MetricsPublisher for system monitoring
     auto metricsPublisher = std::make_shared<App::MetricsPublisher>(

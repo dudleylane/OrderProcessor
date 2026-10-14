@@ -32,6 +32,7 @@ TEST(ServerArgsTest, NoArgumentsGiveTheDefaults)
     const std::optional<ServerArgs> parsed = parse({});
     ASSERT_TRUE(parsed);
     EXPECT_EQ(8080, parsed->port);
+    EXPECT_EQ("0.0.0.0", parsed->bindAddress);
     EXPECT_EQ("./data", parsed->dataDir);
     EXPECT_EQ(0, parsed->workers);
     EXPECT_EQ(-1, parsed->cpuAffinityStart);
@@ -43,6 +44,8 @@ TEST(ServerArgsTest, NoArgumentsGiveTheDefaults)
     EXPECT_EQ(COP::App::DEFAULT_MAX_CONNECTIONS, parsed->wsLimits.maxConnections);
     EXPECT_EQ(COP::App::DEFAULT_MAX_SESSION_QUEUE_MB << 20, parsed->wsLimits.maxQueuedBytes);
     EXPECT_FALSE(parsed->help);
+    EXPECT_TRUE(parsed->wsTokenFile.empty());
+    EXPECT_TRUE(parsed->allowedOrigins.empty());
 }
 
 TEST(ServerArgsTest, EveryOptionIsRead)
@@ -66,7 +69,15 @@ TEST(ServerArgsTest, EveryOptionIsRead)
                                                      "--max-connections",
                                                      "64",
                                                      "--max-session-queue-mb",
-                                                     "8" });
+                                                     "8",
+                                                     "--bind",
+                                                     "127.0.0.1",
+                                                     "--ws-token-file",
+                                                     "/run/secrets/oms_ws_token",
+                                                     "--allowed-origin",
+                                                     "http://a.example",
+                                                     "--allowed-origin",
+                                                     "https://b.example" });
     ASSERT_TRUE(parsed);
     EXPECT_EQ(9090, parsed->port);
     EXPECT_EQ("/data", parsed->dataDir);
@@ -79,6 +90,20 @@ TEST(ServerArgsTest, EveryOptionIsRead)
     EXPECT_EQ(512u, parsed->lmdbMapMb);
     EXPECT_EQ(64u, parsed->wsLimits.maxConnections);
     EXPECT_EQ(8u << 20, parsed->wsLimits.maxQueuedBytes);
+    EXPECT_EQ("127.0.0.1", parsed->bindAddress);
+    EXPECT_EQ("/run/secrets/oms_ws_token", parsed->wsTokenFile);
+    EXPECT_EQ((std::vector<std::string>{ "http://a.example", "https://b.example" }), parsed->allowedOrigins);
+}
+
+TEST(ServerArgsTest, BindTakesAnIpAddress)
+{
+    // #146: the address the server listens on, which used to be 0.0.0.0 always
+    std::string error;
+    ASSERT_TRUE(parse({ "--bind", "::1" }, &error)) << error;
+    EXPECT_FALSE(parse({ "--bind", "localhost" }, &error));
+    EXPECT_EQ("--bind needs an IP address, not 'localhost'", error);
+    EXPECT_FALSE(parse({ "--bind", "" }, &error));
+    EXPECT_EQ("--bind needs a value", error);
 }
 
 TEST(ServerArgsTest, AnUnknownOptionIsRefused)
@@ -159,6 +184,9 @@ TEST(ServerArgsTest, TheUsageNamesEveryOption)
         { "--debug" },
         { "--lmdb-map-mb", "1" },
         { "--max-connections", "1" },
+        { "--bind", "0.0.0.0" },
+        { "--ws-token-file", "f" },
+        { "--allowed-origin", "o" },
         { "--max-session-queue-mb", "1" },
         { "--help" },
     };

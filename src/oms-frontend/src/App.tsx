@@ -9,7 +9,9 @@ import { PositionSummary } from './components/PositionSummary';
 import { DashboardTab } from './components/DashboardTab';
 import { MemoryAdminTab } from './components/MemoryAdminTab';
 import { AlertsPanel } from './components/AlertsPanel';
+import { AccessTokenPrompt } from './components/AccessTokenPrompt';
 import { ACTIVE_STATUSES } from './utils/constants';
+import { loadAccessToken, saveAccessToken } from './utils/accessToken';
 
 type TabId = 'orders' | 'executions' | 'positions' | 'dashboard' | 'memory' | 'alerts';
 
@@ -17,8 +19,38 @@ const OMS_TABS: TabId[] = ['orders', 'executions', 'positions'];
 const MONITORING_TABS: TabId[] = ['dashboard', 'memory', 'alerts'];
 const isMonitoringTab = (tab: TabId) => MONITORING_TABS.includes(tab);
 
+// The app asks for the server's access token first, and connects with it (#146)
 export default function App() {
-  const oms = useOmsWebSocket();
+  const [token, setToken] = useState<string | null>(loadAccessToken);
+
+  if (token === null) {
+    return (
+      <AccessTokenPrompt
+        onSubmit={entered => {
+          saveAccessToken(entered);
+          setToken(entered);
+        }}
+      />
+    );
+  }
+  return (
+    <OmsApp
+      token={token}
+      onChangeToken={() => {
+        saveAccessToken(null);
+        setToken(null);
+      }}
+    />
+  );
+}
+
+interface OmsAppProps {
+  token: string;
+  onChangeToken: () => void;
+}
+
+function OmsApp({ token, onChangeToken }: OmsAppProps) {
+  const oms = useOmsWebSocket(token);
   const alertsState = useAlerts(oms.metricsHistory);
   const [activeTab, setActiveTab] = useState<TabId>('orders');
 
@@ -50,8 +82,18 @@ export default function App() {
         <div className="flex items-center gap-4">
           <div className={`flex items-center gap-2 text-sm ${oms.connected ? 'text-green-400' : 'text-red-400'}`}>
             <span className={`w-2 h-2 rounded-full ${oms.connected ? 'bg-green-400' : 'bg-red-400'}`} />
-            {oms.connected ? 'Connected' : 'Disconnected'}
+            {oms.connected
+              ? 'Connected'
+              : oms.everConnected
+                ? 'Disconnected'
+                : 'Not connected: the server is down, or refused the access token'}
           </div>
+          <button
+            onClick={onChangeToken}
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            Change token
+          </button>
         </div>
       </header>
 

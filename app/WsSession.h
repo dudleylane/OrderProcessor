@@ -6,11 +6,13 @@
 #include <string>
 #include <deque>
 #include <boost/beast/core.hpp>
+#include <boost/beast/http.hpp>
 #include <boost/beast/websocket.hpp>
 #include <boost/asio/strand.hpp>
 
 #include "TypesDef.h"
 #include "ServerDefaults.h"
+#include "WsAuth.h"
 
 namespace COP
 {
@@ -42,7 +44,8 @@ public:
     WsSession(boost::asio::ip::tcp::socket &&socket, SessionManager *sessionMgr, Store::WideParamsDataStorage *wideData,
               Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues, IdTValueGenerator *idGen,
               OrderBookImpl *orderBook, SourceIdT defaultClearingId, SourceIdT defaultAccountId,
-              const WsLimits &limits = WsLimits(), std::shared_ptr<std::atomic<std::size_t>> connections = nullptr);
+              const WsLimits &limits = WsLimits(), std::shared_ptr<std::atomic<std::size_t>> connections = nullptr,
+              const WsAuth &auth = WsAuth());
     ~WsSession();
 
     void run();
@@ -56,6 +59,10 @@ public:
     }
 
 private:
+    /// The upgrade request is read here, not by accept(), so that its token and Origin are checked first (#146)
+    void onRequest(boost::beast::error_code ec, std::size_t bytesTransferred);
+    /// Answers a request that may not open a session with an HTTP response, and ends the connection
+    void refuse(boost::beast::http::status status, const std::string &reason);
     void onAccept(boost::beast::error_code ec);
     void doRead();
     void onRead(boost::beast::error_code ec, std::size_t bytesTransferred);
@@ -70,6 +77,8 @@ private:
 
     boost::beast::websocket::stream<boost::beast::tcp_stream> ws_;
     boost::beast::flat_buffer buffer_;
+    boost::beast::http::request<boost::beast::http::empty_body> upgradeRequest_;
+    WsAuth auth_;
 
     SessionManager *sessionMgr_;
     Store::WideParamsDataStorage *wideData_;

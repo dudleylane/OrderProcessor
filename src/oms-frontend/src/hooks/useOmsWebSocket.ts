@@ -12,6 +12,7 @@ import type {
   SystemMetrics,
 } from '../types';
 import type { ServerMessage, ClientMessage } from '../types/websocket';
+import { wsSubprotocols } from '../utils/accessToken';
 
 // /ws on the host and port the page came from, unless a build sets VITE_WS_URL (#157). The dev server and the image's
 // nginx both pass /ws on to the server. A URL fixed at build time sent a browser on another machine to its own
@@ -26,6 +27,9 @@ const MAX_METRICS_HISTORY = 300; // 5 minutes at 1/sec
 
 export interface OmsState {
   connected: boolean;
+  // Whether a connection has opened since the access token was entered. Until one has, a closed connection may be the
+  // server refusing the token: a browser doesn't tell the app why a WebSocket failed to open (#146).
+  everConnected: boolean;
   instruments: Instrument[];
   accounts: Account[];
   orders: Map<string, Order>;
@@ -48,7 +52,7 @@ type OmsAction =
 function omsReducer(state: OmsState, action: OmsAction): OmsState {
   switch (action.type) {
     case 'CONNECTED':
-      return { ...state, connected: true };
+      return { ...state, connected: true, everConnected: true };
     case 'DISCONNECTED':
       return { ...state, connected: false };
     case 'INSTRUMENT_LIST':
@@ -89,6 +93,7 @@ function omsReducer(state: OmsState, action: OmsAction): OmsState {
 
 const INITIAL_STATE: OmsState = {
   connected: false,
+  everConnected: false,
   instruments: [],
   accounts: [],
   orders: new Map(),
@@ -107,7 +112,8 @@ export interface OmsActions {
   unsubscribeBook: (symbol: string) => void;
 }
 
-export function useOmsWebSocket(): OmsState & OmsActions {
+// token: the server's access token, offered on every connection, or '' for a server that asks for none (#146)
+export function useOmsWebSocket(token: string): OmsState & OmsActions {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [state, dispatch] = useReducer(omsReducer, INITIAL_STATE);
@@ -125,7 +131,14 @@ export function useOmsWebSocket(): OmsState & OmsActions {
       reconnectRef.current = null;
     }
 
-    const ws = new WebSocket(WS_URL);
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(WS_URL, wsSubprotocols(token));
+    } catch (e) {
+      // A URL or subprotocol the browser won't use: retrying wouldn't help
+      console.error('Cannot open a WebSocket to', WS_URL, e);
+      return;
+    }
 
     ws.onopen = () => {
       dispatch({ type: 'CONNECTED' });
@@ -185,7 +198,7 @@ export function useOmsWebSocket(): OmsState & OmsActions {
     };
 
     wsRef.current = ws;
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     connect();
