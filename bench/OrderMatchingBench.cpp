@@ -9,6 +9,7 @@
  * Distributed under the GNU Affero General Public License (AGPL).
  */
 
+#include <algorithm>
 #include <benchmark/benchmark.h>
 #include <memory>
 #include <vector>
@@ -181,6 +182,10 @@ BENCHMARK(BM_OrderBookAddMixed)->Range(8, 8 << 10);
 // Order Book Remove Benchmarks
 // =============================================================================
 
+// Removal from a book that holds range(0) orders throughout (#181). Each iteration removes a batch of them and puts them
+// back with the timer paused. Pausing once per batch keeps PauseTiming's own cost, more than one removal's, out of the
+// measurement, and items processed counts removals. Before, an iteration removed one order until the book was empty,
+// so all but range(0) of millions timed nothing, and the benchmark reported 0 ns.
 static void BM_OrderBookRemove(benchmark::State &state)
 {
     OrderBookBenchmarkSetup setup;
@@ -194,16 +199,26 @@ static void BM_OrderBookRemove(benchmark::State &state)
         orders.push_back(order);
     }
 
-    size_t index = 0;
+    const size_t batch = std::min<size_t>(orders.size(), 64);
+    size_t next = 0;
+    int64_t removed = 0;
     for (auto _ : state)
     {
-        if (index < orders.size())
+        for (size_t i = 0; i < batch; ++i)
         {
-            setup.orderBook_->remove(*orders[index]);
-            ++index;
+            setup.orderBook_->remove(*orders[(next + i) % orders.size()]);
         }
+        removed += static_cast<int64_t>(batch);
+
+        state.PauseTiming();
+        for (size_t i = 0; i < batch; ++i)
+        {
+            setup.orderBook_->add(*orders[(next + i) % orders.size()]);
+        }
+        next = (next + batch) % orders.size();
+        state.ResumeTiming();
     }
-    state.SetItemsProcessed(state.iterations());
+    state.SetItemsProcessed(removed);
 }
 BENCHMARK(BM_OrderBookRemove)->Range(8, 8 << 10);
 
