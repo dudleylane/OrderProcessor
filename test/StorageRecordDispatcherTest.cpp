@@ -1874,3 +1874,110 @@ TEST_F(StorageRecordDispatcherTest, RestoredOrdersThatCrossAnEarlierOneAreLeftTo
     EXPECT_EQ(y->orderId_, dispatcher_->ordersToMatch()[0]->orderId_);
     EXPECT_EQ(w->orderId_, dispatcher_->ordersToMatch()[1]->orderId_);
 }
+
+// =============================================================================
+// Which restored orders are booked, for every status (#165, #215)
+// =============================================================================
+
+TEST_F(StorageRecordDispatcherTest, OnlyAWorkingOrderIsBookedOrLeftToMatch)
+{
+    // A live book holds only orders that are NEW or PARTFILL with quantity left, and a restore must book exactly those. It
+    // booked every status but a list of terminal ones, SUSPENDED included, though suspending takes an order out of the
+    // book (#215). A market order is never booked: an open one is left to match (#207). PENDINGNEW is never set and
+    // INVALID never on an order, and RECEIVEDNEW is an order before acceptance, so none of the three should come back.
+    enum Outcome
+    {
+        NEITHER,
+        BOOKED,
+        TO_MATCH
+    };
+    struct Case
+    {
+        OrderStatus status_;
+        Outcome limit_;  // with quantity left
+        Outcome market_; // with quantity left
+    };
+    const Case cases[] = {
+        { INVALID_ORDSTATUS, NEITHER, NEITHER },        { RECEIVEDNEW_ORDSTATUS, NEITHER, NEITHER },
+        { REJECTED_ORDSTATUS, NEITHER, NEITHER },       { PENDINGNEW_ORDSTATUS, NEITHER, NEITHER },
+        { PENDINGREPLACE_ORDSTATUS, NEITHER, NEITHER }, { NEW_ORDSTATUS, BOOKED, TO_MATCH },
+        { PARTFILL_ORDSTATUS, BOOKED, TO_MATCH },       { FILLED_ORDSTATUS, NEITHER, NEITHER },
+        { EXPIRED_ORDSTATUS, NEITHER, NEITHER },        { DFD_ORDSTATUS, NEITHER, NEITHER },
+        { SUSPENDED_ORDSTATUS, NEITHER, NEITHER },      { REPLACED_ORDSTATUS, NEITHER, NEITHER },
+        { CANCELED_ORDSTATUS, NEITHER, NEITHER },
+    };
+    static_assert(std::size(cases) == CANCELED_ORDSTATUS + 1, "a case for every status");
+    const char *const names[] = { "neither", "booked", "left to match" };
+
+    const SourceIdT instrument = test::addInstrument("STATUSES");
+    u64 number = 100;
+    for (const Case &c : cases)
+    {
+        for (const OrderType type : { LIMIT_ORDERTYPE, MARKET_ORDERTYPE })
+        {
+            for (const QuantityT leaves : { QuantityT(100), QuantityT(0) })
+            {
+                OrderBookImpl book;
+                OrderBookImpl::InstrumentsT instruments;
+                instruments.insert(instrument);
+                book.init(instruments);
+                OrderDataStorage storage;
+                TestFileSaver saver;
+                StorageRecordDispatcher dispatcher;
+                dispatcher.init(restore_.get(), &book, &saver, &storage);
+                dispatcher.startLoad();
+                std::unique_ptr<OrderEntry> order = bookedOrder(instrument, ++number, BUY_SIDE, 10.0, 100);
+                order->status_ = c.status_;
+                order->ordType_ = type;
+                order->leavesQty_ = leaves;
+                loadOrderRecord(dispatcher, *order);
+                dispatcher.finishLoad();
+
+                const Outcome expected = (0 == leaves) ? NEITHER : (LIMIT_ORDERTYPE == type) ? c.limit_ : c.market_;
+                const Outcome actual = book.getTop(instrument, BUY_SIDE).isValid() ? BOOKED
+                                       : dispatcher.ordersToMatch().empty()        ? NEITHER
+                                                                                   : TO_MATCH;
+                EXPECT_EQ(std::string(names[expected]), std::string(names[actual]))
+                    << "status " << c.status_ << ", " << ((LIMIT_ORDERTYPE == type) ? "limit" : "market") << ", "
+                    << leaves << " left";
+            }
+        }
+    }
+}
+
+// =============================================================================
+// The FX branch's data, read here (#165)
+// =============================================================================
+
+TEST_F(StorageRecordDispatcherTest, AnFxSwapRecordIsRefusedNotMisread)
+{
+    // FX's golden swap record (feature/fx-swap-support, 0e96d47): an order's fields, then '.', its far price, '.', and its
+    // far settlement date (#144), with an order type this branch doesn't have. Before #149 a decoder that ignored the
+    // bytes past its fields read it as a priced order with no far leg. It must be refused, so a server pointed at an FX
+    // directory doesn't start (#203) rather than trade half a swap.
+    const IdT fxSwapId(4446, 20261013);
+    const std::string record = fromHex("06000000952835013a65000000000000002e060000003a10000000000000002e"
+                                       "070000003a11000000000000002e020000003a0c000000000000002e03000000"
+                                       "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
+                                       "00000000002e080000003a12000000000000002e942835013a5b110000000000"
+                                       "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
+                                       "35a10100002e00000000005059402e00000000002059402e0000000000485940"
+                                       "2e00000000004459402e060000002e020000002e050000002e030000002e0400"
+                                       "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
+                                       "2ee90300002e910100002e030000003a020000002e000000000000f13f2e0500"
+                                       "863ba1010000");
+    // The codec itself refuses it, as a load does. Its instrument is the golden records', registered so that it is the
+    // swap's bytes that are refused, not a missing instrument.
+    restoreGoldenInstrument();
+    const std::string payload = record.substr(sizeof(u32));
+    try
+    {
+        std::unique_ptr<OrderEntry> order(OrderCodec::decode(fxSwapId, 0, payload.data(), payload.size()));
+        ADD_FAILURE() << "FX's swap record was read as an order of type " << order->ordType_;
+    }
+    catch (const std::runtime_error &ex)
+    {
+        // The far leg: '.', its price, '.', its date (#149's bounds check)
+        EXPECT_NE(std::string::npos, std::string(ex.what()).find("18 bytes after its last field")) << ex.what();
+    }
+}

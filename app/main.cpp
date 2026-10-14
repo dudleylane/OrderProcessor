@@ -35,6 +35,7 @@
 #include "CpuAffinity.h"
 #include "HugePages.h"
 #include "ServerDefaults.h"
+#include "ServerData.h"
 
 using namespace COP;
 
@@ -226,73 +227,15 @@ int main(int argc, char *argv[])
         }
     }
 
-    // 2. Create LMDB storage and record dispatcher
-    const size_t lmdbMapSize = static_cast<size_t>(cfg.lmdbMapMb) << 20;
-    auto lmdbStorage = std::make_unique<Store::LMDBStorage>(lmdbMapSize);
-    auto dispatcher = std::make_unique<Store::StorageRecordDispatcher>();
-
-    // Phase 1: Load reference data (instruments, accounts, strings) — orderBook is null
-    dispatcher->init(Store::WideDataStorage::instance(), nullptr, lmdbStorage.get(), Store::OrderStorage::instance());
-    lmdbStorage->load(cfg.dataDir, dispatcher.get());
-
-    aux::ExchLogger::instance()->note("Phase 1 LMDB load complete (reference data)");
-
-    // 3. Collect instrument IDs and init OrderBook
-    OrderBookImpl::InstrumentsT instrumentIds;
-    Store::WideDataStorage::instance()->forEachInstrument(
-        [&](const SourceIdT &id, const InstrumentEntry & /*instr*/)
-        {
-            instrumentIds.insert(id);
-        });
-
-    auto orderBook = std::make_unique<OrderBookImpl>();
-
-    // 4. Phase 2: Create fresh LMDB + dispatcher with orderBook for order restoration
-    lmdbStorage.reset();
-    lmdbStorage = std::make_unique<Store::LMDBStorage>(lmdbMapSize);
-    dispatcher = std::make_unique<Store::StorageRecordDispatcher>();
-    dispatcher->init(Store::WideDataStorage::instance(), orderBook.get(), lmdbStorage.get(),
-                     Store::OrderStorage::instance());
-
-    // Init order book with loaded instruments; the book itself does not persist orders (#20)
-    orderBook->init(instrumentIds);
-
-    // Reload LMDB — this time orders will be restored into OrderBook
-    lmdbStorage->load(cfg.dataDir, dispatcher.get());
-
-    aux::ExchLogger::instance()->note("Phase 2 LMDB load complete (orders restored)");
-
-    // Order and execution ids come from one counter, which starts at 1 in every run. Continue it past the orders just
-    // restored, so that no new order gets a number a restored order already has: clients name orders by number (#58).
-    // And past the limit the previous run saved, below which it issued every id, execution ids included: execution
-    // reports aren't persisted, so without it a new report could repeat an id a client already has (#81).
-    const u64 lastOrderNumber = Store::OrderStorage::instance()->maxOrderNumber();
-    const u64 idLimit = dispatcher->restoredIdLimit();
-    const u64 lastIssued = std::max(lastOrderNumber, (0 < idLimit) ? idLimit - 1 : 0);
-    IdTGenerator::instance()->advancePast(lastIssued);
-    // From here on no id is returned before a limit above it is saved
-    IdTGenerator::instance()->reserve(dispatcher.get(), ID_RESERVATION_BLOCK);
-    aux::ExchLogger::instance()->note("Order numbers continue after " + std::to_string(lastOrderNumber) +
-                                      "; ids continue after " + std::to_string(lastIssued));
-
-    // Resolve the defaults that WebSocket orders need (#34). Without them the server still starts, as it does on an
-    // unseeded directory, but its sessions refuse the orders that need them. seedData provides both.
-    const SourceIdT defaultClearingId = Store::WideDataStorage::instance()->findClearingByFirm(cfg.clearingFirm);
-    if (!defaultClearingId.isValid())
-    {
-        aux::ExchLogger::instance()->warn("Clearing firm '" + cfg.clearingFirm + "' is not in " + cfg.dataDir +
-                                          "; orders will be refused until it is seeded and the server restarted");
-    }
-    const SourceIdT defaultAccountId = Store::WideDataStorage::instance()->findAccountByName(cfg.defaultAccount);
-    if (!defaultAccountId.isValid())
-    {
-        aux::ExchLogger::instance()->warn("Default account '" + cfg.defaultAccount + "' is not in " + cfg.dataDir +
-                                          "; orders that name no account will be refused");
-    }
-
-    // 5. Bind dispatcher as saver for WideDataStorage
-    Store::WideDataStorage::instance()->bindStorage(dispatcher.get());
-    Store::OrderStorage::instance()->attach(dispatcher.get());
+    // 2-5. Load the data directory: its reference data, then its orders into a book. Continue the ids past every one issued
+    // before, find the defaults that orders need, and make the dispatcher the storages' saver (app/ServerData.cpp, #165).
+    App::ServerData data = App::loadServerData(cfg.dataDir, static_cast<size_t>(cfg.lmdbMapMb) << 20,
+                                               ID_RESERVATION_BLOCK, cfg.clearingFirm, cfg.defaultAccount);
+    std::unique_ptr<Store::LMDBStorage> lmdbStorage = std::move(data.lmdbStorage);
+    std::unique_ptr<Store::StorageRecordDispatcher> dispatcher = std::move(data.dispatcher);
+    std::unique_ptr<OrderBookImpl> orderBook = std::move(data.orderBook);
+    const SourceIdT defaultClearingId = data.defaultClearingId;
+    const SourceIdT defaultAccountId = data.defaultAccountId;
 
     // 6. Create SessionManager and WsOutQueues
     auto sessionMgr = std::make_unique<App::SessionManager>();
