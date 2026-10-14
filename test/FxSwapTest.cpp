@@ -429,4 +429,57 @@ TEST_F(FxSwapTest, NonSwapOrderUnchanged_LimitMatch)
     EXPECT_EQ(1u, deferedContainer_->events_.size());
 }
 
+// An outright order and a resting swap (#212): the swap trades only with a swap, so an outright order passes over it
+TEST_F(FxSwapTest, LimitOrderDoesNotMatchASwap)
+{
+    OrderEntry *sellSwap = createAndSaveSwapOrder(SELL_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    sellSwap->status_ = NEW_ORDSTATUS;
+    orderBook_->add(*sellSwap);
+
+    OrderEntry *buyLimit = createAndSaveLimitOrder(BUY_SIDE, 1.0850, 100);
+    buyLimit->status_ = NEW_ORDSTATUS;
+    matcher_->match(buyLimit, context_);
+
+    EXPECT_EQ(0u, deferedContainer_->events_.size()) << "an outright order traded a swap's near leg";
+}
+
+TEST_F(FxSwapTest, LimitOrderPassesOverASwapToTheOutrightOrderBehindIt)
+{
+    // The swap has the best price, and the outright sell behind it still trades
+    OrderEntry *sellSwap = createAndSaveSwapOrder(SELL_SIDE, 1.0840, 1.0862, 100, 1000, 2000);
+    sellSwap->status_ = NEW_ORDSTATUS;
+    orderBook_->add(*sellSwap);
+    OrderEntry *sellLimit = createAndSaveLimitOrder(SELL_SIDE, 1.0850, 100);
+    sellLimit->status_ = NEW_ORDSTATUS;
+    orderBook_->add(*sellLimit);
+
+    OrderEntry *buyLimit = createAndSaveLimitOrder(BUY_SIDE, 1.0850, 100);
+    buyLimit->status_ = NEW_ORDSTATUS;
+    matcher_->match(buyLimit, context_);
+
+    ASSERT_EQ(1u, deferedContainer_->events_.size());
+    auto *trade = dynamic_cast<ExecutionDeferedEvent *>(deferedContainer_->events_.front());
+    ASSERT_NE(nullptr, trade);
+    ASSERT_EQ(1u, trade->trades_.size());
+    EXPECT_EQ(sellLimit, trade->trades_.front().order_);
+    EXPECT_DOUBLE_EQ(1.0850, trade->trades_.front().lastPx_);
+}
+
+TEST_F(FxSwapTest, MarketOrderDoesNotMatchASwap)
+{
+    // With only a swap on the other side, a market order finds nothing to trade, and is canceled
+    OrderEntry *sellSwap = createAndSaveSwapOrder(SELL_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    sellSwap->status_ = NEW_ORDSTATUS;
+    orderBook_->add(*sellSwap);
+
+    OrderEntry *buyMarket = createAndSaveLimitOrder(BUY_SIDE, 0.0, 100);
+    buyMarket->ordType_ = MARKET_ORDERTYPE;
+    buyMarket->status_ = NEW_ORDSTATUS;
+    matcher_->match(buyMarket, context_);
+
+    ASSERT_EQ(1u, deferedContainer_->events_.size());
+    EXPECT_NE(nullptr, dynamic_cast<CancelOrderDeferedEvent *>(deferedContainer_->events_.front()))
+        << "a market order traded a swap's near leg";
+}
+
 } // namespace
