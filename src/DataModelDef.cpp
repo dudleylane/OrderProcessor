@@ -360,6 +360,13 @@ bool OrderEntry::isValid(std::string *invalid) const
             *invalid = "Invalid value of the order currency!";
             return false;
         }
+        // An order for nothing trades for nothing: the matcher fills the smaller of the two orders' leaves, and it
+        // recorded an execution of 0, or aborted a Debug build (#187)
+        if (0 == orderQty_)
+        {
+            *invalid = "Invalid value of the order quantity!";
+            return false;
+        }
         if (FXSWAP_ORDERTYPE == ordType_)
         {
             if (farPrice_ <= 0.0)
