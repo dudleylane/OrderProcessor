@@ -293,12 +293,14 @@ CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(const TradeEx
     // The leg comes from the trade: a swap's near leg reaches this report through the state machine, and its report used
     // to say SINGLE_LEG (#153). A plain fill's trade says SINGLE_LEG itself.
     execLegType_ = trade->execLegType_;
+    tradeLink_ = trade->tradeLink_; // a swap's near leg's link, as its far leg's report carries it (#199)
 }
 
 CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx, Currency currency,
                                                                    OrderStatus status, ExecLegType legType,
-                                                                   const OrderEntry &order)
-    : Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), status_(status), execLegType_(legType)
+                                                                   u64 tradeLink, const OrderEntry &order)
+    : Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), tradeLink_(tradeLink), status_(status),
+      execLegType_(legType)
 {
     lastQty_ = lastQty;
     lastPx_ = lastPx;
@@ -320,6 +322,7 @@ void CreateTradeExecReportTrOperation::execute(const Context &cnxt)
     execReport.currency_ = currency_;
     execReport.tradeDate_ = tradeDate_;
     execReport.execLegType_ = execLegType_;
+    execReport.tradeLink_ = tradeLink_;
 
     execReport.orderId_ = getObjectId();
     execReport.type_ = TRADE_EXECTYPE;

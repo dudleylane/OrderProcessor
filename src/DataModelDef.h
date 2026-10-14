@@ -369,6 +369,9 @@ struct ExecParams
     StringT market_;
     // which leg this execution belongs to (SINGLE_LEG for non-swap orders)
     ExecLegType execLegType_;
+    // A swap fill's link: the same on one side's near and far reports, so a client can pair them, and drawn afresh for
+    // each side of each fill (#199). 0 for an execution that isn't a swap leg.
+    u64 tradeLink_;
 
     ExecParams();
     ExecParams(const ExecParams &param);

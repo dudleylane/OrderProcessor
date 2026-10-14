@@ -13,6 +13,7 @@
 #include "TransactionDef.h"
 #include "TransactionScope.h"
 #include "DataModelDef.h"
+#include "IdTGenerator.h"
 #include "OrderStorage.h"
 #include "TrOperations.h"
 
@@ -42,6 +43,13 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
     // Stage the swap — if either leg fails, remove the stage and cancel
     size_t stageId = scope->startNewStage();
 
+    // A link per side of this fill, which its near and its far report both carry, so a client can pair them (#199). The
+    // FIX gateway made one from each report's own transact time, and two reports a millisecond apart didn't pair. Each
+    // side has its own: one shared link would tell each client whose order it traded with.
+    assert(nullptr != cnxt.idGenerator_);
+    const u64 contraLink = cnxt.idGenerator_->getId().id_;
+    const u64 baseLink = cnxt.idGenerator_->getId().id_;
+
     try
     {
         // === CONTRA ORDER ===
@@ -56,6 +64,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         nearTradeEntry.transactTime_ = 1;
         nearTradeEntry.orderId_ = nearTrade_.order_->orderId_;
         nearTradeEntry.execLegType_ = NEAR_LEG;
+        nearTradeEntry.tradeLink_ = contraLink;
 
         onTradeExecution contraEvnt(&nearTradeEntry);
         contraEvnt.orderBook_ = cnxt.orderBook_;
@@ -66,7 +75,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         OrderStatus contraStatus = (nearTrade_.order_->leavesQty_ == 0) ? FILLED_ORDSTATUS : PARTFILL_ORDSTATUS;
         std::unique_ptr<Operation> contraFarOp(
             new CreateTradeExecReportTrOperation(farTrade_.lastQty_, farTrade_.lastPx_, nearTrade_.order_->currency_,
-                                                 contraStatus, FAR_LEG, *nearTrade_.order_));
+                                                 contraStatus, FAR_LEG, contraLink, *nearTrade_.order_));
         scope->addOperation(contraFarOp);
 
         // === BASE (AGGRESSOR) ORDER ===
@@ -81,6 +90,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         baseNearTradeEntry.transactTime_ = 1;
         baseNearTradeEntry.orderId_ = baseOrder_->orderId_;
         baseNearTradeEntry.execLegType_ = NEAR_LEG;
+        baseNearTradeEntry.tradeLink_ = baseLink;
 
         onTradeExecution baseEvnt(&baseNearTradeEntry);
         baseEvnt.orderBook_ = cnxt.orderBook_;
@@ -90,7 +100,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         // 4. Far-leg execution REPORT on base order (no state machine, no leavesQty_ change)
         OrderStatus baseStatus = (baseOrder_->leavesQty_ == 0) ? FILLED_ORDSTATUS : PARTFILL_ORDSTATUS;
         std::unique_ptr<Operation> baseFarOp(new CreateTradeExecReportTrOperation(
-            farTrade_.lastQty_, farTrade_.lastPx_, baseOrder_->currency_, baseStatus, FAR_LEG, *baseOrder_));
+            farTrade_.lastQty_, farTrade_.lastPx_, baseOrder_->currency_, baseStatus, FAR_LEG, baseLink, *baseOrder_));
         scope->addOperation(baseFarOp);
     }
     catch (const std::exception &)

@@ -538,13 +538,14 @@ bool ClearingEntry::isValid(std::string *invalid) const
 
 ExecParams::ExecParams()
     : type_(INVALID_EXECTYPE), transactTime_(0), orderId_(), execId_(), orderStatus_(INVALID_ORDSTATUS),
-      execLegType_(SINGLE_LEG)
+      execLegType_(SINGLE_LEG), tradeLink_(0)
 {
 }
 
 ExecParams::ExecParams(const ExecParams &param)
     : type_(param.type_), transactTime_(param.transactTime_), orderId_(param.orderId_), execId_(param.execId_),
-      orderStatus_(param.orderStatus_), market_(param.market_), execLegType_(param.execLegType_)
+      orderStatus_(param.orderStatus_), market_(param.market_), execLegType_(param.execLegType_),
+      tradeLink_(param.tradeLink_)
 {
 }
 

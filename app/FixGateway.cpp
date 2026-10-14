@@ -1099,10 +1099,9 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
 
         report.addGroup(legGroup);
 
-        // Correlation: "<orderId>-<transactTime>" pairs near+far from same match.
-        // Clients join on TradeLinkID (tag 820) to reconstruct the swap fill.
-        // TradeLinkID has no typed class in FIX 4.4 headers; use untyped setField.
-        report.setField(820, std::to_string(order.orderId_.id_) + "-" + std::to_string(exec->transactTime_));
+        // TradeLinkID (820), which has no typed class in FIX 4.4's headers: the same on a side's near and far reports, so
+        // a client pairs them (#199). It was "<orderId>-<transactTime>", and each report stamps its own time.
+        report.setField(820, std::to_string(exec->tradeLink_));
     }
 
     return report;
