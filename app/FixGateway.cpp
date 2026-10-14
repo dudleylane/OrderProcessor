@@ -9,7 +9,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -465,6 +468,16 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
         }
     }
 
+    // A swap's settlement dates, read before anything is stored (#190)
+    DateTimeT settlDate = 0;
+    DateTimeT farSettlDate = 0;
+    if ((FXSWAP_ORDERTYPE == ordTypeVal) &&
+        (!readSettlDate(msg, msg, sid, FIX::FIELD::SettlDate, "SettlDate (64)", &settlDate) ||
+         !readSettlDate(msg, msg, sid, 6501, "the far leg's SettlDate (6501)", &farSettlDate)))
+    {
+        return;
+    }
+
     // The ClOrdID is stored under the session's key, since FIX scopes it to the client that sent it (#71)
     std::string sourceStr = makeSourceString(sid);
     std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
@@ -507,14 +520,8 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
         {
             order->farPrice_ = farPrice; // read and checked above (#145)
         }
-        if (msg.isSetField(6501))
-        {
-            order->farSettlDate_ = static_cast<DateTimeT>(std::stoull(msg.getField(6501)));
-        }
-        if (msg.isSetField(64)) // SettlDate (standard tag) → near leg
-        {
-            order->settlDate_ = static_cast<DateTimeT>(std::stoull(msg.getField(64)));
-        }
+        order->farSettlDate_ = farSettlDate; // 6501, read and checked above (#190)
+        order->settlDate_ = settlDate;       // SettlDate (64), the near leg's
     }
 
     Queues::OrderEvent evt(order);
@@ -605,12 +612,10 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
             }
         }
 
-        FIX::LegSettlDate lsd;
         DateTimeT lsdVal = 0;
-        if (legGroup.isSet(lsd))
+        if (!readSettlDate(legGroup, msg, sid, FIX::FIELD::LegSettlDate, "LegSettlDate (588)", &lsdVal))
         {
-            legGroup.get(lsd);
-            lsdVal = static_cast<DateTimeT>(std::stoull(lsd.getString()));
+            return;
         }
 
         FIX::LegSide lside;
@@ -914,6 +919,27 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
 // Outbound
 // =============================================================================
 
+bool FixGateway::readSettlDate(const FIX::FieldMap &fields, const FIX::Message &msg, const FIX::SessionID &sid, int tag,
+                               const char *name, DateTimeT *date)
+{
+    if (!fields.isSetField(tag))
+    {
+        return true;
+    }
+    const std::string &text = fields.getField(tag);
+    const std::optional<DateTimeT> parsed = fromLocalMktDate(text);
+    if (!parsed)
+    {
+        // The refusal quotes what came, cut short: it is the client's own text
+        refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION,
+                    "Order refused: " + std::string(name) + " must be a date, YYYYMMDD, not '" + text.substr(0, 32) +
+                        "'");
+        return false;
+    }
+    *date = *parsed;
+    return true;
+}
+
 bool FixGateway::applySessionAccounts(const FIX::Message &msg, const FIX::SessionID &sid, std::string *account)
 {
     if (nullptr == credentials_)
@@ -1065,11 +1091,10 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
             legGroup.setField(1418, std::to_string(trade->lastQty_));
         }
 
-        // LegSettlDate is LocalMktDate (YYYYMMDD string in FIX)
-        // We store DateTimeT (ms epoch); pass as string for simplicity
+        // A LocalMktDate, YYYYMMDD: it used to be the engine's milliseconds, which no FIX client could read (#198)
         if (legSettl > 0)
         {
-            legGroup.set(FIX::LegSettlDate(std::to_string(legSettl)));
+            legGroup.set(FIX::LegSettlDate(toLocalMktDate(legSettl)));
         }
 
         report.addGroup(legGroup);
@@ -1425,6 +1450,48 @@ std::optional<QuantityT> FixGateway::toQuantity(double orderQty)
         return static_cast<QuantityT>(orderQty);
     }
     return std::nullopt;
+}
+
+std::optional<DateTimeT> FixGateway::fromLocalMktDate(std::string_view text)
+{
+    if ((8 != text.size()) || !std::all_of(text.begin(), text.end(),
+                                           [](char c)
+                                           {
+                                               return (c >= '0') && (c <= '9');
+                                           }))
+    {
+        return std::nullopt;
+    }
+    const auto number = [text](std::size_t at, std::size_t digits)
+    {
+        unsigned value = 0;
+        for (std::size_t i = at; i < at + digits; ++i)
+        {
+            value = 10 * value + static_cast<unsigned>(text[i] - '0');
+        }
+        return value;
+    };
+    const std::chrono::year_month_day day{ std::chrono::year(static_cast<int>(number(0, 4))),
+                                           std::chrono::month(number(4, 2)), std::chrono::day(number(6, 2)) };
+    if (!day.ok() || (day.year() < std::chrono::year(1970)))
+    {
+        return std::nullopt;
+    }
+    const auto sinceEpoch = std::chrono::sys_days(day).time_since_epoch();
+    return static_cast<DateTimeT>(std::chrono::duration_cast<std::chrono::milliseconds>(sinceEpoch).count());
+}
+
+std::string FixGateway::toLocalMktDate(DateTimeT date)
+{
+    // The last day a LocalMktDate can name, 9999-12-31, bounds a date no FIX order could have given
+    constexpr DateTimeT LAST_DAY_MS = 253402214400000ULL;
+    const std::chrono::sys_time<std::chrono::milliseconds> when{ std::chrono::milliseconds(
+        static_cast<std::int64_t>(std::min(date, LAST_DAY_MS))) };
+    const std::chrono::year_month_day day{ std::chrono::floor<std::chrono::days>(when) };
+    char text[16];
+    std::snprintf(text, sizeof(text), "%04d%02u%02u", static_cast<int>(day.year()), static_cast<unsigned>(day.month()),
+                  static_cast<unsigned>(day.day()));
+    return text;
 }
 
 bool FixGateway::isTradablePrice(double price, OrderType ordType)
