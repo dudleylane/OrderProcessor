@@ -176,9 +176,17 @@ if(BUILD_APP)
     target_link_libraries(seedData PRIVATE orderEngine pthread)
 
     if(BUILD_TESTS)
-        # Run seedData itself, so the Debug and sanitizer CI jobs see an abort in its own code (#41). The
-        # directory persists in the build tree, so later runs exercise the already-seeded path too.
+        # Run seedData itself, so the Debug and sanitizer CI jobs see an abort in its own code (#41): on a new directory,
+        # then again on the one it seeded, where it skips what exists. Both runs are in every ctest: CI's checkout removes
+        # the build tree, so a directory left by an earlier run never covered the second path there (#175).
+        add_test(NAME SeedDataStartsFromANewDirectory
+                 COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_CURRENT_BINARY_DIR}/seed-data-test)
+        set_tests_properties(SeedDataStartsFromANewDirectory PROPERTIES FIXTURES_SETUP SeedDataNewDirectory)
         add_test(NAME SeedDataRunsCleanly COMMAND seedData ${CMAKE_CURRENT_BINARY_DIR}/seed-data-test)
+        set_tests_properties(SeedDataRunsCleanly PROPERTIES FIXTURES_REQUIRED SeedDataNewDirectory
+                                                            FIXTURES_SETUP SeedDataSeededDirectory)
+        add_test(NAME SeedDataRunsCleanlyOnASeededDirectory COMMAND seedData ${CMAKE_CURRENT_BINARY_DIR}/seed-data-test)
+        set_tests_properties(SeedDataRunsCleanlyOnASeededDirectory PROPERTIES FIXTURES_REQUIRED SeedDataSeededDirectory)
         # seedData --if-empty seeds a directory with no instrument, and leaves one with instruments alone (#161)
         add_test(NAME SeedDataIfEmptySeedsOnlyADirectoryWithoutInstruments
                  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/SeedDataIfEmptyTest.sh $<TARGET_FILE:seedData>
