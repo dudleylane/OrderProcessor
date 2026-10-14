@@ -46,6 +46,19 @@ bool readUnsigned(const json &data, const char *key, u64 max, u64 *out, ParsedCl
     return true;
 }
 
+// An order's quantity: required, and from 1 (#187). An absent one used to become 0, an order for nothing.
+bool readQuantity(const json &data, const char *key, u64 max, u64 *out, ParsedClientMessage *msg)
+{
+    json::const_iterator it = data.find(key);
+    if ((data.end() == it) || !it->is_number_unsigned() || (it->get<u64>() < 1) || (it->get<u64>() > max))
+    {
+        markInvalid(msg, std::string("invalid ") + key + ": expected an integer from 1 to " + std::to_string(max));
+        return false;
+    }
+    *out = it->get<u64>();
+    return true;
+}
+
 bool readPrice(const json &data, const char *key, double *out, ParsedClientMessage *msg)
 {
     json::const_iterator it = data.find(key);
@@ -86,7 +99,7 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
             u64 minQty = 0;
             if (requireObject(d, &msg) && readPrice(d, "price", &msg.newOrder.price, &msg) &&
                 readPrice(d, "stopPx", &msg.newOrder.stopPx, &msg) &&
-                readUnsigned(d, "orderQty", maxQty, &orderQty, &msg) &&
+                readQuantity(d, "orderQty", maxQty, &orderQty, &msg) &&
                 readUnsigned(d, "minQty", maxQty, &minQty, &msg))
             {
                 msg.newOrder.symbol = d.value("symbol", "");
@@ -114,7 +127,7 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
             u64 orderQty = 0;
             if (requireObject(d, &msg) && readUnsigned(d, "orderId", maxId, &msg.replaceOrder.orderId, &msg) &&
                 readPrice(d, "price", &msg.replaceOrder.price, &msg) &&
-                readUnsigned(d, "orderQty", maxQty, &orderQty, &msg))
+                (!d.contains("orderQty") || readQuantity(d, "orderQty", maxQty, &orderQty, &msg)))
             {
                 msg.replaceOrder.clOrderId = d.value("clOrderId", "");
                 msg.replaceOrder.hasPrice = d.contains("price");
