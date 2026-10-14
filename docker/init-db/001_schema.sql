@@ -195,24 +195,25 @@ CREATE TABLE orders (
     order_id            BIGINT       NOT NULL,
     order_date          DATE         NOT NULL,
 
-    -- Client/routing identifiers
-    cl_order_id         VARCHAR(64),
-    orig_cl_order_id    VARCHAR(64),
-    source              VARCHAR(64),
-    destination         VARCHAR(64),
+    -- Client/routing identifiers: TEXT, since a FIX order's ClOrdID is stored with its session's CompIDs (#71, #151)
+    cl_order_id         TEXT,
+    orig_cl_order_id    TEXT,
+    source              TEXT,
+    destination         TEXT,
 
     -- Order parameters
     side                side          NOT NULL,
     ord_type            order_type    NOT NULL,
     price               NUMERIC(18,8),
     stop_px             NUMERIC(18,8),
-    order_qty           INTEGER       NOT NULL,
-    min_qty             INTEGER       NOT NULL DEFAULT 0,
-    leaves_qty          INTEGER       NOT NULL DEFAULT 0,
-    cum_qty             INTEGER       NOT NULL DEFAULT 0,
+    -- Quantities are BIGINT: the engine's are unsigned 32-bit, which INTEGER can't hold above 2147483647 (#151)
+    order_qty           BIGINT        NOT NULL,
+    min_qty             BIGINT        NOT NULL DEFAULT 0,
+    leaves_qty          BIGINT        NOT NULL DEFAULT 0,
+    cum_qty             BIGINT        NOT NULL DEFAULT 0,
     avg_px              NUMERIC(18,8) NOT NULL DEFAULT 0,
-    day_order_qty       INTEGER       NOT NULL DEFAULT 0,
-    day_cum_qty         INTEGER       NOT NULL DEFAULT 0,
+    day_order_qty       BIGINT        NOT NULL DEFAULT 0,
+    day_cum_qty         BIGINT        NOT NULL DEFAULT 0,
     day_avg_px          NUMERIC(18,8) NOT NULL DEFAULT 0,
 
     status              order_status  NOT NULL DEFAULT 'RECEIVED_NEW',
@@ -251,7 +252,7 @@ CREATE TABLE executions (
 
     -- Trade-specific (exec_type = TRADE / CORRECT)
     last_px         NUMERIC(18,8),
-    last_qty        INTEGER,
+    last_qty        BIGINT,
     trade_id        VARCHAR(64),
 
     -- Reject-specific (exec_type = REJECT)
@@ -259,7 +260,7 @@ CREATE TABLE executions (
 
     -- Replace-specific (exec_type = REPLACE)
     new_price       NUMERIC(18,8),
-    new_qty         INTEGER,
+    new_qty         BIGINT,
 
     -- Cancel-specific (exec_type = CANCEL)
     cancel_reason   TEXT,

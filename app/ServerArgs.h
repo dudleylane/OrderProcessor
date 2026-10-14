@@ -40,6 +40,9 @@ struct ServerArgs
     // The token may come from OMS_WS_TOKEN instead, and the Origins from OMS_ALLOWED_ORIGINS, which main() reads.
     std::string wsTokenFile;
     std::vector<std::string> allowedOrigins;
+    // The Postgres the server mirrors its orders to (#151): a libpq connection string. It may come from
+    // OMS_PG_CONNECTION instead, which main() reads. Empty: LMDB only.
+    std::string pgConnection;
     bool help = false; // --help: print the usage and exit
 };
 
@@ -74,6 +77,9 @@ inline std::string serverUsage()
            "                            OMS_WS_TOKEN. Without one, any client that reaches the port may trade\n"
            "  --allowed-origin ORIGIN   a browser Origin that may connect; repeat for more, or set\n"
            "                            OMS_ALLOWED_ORIGINS, comma-separated (default: any)\n"
+           "  --pg-connection STRING    mirror orders and reference data to this Postgres, a libpq connection\n"
+           "                            string; better, set OMS_PG_CONNECTION, which other users can't see in\n"
+           "                            the process list (default: none)\n"
            "  -h, --help                print this and exit\n";
 }
 
@@ -123,7 +129,8 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
             "--port",         "--data-dir",        "--workers",
             "--cpu-affinity", "--clearing-firm",   "--default-account",
             "--lmdb-map-mb",  "--max-connections", "--max-session-queue-mb",
-            "--bind",         "--ws-token-file",   "--allowed-origin"
+            "--bind",         "--ws-token-file",   "--allowed-origin",
+            "--pg-connection"
         };
         bool takesValue = false;
         for (const std::string &option : withValues)
@@ -206,6 +213,10 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
         {
             parsed.allowedOrigins.push_back(value);
         }
+        else if ("--pg-connection" == arg)
+        {
+            parsed.pgConnection = value;
+        }
         else if ("--clearing-firm" == arg)
         {
             parsed.clearingFirm = value;
@@ -221,6 +232,37 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
         }
     }
     return parsed;
+}
+
+/// The Postgres connection string (#151), from --pg-connection or OMS_PG_CONNECTION, not both; empty when neither is
+/// set, and the server then keeps LMDB only, as it always had. Returns false, with the reason in *error, for both, for
+/// OMS_PG_CONNECTION set but empty, or for either in a build without BUILD_PG, which couldn't use it.
+inline bool resolvePgConnection(const ServerArgs &args, const char *env, std::string *connection, std::string *error)
+{
+    std::string resolved = args.pgConnection;
+    if (nullptr != env)
+    {
+        if ('\0' == *env)
+        {
+            *error = "OMS_PG_CONNECTION is set, but empty: unset it to run without Postgres";
+            return false;
+        }
+        if (!resolved.empty())
+        {
+            *error = "the Postgres connection string is given twice, by --pg-connection and by OMS_PG_CONNECTION";
+            return false;
+        }
+        resolved = env;
+    }
+#ifndef BUILD_PG
+    if (!resolved.empty())
+    {
+        *error = "this server was built without BUILD_PG, so it can't write to Postgres";
+        return false;
+    }
+#endif
+    *connection = std::move(resolved);
+    return true;
 }
 
 /// Who may open a WebSocket session (#146), from the arguments and the environment: the access token from

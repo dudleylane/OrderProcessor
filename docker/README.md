@@ -39,7 +39,7 @@ All three restart unless stopped (`restart: unless-stopped`), and each has a hea
 
 On a host with SELinux enforcing, as el10 is by default, compose relabels `init-db/` so the database container can read it (the `z` on its mount, #201). Without that, Postgres can't read its init scripts and never starts.
 
-CI brings this stack up with `scripts/check-compose-stack.sh` (#140), when `docker/` changes and weekly. The script checks that compose refuses to start without an access token and publishes only the frontend's port, that every service becomes healthy, that Postgres loaded the schema, that the server seeded its volume, that `/ws` refuses an upgrade without the token or from another Origin, and that a new order sent to the frontend's `/ws` with the token gets its execution report. Run it before changing `docker-compose.yml`, `nginx.conf`, `.env.example` or `init-db/`. It takes about three minutes, and it publishes no host port, so it can run beside a stack that is already up.
+CI brings this stack up with `scripts/check-compose-stack.sh` (#140), when `docker/` changes and weekly. The script checks that compose refuses to start without an access token and publishes only the frontend's port, that every service becomes healthy, that Postgres loaded the schema, that the server seeded its volume, that `/ws` refuses an upgrade without the token or from another Origin, that a new order sent to the frontend's `/ws` with the token gets its execution report, and that the order and the seeded reference data reach Postgres (#151). Run it before changing `docker-compose.yml`, `nginx.conf`, `.env.example` or `init-db/`. It takes about three minutes, and it publishes no host port, so it can run beside a stack that is already up.
 
 The server runs as the user `oms`, which owns `/data`, and nginx as the user `nginx`; neither container runs as root. nginx looks the server up through the container's own DNS resolver when a request needs it, so it starts while the server is still down, and it finds a re-created server container at its new address.
 
@@ -63,7 +63,7 @@ Copy `.env.example` to `.env` and set values:
 
 ```bash
 POSTGRES_USER=oms              # PostgreSQL username
-POSTGRES_PASSWORD=changeme     # PostgreSQL password (change this!)
+POSTGRES_PASSWORD=changeme     # PostgreSQL password (change this! The server's connection string quotes it, so no ', \ or $)
 POSTGRES_DB=oms                # Database name
 OMS_WS_TOKEN=                  # WebSocket access token, required: openssl rand -hex 32 makes one (#146)
 OMS_ALLOWED_ORIGINS=           # Pages a browser may connect from, comma-separated; empty allows any (#146)
@@ -227,7 +227,7 @@ CI builds and runs this image as well, with `scripts/check-frontend-image.sh` (#
 
 ## Database Schema
 
-The schema is initialized automatically on first boot from `init-db/001_schema.sql`. Nothing writes to it yet: the server doesn't connect to Postgres (#151). It includes:
+The schema is initialized automatically on first boot from `init-db/001_schema.sql`. The server mirrors its reference data and orders into it, behind LMDB (#151): README's [PostgreSQL Integration](../README.md#postgresql-integration) says how. It includes:
 
 **Enum types** (matching C++ and TypeScript): `side`, `order_type`, `order_status`, `exec_type`, `time_in_force`, `currency`, `capacity`, `settl_type`, `account_type`, `audit_action`
 
@@ -244,6 +244,20 @@ The schema is initialized automatically on first boot from `init-db/001_schema.s
 | `audit_log` | Audit trail with JSONB detail; nothing enforces append-only |
 
 **Indexes** optimized for frontend blotter queries: active orders (partial index), executions by order and time, audit log with GIN index on JSONB.
+
+### An `oms-pgdata` volume from before #151
+
+Postgres runs `init-db/` only on a new volume, so an older one keeps the schema it was made with, whose quantity columns are INTEGER and whose ClOrdID columns hold 64 characters. The server's writes then fail for an order above 2147483647 or with a longer ClOrdID, and it logs each. Nothing wrote to Postgres before #151, so starting over loses nothing: `docker compose down -v` deletes every volume, the server's data too. To keep the server's data, change just the columns:
+
+```bash
+docker compose exec oms-db psql -U oms -d oms -c "
+  ALTER TABLE orders ALTER COLUMN order_qty TYPE BIGINT, ALTER COLUMN min_qty TYPE BIGINT,
+    ALTER COLUMN leaves_qty TYPE BIGINT, ALTER COLUMN cum_qty TYPE BIGINT,
+    ALTER COLUMN day_order_qty TYPE BIGINT, ALTER COLUMN day_cum_qty TYPE BIGINT,
+    ALTER COLUMN cl_order_id TYPE TEXT, ALTER COLUMN orig_cl_order_id TYPE TEXT,
+    ALTER COLUMN source TYPE TEXT, ALTER COLUMN destination TYPE TEXT;
+  ALTER TABLE executions ALTER COLUMN last_qty TYPE BIGINT, ALTER COLUMN new_qty TYPE BIGINT;"
+```
 
 ## Troubleshooting
 

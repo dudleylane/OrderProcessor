@@ -37,6 +37,7 @@ namespace Store
 {
 
 class OrderDataStorage;
+class WideParamsDataStorage;
 
 class FileStorage;
 
@@ -96,10 +97,15 @@ public:
 
 #ifdef BUILD_PG
 public:
+    /// Mirrors what is saved from now on to Postgres, and what a rollback erases (#151)
     void setPGWriter(PG::PGWriteBehind *writer)
     {
         pgWriter_ = writer;
     }
+    /// Hands the Postgres writer every instrument, account, clearing firm and order the data directory holds (#151).
+    /// LMDB's load restores them without save(), so Postgres would otherwise never hear of anything stored before it
+    /// was wired up, and an order's row would point at no instrument.
+    void syncToPG(const WideParamsDataStorage &wideData) const;
 #endif
 
 public:

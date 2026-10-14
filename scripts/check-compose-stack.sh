@@ -25,7 +25,9 @@
 #      list with 403 (#146).
 #   5. A client on the stack's network sends a new order to the frontend's /ws, offering
 #      the token as the app does, and gets an execution report with status NEW: a
-#      browser's order's path, through nginx, to a seeded engine.
+#      browser's order's path, through nginx, to a seeded engine. Then the order reaches
+#      Postgres, as NEW, and so does the seeded reference data the server mirrored at
+#      startup (#151).
 #   6. Stopping the stack ends every container with exit code 0, and the server's log
 #      has no errors.
 # The containers, pod, network, volumes and images it makes are removed when it exits,
@@ -293,6 +295,23 @@ report="$(podman run --rm --network "$network" "$node_image" node -e "$client" \
     "ws://oms-frontend:$FRONTEND_PORT/ws" "$TOKEN" 2>&1)" || fail "the order got no execution report: $report"
 [[ "$report" == "execution_report NEW" ]] || fail "the order got '$report', not an execution report with status NEW"
 echo "$report"
+
+step "the order in Postgres"
+# Written behind LMDB, on the server's own thread, so it may take a moment (#151)
+psql_value() {
+    podman exec "$db" psql -U "$DB_USER" -d "$DB_NAME" -Atc "$1"
+}
+status=""
+for _ in $(seq 1 30); do
+    status="$(psql_value "SELECT status FROM orders o JOIN instruments i ON i.id = o.instrument_id
+                          WHERE i.symbol = 'AAPL' AND o.price = 150.25")" || true
+    [[ "$status" == NEW ]] && break
+    sleep 1
+done
+[[ "$status" == NEW ]] || fail "the order didn't reach Postgres as NEW within 30s ('${status:-no row}')"
+instruments="$(psql_value "SELECT count(*) FROM instruments")" || fail "psql failed"
+(( instruments > 0 )) || fail "Postgres has no instrument: the server didn't mirror its seeded reference data"
+echo "orders: AAPL 150.25 is NEW; instruments: $instruments"
 
 step "stop the stack"
 "${COMPOSE[@]}" stop >/dev/null 2>&1 || fail "compose stop failed"
