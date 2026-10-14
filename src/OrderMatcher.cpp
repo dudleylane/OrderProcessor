@@ -78,40 +78,34 @@ bool FindOpositeOrder::match(const IdT &order, bool *stop) const
     {
         return false;
     }
-    if (MARKET_ORDERTYPE == order_->ordType_)
+    if (OrderMatcher::tradesWith(*order_, *contrOrd))
     {
         return true;
     }
-    if (MARKET_ORDERTYPE == contrOrd->ordType_)
-    {
-        return true;
-    }
-    if (BUY_SIDE == order_->side_)
-    {
-        if (order_->price_ >= contrOrd->price_)
-        {
-            return true;
-        }
-        else
-        {
-            *stop = true;
-        }
-    }
-    else
-    {
-        if (order_->price_ <= contrOrd->price_)
-        {
-            return true;
-        }
-        else
-        {
-            *stop = true;
-        }
-    }
+    // The side is sorted by price, so no order further on trades with it either
     assert(nullptr != stop);
+    *stop = true;
     return false;
 }
 } // namespace
+
+bool OrderMatcher::tradesWith(const OrderEntry &order, const OrderEntry &contra)
+{
+    if ((MARKET_ORDERTYPE == order.ordType_) || (MARKET_ORDERTYPE == contra.ordType_))
+    {
+        return true;
+    }
+    if (BUY_SIDE == order.side_)
+    {
+        return order.price_ >= contra.price_;
+    }
+    return order.price_ <= contra.price_;
+}
+
+IdT OrderMatcher::findContra(OrderEntry *order, const OrderBook &book, OrderDataStorage *storage)
+{
+    return book.find(FindOpositeOrder(order, storage));
+}
 
 OrderMatcher::OrderMatcher(void) : defered_(nullptr)
 {
@@ -139,7 +133,7 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
     assert(nullptr != ctxt.orderBook_);
     assert(nullptr != ctxt.orderStorage_);
 
-    IdT id = ctxt.orderBook_->find(FindOpositeOrder(order, ctxt.orderStorage_));
+    IdT id = findContra(order, *ctxt.orderBook_, ctxt.orderStorage_);
     if (!id.isValid())
     {
         if (MARKET_ORDERTYPE == order->ordType_)

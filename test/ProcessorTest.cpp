@@ -17,6 +17,7 @@
 #include <thread>
 #include <memory>
 #include <deque>
+#include <filesystem>
 #include <vector>
 
 #include "TestFixtures.h"
@@ -34,6 +35,8 @@
 #include "OrderStorage.h"
 #include "OrderBookImpl.h"
 #include "StateMachine.h"
+#include "LMDBStorage.h"
+#include "StorageRecordDispatcher.h"
 
 using namespace COP;
 using namespace COP::Queues;
@@ -125,14 +128,24 @@ public:
             onAdd_();
         }
         tr->setTransactionId(TransactionId(1, 1));
-        if (keep_)
+        if (keep_ || (keepNested_ && (0 < running_)))
         {
             kept_.push_back(std::move(tr));
             return;
         }
         if (proc_)
         {
-            proc_->process(tr->transactionId(), tr.get());
+            ++running_;
+            try
+            {
+                proc_->process(tr->transactionId(), tr.get());
+            }
+            catch (...)
+            {
+                --running_;
+                throw;
+            }
+            --running_;
         }
         ++transactionCount_;
     }
@@ -167,10 +180,14 @@ public:
     std::function<void()> onAdd_;
     /// While set, a transaction added is kept here, not run
     bool keep_ = false;
+    /// While set, a transaction added while another runs is kept, not run: one a deferred event adds, a trade's or a
+    /// cancel's. Each is lost, as a crash would lose it after the transaction before it committed.
+    bool keepNested_ = false;
     std::vector<std::unique_ptr<Transaction>> kept_;
 
 private:
     int transactionCount_;
+    int running_ = 0;
 };
 
 // =============================================================================
@@ -1125,4 +1142,230 @@ TEST_F(ProcessorTest, ReplaceWaitsForTheTransactionThatBooksTheOriginal)
 
     ASSERT_EQ(1u, marks.size());
     EXPECT_FALSE(marks.front()) << "the replace was enqueued before the transaction that books the original";
+}
+
+// =============================================================================
+// Orders a crash left without their fills (#207)
+// =============================================================================
+
+namespace
+{
+/// Keeps each trade the engine reports, as the client is told it: the order, the quantity and the price
+class TradeRecorder final : public Queues::OutQueues
+{
+public:
+    struct Trade
+    {
+        IdT orderId_;
+        QuantityT lastQty_;
+        PriceT lastPx_;
+    };
+
+    void push(const Queues::ExecReportEvent &evnt, const std::string &) override
+    {
+        if ((nullptr != evnt.exec_) && (TRADE_EXECTYPE == evnt.exec_->type_))
+        {
+            const TradeExecEntry *trade = static_cast<const TradeExecEntry *>(evnt.exec_);
+            trades_.push_back(Trade{ trade->orderId_, trade->lastQty_, trade->lastPx_ });
+        }
+    }
+    void push(const Queues::CancelRejectEvent &, const std::string &) override {}
+    void push(const Queues::BusinessRejectEvent &, const std::string &) override {}
+
+    /// The trades reported for the order, as "quantity@price"
+    std::vector<std::string> tradesOf(const IdT &orderId) const
+    {
+        std::vector<std::string> result;
+        for (const Trade &trade : trades_)
+        {
+            if (trade.orderId_ == orderId)
+            {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "%llu@%g", static_cast<unsigned long long>(trade.lastQty_), trade.lastPx_);
+                result.emplace_back(buf);
+            }
+        }
+        return result;
+    }
+
+    std::vector<Trade> trades_;
+};
+
+/// One run of the engine over a data directory, wired as app/main.cpp wires it, except that transactions run as they
+/// are added: what the directory holds is restored when it starts, and each order change is written to it
+class EngineOverDirectory
+{
+public:
+    EngineOverDirectory(const std::string &dir, const SourceIdT &instrument, IncomingQueues *inQueues,
+                        OutQueues *outQueues)
+    {
+        OrderBookImpl::InstrumentsT instruments;
+        instruments.insert(instrument);
+        book_.init(instruments);
+        dispatcher_.init(WideDataStorage::instance(), &book_, &lmdb_, &storage_);
+        lmdb_.load(dir, &dispatcher_);
+        storage_.attach(&dispatcher_);
+        ProcessorParams params(IdTGenerator::instance(), &storage_, &book_, inQueues, outQueues, inQueues,
+                               &transactions_);
+        processor_.init(params);
+        transactions_.proc_ = &processor_;
+    }
+
+    /// Processes the order event queued, and returns the stored order
+    OrderEntry *process(const RawDataEntry &clOrdId)
+    {
+        processor_.process();
+        OrderEntry *stored = storage_.locateByClOrderId(clOrdId);
+        EXPECT_NE(nullptr, stored);
+        return stored;
+    }
+
+    LMDBStorage lmdb_;
+    StorageRecordDispatcher dispatcher_;
+    OrderBookImpl book_;
+    OrderDataStorage storage_;
+    TestTransactionManager transactions_;
+    Processor processor_;
+};
+} // namespace
+
+TEST_F(ProcessorTest, OrdersACrashLeftWithoutTheirFillsTradeAsTheyDidOnceRestarted)
+{
+    // X rests. Y crosses it, and W crosses what Y leaves. The transaction that books each commits, and a crash loses the
+    // transactions with their fills (#207). Restored, Y and W must trade as they did: Y with X at X's price, then W with
+    // Y at Y's. All three used to be booked as they were restored, crossed, and nothing traded them.
+    const std::string dir = test::uniqueTestPath("uncross-restart");
+    std::filesystem::remove_all(dir);
+    IdT x;
+    IdT y;
+    IdT w;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        crashed.transactions_.keepNested_ = true; // every fill is lost
+        auto order = createTestOrder(instrId1_, SELL_SIDE, 100.0, 100);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        x = crashed.process(clOrdId)->orderId_;
+        order = createTestOrder(instrId1_, BUY_SIDE, 101.0, 200);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        y = crashed.process(clOrdId)->orderId_;
+        order = createTestOrder(instrId1_, SELL_SIDE, 100.5, 50);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        w = crashed.process(clOrdId)->orderId_;
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        const IdT ids[] = { x, y, w };
+        for (const IdT &id : ids)
+        {
+            const OrderEntry *order = restarted.storage_.locateByOrderId(id);
+            ASSERT_NE(nullptr, order);
+            ASSERT_EQ(NEW_ORDSTATUS, order->status_) << "the crash should leave each order as its booking wrote it";
+            ASSERT_EQ(order->orderQty_, order->leavesQty_);
+        }
+        const IdT bestBid = restarted.book_.getTop(instrId1_, BUY_SIDE);
+        const IdT bestAsk = restarted.book_.getTop(instrId1_, SELL_SIDE);
+        if (bestBid.isValid() && bestAsk.isValid())
+        {
+            EXPECT_LT(restarted.storage_.locateByOrderId(bestBid)->price_,
+                      restarted.storage_.locateByOrderId(bestAsk)->price_)
+                << "the restored book is crossed";
+        }
+        ASSERT_EQ(2u, restarted.dispatcher_.ordersToMatch().size());
+        EXPECT_EQ(y, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+        EXPECT_EQ(w, restarted.dispatcher_.ordersToMatch()[1]->orderId_);
+
+        for (OrderEntry *order : restarted.dispatcher_.ordersToMatch())
+        {
+            restarted.processor_.matchRestored(order);
+        }
+
+        EXPECT_EQ(std::vector<std::string>{ "100@100" }, reports.tradesOf(x));
+        EXPECT_EQ((std::vector<std::string>{ "100@100", "50@101" }), reports.tradesOf(y));
+        EXPECT_EQ(std::vector<std::string>{ "50@101" }, reports.tradesOf(w)) << "W trades at Y's price, as it did";
+        EXPECT_EQ(y, restarted.book_.getTop(instrId1_, BUY_SIDE));
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, SELL_SIDE).isValid());
+    }
+
+    // The fills are durable: restarted again, Y rests with what is left, and nothing waits to be matched
+    {
+        TradeRecorder reports;
+        EngineOverDirectory again(dir, instrId1_, inQueues_.get(), &reports);
+        EXPECT_TRUE(again.dispatcher_.ordersToMatch().empty());
+        EXPECT_EQ(FILLED_ORDSTATUS, again.storage_.locateByOrderId(x)->status_);
+        EXPECT_EQ(PARTFILL_ORDSTATUS, again.storage_.locateByOrderId(y)->status_);
+        EXPECT_EQ(50u, again.storage_.locateByOrderId(y)->leavesQty_);
+        EXPECT_EQ(FILLED_ORDSTATUS, again.storage_.locateByOrderId(w)->status_);
+        EXPECT_EQ(y, again.book_.getTop(instrId1_, BUY_SIDE));
+        EXPECT_FALSE(again.book_.getTop(instrId1_, SELL_SIDE).isValid());
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AnOpenMarketOrderACrashLeftTradesAndIsCanceledOnceRestarted)
+{
+    // S rests with 20. Market order M buys 50: it trades 20 with S, and what it can't trade is canceled. L, a sell that
+    // arrives after M, rests. A crash loses M's trade and its cancel (#207). M is never booked, so restored it stayed
+    // open for good. It must trade with S and be canceled, as it was, and not trade with L, which arrived after it.
+    const std::string dir = test::uniqueTestPath("uncross-market");
+    std::filesystem::remove_all(dir);
+    IdT s;
+    IdT m;
+    IdT l;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        crashed.transactions_.keepNested_ = true; // the trade and the cancel are lost
+        auto order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 20);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        s = crashed.process(clOrdId)->orderId_;
+        order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 50);
+        order->ordType_ = MARKET_ORDERTYPE;
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        m = crashed.process(clOrdId)->orderId_;
+        order = createTestOrder(instrId1_, SELL_SIDE, 9.0, 10);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        l = crashed.process(clOrdId)->orderId_;
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        ASSERT_EQ(NEW_ORDSTATUS, restarted.storage_.locateByOrderId(m)->status_);
+        ASSERT_EQ(50u, restarted.storage_.locateByOrderId(m)->leavesQty_);
+        ASSERT_EQ(2u, restarted.dispatcher_.ordersToMatch().size());
+        EXPECT_EQ(m, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+        EXPECT_EQ(l, restarted.dispatcher_.ordersToMatch()[1]->orderId_);
+
+        for (OrderEntry *order : restarted.dispatcher_.ordersToMatch())
+        {
+            restarted.processor_.matchRestored(order);
+        }
+
+        EXPECT_EQ(std::vector<std::string>{ "20@10" }, reports.tradesOf(s));
+        EXPECT_EQ(std::vector<std::string>{ "20@10" }, reports.tradesOf(m));
+        EXPECT_TRUE(reports.tradesOf(l).empty()) << "M traded with an order that arrived after it";
+        EXPECT_EQ(CANCELED_ORDSTATUS, restarted.storage_.locateByOrderId(m)->status_);
+        EXPECT_EQ(l, restarted.book_.getTop(instrId1_, SELL_SIDE));
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory again(dir, instrId1_, inQueues_.get(), &reports);
+        EXPECT_TRUE(again.dispatcher_.ordersToMatch().empty());
+        EXPECT_EQ(FILLED_ORDSTATUS, again.storage_.locateByOrderId(s)->status_);
+        EXPECT_EQ(CANCELED_ORDSTATUS, again.storage_.locateByOrderId(m)->status_);
+        EXPECT_EQ(20u, again.storage_.locateByOrderId(m)->cumQty_);
+        EXPECT_EQ(NEW_ORDSTATUS, again.storage_.locateByOrderId(l)->status_);
+        EXPECT_EQ(l, again.book_.getTop(instrId1_, SELL_SIDE));
+    }
+    std::filesystem::remove_all(dir);
 }

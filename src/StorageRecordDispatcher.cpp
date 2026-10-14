@@ -21,6 +21,7 @@
 #include "RawDataCodec.h"
 #include "OrderCodec.h"
 #include "OrderStorage.h"
+#include "OrderMatcher.h"
 
 #ifdef BUILD_PG
 #include "PGRequestBuilder.h"
@@ -205,14 +206,10 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
 
 namespace
 {
-/// An order belongs in the book only while it can still trade. Before #20 every record was a
-/// pre-acceptance snapshot, so restoring all of them was right; now terminal states persist too.
-bool belongsInBook(const OrderEntry &order)
+/// Whether a restored order can still trade: it isn't finished, and has quantity left. Before #20 every record was a
+/// pre-acceptance snapshot, so booking all of them was right; now terminal states persist too.
+bool canStillTrade(const OrderEntry &order)
 {
-    if (MARKET_ORDERTYPE == order.ordType_)
-    {
-        return false;
-    }
     switch (order.status_)
     {
     case FILLED_ORDSTATUS:
@@ -230,8 +227,36 @@ bool belongsInBook(const OrderEntry &order)
 }
 } // namespace
 
+bool StorageRecordDispatcher::crossesAnEarlierOrder(OrderEntry *order) const
+{
+    assert(nullptr != orderBook_);
+    assert(nullptr != orderStorage_);
+    // The matcher decides, not a copy of its test here: a restore must book exactly what a live match would have left
+    // resting, and the test changes, as it did for FX swaps (#212)
+    if (Proc::OrderMatcher::findContra(order, *orderBook_, orderStorage_).isValid())
+    {
+        return true;
+    }
+    // An order left to match may rest once it is matched, and then this order trades with it at its price, as it would
+    // have when this order arrived. Booked now instead, this order would rest, and the earlier order would trade with
+    // it at this order's price.
+    const SourceIdT instrument = order->instrument_.getId();
+    const Side otherSide = (BUY_SIDE == order->side_) ? SELL_SIDE : BUY_SIDE;
+    for (const OrderEntry *earlier : ordersToMatch_)
+    {
+        if ((otherSide == earlier->side_) && (instrument == earlier->instrument_.getId()) &&
+            Proc::OrderMatcher::tradesWith(*order, *earlier))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void StorageRecordDispatcher::finishLoad()
 {
+    ordersToMatch_.clear();
+    // In id order, which is the order the orders arrived in: ids increase across restarts too (#58)
     for (PendingOrdersT::iterator it = pendingOrders_.begin(); it != pendingOrders_.end(); ++it)
     {
         const std::string &record = it->second.record_;
@@ -255,7 +280,19 @@ void StorageRecordDispatcher::finishLoad()
                 storage_->restore(executionsId, new ExecutionsT());
             }
         }
-        if ((nullptr != orderBook_) && belongsInBook(*restored))
+        if ((nullptr == orderBook_) || !canStillTrade(*restored))
+        {
+            continue;
+        }
+        // An open market order, or an order that crosses one that arrived before it, lost what its booking started:
+        // a market order is never left open, and an order that crosses an earlier one trades with it. The transaction
+        // that booked it committed, and the one with its fills didn't (#207). It is left for the server to match, in
+        // this order, and not booked as it is, which would leave the book crossed.
+        if ((MARKET_ORDERTYPE == restored->ordType_) || crossesAnEarlierOrder(restored))
+        {
+            ordersToMatch_.push_back(restored);
+        }
+        else
         {
             orderBook_->restore(*restored);
         }

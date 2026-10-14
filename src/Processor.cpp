@@ -868,6 +868,51 @@ void Processor::process(const ACID::TransactionId &id, ACID::Transaction *tr)
     }
 }
 
+void Processor::matchRestored(OrderEntry *order)
+{
+    if (nullptr == order) [[unlikely]]
+    {
+        throw std::runtime_error("Processor::matchRestored: order pointer is null!");
+    }
+    if (!threadState().events.empty()) [[unlikely]]
+    {
+        throw std::runtime_error("Processor::matchRestored: events queue is not empty!");
+    }
+    // The operations OrdStateImpl::processReceive gave the transaction that booked the order, run here, on the caller's
+    // thread, as process() runs a transaction: the order is matched, then booked unless it is a market order. Not
+    // through the transaction manager, which orders a transaction only after those that share an object with it: a
+    // market order's relates to no other order on its instrument (#209), and each order matched here must see the
+    // fills of the one before it.
+    TransactionScope scope;
+    {
+        ScopeArenaGuard arenaGuard(&scope);
+        std::unique_ptr<Operation> match(new MatchOrderTrOperation(order));
+        scope.addOperation(match);
+        if (MARKET_ORDERTYPE != order->ordType_)
+        {
+            std::unique_ptr<Operation> book(new AddToOrderBookTrOperation(*order, order->instrument_.getId()));
+            scope.addOperation(book);
+        }
+    }
+    Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
+    if (!scope.executeTransaction(cntxt))
+    {
+        clearDeferedEvents();
+        throw std::runtime_error("Processor::matchRestored: order " + std::to_string(order->orderId_.id_) +
+                                 " could not be matched or booked!");
+    }
+    // The fills, and a market order's cancel when nothing is left to trade with, as process() applies them
+    try
+    {
+        processDeferedEvent();
+    }
+    catch (...)
+    {
+        clearDeferedEvents();
+        throw;
+    }
+}
+
 void Processor::clearDeferedEvents()
 {
     for (DeferedEventsT::iterator it = threadState().events.begin(); it != threadState().events.end(); ++it)
