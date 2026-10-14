@@ -366,6 +366,13 @@ bool OrderEntry::isValid(std::string *invalid) const
             *invalid = "Invalid value of the order quantity!";
             return false;
         }
+        // A limit price is above 0 (#188): at 0 a limit sell sold at any bid, as a market order does. Written so that a
+        // NaN is refused as well.
+        if (((LIMIT_ORDERTYPE == ordType_) || (STOPLIMIT_ORDERTYPE == ordType_)) && !(price_ > 0))
+        {
+            *invalid = "Invalid value of the order price!";
+            return false;
+        }
         return true;
     }
     catch (const std::exception &ex)
