@@ -57,7 +57,10 @@ FIX 4.4 only:
 - **Messages:** `NewOrderSingle`, `NewOrderMultileg` (FX swaps, with the `NoLegs` group),
   `OrderCancelRequest`, `OrderCancelReplaceRequest`, `ExecutionReport`, `OrderCancelReject`,
   `BusinessMessageReject`, `News`.
-- **Settings:** `config/fix.cfg` (acceptor on port 5001, `ResetOnLogon=N`, one session a day from 00:00 UTC).
+- **Settings:** `config/fix.cfg` (acceptor on port 5001, `ResetOnLogon=N`, one session a day from 00:00 UTC). It names
+  no session: the server makes one for each counterparty in `--fix-credentials` (#147).
+- **Logon:** `Application::fromAdmin` checks a Logon's `Username` (553) and `Password` (554) against the credentials
+  file, and throws `RejectLogon` to refuse it (#147).
   The logs come from the project's `FixRotatingLogFactory` (`app/FixRotatingLog.cpp`), not `FileLog`:
   the same files and lines, rotated at `FileLogMaxMB` with `FileLogBackups` kept (#160).
 

@@ -13,6 +13,8 @@
 #include <quickfix/fix44/OrderCancelRequest.h>
 #include <quickfix/fix44/OrderCancelReplaceRequest.h>
 #include <quickfix/fix44/News.h>
+#include <quickfix/fix44/Logon.h>
+#include <quickfix/fix44/Heartbeat.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
 #include <quickfix/FieldConvertors.h>
@@ -626,6 +628,105 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_ForAnotherSessionsOrder_IsNotQueued
     replaceMsg.set(FIX::Price(15.50));
     replaceMsg.set(FIX::OrderQty(200));
     gateway_->onMessage(replaceMsg, TEST_SID);
+}
+
+// --- Who may log on, and what each counterparty may trade (#147) ---
+
+/// The acceptor's own view of its session with CLIENT_A, as QuickFIX passes it: TargetCompID is the counterparty's
+const FIX::SessionID ACCEPTOR_SID("FIX.4.4", "ORDER_PROCESSOR", "CLIENT_A");
+
+FIX44::Logon makeLogon(const std::string &username, const std::string &password)
+{
+    FIX44::Logon logon(FIX::EncryptMethod(FIX::EncryptMethod_NONE_OTHER), FIX::HeartBtInt(30));
+    if (!username.empty())
+    {
+        logon.set(FIX::Username(username));
+    }
+    if (!password.empty())
+    {
+        logon.set(FIX::Password(password));
+    }
+    return logon;
+}
+
+/// CLIENT_A may trade CLIENT-A only, with the password "secret" (few iterations, to stay fast under the sanitizers)
+FixCredentials clientACredentials(const std::string &accounts = "CLIENT-A")
+{
+    return FixCredentials::parse("CLIENT_A client_a " + FixCredentials::hashPassword("secret", 1000) + " " + accounts,
+                                 "creds");
+}
+
+TEST_F(FixGatewayInboundTest, ALogonNeedsItsCounterpartysUsernameAndPassword)
+{
+    const FixCredentials credentials = clientACredentials();
+    gateway_->setCredentials(&credentials);
+    EXPECT_NO_THROW(gateway_->fromAdmin(makeLogon("client_a", "secret"), ACCEPTOR_SID));
+    EXPECT_THROW(gateway_->fromAdmin(makeLogon("client_a", "Secret"), ACCEPTOR_SID), FIX::RejectLogon);
+    EXPECT_THROW(gateway_->fromAdmin(makeLogon("client_b", "secret"), ACCEPTOR_SID), FIX::RejectLogon);
+    EXPECT_THROW(gateway_->fromAdmin(makeLogon("client_a", ""), ACCEPTOR_SID), FIX::RejectLogon);
+    EXPECT_THROW(gateway_->fromAdmin(makeLogon("", ""), ACCEPTOR_SID), FIX::RejectLogon);
+    // A session the credentials don't name, with another counterparty's username and password
+    EXPECT_THROW(
+        gateway_->fromAdmin(makeLogon("client_a", "secret"), FIX::SessionID("FIX.4.4", "ORDER_PROCESSOR", "CLIENT_Z")),
+        FIX::RejectLogon);
+    // Only a Logon is checked: the session's other admin messages carry no credentials
+    EXPECT_NO_THROW(gateway_->fromAdmin(FIX44::Heartbeat(), ACCEPTOR_SID));
+    // The client learns only that it was refused, whatever the reason
+    try
+    {
+        gateway_->fromAdmin(makeLogon("client_b", "secret"), ACCEPTOR_SID);
+    }
+    catch (const FIX::RejectLogon &e)
+    {
+        EXPECT_EQ("Logon refused: wrong username or password", e.detail);
+    }
+}
+
+TEST_F(FixGatewayInboundTest, WithoutCredentialsEveryLogonIsAccepted)
+{
+    // As tests run the gateway; the server refuses --fix-cfg without --fix-credentials
+    EXPECT_NO_THROW(gateway_->fromAdmin(makeLogon("", ""), ACCEPTOR_SID));
+}
+
+TEST_F(FixGatewayInboundTest, ASessionTradesOnlyItsCounterpartysAccounts)
+{
+    const FixCredentials credentials = clientACredentials();
+    gateway_->setCredentials(&credentials);
+    std::vector<SourceIdT> queued;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                queued.push_back(evt.order_->account_.getId());
+                delete evt.order_;
+            }));
+
+    // Its own account
+    auto own = makeNewOrderSingle("ACCT-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100);
+    own.set(FIX::Account("CLIENT-A"));
+    gateway_->onMessage(own, ACCEPTOR_SID);
+    // No account: its first, not the server's default
+    gateway_->onMessage(makeNewOrderSingle("ACCT-2", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100),
+                        ACCEPTOR_SID);
+    // The server's default account, which isn't its: refused, before the engine sees it
+    auto other = makeNewOrderSingle("ACCT-3", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100);
+    other.set(FIX::Account("TRADING-1"));
+    gateway_->onMessage(other, ACCEPTOR_SID);
+    // An FX swap, with the same rules
+    auto swapOther = makeFxSwap("ACCT-4");
+    swapOther.set(FIX::Account("TRADING-1"));
+    gateway_->onMessage(swapOther, ACCEPTOR_SID);
+    gateway_->onMessage(makeFxSwap("ACCT-5"), ACCEPTOR_SID);
+
+    EXPECT_EQ((std::vector<SourceIdT>{ otherAccountId_, otherAccountId_, otherAccountId_ }), queued);
+}
+
+TEST_F(FixGatewayInboundTest, CredentialsGivingAnAccountTheServerDoesntHaveAreRefused)
+{
+    const FixCredentials credentials = clientACredentials("CLIENT-A,NO-SUCH-ACCOUNT");
+    EXPECT_THROW(gateway_->setCredentials(&credentials), std::runtime_error);
+    // And it checks nothing then: the server doesn't start
+    EXPECT_NO_THROW(gateway_->fromAdmin(makeLogon("", ""), ACCEPTOR_SID));
 }
 
 TEST_F(FixGatewayInboundTest, CancelRequest_ForItsOwnOrderStoredUnderTheClOrdIdAlone_IsQueued)

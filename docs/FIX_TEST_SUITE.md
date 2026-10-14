@@ -130,6 +130,10 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `NewOrderMultileg_NonSwapOrdType_Rejected` | Non-FXSWAP OrdType in multileg → rejected, no push |
 | `NewOrderMultileg_TooFewLegs_Rejected` | Single leg multileg → rejected, no push |
 | `SessionMapPopulatedOnLogon` | `onLogon()` makes the session known |
+| `ALogonNeedsItsCounterpartysUsernameAndPassword` | With credentials, `fromAdmin()` accepts a Logon only with its counterparty's Username and Password, and from a CompID the credentials name; it refuses with `RejectLogon` and a text that doesn't say which was wrong. Other admin messages aren't checked (#147) |
+| `WithoutCredentialsEveryLogonIsAccepted` | The gateway without credentials, as tests run it, checks nothing; the server won't run FIX that way (#147) |
+| `ASessionTradesOnlyItsCounterpartysAccounts` | An order, single or FX swap, naming one of the counterparty's accounts is queued; one naming no account trades its first; one naming another account is refused before the engine sees it (#147) |
+| `CredentialsGivingAnAccountTheServerDoesntHaveAreRefused` | `setCredentials()` throws for an account the data directory doesn't have (#147) |
 | `ASessionStaysKnownWhileItsClientIsAway` | A session is known from `onCreate()`, before any logon, and still after `onLogout()`, so a report for its order reaches QuickFIX, which keeps it for a ResendRequest (#160) |
 | `MakeSourceString_Format` | Source string format: `"FIX:SENDER->TARGET"` |
 | `FromApp_RoutesAGenericNewOrderSingle` | `fromApp()` given a plain `FIX::Message` builds the typed message, without the cracker's bad cast that UBSan reported |
@@ -256,6 +260,35 @@ The QuickFIX log the gateway uses since #160, whose files rotate where QuickFIX'
 **Requires:** `BUILD_FIX=ON`, Python 3
 
 Runs `orderProcessorServer` with this branch's `config/fix.cfg` and two FIX clients on raw sockets. CLIENT_A rests a buy and drops its connection; CLIENT_B's sell fills it while A is away; A logs on again, with its sequence numbers continuing, and its ResendRequest must get the fill back, with PossDupFlag (43=Y). Before #160 the gateway forgot a session at logout and dropped the report, and `ResetOnLogon=Y` started both sides from 1.
+
+## 12. FixCredentialsTest — The Credentials File and Its Hashes
+
+**File:** `test/FixCredentialsTest.cpp`
+**Requires:** `BUILD_FIX=ON`
+
+| Test | Description |
+|------|-------------|
+| `HashesWithPbkdf2HmacSha256` | RFC 7914's PBKDF2-HMAC-SHA256 vectors, as `hashPassword()` stores them |
+| `EachHashHasItsOwnSalt` | Two hashes of one password differ; the iteration count is read back |
+| `ALogonNeedsTheUsernameAndThePassword` | `verify()` takes only the counterparty's Username and Password, and no stored password that isn't a hash |
+| `AFileNamesEachCounterpartyItsUserAndItsAccounts` | Lines with spaces or tabs, CR LF endings, comments and blank lines; accounts in order |
+| `ALineThatCantBeUsedIsRefusedWithItsNumber` | A wrong field count, a CompID or an account given twice, an empty account, a hash in another form: refused with the file and line |
+| `AFileItCantReadIsRefused` | A missing file is refused, naming it |
+
+---
+
+## 13. FixLogonNeedsCredentials — A Real Server's Logons
+
+**File:** `test/FixLogonTest.py`, a ctest
+**Requires:** `BUILD_FIX=ON`, Python 3
+
+Runs `orderProcessorServer` with this branch's `config/fix.cfg` and a credentials file, and checks, on the wire:
+- the server won't start FIX without `--fix-credentials` (exit 2), nor with an account the data directory lacks (exit 1);
+- a Logon with a wrong password, none, or another username gets a Logout and a closed connection, and one from a CompID no line names is dropped; the log says why, and has no password in it;
+- with its password the counterparty logs on, an order on one of its accounts is acknowledged, and one on another account is refused with 150=8 and 103=15;
+- `--hash-fix-password` makes a hash Python's own PBKDF2 agrees with, with 600000 iterations.
+
+`test/fix_client.py` holds the raw-socket FIX client and server harness it shares with `FixResendTest.py`.
 
 ---
 

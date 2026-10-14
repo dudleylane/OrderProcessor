@@ -14,12 +14,28 @@ This directory contains everything needed to run the full OrderProcessor OMS sta
 cd docker
 cp .env.example .env          # Set PostgreSQL credentials
 sed -i "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$(openssl rand -hex 32)/" .env   # The access token
+# A FIX counterparty, CLIENT_A, trading TRADING-1 (#147): it asks for the password, and the file keeps only its hash
+python3 -c 'import getpass, hashlib, os; s = os.urandom(16); k = hashlib.pbkdf2_hmac("sha256", getpass.getpass("FIX password for CLIENT_A: ").encode(), s, 600000); print(f"CLIENT_A client_a pbkdf2-sha256$600000${s.hex()}${k.hex()} TRADING-1")' > fix-credentials
 docker compose up --build -d   # Build and start all services
 ```
 
 Open **http://localhost:3000** to access the OMS frontend. It asks for the access token first, the `OMS_WS_TOKEN` in `.env` (`grep OMS_WS_TOKEN .env` shows it), and keeps it until the tab closes (see [Access](#access)). The first `up` seeds the new data volume with test instruments, accounts and the clearing firm, so the stack takes orders at once (see [Seed Test Data](#seed-test-data)).
 
 The first build takes several minutes (C++ compilation inside the container). Subsequent starts use the Docker layer cache and are fast.
+
+### FIX counterparties
+
+The server's FIX acceptor, on port 5001, lets a counterparty log on only with the Username and Password its line in `docker/fix-credentials` gives, and trade only the accounts it lists (#147). Compose mounts the file into the server's container, and the server won't start without it. A line per counterparty:
+
+```
+# CompID   Username   PasswordHash                          Accounts
+CLIENT_A   client_a   pbkdf2-sha256$600000$<salt>$<key>     TRADING-1,TRADING-2
+```
+
+- **The hash.** The quick start's line makes one with Python's PBKDF2. The server makes the same, `orderProcessorServer --hash-fix-password`, from a password on standard input.
+- **Readable by others.** The file holds only hashes, so it may be, and it must be: the server runs as `oms` (uid 10001), and rootless podman shows a file only its owner may read as root's, which `oms` can't read.
+- **Changes.** Add or change a line, then `docker compose restart oms-server`.
+- **No TLS yet.** FIX runs over plain TCP until #228, so a password crosses the network in the clear.
 
 ## Services
 

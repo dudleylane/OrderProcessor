@@ -509,6 +509,8 @@ COP (Concurrent Order Processor)
 | `FixGatewayTest.cpp` | `FixGatewayInboundTest.*` | FIX message translation (7 tests) |
 | `FixGatewayTest.cpp` | `MultiOutQueuesTest.*` | Fan-out adapter (4 tests) |
 | `FixRotatingLogTest.cpp` | `FixRotatingLogTest.*` | The FIX log's files rotate and stay bounded (#160) |
+| `FixCredentialsTest.cpp` | `FixCredentialsTest.*` | The FIX credentials file, and its PBKDF2 password hashes (#147) |
+| `FixLogonTest.py` | `FixLogonNeedsCredentials` (ctest) | A real server: only a counterparty with its password logs on, and it trades only its accounts (#147) |
 | `FixResendTest.py` | `FixClientRecoversMissedReports` (ctest) | A real server: a client that reconnects gets back, with a ResendRequest, the reports it missed (#160) |
 
 ---

@@ -13,7 +13,9 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <vector>
+#include <quickfix/Exceptions.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
 
@@ -184,9 +186,61 @@ void FixGateway::onLogout(const FIX::SessionID &sid)
     loggedOn_.erase(source); // the session stays known: QuickFIX keeps what it is sent for the client's return (#160)
 }
 
+void FixGateway::setCredentials(const FixCredentials *credentials)
+{
+    if (nullptr != credentials)
+    {
+        for (const FixCounterparty &counterparty : credentials->counterparties())
+        {
+            for (const std::string &account : counterparty.accounts)
+            {
+                if (!wideData_->findAccountByName(account).isValid())
+                {
+                    throw std::runtime_error("the FIX credentials give " + counterparty.compId + " the account " +
+                                             account + ", which the data directory doesn't have");
+                }
+            }
+        }
+    }
+    credentials_ = credentials;
+}
+
 void FixGateway::toAdmin(FIX::Message & /*msg*/, const FIX::SessionID & /*sid*/) {}
 void FixGateway::toApp(FIX::Message & /*msg*/, const FIX::SessionID & /*sid*/) {}
-void FixGateway::fromAdmin(const FIX::Message & /*msg*/, const FIX::SessionID & /*sid*/) {}
+
+void FixGateway::fromAdmin(const FIX::Message &msg, const FIX::SessionID &sid)
+{
+    // QuickFIX calls this with a Logon before it accepts it, and refuses the Logon if this throws RejectLogon: it answers
+    // with a Logout carrying the text, and disconnects (#147). Before #147 nothing was checked here.
+    const FIX::Header &header = msg.getHeader();
+    if ((nullptr == credentials_) || !header.isSetField(FIX::FIELD::MsgType) ||
+        (FIX::MsgType_Logon != header.getField(FIX::FIELD::MsgType)))
+    {
+        return;
+    }
+    const FixCounterparty *counterparty = credentials_->find(sid.getTargetCompID().getString());
+    const std::string username = msg.isSetField(FIX::FIELD::Username) ? msg.getField(FIX::FIELD::Username) : "";
+    const std::string password = msg.isSetField(FIX::FIELD::Password) ? msg.getField(FIX::FIELD::Password) : "";
+    std::string refusal;
+    if (nullptr == counterparty)
+    {
+        refusal = "the credentials name no counterparty with its CompID";
+    }
+    else if (username.empty() || password.empty())
+    {
+        refusal = "it carries no Username (553) or no Password (554)";
+    }
+    else if (!FixCredentials::verify(*counterparty, username, password))
+    {
+        refusal = "the Username or Password is wrong";
+    }
+    if (!refusal.empty())
+    {
+        // The reason goes to the log only; the client learns no more than that it was refused
+        aux::ExchLogger::instance()->warn("FIX logon refused for " + sid.toString() + ": " + refusal + " (#147)");
+        throw FIX::RejectLogon("Logon refused: wrong username or password");
+    }
+}
 
 void FixGateway::fromApp(const FIX::Message &msg, const FIX::SessionID &sid)
 {
@@ -359,6 +413,11 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
         return;
     }
 
+    // The session's own accounts (#147): one it may trade, its first if the order names none
+    if (!applySessionAccounts(msg, sid, &acctStr))
+    {
+        return;
+    }
     // Look up the account; an order that names none goes to the server's default account (#34)
     SourceIdT acctId = defaultAccountId_;
     if (!acctStr.empty())
@@ -596,7 +655,11 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
         msg.get(account);
         acctStr = account.getString();
     }
-    // As for NewOrderSingle: the server's default account and clearing firm (#34)
+    // As for NewOrderSingle: the session's own accounts (#147), else the server's default, and its clearing firm (#34)
+    if (!applySessionAccounts(msg, sid, &acctStr))
+    {
+        return;
+    }
     SourceIdT acctId = defaultAccountId_;
     if (!acctStr.empty())
     {
@@ -850,6 +913,33 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
 // =============================================================================
 // Outbound
 // =============================================================================
+
+bool FixGateway::applySessionAccounts(const FIX::Message &msg, const FIX::SessionID &sid, std::string *account)
+{
+    if (nullptr == credentials_)
+    {
+        return true;
+    }
+    const FixCounterparty *counterparty = credentials_->find(sid.getTargetCompID().getString());
+    if (nullptr == counterparty)
+    {
+        // Such a session can't log on; refuse rather than trade the server's default account
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNKNOWN_ACCOUNT, "Order refused: this session may trade no account");
+        return false;
+    }
+    if (account->empty())
+    {
+        *account = counterparty->accounts.front();
+        return true;
+    }
+    if (!FixCredentials::mayTrade(*counterparty, *account))
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNKNOWN_ACCOUNT,
+                    "Order refused: this session may not trade the account " + *account);
+        return false;
+    }
+    return true;
+}
 
 bool FixGateway::hasFixSession(const std::string &source) const
 {

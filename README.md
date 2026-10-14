@@ -46,7 +46,9 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **ClOrdIDs in Use:** an order whose ClOrdID its session already uses is refused without being stored. A NewOrderSingle gets an ExecutionReport with 150=8, 39=8, OrdRejReason 103=6 and the reason in Text (58); a cancel/replace request gets an OrderCancelReject (35=9) with 434=2, CxlRejReason 102=6 and 58
 - **Cancel (35=F):** the engine decides a cancel after the order's earlier transactions. An accepted one is acknowledged with an ExecutionReport: 150=4, 39=4, ClOrdID (11) from the request and OrigClOrdID (41) naming the cancelled order. A refused one gets an OrderCancelReject (35=9, 434=1) with the same 11 and 41, CxlRejReason 102 (0 too late, 1 unknown order, 3 a replace pending, 99 other), the order's status in 39 (8 when the order is unknown), and the reason in Text (58). A cancel that no FIX request asked for, such as the engine cancelling a market order it can't fill, or a cancel from the WebSocket side, carries the order's own ClOrdID in 11 and no 41
 - **Cancel/Replace (35=G):** the engine decides a replace after the order's earlier transactions. An accepted one is acknowledged once, with the replacement's ExecutionReport: 150=5, 39=0 or 1, ClOrdID (11) from the request, OrigClOrdID (41) naming the replaced order, and the replacement's own OrderID (37); it keeps the original's fills. A refused one gets an OrderCancelReject (35=9, 434=2) with CxlRejReason 102 (0 too late, 1 unknown order, 3 a cancel or replace pending, 6 ClOrdID in use, 99 other), the order's status in 39, and the reason in Text (58). Side (54) and Symbol (55) must match the order. FIX 4.4 has no Replaced status, so a replaced order shows as 39=4 if a later request names it
-- **Server Defaults:** FIX orders get the server's clearing firm and, when they carry no Account (1), its default account, as WebSocket orders do. If either is missing from the data directory, the gateway answers the order with a BusinessMessageReject (35=j; BusinessRejectReason 4 when there is no clearing firm, 5 when there is no account) instead of passing it to the engine
+- **Server Defaults:** FIX orders get the server's clearing firm, as WebSocket orders do, and an order with no Account (1) trades its counterparty's first account (#147). If the data directory has no clearing firm, the gateway answers the order with a BusinessMessageReject (35=j, BusinessRejectReason 4) instead of passing it to the engine
+- **Logon (#147):** a counterparty's Logon (35=A) must carry the Username (553) and Password (554) that its line in the credentials file, `--fix-credentials`, gives. The file names each counterparty by its CompID, and the server makes a session for each: `config/fix.cfg` names none, and gives only the server's side, SenderCompID `ORDER_PROCESSOR`. A Logon with a wrong or missing password is refused with a Logout, and so is one from a CompID no line names, which QuickFIX drops; the server logs why. The file stores PBKDF2-HMAC-SHA256 hashes, which `orderProcessorServer --hash-fix-password` makes from a password on standard input. FIX runs over plain TCP, so until #228 a password crosses the network in the clear
+- **Accounts (#147):** a counterparty trades only the accounts its line lists. An order naming another is refused with an ExecutionReport: 150=8, 39=8, OrdRejReason 103=15 (unknown account) and the reason in Text (58). Before #147 any FIX session could trade any account
 - **Sessions:** `config/fix.cfg` runs one session a day. It is open all day (StartTime equals EndTime), and QuickFIX starts a new one, from sequence number 1, at its first check after 00:00 UTC. Within the day a client that reconnects keeps its sequence numbers (`ResetOnLogon=N`), so a ResendRequest (35=2) gets back the ExecutionReports sent while it was away, with PossDupFlag (43=Y); QuickFIX keeps them in `FileStorePath`. The FIX logs in `FileLogPath` rotate: `FileLogMaxMB` per file, and `FileLogBackups` older files (#160)
 - **Gateway Pattern:** Thin adapter — FIX messages translate to internal events at the boundary; core engine is protocol-agnostic
 - **MultiOutQueues:** Fan-out adapter routes execution reports to both WebSocket and FIX sessions simultaneously
@@ -136,7 +138,14 @@ cmake --build . -j$(nproc)
 
 With FIX gateway enabled (requires `BUILD_FIX=ON`):
 ```bash
-./build/orderProcessorServer --port 8080 --data-dir ./data --fix-cfg config/fix.cfg
+./build/orderProcessorServer --port 8080 --data-dir ./data --fix-cfg config/fix.cfg --fix-credentials fix-credentials
+```
+
+`fix-credentials` has a line per FIX counterparty: its CompID, Username, password hash and the accounts it may trade (#147). `orderProcessorServer --hash-fix-password` reads a password from standard input and prints its hash:
+
+```
+# CompID   Username   PasswordHash                          Accounts
+CLIENT_A   client_a   pbkdf2-sha256$600000$<salt>$<key>     TRADING-1,TRADING-2
 ```
 
 Seed a new data directory first. Until then it has no instruments, accounts or clearing firm, and the server answers every order with an `error` (#161). `seedData` seeds test data, so don't run it on a directory in real use.
@@ -153,7 +162,9 @@ Server options:
 | `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
 | `--huge-pages` | off | Reports whether huge pages are available; nothing allocates from them yet |
-| `--fix-cfg` | *(none)* | Path to QuickFIX settings file (enables FIX gateway) |
+| `--fix-cfg` | *(none)* | Path to QuickFIX settings file (enables FIX gateway); needs `--fix-credentials` |
+| `--fix-credentials` | *(none)* | The FIX counterparties: who may log on, with which password, to trade which accounts (#147). Each gets a session |
+| `--hash-fix-password` | | Read a password from standard input, print its hash for `--fix-credentials`, and exit |
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
 | `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
 | `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock |

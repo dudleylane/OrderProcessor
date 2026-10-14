@@ -25,6 +25,7 @@ target_include_directories(orderProcessorBench
 if(BUILD_FIX)
     target_sources(orderProcessorBench PRIVATE
         FixGatewayBench.cpp
+        ${CMAKE_SOURCE_DIR}/app/FixCredentials.cpp
         ${CMAKE_SOURCE_DIR}/app/FixGateway.cpp
         ${CMAKE_SOURCE_DIR}/app/FixOutQueues.cpp
         ${CMAKE_SOURCE_DIR}/app/MultiOutQueues.cpp)

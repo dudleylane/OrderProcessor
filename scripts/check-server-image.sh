@@ -7,8 +7,11 @@
 # docker/Dockerfile.oms-server, with the repository as context, and in docker format,
 # which keeps its HEALTHCHECK. (podman-compose builds OCI images, which drop it, so
 # docker-compose.yml repeats the health check.) Then:
-#   1. seedData seeds a new volume.
-#   2. The server starts on it with the image's own CMD.
+#   1. seedData seeds a new volume. When the image's CMD names a FIX credentials file,
+#      as feature/fx-swap-support's does, the image's own --hash-fix-password makes one
+#      for a test counterparty; and the CMD, run without that file mounted, must exit 1,
+#      saying it can't read it, rather than run FIX with no logon check (#147).
+#   2. The server starts on it with the image's own CMD, and that file mounted.
 #   3. Every port the image EXPOSEs is listened on: 8080, the WebSocket port, and on
 #      feature/fx-swap-support also 5001, the FIX acceptor's. This is checked inside the
 #      container, because rootless port forwarding accepts a connection on the host
@@ -116,6 +119,30 @@ build_seconds=$SECONDS
 step "seed a volume with seedData"
 podman run --rm -v "$NAME:/data" --entrypoint seedData "$IMAGE" --data-dir /data || fail "seedData failed"
 
+# The FIX credentials file the image's CMD names, if it names one: the deployment's, so the image holds none (#147)
+credentials=()
+credentials_path="$(podman image inspect --format '{{json .Config.Cmd}}' "$IMAGE" \
+    | sed -n 's/.*"--fix-credentials","\([^"]*\)".*/\1/p')"
+if [[ -n "$credentials_path" ]]; then
+    step "the FIX credentials file the image's CMD names, $credentials_path (#147)"
+    hash="$(printf 'check-password\n' | podman run --rm -i --entrypoint orderProcessorServer "$IMAGE" \
+        --hash-fix-password)" || fail "--hash-fix-password failed"
+    [[ "$hash" == 'pbkdf2-sha256$'* ]] || fail "--hash-fix-password printed '$hash', not a password hash"
+    # Readable by the image's user: the file holds only a hash
+    printf 'CHECK_CLIENT check %s TRADING-1\n' "$hash" > "$WORK/fix-credentials"
+    chmod 644 "$WORK/fix-credentials"
+    echo "made with the image's --hash-fix-password: CHECK_CLIENT, trading TRADING-1"
+    refused=0
+    timeout 120 podman run --rm -v "$NAME:/data" "$IMAGE" > "$WORK/no-credentials.log" 2>&1 || refused=$?
+    if (( refused != 1 )) \
+        || ! grep -q "Can't start: can't read the FIX credentials file $credentials_path" "$WORK/no-credentials.log"; then
+        tail -n 5 "$WORK/no-credentials.log" >&2
+        fail "without $credentials_path, the image's CMD exited with code $refused, not 1 saying it can't read it"
+    fi
+    echo "without it, the image's CMD exits 1: can't read the FIX credentials file $credentials_path"
+    credentials=(-v "$WORK/fix-credentials:$credentials_path:ro,Z")
+fi
+
 mapfile -t ports < <(podman image inspect --format '{{range $p, $_ := .Config.ExposedPorts}}{{println $p}}{{end}}' \
     "$IMAGE" | sed '/^$/d')
 for port in "${ports[@]}"; do
@@ -126,8 +153,8 @@ done
 
 step "start the server and wait for it to listen on ${ports[*]}"
 # --health-interval=disable: the health check runs only when this script runs it
-podman run -d --name "$NAME" --health-interval=disable -v "$NAME:/data" -p "127.0.0.1::$WS_PORT" "$IMAGE" \
-    >/dev/null || fail "the container didn't start"
+podman run -d --name "$NAME" --health-interval=disable -v "$NAME:/data" "${credentials[@]}" -p "127.0.0.1::$WS_PORT" \
+    "$IMAGE" >/dev/null || fail "the container didn't start"
 deadline=$((SECONDS + START_TIMEOUT))
 while :; do
     [[ "$(podman inspect --format '{{.State.Running}}' "$NAME")" == true ]] \
