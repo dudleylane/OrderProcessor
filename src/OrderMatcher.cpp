@@ -78,6 +78,12 @@ bool FindOpositeOrder::match(const IdT &order, bool *stop) const
     {
         return false;
     }
+    // A swap trades only with a swap, on both legs (FindOppositeSwapOrder). An outright order passes over one, and keeps
+    // looking: it used to take a swap by its near price alone, and filled the swap's near leg without its far leg (#212).
+    if (FXSWAP_ORDERTYPE == contrOrd->ordType_)
+    {
+        return false;
+    }
     if (MARKET_ORDERTYPE == order_->ordType_)
     {
         return true;
