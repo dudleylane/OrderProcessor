@@ -103,7 +103,7 @@ public:
     // ToDo: add execCorrect, when qty not changed Fill->Fill for example
     // ToDo: add administrative switch to any state
     // clang-format off
-	struct transition_table : mpl::vector46<
+	struct transition_table : mpl::vector47<
 		//    Start                Event           Next           Action				Guard
 		//	  +-------------+------------------+-------------+------------+----------------------+
 		// create OrderEntry from received event and generate id
@@ -252,6 +252,9 @@ public:
 		// remove order from OrderBook
 		// create ExecReport Replaced
 		a_row< GoingReplace, onExecReplace,		CnclReplaced, &os::replaced						 >,
+		// a cancel of an order an older server left with a replace pending (#164): remove order from OrderBook
+		// create ExecReport Canceled
+		a_row< GoingReplace, onExecCancel,		CnclReplaced, &os::canceled						 >,
 
 		// update orderentry according to tradecorrect
 		// create ExecReport TradeCorrect
