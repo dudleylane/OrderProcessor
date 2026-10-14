@@ -410,8 +410,13 @@ void OrdStateImpl::processFill(OrderEntry *orderData, OrdState::onTradeExecution
     orderData->applyTrade(static_cast<TradeExecEntry *>(tr));
     if (0 == orderData->leavesQty_)
     {
-        assert(nullptr != evnt.orderBook_);
-        evnt.orderBook_->remove(*orderData);
+        // A market order is never booked (processReceive). Removing one threw, the state machine swallowed it, and the
+        // order never reached Filled: it stayed NEW with nothing left, and its trade went unreported (#211).
+        if (MARKET_ORDERTYPE != orderData->ordType_)
+        {
+            assert(nullptr != evnt.orderBook_);
+            evnt.orderBook_->remove(*orderData);
+        }
         tr->orderStatus_ = FILLED_ORDSTATUS;
     }
     else
