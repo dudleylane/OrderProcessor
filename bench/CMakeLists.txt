@@ -7,9 +7,17 @@ target_sources(orderProcessorBench
         TransactionScopePoolBench.cpp
         NumaAllocatorBench.cpp
         OrderParamsLayoutBench.cpp
+        SessionManagerBench.cpp
+
+        # The WebSocket broadcast path a transaction worker takes through WsOutQueues (built from app/, #159)
+        ${CMAKE_SOURCE_DIR}/app/SessionManager.cpp
+        ${CMAKE_SOURCE_DIR}/app/WsSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
+        ${CMAKE_SOURCE_DIR}/app/ClientMessageParser.cpp
 )
 
 target_include_directories(orderProcessorBench
     PRIVATE
         ${CMAKE_SOURCE_DIR}/test
+        ${CMAKE_SOURCE_DIR}/app
 )

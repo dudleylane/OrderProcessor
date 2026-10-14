@@ -83,9 +83,10 @@ endif()
 # FetchContent for external dependencies
 include(FetchContent)
 
-# nlohmann/json is needed by the app, the fuzz targets, and the parser unit tests, so it is fetched
+# nlohmann/json is needed by the app, the fuzz targets, the parser unit tests, and the WebSocket benchmarks (#159), so it
+# is fetched
 # before the test target is created.
-if(BUILD_APP OR BUILD_FUZZ OR BUILD_TESTS)
+if(BUILD_APP OR BUILD_FUZZ OR BUILD_TESTS OR BUILD_BENCHMARKS)
     FetchContent_Declare(json
         GIT_REPOSITORY https://github.com/nlohmann/json.git
         GIT_TAG v3.11.3)
@@ -134,6 +135,7 @@ if(BUILD_BENCHMARKS)
             orderEngine
             benchmark::benchmark
             benchmark::benchmark_main
+            nlohmann_json::nlohmann_json
     )
 endif()
 

@@ -116,6 +116,7 @@ struct Config
     bool debug = false;                                    // debug logging, off unless asked for (#76)
     // LMDB's starting map, in MiB: a write that finds the map full doubles it (#148)
     u64 lmdbMapMb = Store::LMDBStorage::DEFAULT_MAP_SIZE >> 20;
+    App::WsLimits wsLimits; // what WebSocket clients may hold of the server (#159)
 };
 
 Config parseArgs(int argc, char *argv[])
@@ -159,6 +160,14 @@ Config parseArgs(int argc, char *argv[])
         else if (arg == "--lmdb-map-mb" && i + 1 < argc)
         {
             cfg.lmdbMapMb = std::max<u64>(1, std::stoull(argv[++i]));
+        }
+        else if (arg == "--max-connections" && i + 1 < argc)
+        {
+            cfg.wsLimits.maxConnections = std::max<u64>(1, std::stoull(argv[++i]));
+        }
+        else if (arg == "--max-session-queue-mb" && i + 1 < argc)
+        {
+            cfg.wsLimits.maxQueuedBytes = std::max<u64>(1, std::stoull(argv[++i])) << 20;
         }
     }
     return cfg;
@@ -339,7 +348,7 @@ int main(int argc, char *argv[])
     auto server = std::make_shared<App::WsServer>(
         ioc, boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("0.0.0.0"), cfg.port), sessionMgr.get(),
         Store::WideDataStorage::instance(), Store::OrderStorage::instance(), inQueues.get(), IdTGenerator::instance(),
-        orderBook.get(), defaultClearingId, defaultAccountId);
+        orderBook.get(), defaultClearingId, defaultAccountId, cfg.wsLimits);
     server->run();
 
     // 10b. Create MetricsPublisher for system monitoring
