@@ -281,7 +281,7 @@ static void BM_ProcessNewOrder(benchmark::State &state)
     // Built outside the timed region: the measurement is the processing, not order construction.
     std::vector<OrderEntry *> orders;
     orders.reserve(state.max_iterations);
-    for (u64 i = 0; i < state.max_iterations; ++i)
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
     {
         orders.push_back(engine.newOrder(BUY_SIDE, 100.0, 100));
     }
@@ -306,14 +306,14 @@ static void BM_ProcessNewOrderWithMatch(benchmark::State &state)
 
     // One resting sell per iteration, so every timed order crosses: a trade, the deferred execution
     // events it raises, and the book removal that follows.
-    for (u64 i = 0; i < state.max_iterations; ++i)
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
     {
         engine.submit(engine.newOrder(SELL_SIDE, 100.0, 100));
     }
 
     std::vector<OrderEntry *> aggressors;
     aggressors.reserve(state.max_iterations);
-    for (u64 i = 0; i < state.max_iterations; ++i)
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
     {
         aggressors.push_back(engine.newOrder(BUY_SIDE, 100.0, 100));
     }
@@ -338,7 +338,7 @@ static void BM_ProcessCancelOrder(benchmark::State &state)
 
     std::vector<IdT> resting;
     resting.reserve(state.max_iterations);
-    for (u64 i = 0; i < state.max_iterations; ++i)
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
     {
         resting.push_back(engine.submit(engine.newOrder(BUY_SIDE, 100.0, 100)));
     }

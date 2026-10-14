@@ -44,7 +44,9 @@ std::string getTimestamp()
     std::tm tm_time;
     gmtime_r(&time, &tm_time);
 
-    char buf[32];
+    // A timestamp takes 22 bytes. A Debug build can't bound the fields, so it allows for any int in each, 82 bytes, and
+    // warned of truncation with less room (-Wformat-truncation, #167).
+    char buf[96];
     std::snprintf(buf, sizeof(buf), "%04d%02d%02d-%02d:%02d:%02d.%03d", tm_time.tm_year + 1900, tm_time.tm_mon + 1,
                   tm_time.tm_mday, tm_time.tm_hour, tm_time.tm_min, tm_time.tm_sec, static_cast<int>(ms.count()));
     return std::string(buf);

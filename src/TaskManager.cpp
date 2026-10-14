@@ -32,7 +32,7 @@ static std::atomic<int> g_nextWorkerCore{ 0 };
 
 TaskManager::TaskManager(const TaskManagerParams &params)
     : transactMgr_(nullptr), transactIt_(nullptr), cpuAffinityStart_(-1), lastAvailableTransactProcessor_(0),
-      lastAvailableEvntProcessor_(0), totalAvailableTransactProcessor_(0), totalAvailableEvntProcessor_(0), created_(0),
+      totalAvailableTransactProcessor_(0), lastAvailableEvntProcessor_(0), totalAvailableEvntProcessor_(0), created_(0),
       processed_(0), finished_(0), createdTr_(0), processedTr_(0), finishedTr_(0), failed_(0)
 {
     assert(nullptr != params.transactMgr_);

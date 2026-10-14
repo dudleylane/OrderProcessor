@@ -15,6 +15,7 @@
 add_executable(fuzzClientMessage
     fuzz_client_message.cpp
     ${CMAKE_SOURCE_DIR}/app/ClientMessageParser.cpp)
+op_warnings(fuzzClientMessage)
 
 target_include_directories(fuzzClientMessage PRIVATE
     ${CMAKE_SOURCE_DIR}/app

@@ -841,7 +841,7 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
     publishGuard.release();
 }
 
-void Processor::process(const ACID::TransactionId &id, ACID::Transaction *tr)
+void Processor::process([[maybe_unused]] const ACID::TransactionId &id, ACID::Transaction *tr)
 {
     assert(nullptr != tr);
     assert(id.isValid());

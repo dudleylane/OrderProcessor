@@ -432,7 +432,7 @@ bool NLinkTree::remove(const K &key, int *readyToExecuteAdded)
                 }
                 else
                 {
-                    true; /// todo: note about broken structure
+                    // todo: the child isn't among its parent's children, so the structure is broken; nothing reports it
                 }
             }
 
