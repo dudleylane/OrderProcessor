@@ -132,8 +132,9 @@ export interface NewOrderRequest {
   minQty?: number;
   tif: TimeInForce;
   account?: string;
-  currency?: Currency;
-  capacity?: Capacity;
+  // Required by the server, which refuses an order without them (#166)
+  currency: Currency;
+  capacity: Capacity;
 }
 
 /** An FX swap: buy (or sell) at the near price, and the reverse at the far price */
@@ -148,8 +149,9 @@ export interface NewSwapOrderRequest {
   farSettlDate: number;
   orderQty: number;
   account?: string;
-  currency?: Currency;
-  capacity?: Capacity;
+  // Required by the server, which refuses a swap without them (#166)
+  currency: Currency;
+  capacity: Capacity;
   tif?: TimeInForce;
 }
 

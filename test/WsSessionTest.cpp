@@ -635,6 +635,110 @@ TEST_F(WsSessionTest, OrdersWithAQuantityOutOfRangeAreRefused)
     EXPECT_EQ(0u, inQueues_.size());
 }
 
+TEST_F(WsSessionTest, OrderWithAFieldTheServerDoesNotKnowIsRefusedBeforeAnythingIsStored)
+{
+    // An order whose side, type, time in force, currency or capacity was missing or unknown parsed to INVALID, went to the
+    // engine, and was stored to be rejected: from then on every client got it with "INVALID" in that field, a value none
+    // of their types has (#166). It must be refused at once, with nothing queued.
+    const std::string order = R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
+                              R"("price":150.25,"orderQty":100,"tif":"DAY","currency":"USD","capacity":"AGENCY"}})";
+    struct Field
+    {
+        const char *name_;
+        const char *value_;
+    };
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    for (const Field field : { Field{ "side", "BUY" }, Field{ "ordType", "LIMIT" }, Field{ "tif", "DAY" },
+                               Field{ "currency", "USD" }, Field{ "capacity", "AGENCY" } })
+    {
+        const std::string pair = std::string("\"") + field.name_ + "\":\"" + field.value_ + "\"";
+        const size_t at = order.find(pair);
+        ASSERT_NE(std::string::npos, at) << pair;
+        std::string unknown = order;
+        unknown.replace(at, pair.size(), std::string("\"") + field.name_ + "\":\"NO_SUCH_VALUE\"");
+        std::string missing = order;
+        missing.erase(at - 1, pair.size() + 1); // and the comma before it
+        for (const std::string &request : { unknown, missing })
+        {
+            send(client, request);
+            auto reply = readUntil(client, "error");
+            ASSERT_TRUE(reply.has_value()) << request << "; escaped: " << escaped();
+            EXPECT_EQ(std::string("Order refused: ") + field.name_ + " is missing, or isn't one the server knows",
+                      reply->value("message", ""));
+            EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0))) << request;
+        }
+    }
+}
+
+TEST_F(WsSessionTest, SwapOrderWithAFieldTheServerDoesNotKnowIsRefusedBeforeAnythingIsStored)
+{
+    // As for new_order (#166): a swap whose side, currency or capacity was missing, or whose side, time in force,
+    // currency or capacity was unknown, parsed to INVALID and was stored to be rejected. It must be refused at once, with
+    // nothing queued. A swap that gives no time in force is GTC (ClientMessageParser), so that one is accepted.
+    const std::string swap = R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,)"
+                             R"("farPrice":1.087,"settlDate":1000,"farSettlDate":2000,"orderQty":1000000,"tif":"GTC",)"
+                             R"("currency":"USD","capacity":"AGENCY"}})";
+    struct Field
+    {
+        const char *name_;
+        const char *value_;
+        bool required_;
+    };
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    for (const Field field : { Field{ "side", "BUY", true }, Field{ "tif", "GTC", false },
+                               Field{ "currency", "USD", true }, Field{ "capacity", "AGENCY", true } })
+    {
+        const std::string pair = std::string("\"") + field.name_ + "\":\"" + field.value_ + "\"";
+        const size_t at = swap.find(pair);
+        ASSERT_NE(std::string::npos, at) << pair;
+        const std::string refusal =
+            std::string("Order refused: ") + field.name_ + " is missing, or isn't one the server knows";
+        std::string unknown = swap;
+        unknown.replace(at, pair.size(), std::string("\"") + field.name_ + "\":\"NO_SUCH_VALUE\"");
+        send(client, unknown);
+        auto reply = readUntil(client, "error");
+        ASSERT_TRUE(reply.has_value()) << unknown << "; escaped: " << escaped();
+        EXPECT_EQ(refusal, reply->value("message", ""));
+        EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0))) << unknown;
+
+        std::string missing = swap;
+        missing.erase(at - 1, pair.size() + 1); // and the comma before it
+        send(client, missing);
+        if (field.required_)
+        {
+            reply = readUntil(client, "error");
+            ASSERT_TRUE(reply.has_value()) << missing << "; escaped: " << escaped();
+            EXPECT_EQ(refusal, reply->value("message", ""));
+            EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0))) << missing;
+        }
+        else
+        {
+            std::unique_ptr<OrderEntry> order = takeQueuedOrder();
+            ASSERT_NE(nullptr, order) << missing << "; escaped: " << escaped();
+            EXPECT_EQ(GTC_TIF, order->tif_);
+        }
+    }
+}
+
+TEST_F(WsSessionTest, ReplaceWithATifTheServerDoesNotKnowIsRefused)
+{
+    // As for a new order (#166)
+    restoreOrder(IdT(7, 1790000100), "CL-7");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"replace_order","data":{"orderId":7,"tif":"NO_SUCH_VALUE"}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Replace refused: tif isn't one the server knows", reply->value("message", ""));
+    EXPECT_EQ(0u, inQueues_.size());
+}
+
 TEST_F(WsSessionTest, ReplaceThatChangesNothingIsRefused)
 {
     // The frontend's Replace button sends no changes, until it has a form for them

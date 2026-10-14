@@ -177,6 +177,38 @@ void WsSession::handleMessage(const std::string &msgStr)
     {
         auto &no = msg.newOrder;
 
+        // A side, type, time in force, currency or capacity that is missing, or isn't one of the protocol's values, parses
+        // to INVALID (ClientMessageParser). No such order can be valid (OrderEntry::isValid). Stored to be rejected, it
+        // reached every client with "INVALID" in its fields, a value none of their types has (#166). Refuse it before
+        // anything is stored.
+        const char *unknown = nullptr;
+        if (INVALID_SIDE == no.side)
+        {
+            unknown = "side";
+        }
+        else if (INVALID_ORDERTYPE == no.ordType)
+        {
+            unknown = "ordType";
+        }
+        else if (INVALID_TIF == no.tif)
+        {
+            unknown = "tif";
+        }
+        else if (INVALID_CURRENCY == no.currency)
+        {
+            unknown = "currency";
+        }
+        else if (INVALID_CAPACITY == no.capacity)
+        {
+            unknown = "capacity";
+        }
+        if (nullptr != unknown)
+        {
+            send(serializeError(std::string("Order refused: ") + unknown +
+                                " is missing, or isn't one the server knows"));
+            return;
+        }
+
         // Look up instrument
         SourceIdT instrId = wideData_->findInstrumentBySymbol(no.symbol);
         if (!instrId.isValid())
@@ -250,6 +282,33 @@ void WsSession::handleMessage(const std::string &msgStr)
     else if (msg.type == "new_swap_order")
     {
         auto &so = msg.swapOrder;
+
+        // As for new_order (#166): a side, currency or capacity that is missing, or a side, time in force, currency or
+        // capacity that isn't one of the protocol's values, parses to INVALID. Refuse it before anything is stored. A swap
+        // that gives no time in force is GTC (ClientMessageParser).
+        const char *unknown = nullptr;
+        if (INVALID_SIDE == so.side)
+        {
+            unknown = "side";
+        }
+        else if (INVALID_TIF == so.tif)
+        {
+            unknown = "tif";
+        }
+        else if (INVALID_CURRENCY == so.currency)
+        {
+            unknown = "currency";
+        }
+        else if (INVALID_CAPACITY == so.capacity)
+        {
+            unknown = "capacity";
+        }
+        if (nullptr != unknown)
+        {
+            send(serializeError(std::string("Order refused: ") + unknown +
+                                " is missing, or isn't one the server knows"));
+            return;
+        }
 
         SourceIdT instrId = wideData_->findInstrumentBySymbol(so.symbol);
         if (!instrId.isValid())
@@ -342,6 +401,12 @@ void WsSession::handleMessage(const std::string &msgStr)
         if (!ro.hasPrice && !ro.hasQty && !ro.hasTif)
         {
             send(serializeError("replace_order changes nothing: give price, orderQty or tif"));
+            return;
+        }
+        // As for a new order (#166): a tif the server doesn't know would reach every client as "INVALID"
+        if (ro.hasTif && (INVALID_TIF == ro.tif))
+        {
+            send(serializeError("Replace refused: tif isn't one the server knows"));
             return;
         }
         bool answered = false;
