@@ -60,17 +60,20 @@ class CreateTradeExecReportTrOperation final : public Operation
 {
 public:
     CreateTradeExecReportTrOperation(const TradeExecEntry *trade, OrderStatus status, const OrderEntry &order);
+    /// A swap leg's report outside the state machine; tradeLink pairs it with its other leg's (#199)
     CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx, Currency currency, OrderStatus status,
-                                     ExecLegType legType, const OrderEntry &order);
+                                     ExecLegType legType, u64 tradeLink, const OrderEntry &order);
     ~CreateTradeExecReportTrOperation();
 
     void execute(const Context &cnxt) override;
     void rollback(const Context &cnxt) override;
 
 private:
-    QuantityT lastQty_;
+    // In this order, the link fits where padding was: the operation stays 88 bytes in the transaction's arena (#199)
     PriceT lastPx_;
     DateTimeT tradeDate_;
+    u64 tradeLink_;
+    QuantityT lastQty_;
     Currency currency_;
     OrderStatus status_;
     ExecLegType execLegType_;

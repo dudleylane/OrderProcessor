@@ -129,7 +129,7 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `NewOrderMultileg_FxSwap_PushesToQueue` | 2-leg multileg → FXSWAP OrderEntry with near/far prices, and LegSettlDates as midnight UTC of their days (#198) |
 | `ASwapsSettlementDatesAreReadAsDates` | A NewOrderSingle swap's SettlDate (64) and 6501, LocalMktDates, become midnight UTC of their days (#198) |
 | `ASwapWithADateThatIsntOneIsNotQueued` | `-5`, a non-number, 21 digits or a day that doesn't exist, in 64, 6501 or a leg's 588 → refused before anything is stored, nothing pushed (#190) |
-| `ExecutionReport_ASwapsLegsCarryTheirSideDateAndPrice` | Each leg's report carries its side, its LegSettlDate as `YYYYMMDD` (#198), its price, and a TradeLinkID (#153) |
+| `ExecutionReport_ASwapsLegsCarryTheirSideDateAndPrice` | Each leg's report carries its side, its LegSettlDate as `YYYYMMDD` (#198), its price, and a TradeLinkID (#153): the fill's link, the same on both legs even when their transact times differ (#199) |
 | `NewOrderMultileg_NonSwapOrdType_Rejected` | Non-FXSWAP OrdType in multileg → no push; refused to the sender, 103=11 (#189) |
 | `NewOrderMultileg_TooFewLegs_Rejected` | Single leg multileg → no push; refused to the sender, 103=11 (#189) |
 | `SessionMapPopulatedOnLogon` | `onLogon()` makes the session known |

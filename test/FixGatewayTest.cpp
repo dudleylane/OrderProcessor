@@ -1785,6 +1785,9 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsLegsCarryTheirSideDateAndPri
     {
         auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
         trade.execLegType_ = leg;
+        trade.tradeLink_ = 4242;
+        // A millisecond apart: the link, not the time, pairs them (#199)
+        trade.transactTime_ = (NEAR_LEG == leg) ? 1792022400999ULL : 1792022401000ULL;
         trade.lastQty_ = 100;
         trade.lastPx_ = (NEAR_LEG == leg) ? 1.0850 : 1.0872;
 
@@ -1803,8 +1806,9 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsLegsCarryTheirSideDateAndPri
         FIX::LegLastPx px;
         group.get(px);
         EXPECT_DOUBLE_EQ(trade.lastPx_, px.getValue()) << "leg " << leg;
-        // Present on both legs; whether the two match is #199
-        EXPECT_TRUE(report.isSetField(820)) << "leg " << leg;
+        // The same on both legs: the swap fill's link (#199)
+        ASSERT_TRUE(report.isSetField(820)) << "leg " << leg;
+        EXPECT_EQ("4242", report.getField(820)) << "leg " << leg;
     }
 
     // A plain fill has no legs

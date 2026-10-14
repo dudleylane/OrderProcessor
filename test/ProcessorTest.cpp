@@ -1161,13 +1161,14 @@ public:
         ExecType type_;
         ExecLegType leg_;
         PriceT lastPx_;
+        u64 tradeLink_;
     };
 
     void push(const ExecReportEvent &evnt, const std::string &) override
     {
         const auto *trade = dynamic_cast<const TradeExecEntry *>(evnt.exec_);
         reports_.push_back(Report{ evnt.exec_->orderId_, evnt.exec_->type_, evnt.exec_->execLegType_,
-                                   (nullptr != trade) ? trade->lastPx_ : 0.0 });
+                                   (nullptr != trade) ? trade->lastPx_ : 0.0, evnt.exec_->tradeLink_ });
     }
     void push(const CancelRejectEvent &, const std::string &) override {}
     void push(const BusinessRejectEvent &, const std::string &) override {}
@@ -1599,4 +1600,67 @@ TEST_F(ProcessorTest, ASuspendedOrderStaysOutOfTheBookAfterARestartAndIsBookedOn
     EXPECT_EQ(1u, book.bids[0].orderCount) << "the resumed order is booked twice";
     EXPECT_EQ(100u, book.bids[0].totalQty);
     std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, ASwapFillsTwoReportsOnEachSideShareTheirOwnLink)
+{
+    // A side's near and far reports carry one link, which FIX sends as TradeLinkID, so a client can pair them; each side
+    // has its own (#199). The gateway's TradeLinkID came from each report's own transact time, so a millisecond boundary
+    // between the two reports split the pair.
+    LegRecordingOutQueues outQueues;
+    ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
+                           &outQueues, inQueues_.get(), transMgr_.get());
+    Processor processor;
+    processor.init(params);
+    transMgr_->proc_ = &processor;
+
+    const auto swap = [this](Side side)
+    {
+        auto order = createTestOrder(instrId1_, side, 1.0850, 100);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->farPrice_ = 1.0872;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        return order;
+    };
+    auto sell = swap(SELL_SIDE);
+    const RawDataEntry sellClOrdId = sell->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(sell.release()));
+    processor.process();
+    auto buy = swap(BUY_SIDE);
+    const RawDataEntry buyClOrdId = buy->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(buy.release()));
+    processor.process();
+
+    const OrderEntry *savedSell = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
+    const OrderEntry *savedBuy = OrderStorage::instance()->locateByClOrderId(buyClOrdId);
+    ASSERT_NE(nullptr, savedSell);
+    ASSERT_NE(nullptr, savedBuy);
+    ASSERT_EQ(FILLED_ORDSTATUS, savedBuy->status_) << "the swaps didn't match";
+
+    std::vector<u64> sideLinks;
+    for (const OrderEntry *order : { savedSell, savedBuy })
+    {
+        std::vector<u64> links;
+        for (const auto &report : outQueues.reports_)
+        {
+            if ((report.orderId_ == order->orderId_) && (TRADE_EXECTYPE == report.type_))
+            {
+                links.push_back(report.tradeLink_);
+            }
+        }
+        ASSERT_EQ(2u, links.size()) << "trade reports for order " << order->orderId_.id_;
+        EXPECT_NE(0u, links[0]) << "order " << order->orderId_.id_;
+        EXPECT_EQ(links[0], links[1]) << "order " << order->orderId_.id_ << ": its near and far reports";
+        sideLinks.push_back(links[0]);
+    }
+    EXPECT_NE(sideLinks[0], sideLinks[1]) << "the two sides share a link";
+    // A plain fill's report carries none
+    for (const auto &report : outQueues.reports_)
+    {
+        if (SINGLE_LEG == report.leg_)
+        {
+            EXPECT_EQ(0u, report.tradeLink_);
+        }
+    }
 }
