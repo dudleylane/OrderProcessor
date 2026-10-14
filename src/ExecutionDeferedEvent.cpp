@@ -42,8 +42,6 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const ACID::Conte
     trade.type_ = TRADE_EXECTYPE;
     trade.transactTime_ = 1;
     trade.orderId_ = param.order_->orderId_;
-    trade.execId_;
-    trade.orderStatus_;
     onTradeExecution evnt4Proc(&trade);
     evnt4Proc.orderBook_ = cnxt.orderBook_;
     evnt4Proc.transaction_ = scope;

@@ -108,7 +108,7 @@ fi
 step "build ($BUILD_DIR)"
 if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
     cmake -S "$ROOT" -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON -DBUILD_APP=ON -DBUILD_PG=OFF \
+        -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON -DBUILD_APP=ON -DBUILD_PG=OFF -DWARNINGS_AS_ERRORS=ON \
         -DBUILD_FIX=ON \
         || refuse "configure failed"
 fi
@@ -116,9 +116,10 @@ if ! grep -q '^CMAKE_BUILD_TYPE:STRING=Release$' "$BUILD_DIR/CMakeCache.txt"; th
     refuse "$BUILD_DIR is not a Release build; CI tests Release. Point BUILD_DIR at one."
 fi
 # CI turns each of these on (build-test.yml), so a directory with one off would
-# skip code CI builds: BUILD_APP=OFF never compiles the server (#152). On this
+# skip code CI builds: BUILD_APP=OFF never compiles the server (#152), and
+# WARNINGS_AS_ERRORS=OFF lets through a warning CI fails on (#167). On this
 # branch BUILD_FIX too: it's the configuration that compiles the FIX gateway.
-for option in BUILD_TESTS BUILD_BENCHMARKS BUILD_APP BUILD_FIX; do
+for option in BUILD_TESTS BUILD_BENCHMARKS BUILD_APP WARNINGS_AS_ERRORS BUILD_FIX; do
     if ! grep -q "^${option}:BOOL=ON\$" "$BUILD_DIR/CMakeCache.txt"; then
         refuse "$BUILD_DIR has $option off; CI builds with it on. Point BUILD_DIR at a directory configured as CI configures."
     fi

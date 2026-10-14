@@ -31,7 +31,8 @@ MatchOrderDeferedEvent::MatchOrderDeferedEvent(OrderEntry *ord) : order_(ord)
     assert(nullptr != order_);
 }
 
-void MatchOrderDeferedEvent::execute(DeferedEventFunctor *func, const Context &cnxt, ACID::Scope * /*scope*/)
+void MatchOrderDeferedEvent::execute([[maybe_unused]] DeferedEventFunctor *func, const Context &cnxt,
+                                     ACID::Scope * /*scope*/)
 {
     assert(nullptr != func);
     assert(nullptr != order_);

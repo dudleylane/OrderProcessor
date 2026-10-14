@@ -378,7 +378,7 @@ void CreateCorrectExecReportTrOperation::rollback(const Context &) {}
 
 CreateRejectExecReportTrOperation::CreateRejectExecReportTrOperation(std::string_view reason, OrderStatus status,
                                                                      const OrderEntry &order)
-    : Operation(CREATE_REJECT_EXECREPORT_TROPERATION, order.orderId_), status_(status), reason_(reason)
+    : Operation(CREATE_REJECT_EXECREPORT_TROPERATION, order.orderId_), reason_(reason), status_(status)
 {
 }
 
@@ -406,7 +406,7 @@ void CreateRejectExecReportTrOperation::rollback(const Context &) {}
 
 CreateReplaceExecReportTrOperation::CreateReplaceExecReportTrOperation(const IdT &origOrderId, OrderStatus status,
                                                                        const OrderEntry &order)
-    : Operation(CREATE_REPLACE_EXECREPORT_TROPERATION, order.orderId_), status_(status), origOrderId_(origOrderId)
+    : Operation(CREATE_REPLACE_EXECREPORT_TROPERATION, order.orderId_), origOrderId_(origOrderId), status_(status)
 {
 }
 
