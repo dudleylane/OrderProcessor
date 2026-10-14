@@ -26,7 +26,7 @@
 OrderProcessor is a high-performance, concurrent order processing library written in C++23. It provides:
 
 - **ACID-compliant** transaction processing
-- **State machine-based** order lifecycle management (14 states, 47+ transitions)
+- **State machine-based** order lifecycle management (<!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> states, <!-- DOC_CHECK:transition_count -->47<!-- /DOC_CHECK --> transitions)
 - **Order matching** against an in-memory order book with price-time priority
 - **Lock-free** and fine-grained locking for maximum throughput
 - **File-based persistence** with versioned records
@@ -106,8 +106,8 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 │  ┌───────────────────┐ ┌────────────┐ ┌──────────────────┐                  │
 │  │  OrderStateMachine│ │OrderMatcher│ │ TransactionScope │                  │
 │  │  (Boost.MSM)      │ │            │ │                  │                  │
-│  │  • 14 States      │ │ • Price-   │ │ • Operation      │                  │
-│  │  • 47+ Transitions│ │   Time     │ │   Collection     │                  │
+│  │  • States         │ │ • Price-   │ │ • Operation      │                  │
+│  │  • Transitions    │ │   Time     │ │   Collection     │                  │
 │  │  • Event Handlers │ │   Priority │ │ • Atomic Exec    │                  │
 │  └───────────────────┘ └────────────┘ └──────────────────┘                  │
 └──────────────────────────────┬──────────────────────────────────────────────┘
@@ -545,30 +545,23 @@ COP (Concurrent Order Processor)
 │   • Create OrderEntry                                                    │
 │   • Add to OrderDataStorage, locked until initialised (#13), and marked  │
 │     until its transaction is enqueued (#83)                              │
-│   • Transition: INITIAL → RCVD_NEW → NEW                                │
+│   • Transition: INITIAL → RCVD_NEW → NEW                                 │
 └──────────────────────────────────────────────────────────────────────────┘
        │
        ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ TransactionScope collects operations:                                    │
-│   • CreateExecReportTrOperation (NEW acknowledgment)                    │
-│   • AddToOrderBookTrOperation                                           │
-│   • EnqueueEventTrOperation (deferred match event)                      │
-└──────────────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│ OrderMatcher.match()                                                     │
-│   • Find opposite side orders                                            │
-│   • Check price compatibility                                            │
-│   • Create ExecutionDeferedEvent if matched                             │
+│ TransactionScope collects operations, which run when it executes:        │
+│   • MatchOrderTrOperation (the order's booking)                          │
+│   • AddToOrderBookTrOperation (a limit order; a market one isn't booked) │
+│   • CreateExecReportTrOperation (the NEW report)                         │
+│   • PersistOrderTrOperation, put ahead of them all (#28)                 │
 └──────────────────────────────────────────────────────────────────────────┘
        │
        ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ TransactionMgr.enqueue(transaction)                                      │
-│   • Add to NLinkedTree dependency graph                                 │
-│   • Mark objects as "in transaction"                                    │
+│   • Add to NLinkedTree dependency graph                                  │
+│   • Mark objects as "in transaction"                                     │
 │   • Schedule execution                                                   │
 │   • The processor then clears the order's mark: a cancel or replace of   │
 │     the order can now be enqueued after this transaction (#83)           │
@@ -576,25 +569,22 @@ COP (Concurrent Order Processor)
        │
        ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ TaskManager executes transaction:                                        │
-│   • OrderBook.add(order)                                                │
-│   • OutgoingQueues.push(ExecReport)                                     │
-│   • Process deferred execution events                                   │
+│ TaskManager executes the transaction, its operations in order:           │
+│   • Persist: LMDBStorage writes the order's new version, so nothing      │
+│     is reported before it is durable (#20, #28)                          │
+│   • Match: OrderMatcher.match() finds a contra order at a crossing       │
+│     price; each fill becomes a deferred execution event                  │
+│   • Book: OrderBook.add() rests what is left                             │
+│   • Report: OutgoingQueues gets the NEW execution report                 │
+│   • Then each deferred fill runs as a transaction of its own, which      │
+│     persists both orders and reports the trade to both sides             │
 └──────────────────────────────────────────────────────────────────────────┘
        │
        ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ FileStorage.save()                                                       │
-│   • Serialize via OrderCodec                                            │
-│   • Write versioned record                                              │
-│   • Update metadata                                                      │
-└──────────────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│ OutgoingQueues → External System                                         │
-│   • Execution Report (NEW)                                              │
-│   • Execution Report (FILL) if matched                                  │
+│ OutgoingQueues → clients (WsOutQueues broadcasts over WebSocket)         │
+│   • Execution Report (NEW)                                               │
+│   • Execution Report (TRADE), to both sides, if matched                  │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -699,7 +689,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │   • ExecReport TRADE to aggressor                                       │
 │   • ExecReport TRADE to passive order owner                             │
 │   • Updated order states persisted                                      │
-│   • Execution records persisted                                         │
+│   • No execution record: reports aren't persisted (#33)                 │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -875,7 +865,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 
 | Test File | Test Cases | Coverage |
 |-----------|------------|----------|
-| `StatesTest.cpp` | 47 individual state tests | All transitions |
+| `StatesTest.cpp` | `StatesTest.*` | Rcvd_New's transitions and refusals, and what a reject keeps |
 | `StateMachineTest.cpp` | `StateMachineTest.*` | Full lifecycle scenarios |
 | `StateMachineHelper.cpp` | Helper class | Test event dispatching |
 
@@ -1320,7 +1310,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │        │                                                                     │
 │        ├─── ORDER_RECORDTYPE ───────► OrderCodec ───────► OrderEntry        │
 │        │                                                                     │
-│        ├─── EXECUTION_RECORDTYPE ───► (Execution handling) ► ExecutionsT    │
+│        ├─── EXECUTION_RECORDTYPE ───► none written; skipped on load         │
 │        │                                                                     │
 │        └─── IDLIMIT_RECORDTYPE ─────► (id limit, #81) ──► restoredIdLimit   │
 │                                                                              │
@@ -1371,88 +1361,52 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 
 ## 9. Test Coverage Matrix
 
+`ctest -N` lists every registered test. This section names the files, not how many tests each holds: those counts went stale here, as they did in README (#11).
+
 ### 9.1 Component Coverage Summary
 
-| Component | Unit Tests | Integration Tests | Benchmarks | Total Test Lines |
-|-----------|------------|-------------------|------------|------------------|
-| **Codecs** | CodecsTest.cpp (340), testCodecs.cpp (404) | - | - | 744 |
-| **State Machine** | testStates.cpp (1,380) | testStateMachine.cpp (3,709) | StateMachineBench.cpp | 5,089+ |
-| **Order Book** | testOrderBook.cpp (347) | testIntegral.cpp (579) | OrderMatchingBench.cpp | 926+ |
-| **Queues** | testIncomingQueues.cpp (279) | testIntegral.cpp | EventProcessingBench.cpp | 858+ |
-| **Processor** | testProcessor.cpp (289) | testIntegral.cpp | EventProcessingBench.cpp | 868+ |
-| **Transactions** | NLinkTreeTest.cpp (51), testNLinkTree.cpp (484) | testIntegral.cpp | - | 1,114 |
-| **Storage** | testFileStorage.cpp (289), testStorageRecordDispatcher.cpp (559) | testIntegral.cpp | - | 1,427 |
-| **Low-Latency** | CacheAlignedAtomicTest.cpp, CpuAffinityHugePagesTest.cpp, NumaAllocatorTest.cpp, TransactionScopePoolTest.cpp | - | TransactionScopePoolBench.cpp, NumaAllocatorBench.cpp, OrderParamsLayoutBench.cpp | - |
-| **LMDB Storage** | LMDBStorageTest.cpp | - | - | - |
-| **PostgreSQL** | PGEnumStringsTest.cpp, PGRequestBuilderTest.cpp, PGWriteBehindTest.cpp | - | - | - |
-| **Concurrency** | - | testTaskManager.cpp (238) | - | 238+ |
+| Component | Tests | Benchmarks |
+|-----------|-------|------------|
+| **Codecs** | `CodecsTest.cpp`; `StorageRecordDispatcherTest.cpp`, which holds the golden records (#149) | - |
+| **State Machine** | `StatesTest.cpp`, `StateMachineTest.cpp`, both through `StateMachineHelper` | `StateMachineBench.cpp` |
+| **Order Book & Matching** | `OrderBookTest.cpp`, `OrderMatcherTest.cpp` | `OrderMatchingBench.cpp` |
+| **Queues** | `IncomingQueuesTest.cpp`, `OutgoingQueuesTest.cpp`, `QueuesManagerTest.cpp` | `EventProcessingBench.cpp` |
+| **Processor** | `ProcessorTest.cpp`, `DeferedEventsTest.cpp`, `IntegrationTest.cpp` | `ProcessorBench.cpp` |
+| **Transactions** | `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `NLinkTreeTest.cpp` | - |
+| **Concurrency** | `TaskManagerTest.cpp` | `ProcessorBench.cpp` (`BM_TaskManagerThroughput`) |
+| **Storage** | `LMDBStorageTest.cpp`, `OrderStorageTest.cpp`, `WideDataStorageTest.cpp`; `FileStorageTest.cpp` for the legacy file storage | - |
+| **Low-Latency** | `CacheAlignedAtomicTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `NumaAllocatorTest.cpp`, `TransactionScopePoolTest.cpp` | `TransactionScopePoolBench.cpp`, `NumaAllocatorBench.cpp`, `OrderParamsLayoutBench.cpp` |
+| **Server (`app/`)** | `ClientMessageParserTest.cpp`, `JsonSerializerTest.cpp`, `WsSessionTest.cpp`, `WsServerLimitsTest.cpp`, `ServerDataTest.cpp`, `SeedDataArgsTest.cpp`; the ctest scripts `ServerThatCannotStartExits` and `SeedDataIfEmptySeedsOnlyADirectoryWithoutInstruments`, and `SeedDataRunsCleanly`; with `BUILD_FUZZ=ON`, `test/fuzz/` | `SessionManagerBench.cpp` |
+| **PostgreSQL** | `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`; with `BUILD_PG=ON`, `PGWriteBehindTest.cpp`, whose integration cases need `PG_CONNECTION_STRING` | - |
+| **CI runner** | the ctest script `JobStartedHookDecides` (`JobStartedHookTest.sh`): the job-started hook's verdicts, a fork's pull request and anything Dependabot sent refused (#143, #168) | - |
+| **Other** | `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `FiltersTest.cpp`, `SubscriptionTest.cpp`, `IdTGeneratorTest.cpp`, `LoggerTest.cpp` | - |
 
-### 9.2 Test File Details
+### 9.2 State Machine Tests
 
-#### Google Test Files (33 files, 463 tests)
+- **`StatesTest.cpp`** drives the Rcvd_New state one event at a time: the transitions out of it, the refusals a new order or a replacement can meet (a duplicate ClOrdID, an invalid side, an empty or unknown id), and what a reject keeps of the order.
+- **`StateMachineTest.cpp`** runs orders through the real `OrderState` machine: a full New, PartFill, Filled lifecycle; expiry, done for day, suspension and rejection; cancels and replaces through NoCnlReplace, GoingCancel and GoingReplace; trade corrections; and orders whose states stay independent.
+- **`ProcessorTest.cpp`** covers what the processor adds around the machine, such as the booking mark (#83), restored orders (#165, #207) and market orders (#209, #211).
 
-| Category | Test Files |
-|----------|------------|
-| **Core** | `CodecsTest.cpp`, `IncomingQueuesTest.cpp`, `OutgoingQueuesTest.cpp`, `NLinkTreeTest.cpp`, `ProcessorTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp` |
-| **Transactions** | `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TransactionScopePoolTest.cpp`, `TrOperationsTest.cpp` |
-| **Storage** | `FileStorageTest.cpp`, `StorageRecordDispatcherTest.cpp`, `WideDataStorageTest.cpp`, `LMDBStorageTest.cpp` |
-| **Low-Latency** | `CacheAlignedAtomicTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `NumaAllocatorTest.cpp` |
-| **PostgreSQL** | `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGWriteBehindTest.cpp` |
-| **Other** | `DeferedEventsTest.cpp`, `EventBenchmarkTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `QueuesManagerTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `IntegrationTest.cpp` |
-
-#### Legacy Tests (10 files, retained for reference)
-
-| Test File | Coverage |
-|-----------|----------|
-| `testStateMachine.cpp` | Full state machine lifecycle |
-| `testStates.cpp` | All 47 state transitions |
-| `testOrderBook.cpp` | Order book operations |
-| `testIncomingQueues.cpp` | Queue operations |
-| `testProcessor.cpp` | Processor coordination |
-| `testIntegral.cpp` | End-to-end integration |
-| `testFileStorage.cpp` | File persistence |
-| `testStorageRecordDispatcher.cpp` | Record dispatching |
-| `testNLinkTree.cpp` | Dependency tree |
-| `testCodecs.cpp` | All codecs |
-
-### 9.3 State Machine Test Coverage
-
-| State | Transitions Tested | Test Functions |
-|-------|-------------------|----------------|
-| **RCVD_NEW** | 6 | `testRcvdNew2New_onOrderReceived`, `testRcvdNew2Rejected_onRecvOrderRejected`, `testRcvdNew2PendReplace_onRplOrderReceived`, `testRcvdNew2Rejected_onRecvRplOrderRejected`, `testRcvdNew2Rejected_onExternalOrderReject`, `testRcvdNew2New_onExternalOrder` |
-| **PEND_NEW** | 3 | `testPendNew2New_onOrderAccepted`, `testPendNew2Rejected_onOrderRejected`, `testPendNew2Expired_onExpired` |
-| **PEND_REPLACE** | 3 | `testPendRepl2New_onReplace`, `testPendRepl2Rejected_onRplOrderRejected`, `testPendRepl2Expired_onRplOrderExpired` |
-| **NEW** | 6 | `testNew2PartFill_onTradeExecution`, `testNew2Filled_onTradeExecution`, `testNew2Rejected_onOrderRejected`, `testNew2Expired_onExpired`, `testNew2DoneForDay_onFinished`, `testNew2Suspended_onSuspended` |
-| **PARTFILL** | 7 | `testPartFill2PartFill_onTradeExecution`, `testPartFill2Filled_onTradeExecution`, `testPartFill2PartFill_onTradeCrctCncl`, `testPartFill2New_onTradeCrctCncl`, `testPartFill2Expired_onExpired`, `testPartFill2DoneForDay_onFinished`, `testPartFill2Suspended_onSuspended` |
-| **FILLED** | 5 | `testFilled2PartFill_onTradeCrctCncl`, `testFilled2New_onTradeCrctCncl`, `testFilled2Expired_onExpired`, `testFilled2DoneForDay_onFinished`, `testFilled2Suspended_onSuspended` |
-| **EXPIRED** | 1 | `testExpired2Expired_onTradeCrctCncl` |
-| **DONEFORDAY** | 4 | `testDoneForDay2PartFill_onNewDay`, `testDoneForDay2New_onNewDay`, `testDoneForDay2DoneForDay_onTradeCrctCncl`, `testDoneForDay2Suspended_onSuspended` |
-| **SUSPENDED** | 5 | `testSuspended2PartFill_onContinue`, `testSuspended2New_onContinue`, `testSuspended2Expired_onExpired`, `testSuspended2DoneForDay_onFinished`, `testSuspended2Suspended_onTradeCrctCncl` |
-| **NO_CNL_REPLACE** | 2 | `testNoCnlReplace2GoingCancel_onCancelReceived`, `testNoCnlReplace2GoingReplace_onReplaceReceived` |
-| **GOING_CANCEL** | 2 | `testGoingCancel2NoCnlReplace_onCancelRejected`, `testGoingCancel2CnclReplaced_onExecCancel` |
-| **GOING_REPLACE** | 2 | `testGoingReplace2NoCnlReplace_onReplaceRejected`, `testGoingReplace2CnclReplaced_onExecReplace` |
-| **CNCL_REPLACED** | 1 | `testCnclReplaced2CnclReplaced_onTradeCrctCncl` |
-
-**Total: 47 state transition tests**
-
-### 9.4 Test Utilities
+### 9.3 Test Utilities
 
 | Utility | Location | Purpose |
 |---------|----------|---------|
 | `TestTransactionContext` | `TestAux.h/cpp` | Mock ACID::Scope for transaction testing |
-| `DummyOrderSaver` | `TestAux.h/cpp` | No-op order persistence |
+| `DummyOrderSaver` | `TestAux.h` | No-op order persistence |
 | `check()` | `TestAux.h/cpp` | Assertion with error messages |
+| `uniqueTestPath()` | `TestAux.h` | A per-test-case path, so tests can run in parallel (#10) |
+| `SingletonFixture`, `OrderStorageFixture`, ... | `TestFixtures.h` | Create and destroy the singletons per test |
 | `OrderStateWrapper` | `StateMachineHelper.h/cpp` | State machine event processing |
 | `TestInQueueObserver` | Various test files | Queue event capture |
-| `TestOrderFunctor` | Various test files | Mock order matching |
-| `TestFileStorageObserver` | `testFileStorage.cpp` | File storage callbacks |
-| `TestDataStorageRestore` | `testStorageRecordDispatcher.cpp` | Data restoration verification |
+| `TestOrderFunctor` | `OrderBookTest.cpp`, `mocks/MockOrderBook.h` | Mock order matching |
+| `TestFileStorageObserver` | `FileStorageTest.cpp` | File storage callbacks |
+| `TestDataStorageRestore` | `StorageRecordDispatcherTest.cpp` | Data restoration verification |
 
 ---
 
 ## 10. Appendix: File Reference
 
-### 10.1 Source Files (101 total: 54 .h, 47 .cpp)
+### 10.1 Source Files
 
 | Category | Files |
 |----------|-------|
@@ -1462,23 +1416,25 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Transactions** | `TransactionDef.h`, `TransactionMgr.h/cpp`, `TransactionScope.h/cpp`, `TransactionScopePool.h`, `TrOperations.h/cpp`, `NLinkedTree.h/cpp` |
 | **Storage** | `FileStorage.h/cpp`, `FileStorageDef.h`, `OrderStorage.h/cpp`, `StorageRecordDispatcher.h/cpp`, `LMDBStorage.h/cpp` |
 | **Data Models** | `DataModelDef.h/cpp`, `TypesDef.h`, `QueuesDef.h`, `EventDef.h`, `TasksDef.h` |
-| **Codecs** | `OrderCodec.h/cpp`, `InstrumentCodec.h/cpp`, `AccountCodec.h/cpp`, `ClearingCodec.h/cpp`, `RawDataCodec.h/cpp`, `StringTCodec.h/cpp` |
+| **Codecs** | `OrderCodec.h/cpp`, `InstrumentCodec.h/cpp`, `AccountCodec.h/cpp`, `ClearingCodec.h/cpp`, `RawDataCodec.h/cpp`, `StringTCodec.h/cpp`, `CodecChecks.h` |
 | **Concurrency** | `TaskManager.h/cpp`, `AllocateCache.h/cpp` |
 | **Low-Latency** | `TransactionScopePool.h`, `CacheAlignedAtomic.h`, `CpuAffinity.h`, `HugePages.h`, `NumaAllocator.h` |
 | **Subscriptions** | `SubscrManager.h/cpp`, `SubscriptionLayerImpl.h/cpp`, `SubscriptionLayerDef.h`, `SubscriptionDef.h`, `FilterImpl.h/cpp`, `EntryFilter.h/cpp`, `OrderFilter.h/cpp` |
-| **Events** | `EventManager.h/cpp`, `DeferedEvents.h`, `CancelOrderDeferedEvent.cpp`, `ExecutionDeferedEvent.cpp`, `MatchOrderDeferedEvent.cpp` |
+| **Events** | `EventManager.h/cpp`, `DeferedEvents.h`, `CancelOrderDeferedEvent.cpp`, `ExecutionDeferedEvent.cpp`, `MatchOrderDeferedEvent.cpp`, `ReplaceRequestDeferedEvent.cpp`, `StateChangeDeferedEvent.cpp` |
 | **PostgreSQL** | `PGWriteBehind.h/cpp`, `PGRequestBuilder.h/cpp`, `PGWriteRequest.h`, `PGEnumStrings.h` (optional) |
 | **Utilities** | `Logger.h/cpp`, `IdTGenerator.h/cpp`, `ExchUtils.h/cpp`, `Singleton.h`, `WideDataStorage.h/cpp`, `WideDataLazyRef.h` |
 
-### 10.2 Test Files (45 total)
+### 10.2 Test Files
 
 | Category | Files |
 |----------|-------|
-| **Google Test (33)** | `CacheAlignedAtomicTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `EventBenchmarkTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `LMDBStorageTest.cpp`, `NLinkTreeTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp` |
+| **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `SeedDataArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
+| **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `JobStartedHookTest.sh` |
+| **Fuzzing** | `fuzz/fuzz_client_message.cpp`, `fuzz/standalone_main.cpp`, `fuzz/corpus/` (`BUILD_FUZZ=ON`) |
 
-### 10.3 Benchmark Files (7 total)
+### 10.3 Benchmark Files
 
 | File | Purpose |
 |------|---------|
@@ -1488,6 +1444,8 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | `TransactionScopePoolBench.cpp` | Lock-free object pool allocation |
 | `NumaAllocatorBench.cpp` | NUMA-aware allocation performance |
 | `OrderParamsLayoutBench.cpp` | Field layout optimization |
+| `ProcessorBench.cpp` | The real path: new order, match and cancel through a `Processor`, and `TaskManager` throughput (#25) |
+| `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159) |
 
 ---
 
@@ -1498,6 +1456,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | 1.0 | January 2026 | Generated | Initial architecture document |
 | 1.1 | January 2026 | Generated | Added ultra low-latency optimizations: TransactionScopePool, CacheAlignedAtomic, CpuAffinity, HugePages |
 | 1.2 | February 2026 | Generated | Updated file counts (101 src, 45 test, 7 bench), added LMDBStorage, NumaAllocator, PG write-behind, expanded namespace listing, updated test/benchmark appendix |
+| 1.3 | October 2026 | dudleylane, Claude | Corrected against the code (#171): state and transition counts (now checked by DocConsistencyTest), the new order flow, execution records, the test sections and the appendix's file lists |
 
 ---
 

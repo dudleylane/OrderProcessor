@@ -4,13 +4,13 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 
 **Original Author:** Sergey Mikhailik
 **Modernization & Extensions:** dudleylane, Claude
-**License:** GNU General Public License v3 (AGPL-3.0)
+**License:** GNU Affero General Public License v3 (AGPL-3.0)
 
 ## Features
 
 ### Core Engine
 - **ACID Transactions:** Full transaction support with operation-level rollback on failure
-- **State Machine:** 14 order states with 47+ transitions managed via Boost Meta State Machine (MSM)
+- **State Machine:** <!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> order states and <!-- DOC_CHECK:transition_count -->47<!-- /DOC_CHECK --> transitions, managed via Boost Meta State Machine (MSM)
 - **Order Matching:** Price-time priority matching engine with per-instrument order books
 - **Deferred Event Chaining:** Trade executions trigger cascading events (e.g., settlement)
 - **Subscription Filtering:** Selective event delivery per client via SubscrManager
@@ -18,9 +18,9 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 ### Low-Latency Infrastructure
 - **Zero-Allocation Hot Path:** 5-tier memory hierarchy — stack, arena (<!-- DOC_CHECK:arena_size -->2048<!-- /DOC_CHECK -->-byte bump), CAS pool (<!-- DOC_CHECK:pool_size -->1024<!-- /DOC_CHECK --> slots), TBB scalable allocator, heap fallback
 - **Lock-Free Pool:** TransactionScopePool with exponential backoff CAS and cache miss tracking
-- **CPU Affinity:** Thread-to-core pinning with SCHED_FIFO real-time scheduling
-- **NUMA-Aware Allocation:** `mbind()` via NumaAllocator for multi-socket locality
-- **Huge Pages:** 2MB page support for TLB efficiency
+- **CPU Affinity:** Thread-to-core pinning, for the main thread (`--cpu-affinity`) and the TaskManager's workers. `CpuAffinity` can also set SCHED_FIFO priority, but nothing calls it
+- **NUMA-Aware Allocation:** `TransactionScopePool` can bind its slots to the local NUMA node (`mbind()` via NumaAllocator). The server builds its pools in the default mode, so it doesn't use this
+- **Huge Pages:** `TransactionScopePool` can put its slots in 2 MB pages. The server doesn't ask it to: `--huge-pages` only reports whether huge pages are available
 - **False-Sharing Prevention:** `CacheAlignedAtomic<T>` (`alignas(64)`) on all shared atomics
 - **Branch Prediction:** `[[likely]]`, `[[unlikely]]`, `[[assume]]` (C++23) throughout hot path
 
@@ -54,7 +54,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 
 ### Persistence
 - **LMDB Storage:** Memory-mapped key-value store with versioned records. An order keeps its newest version and the one before it, and the map doubles when a write finds it full (#148)
-- **PostgreSQL Write-Behind:** Optional async persistence via PGWriteBehind (requires `BUILD_PG=ON`)
+- **PostgreSQL Write-Behind:** PGWriteBehind builds with `BUILD_PG=ON`, but nothing connects it to the server yet, so nothing reaches Postgres (#151)
 - **File Storage:** Legacy versioned file persistence (deprecated in favor of LMDB)
 
 ### Deployment
@@ -66,7 +66,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 ## Requirements
 
 - **Platform:** Linux (CentOS 10 / RHEL 10 or compatible)
-- **Compiler:** GCC 13+ with C++23 support (GCC 15.2.1 recommended)
+- **Compiler:** GCC 15, from `gcc-toolset-15` on el10. The engine uses C++23's `<flat_map>`, which the system's GCC 14 doesn't have (#132)
 - **Build System:** CMake 3.21+
 
 ### Dependencies
@@ -83,7 +83,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 Install on CentOS 10:
 ```bash
 # Core dependencies
-sudo dnf install tbb-devel spdlog-devel boost-devel cmake gcc-c++ lmdb-devel numactl-devel
+sudo dnf install gcc-toolset-15 tbb-devel spdlog-devel boost-devel cmake lmdb-devel numactl-devel
 
 # Optional: QuickFIX 22 for FIX protocol support. scripts/build-quickfix.sh builds the pinned ref
 # (see docs/QUICKFIX_DEPENDENCY.md)
@@ -96,6 +96,7 @@ sudo dnf install tbb-devel spdlog-devel boost-devel cmake gcc-c++ lmdb-devel num
 ```bash
 git clone https://github.com/dudleylane/OrderProcessor.git
 cd OrderProcessor
+source /opt/rh/gcc-toolset-15/enable   # GCC 15 first on PATH, for this shell
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 cmake --build . -j$(nproc)
@@ -108,8 +109,10 @@ cmake --build . -j$(nproc)
 | `BUILD_TESTS` | ON | Build unit tests with Google Test |
 | `BUILD_BENCHMARKS` | ON | Build benchmarks with Google Benchmark |
 | `BUILD_APP` | ON | Build WebSocket server and seed data utility |
-| `BUILD_PG` | OFF | Build PostgreSQL write-behind layer (requires libpqxx) |
+| `BUILD_PG` | OFF | Build PostgreSQL write-behind layer (requires libpqxx); nothing connects it to the server yet (#151) |
 | `BUILD_FIX` | OFF | Build FIX 4.4 protocol gateway (requires QuickFIX/C++) |
+| `BUILD_FUZZ` | OFF | Build the `parseClientMessage` fuzz target (`docs/DEBUGGING.md`, Fuzzing) |
+| `WARNINGS_AS_ERRORS` | OFF | Fail the build on a warning in the project's own code; CI's Release job and the pre-push hook turn it on (#167) |
 | `MARCH` | `native` | The CPU a Release build targets (`-march`): `native`, this machine's, or an ISA level such as `x86-64-v3`. The server image builds for `x86-64-v3` (#170) |
 
 ### Build Outputs
@@ -144,9 +147,9 @@ Server options:
 |------|---------|-------------|
 | `--port` | 8080 | WebSocket listen port |
 | `--data-dir` | `./data` | LMDB persistence directory |
-| `--workers` | 0 | Worker thread count (0 = auto) |
+| `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
-| `--huge-pages` | off | Enable huge page allocation |
+| `--huge-pages` | off | Reports whether huge pages are available; nothing allocates from them yet |
 | `--fix-cfg` | *(none)* | Path to QuickFIX settings file (enables FIX gateway) |
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
 | `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
@@ -326,7 +329,7 @@ reaches LMDB.
 
 ## WebSocket Protocol
 
-The server communicates with clients via JSON messages over WebSocket. All messages have a `type` field for dispatch.
+The server communicates with clients via JSON messages over WebSocket. All messages have a `type` field for dispatch. A server message's payload is in a `data` field, except `error`'s, whose text is a top-level `message`. A client's `new_order`, `cancel_order` and `replace_order` put theirs in `data` too, `{"type": "new_order", "data": {...}}`, while `subscribe_book` and `unsubscribe_book` give `symbol` at the top level.
 
 ### Server → Client
 
@@ -340,7 +343,7 @@ The server communicates with clients via JSON messages over WebSocket. All messa
 | `execution_report` | `ExecutionReport` | On trade, reject, cancel, replace, correct |
 | `book_update` | `OrderBookSnapshot` | On book change (subscribed symbols only) |
 | `cancel_reject` | `{orderId, reason}` | When a cancel is refused; `reason` says why: unknown order, too late (with the order's status), or a replace pending |
-| `business_reject` | `{refId, reason}` | On business logic rejection |
+| `business_reject` | `{refId, reason}` | Not sent: nothing in the server raises one |
 | `metrics_update` | `SystemMetrics` | Every 1 second (broadcast to all) |
 | `error` | `{message}` | On server error |
 
@@ -398,7 +401,7 @@ The MetricsPublisher runs on the server's ASIO io_context thread and broadcasts 
 
 ## PostgreSQL Integration
 
-Optional write-behind persistence to PostgreSQL. Enable with `BUILD_PG=ON` (requires `libpqxx`).
+Write-behind persistence to PostgreSQL, built with `BUILD_PG=ON` (requires `libpqxx`). Nothing connects it to the server yet, so the server writes nothing to Postgres (#151).
 
 - **PGWriteBehind:** Async write-behind from the order engine to PostgreSQL
 - **PGRequestBuilder:** Maps C++ data structures to SQL statements
@@ -411,7 +414,7 @@ Optional write-behind persistence to PostgreSQL. Enable with `BUILD_PG=ON` (requ
 
 ```
 OrderProcessor/
-├── src/                    # Library source (54 headers, 47 implementations)
+├── src/                    # Library source
 │   ├── Processor.cpp/h     # Central event coordinator
 │   ├── StateMachine.cpp/h  # Boost MSM order state machine
 │   ├── OrderMatcher.cpp/h  # Price-time priority matching engine
@@ -430,7 +433,7 @@ OrderProcessor/
 │       └── src/types/       # TypeScript type definitions
 ├── test/                   # Google Test unit tests (33 files, 458 tests)
 │   └── mocks/              # Mock objects for testing
-├── bench/                  # Google Benchmark performance tests (17 suites)
+├── bench/                  # Google Benchmark performance tests
 ├── app/                    # WebSocket server application
 │   ├── main.cpp            # Server entry point
 │   ├── WsServer.cpp/h      # Boost Beast WebSocket server
