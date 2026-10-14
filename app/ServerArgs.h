@@ -30,7 +30,9 @@ struct ServerArgs
     int workers = 0;
     int cpuAffinityStart = -1; // -1 = disabled, >= 0 = pin starting from this core
     bool hugePages = false;
-    std::string fixCfg;                               // QuickFIX's settings file (empty: no FIX gateway)
+    std::string fixCfg;           // QuickFIX's settings file (empty: no FIX gateway)
+    std::string fixCredentials;   // who may log on to FIX, and what each may trade (#147); --fix-cfg needs it
+    bool hashFixPassword = false; // print a FIX password's hash for the credentials file, and exit (#147)
     std::string clearingFirm = DEFAULT_CLEARING_FIRM; // the clearing firm on every order (#34)
     std::string defaultAccount = DEFAULT_ACCOUNT;     // the account of an order that names none (#34)
     bool debug = false;                               // debug logging, off unless asked for (#76)
@@ -57,6 +59,8 @@ inline std::string serverUsage()
            "  --huge-pages              report whether huge pages are available\n"
 #ifdef BUILD_FIX
            "  --fix-cfg FILE            QuickFIX's settings file, which starts the FIX gateway (default: none)\n"
+           "  --fix-credentials FILE    who may log on to FIX, and the accounts each may trade; --fix-cfg needs it\n"
+           "  --hash-fix-password       read a password from standard input, print its hash for that file, and exit\n"
 #endif
            "  --clearing-firm FIRM      the clearing firm on every order (default " +
            std::string(DEFAULT_CLEARING_FIRM) +
@@ -123,12 +127,22 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
             parsed.debug = true;
             continue;
         }
+        if ("--hash-fix-password" == arg)
+        {
+#ifdef BUILD_FIX
+            parsed.hashFixPassword = true;
+            continue;
+#else
+            *error = "--hash-fix-password needs a server built with BUILD_FIX=ON";
+            return std::nullopt;
+#endif
+        }
         static const std::vector<std::string> withValues = {
             "--port",         "--data-dir",        "--workers",
             "--cpu-affinity", "--clearing-firm",   "--default-account",
             "--lmdb-map-mb",  "--max-connections", "--max-session-queue-mb",
             "--bind",         "--ws-token-file",   "--allowed-origin",
-            "--fix-cfg"
+            "--fix-cfg",      "--fix-credentials"
         };
         bool takesValue = false;
         for (const std::string &option : withValues)
@@ -225,6 +239,15 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
             return std::nullopt;
 #endif
         }
+        else if ("--fix-credentials" == arg)
+        {
+#ifdef BUILD_FIX
+            parsed.fixCredentials = value;
+#else
+            *error = "--fix-credentials needs a server built with BUILD_FIX=ON";
+            return std::nullopt;
+#endif
+        }
         else
         {
             parsed.defaultAccount = value;
@@ -234,6 +257,14 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
             *error = arg + " needs a whole number " + range + ", not '" + value + "'";
             return std::nullopt;
         }
+    }
+    // FIX fails closed (#147): without the credentials file a counterparty would log on with no password and trade any
+    // account. The hash tool needs neither.
+    if (!parsed.fixCfg.empty() && parsed.fixCredentials.empty() && !parsed.hashFixPassword)
+    {
+        *error = "--fix-cfg needs --fix-credentials: without them a FIX counterparty would log on with no password "
+                 "and trade any account (#147)";
+        return std::nullopt;
     }
     return parsed;
 }

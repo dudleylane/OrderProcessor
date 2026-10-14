@@ -42,6 +42,7 @@
 
 #ifdef BUILD_FIX
 #include "FixServer.h"
+#include "FixCredentials.h"
 #include "MultiOutQueues.h"
 #endif
 
@@ -134,6 +135,26 @@ int main(int argc, char *argv[])
         return 0;
     }
     App::ServerArgs cfg = *parsed;
+#ifdef BUILD_FIX
+    if (cfg.hashFixPassword)
+    {
+        // The password from standard input, so it stays out of the shell's history and the process list (#147)
+        std::string password;
+        std::getline(std::cin, password);
+        if (!password.empty() && ('\r' == password.back()))
+        {
+            password.pop_back();
+        }
+        if (password.empty())
+        {
+            std::cerr
+                << "orderProcessorServer: --hash-fix-password reads the password from standard input, and got none\n";
+            return 2;
+        }
+        std::cout << App::FixCredentials::hashPassword(password) << "\n";
+        return 0;
+    }
+#endif
     // Who may open a WebSocket session (#146). A token that can't be used is a usage error too.
     App::WsAuth wsAuth;
     if (!App::resolveWsAuth(cfg, std::getenv("OMS_WS_TOKEN"), std::getenv("OMS_ALLOWED_ORIGINS"), &wsAuth, &usageError))
@@ -328,7 +349,7 @@ int main(int argc, char *argv[])
 #ifdef BUILD_FIX
     if (fixServer)
     {
-        fixServer->start(cfg.fixCfg);
+        fixServer->start(cfg.fixCfg, cfg.fixCredentials);
     }
 #endif
 

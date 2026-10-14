@@ -87,5 +87,9 @@ USER oms
 HEALTHCHECK --interval=10s --timeout=3s --start-period=120s --retries=3 \
     CMD ["curl", "-s", "-o", "/dev/null", "--max-time", "2", "http://127.0.0.1:8080/"]
 
+# FIX needs the deployment's credentials file (#147), which the image doesn't hold: mount it at this path, readable by oms.
+# It holds only password hashes, which `orderProcessorServer --hash-fix-password` makes. Without it the server exits 1,
+# saying it can't read the file.
 ENTRYPOINT ["orderProcessorServer"]
-CMD ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/fix.cfg"]
+CMD ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/fix.cfg", \
+     "--fix-credentials", "/etc/orderprocessor/fix-credentials"]

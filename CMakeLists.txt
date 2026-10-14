@@ -24,6 +24,8 @@ if(BUILD_FIX)
     # branch is verified with. The package's version check accepts the same major only, and its imported
     # target brings the headers and the library from the same installation.
     find_package(quickfix 22 CONFIG REQUIRED)
+    # The FIX credentials file's password hashes, PBKDF2-HMAC-SHA256 (#147)
+    find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 endif()
 option(BUILD_FUZZ "Build fuzz targets in test/fuzz (libFuzzer with Clang, corpus replay otherwise)" OFF)
 option(WARNINGS_AS_ERRORS "Fail the build on a warning in this project's own code; CI's Release job and the pre-push hook turn it on (#167)" OFF)
@@ -142,7 +144,7 @@ if(BUILD_TESTS)
     )
 
     if(BUILD_FIX)
-        target_link_libraries(orderProcessorTest PRIVATE quickfix::quickfix)
+        target_link_libraries(orderProcessorTest PRIVATE quickfix::quickfix OpenSSL::Crypto)
         target_compile_definitions(orderProcessorTest PRIVATE BUILD_FIX)
         target_include_directories(orderProcessorTest PRIVATE ${CMAKE_SOURCE_DIR}/app)
     endif()
@@ -187,7 +189,7 @@ if(BUILD_BENCHMARKS)
     )
 
     if(BUILD_FIX)
-        target_link_libraries(orderProcessorBench PRIVATE quickfix::quickfix)
+        target_link_libraries(orderProcessorBench PRIVATE quickfix::quickfix OpenSSL::Crypto)
         target_compile_definitions(orderProcessorBench PRIVATE BUILD_FIX)
     endif()
 endif()
@@ -200,7 +202,7 @@ if(BUILD_APP)
         orderEngine nlohmann_json::nlohmann_json pthread)
 
     if(BUILD_FIX)
-        target_link_libraries(orderProcessorServer PRIVATE quickfix::quickfix)
+        target_link_libraries(orderProcessorServer PRIVATE quickfix::quickfix OpenSSL::Crypto)
         target_compile_definitions(orderProcessorServer PRIVATE BUILD_FIX)
     endif()
 
@@ -232,6 +234,11 @@ if(BUILD_APP)
             find_package(Python3 REQUIRED COMPONENTS Interpreter)
             add_test(NAME FixClientRecoversMissedReports
                      COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixResendTest.py
+                             $<TARGET_FILE:orderProcessorServer> $<TARGET_FILE:seedData>
+                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec/FIX44.xml)
+            # Only a counterparty with its Username and Password logs on, and it trades only its accounts (#147)
+            add_test(NAME FixLogonNeedsCredentials
+                     COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixLogonTest.py
                              $<TARGET_FILE:orderProcessorServer> $<TARGET_FILE:seedData>
                              ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec/FIX44.xml)
         endif()

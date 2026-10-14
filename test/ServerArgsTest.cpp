@@ -200,21 +200,47 @@ TEST(ServerArgsTest, TheUsageNamesEveryOption)
 
 TEST(ServerArgsTest, TheFixGatewaysSettingsNeedAFixBuild)
 {
-    // On this branch --fix-cfg starts the FIX gateway. A build without it refuses the flag rather than run without the
-    // gateway it was asked for, as the server refuses any value it can't use (#173).
+    // On this branch --fix-cfg starts the FIX gateway, --fix-credentials says who may log on to it (#147), and
+    // --hash-fix-password makes a password's hash for that file. A build without the gateway refuses all three rather
+    // than run without the gateway it was asked for, as the server refuses any value it can't use (#173).
     std::string error;
 #ifdef BUILD_FIX
-    const std::optional<ServerArgs> parsed = parse({ "--fix-cfg", "config/fix.cfg" }, &error);
+    const std::optional<ServerArgs> parsed =
+        parse({ "--fix-cfg", "config/fix.cfg", "--fix-credentials", "fix-credentials" }, &error);
     ASSERT_TRUE(parsed) << error;
     EXPECT_EQ("config/fix.cfg", parsed->fixCfg);
-    EXPECT_NE(std::string::npos, serverUsage().find(" --fix-cfg ")) << "--fix-cfg isn't in the usage";
+    EXPECT_EQ("fix-credentials", parsed->fixCredentials);
+    const std::optional<ServerArgs> hash = parse({ "--hash-fix-password" }, &error);
+    ASSERT_TRUE(hash) << error;
+    EXPECT_TRUE(hash->hashFixPassword);
+    for (const char *option : { " --fix-cfg ", " --fix-credentials ", " --hash-fix-password " })
+    {
+        EXPECT_NE(std::string::npos, serverUsage().find(option)) << option << "isn't in the usage";
+    }
+    // FIX fails closed (#147): without the credentials a counterparty would log on with no password and trade any
+    // account. The hash tool needs neither.
+    EXPECT_FALSE(parse({ "--fix-cfg", "config/fix.cfg" }, &error));
+    EXPECT_EQ("--fix-cfg needs --fix-credentials: without them a FIX counterparty would log on with no password and "
+              "trade any account (#147)",
+              error);
+    EXPECT_TRUE(parse({ "--hash-fix-password", "--fix-cfg", "config/fix.cfg" }, &error)) << error;
 #else
     EXPECT_FALSE(parse({ "--fix-cfg", "config/fix.cfg" }, &error));
     EXPECT_EQ("--fix-cfg needs a server built with BUILD_FIX=ON", error);
-    EXPECT_EQ(std::string::npos, serverUsage().find("--fix-cfg")) << "the usage offers a flag this build refuses";
+    EXPECT_FALSE(parse({ "--fix-credentials", "fix-credentials" }, &error));
+    EXPECT_EQ("--fix-credentials needs a server built with BUILD_FIX=ON", error);
+    EXPECT_FALSE(parse({ "--hash-fix-password" }, &error));
+    EXPECT_EQ("--hash-fix-password needs a server built with BUILD_FIX=ON", error);
+    for (const char *option : { "--fix-cfg", "--fix-credentials", "--hash-fix-password" })
+    {
+        EXPECT_EQ(std::string::npos, serverUsage().find(option))
+            << "the usage offers " << option << ", which this build refuses";
+    }
 #endif
     EXPECT_FALSE(parse({ "--fix-cfg", "" }, &error));
     EXPECT_EQ("--fix-cfg needs a value", error);
+    EXPECT_FALSE(parse({ "--fix-credentials", "" }, &error));
+    EXPECT_EQ("--fix-credentials needs a value", error);
 }
 
 } // namespace

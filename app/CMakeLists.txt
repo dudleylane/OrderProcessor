@@ -12,6 +12,7 @@ target_sources(orderProcessorServer PRIVATE
 if(BUILD_FIX)
     target_sources(orderProcessorServer PRIVATE
         FixServer.cpp
+        FixCredentials.cpp
         FixGateway.cpp
         FixOutQueues.cpp
         FixRotatingLog.cpp

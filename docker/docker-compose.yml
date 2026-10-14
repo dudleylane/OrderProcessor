@@ -60,8 +60,10 @@ services:
     # one a server ran on before it was seeded, which has an LMDB file but no instrument. Not a one-shot service:
     # podman-compose makes a dependency a container that must be running when the server starts.
     entrypoint: ["sh", "-c", "seedData --if-empty --data-dir /data && exec orderProcessorServer \"$$@\"", "oms-server"]
-    # The image's CMD, repeated: an entrypoint set here clears it. On this branch that includes the FIX gateway's config.
-    command: ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/fix.cfg"]
+    # The image's CMD, repeated: an entrypoint set here clears it. On this branch that includes the FIX gateway's config
+    # and its credentials (#147), without which the server refuses --fix-cfg and exits 2.
+    command: ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/fix.cfg",
+              "--fix-credentials", "/etc/orderprocessor/fix-credentials"]
     restart: unless-stopped
     # A small init runs as PID 1 and starts the server (#203). As PID 1 itself, the server ignored SIGTERM until its
     # handler was set, after the data directory's restore, and an abort became a SIGSEGV.
@@ -88,6 +90,10 @@ services:
       start_period: 120s
     volumes:
       - oms-data:/data
+      # Who may log on to FIX, and what each counterparty may trade (#147): docker/fix-credentials, which docker/README.md
+      # says how to make. It holds only password hashes, so it may be readable by others, as it must be here: the server
+      # runs as oms, and rootless podman shows a file only its owner may read as root's. z relabels it for SELinux (#201).
+      - ./fix-credentials:/etc/orderprocessor/fix-credentials:ro,z
     # The server logs to standard output (EXCHANGE_LOG=- in its image, #156); keep at most 3 files of 10 MB
     logging:
       driver: json-file

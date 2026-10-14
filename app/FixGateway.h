@@ -19,6 +19,7 @@
 #include <quickfix/Group.h>
 #include "QueuesDef.h"
 #include "DataModelDef.h"
+#include "FixCredentials.h"
 
 // Catch QuickFIX ABI breaks at compile time (GroupArena added m_arena to FieldMap).
 static_assert(sizeof(FIX::Group) == 128, "FIX::Group size changed — ABI break. Clean rebuild required.");
@@ -41,6 +42,11 @@ public:
     FixGateway(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
                Store::OrderDataStorage *orderStorage, SourceIdT defaultClearingId = SourceIdT(),
                SourceIdT defaultAccountId = SourceIdT());
+
+    /// Who may log on, and what each counterparty may trade (#147), which the gateway checks from now on: set it before the
+    /// acceptor starts. Throws std::runtime_error if it lists an account the data directory doesn't have. Without it, as
+    /// in tests, every Logon is accepted and an order trades the account it names.
+    void setCredentials(const FixCredentials *credentials);
 
     // Application interface
     void onCreate(const FIX::SessionID &) override;
@@ -92,6 +98,10 @@ private:
     void rejectMessage(const FIX::Message &msg, const FIX::SessionID &sid, int reason, const std::string &text);
     /// refuses a new order to its sender with buildOrderRefusal()'s ExecutionReport, before the engine sees it (#145)
     void refuseOrder(const FIX::Message &msg, const FIX::SessionID &sid, int ordRejReason, const std::string &text);
+    /// Applies the session's account list to an order's Account (#147): an order that names none trades the
+    /// counterparty's first account, and one that names another account is refused, with OrdRejReason 15. Returns false
+    /// when it refused the order. Without credentials, the account stays as the order names it.
+    bool applySessionAccounts(const FIX::Message &msg, const FIX::SessionID &sid, std::string *account);
     /// The order a request from the session source names by ClOrdID (#71): the one stored under the session's key, or,
     /// failing that, the one stored under the ClOrdID alone if this session placed it, as an order stored before #71
     /// was. Another session's order is not found.
@@ -107,8 +117,9 @@ private:
     std::unordered_set<std::string> loggedOn_;          // the sessions logged on now, by source string
     mutable oneapi::tbb::spin_rw_mutex sessionMapLock_; // guards both
 
-    SourceIdT defaultClearingId_; // pre-resolved clearing for FIX orders
-    SourceIdT defaultAccountId_;  // pre-resolved account for FIX orders that name none (#34)
+    SourceIdT defaultClearingId_;                 // pre-resolved clearing for FIX orders
+    SourceIdT defaultAccountId_;                  // pre-resolved account for FIX orders that name none (#34)
+    const FixCredentials *credentials_ = nullptr; // who may log on and what each may trade (#147); owned by FixServer
 
 public:
     // FIX → internal enum conversions (public static for testability)

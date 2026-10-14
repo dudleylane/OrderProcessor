@@ -98,9 +98,11 @@ target_include_directories(orderProcessorTest
 if(BUILD_FIX)
     target_sources(orderProcessorTest PRIVATE
         FixGatewayTest.cpp
+        FixCredentialsTest.cpp
         FixEndToEndTest.cpp
         FixFullPipelineTest.cpp
         FixRotatingLogTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/FixCredentials.cpp
         ${CMAKE_SOURCE_DIR}/app/FixGateway.cpp
         ${CMAKE_SOURCE_DIR}/app/FixOutQueues.cpp
         ${CMAKE_SOURCE_DIR}/app/FixRotatingLog.cpp

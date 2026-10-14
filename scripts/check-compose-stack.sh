@@ -9,7 +9,9 @@
 # podman-compose under a project name of its own, with an override file that publishes
 # no host port (this machine runs PostgreSQL on 5432, and development servers use 3000
 # and 8080) and gives oms-db .env.example's settings, with an access token made for the
-# run and an Origin list, so it neither reads nor writes a docker/.env. Then:
+# run and an Origin list, so it neither reads nor writes a docker/.env. On this branch it
+# also mounts a FIX credentials file made for the run, as docker/README.md's quick start
+# makes one (#147), in place of a docker/fix-credentials it never reads or writes. Then:
 #   0. Before it builds anything: compose refuses .env.example as it is, which sets no
 #      access token, and docker-compose.yml publishes only the frontend's port (#146)
 #      and, on this branch, the FIX acceptor's 5001.
@@ -159,9 +161,19 @@ services:
       - $WORK/env
   oms-server:
     ports: !reset []
+    volumes: !override
+      - oms-data:/data
+      - $WORK/fix-credentials:/etc/orderprocessor/fix-credentials:ro,z
   oms-frontend:
     ports: !reset []
 EOF
+# The FIX credentials compose's server needs (#147), as docker/README.md's quick start makes them: a counterparty
+# trading a seeded account, with a PBKDF2 hash. Only the hash is in the file, so it may be readable by others.
+# shellcheck disable=SC2016 # the $ are the Python f-string's, inside the single quotes on purpose
+python3 -c 'import hashlib, os; s = os.urandom(16); k = hashlib.pbkdf2_hmac("sha256", b"check-password", s, 600000); '\
+'print(f"CHECK_CLIENT check pbkdf2-sha256$600000${s.hex()}${k.hex()} TRADING-1")' > "$WORK/fix-credentials" \
+    || fail "couldn't make the FIX credentials file"
+chmod 644 "$WORK/fix-credentials"
 
 step "what compose would publish, and whether it starts without a token"
 # docker-compose.yml as committed: this run's override publishes nothing, so the stack's ports are checked here

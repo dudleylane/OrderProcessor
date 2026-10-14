@@ -29,8 +29,12 @@ public:
               SourceIdT defaultClearingId, SourceIdT defaultAccountId);
     ~FixServer();
 
-    /// Start the FIX acceptor (ThreadedSocketAcceptor).
-    void start(const std::string &configFile);
+    /// Start the FIX acceptor (ThreadedSocketAcceptor), with QuickFIX's settings from configFile and the counterparties
+    /// from credentialsFile (#147). Each counterparty gets a session, with BeginString and SenderCompID from the
+    /// settings' [DEFAULT], unless the settings already have one; a session the credentials don't name is refused, since
+    /// nobody could log on to it. Throws if either file can't be used, or names an account the data directory doesn't
+    /// have.
+    void start(const std::string &configFile, const std::string &credentialsFile);
 
     /// Stop the FIX acceptor gracefully.
     void stop();
