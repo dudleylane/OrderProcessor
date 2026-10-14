@@ -314,8 +314,8 @@ TEST_F(FxSwapTest, SwapCodecRoundTrip)
 
     EXPECT_EQ(1u, version);
 
-    // Decode
-    OrderEntry *decoded = codec.decode(id, version, buf.data(), buf.size());
+    // Decode, in the format version a record's word carries (#149, #172), not the version encode() returns
+    OrderEntry *decoded = codec.decode(id, COP::Codec::OrderCodec::FORMAT_VERSION, buf.data(), buf.size());
     ASSERT_NE(nullptr, decoded);
 
     EXPECT_EQ(FXSWAP_ORDERTYPE, decoded->ordType_);
@@ -337,7 +337,7 @@ TEST_F(FxSwapTest, LegacyCodecCompat_V0DefaultsSwapFields)
     saved->stateMachinePersistance_.stateZone2Id_ = 8;
     saved->ordType_ = LIMIT_ORDERTYPE; // non-swap
 
-    // Encode as v0
+    // A non-swap order: its record has no far leg
     std::string buf;
     IdT id;
     u32 version;
@@ -347,7 +347,7 @@ TEST_F(FxSwapTest, LegacyCodecCompat_V0DefaultsSwapFields)
     EXPECT_EQ(0u, version);
 
     // Decode — swap fields should be defaults
-    OrderEntry *decoded = codec.decode(id, version, buf.data(), buf.size());
+    OrderEntry *decoded = codec.decode(id, COP::Codec::OrderCodec::FORMAT_VERSION, buf.data(), buf.size());
     ASSERT_NE(nullptr, decoded);
 
     EXPECT_DOUBLE_EQ(0.0, decoded->farPrice_);
@@ -358,8 +358,9 @@ TEST_F(FxSwapTest, LegacyCodecCompat_V0DefaultsSwapFields)
 
 TEST_F(FxSwapTest, SwapCodecReadsTheFarLegWhateverTheVersion)
 {
-    // Records are stored under the storage's own version, 0 on an order's first write, not the 1 encode() returns for
-    // a swap. Decode used to read the far leg only from version 1 on, so a swap written once lost it (#144).
+    // Every format version has a swap's far leg, and decode reads it by content. Records were once stored under the
+    // storage's own version, 0 on an order's first write, and decode read the far leg only from version 1 on, so a swap
+    // written once lost it (#144). Since #172 the far leg follows the execution instructions, in format version 1.
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
@@ -376,10 +377,20 @@ TEST_F(FxSwapTest, SwapCodecReadsTheFarLegWhateverTheVersion)
     COP::Codec::OrderCodec codec;
     codec.encode(*saved, &buf, &id, &version);
 
-    std::unique_ptr<OrderEntry> decoded(codec.decode(id, 0, buf.data(), buf.size()));
-    ASSERT_NE(nullptr, decoded);
-    EXPECT_DOUBLE_EQ(1.0872, decoded->farPrice_);
-    EXPECT_EQ(1716595200000ULL, decoded->farSettlDate_);
+    // Format version 1, as encode() writes it; and version 0, the same record without the execution instructions ('.'
+    // and their 4-byte mask), which come before the far leg ('.', farPrice_, '.', farSettlDate_)
+    const size_t farLeg = 2 + sizeof(saved->farPrice_) + sizeof(saved->farSettlDate_);
+    const size_t instructions = 1 + sizeof(u32);
+    ASSERT_LT(farLeg + instructions, buf.size());
+    const std::string v0 = buf.substr(0, buf.size() - farLeg - instructions) + buf.substr(buf.size() - farLeg);
+    const std::pair<u32, std::string> records[] = { { 1u, buf }, { 0u, v0 } };
+    for (const auto &[formatVersion, record] : records)
+    {
+        std::unique_ptr<OrderEntry> decoded(codec.decode(id, formatVersion, record.data(), record.size()));
+        ASSERT_NE(nullptr, decoded) << "format version " << formatVersion;
+        EXPECT_DOUBLE_EQ(1.0872, decoded->farPrice_) << "format version " << formatVersion;
+        EXPECT_EQ(1716595200000ULL, decoded->farSettlDate_) << "format version " << formatVersion;
+    }
 }
 
 TEST_F(FxSwapTest, SwapRecordCutAfterTheFarPriceIsRejected)
@@ -406,7 +417,7 @@ TEST_F(FxSwapTest, SwapRecordCutAfterTheFarPriceIsRejected)
     const size_t cut = buf.size() - 1 - sizeof(saved->farSettlDate_); // drop the last '.' and farSettlDate_
     std::unique_ptr<char[]> exact(new char[cut]);
     memcpy(exact.get(), buf.data(), cut);
-    EXPECT_THROW(delete codec.decode(id, version, exact.get(), cut), std::runtime_error);
+    EXPECT_THROW(delete codec.decode(id, COP::Codec::OrderCodec::FORMAT_VERSION, exact.get(), cut), std::runtime_error);
 }
 
 // =============================================================================

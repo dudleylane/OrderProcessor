@@ -295,12 +295,37 @@ OrderEntry *createTestOrder()
     return val;
 }
 
+/// A record's first 4 bytes, as the dispatcher writes them: the type, and in the high 16 bits the version of the layout
+/// its codec writes now (#149)
 std::string createRecordTypePrefix(int recordType)
 {
-    std::string buf;
-    char typebuf[36];
-    std::memcpy(typebuf, &recordType, sizeof(int));
-    buf.append(typebuf, sizeof(int));
+    u32 formatVersion = 0;
+    switch (recordType)
+    {
+    case StorageRecordDispatcher::INSTRUMENT_RECORDTYPE:
+        formatVersion = InstrumentCodec::FORMAT_VERSION;
+        break;
+    case StorageRecordDispatcher::STRING_RECORDTYPE:
+        formatVersion = StringTCodec::FORMAT_VERSION;
+        break;
+    case StorageRecordDispatcher::ACCOUNT_RECORDTYPE:
+        formatVersion = AccountCodec::FORMAT_VERSION;
+        break;
+    case StorageRecordDispatcher::CLEARING_RECORDTYPE:
+        formatVersion = ClearingCodec::FORMAT_VERSION;
+        break;
+    case StorageRecordDispatcher::RAWDATA_RECORDTYPE:
+        formatVersion = RawDataCodec::FORMAT_VERSION;
+        break;
+    case StorageRecordDispatcher::ORDER_RECORDTYPE:
+        formatVersion = OrderCodec::FORMAT_VERSION;
+        break;
+    default:
+        break;
+    }
+    const u32 word = (formatVersion << 16) | static_cast<u32>(recordType);
+    std::string buf(sizeof(word), '\0');
+    std::memcpy(buf.data(), &word, sizeof(word));
     return buf;
 }
 
@@ -1604,6 +1629,7 @@ std::unique_ptr<OrderEntry> goldenOrder()
     val->stateMachinePersistance_.orderData_ = val.get();
     val->stateMachinePersistance_.stateZone1Id_ = 3;
     val->stateMachinePersistance_.stateZone2Id_ = 2;
+    val->execInstruct_ = { STAY_ON_OFFER_SIDE_INSTRUCTION, NOT_HELD_INSTRUCTION };
     return val;
 }
 
@@ -1615,15 +1641,26 @@ const char *const GOLDEN_ACCOUNT_RECORD = "030000000b0000000000000054524144494e4
                                           "484f5553452d434c454152494e472e02000000";
 const char *const GOLDEN_CLEARING_RECORD = "040000000e00000000000000484f5553452e434c454152494e47";
 const char *const GOLDEN_RAWDATA_RECORD = "05000000010000002e120000002e57532d313739313930303030303030302e37";
-const char *const GOLDEN_ORDER_RECORD = "06000000952835013a65000000000000002e060000003a10000000000000002e"
-                                        "070000003a11000000000000002e020000003a0c000000000000002e03000000"
-                                        "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
-                                        "00000000002e080000003a12000000000000002e942835013a5b110000000000"
-                                        "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
-                                        "35a10100002e00000000005059402e00000000002059402e0000000000485940"
-                                        "2e00000000004459402e060000002e020000002e040000002e030000002e0400"
-                                        "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
-                                        "2ee90300002e910100002e030000003a02000000";
+const char *const GOLDEN_ORDER_RECORD_V0 = "06000000952835013a65000000000000002e060000003a10000000000000002e"
+                                           "070000003a11000000000000002e020000003a0c000000000000002e03000000"
+                                           "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
+                                           "00000000002e080000003a12000000000000002e942835013a5b110000000000"
+                                           "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
+                                           "35a10100002e00000000005059402e00000000002059402e0000000000485940"
+                                           "2e00000000004459402e060000002e020000002e040000002e030000002e0400"
+                                           "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
+                                           "2ee90300002e910100002e030000003a02000000";
+// The order as OrderCodec has written it since #172, in format version 1: version 0's fields, then '.' and the mask of
+// its execution instructions
+const char *const GOLDEN_ORDER_RECORD_V1 = "06000100952835013a65000000000000002e060000003a10000000000000002e"
+                                           "070000003a11000000000000002e020000003a0c000000000000002e03000000"
+                                           "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
+                                           "00000000002e080000003a12000000000000002e942835013a5b110000000000"
+                                           "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
+                                           "35a10100002e00000000005059402e00000000002059402e0000000000485940"
+                                           "2e00000000004459402e060000002e020000002e040000002e030000002e0400"
+                                           "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
+                                           "2ee90300002e910100002e030000003a020000002e06000000";
 const char *const GOLDEN_ID_LIMIT_RECORD = "09000000cb04fb711f010000";
 
 } // namespace
@@ -1652,9 +1689,71 @@ TEST_F(StorageRecordDispatcherTest, WritesTheGoldenRecords)
     expectGolden("GOLDEN_ACCOUNT_RECORD", written(GOLDEN_ACCOUNT_ID), GOLDEN_ACCOUNT_RECORD);
     expectGolden("GOLDEN_CLEARING_RECORD", written(GOLDEN_CLEARING_ID), GOLDEN_CLEARING_RECORD);
     expectGolden("GOLDEN_RAWDATA_RECORD", written(GOLDEN_RAWDATA_ID), GOLDEN_RAWDATA_RECORD);
-    expectGolden("GOLDEN_ORDER_RECORD", written(GOLDEN_ORDER_ID), GOLDEN_ORDER_RECORD);
+    expectGolden("GOLDEN_ORDER_RECORD_V1", written(GOLDEN_ORDER_ID), GOLDEN_ORDER_RECORD_V1);
     expectGolden("GOLDEN_ID_LIMIT_RECORD", written(IdT(0, 1)), GOLDEN_ID_LIMIT_RECORD);
 }
+
+namespace
+{
+/// Decodes a golden order record in the version its record word names, and expects every field of the golden order,
+/// with the execution instructions given: a version 0 record has none
+void expectEveryFieldOfTheGoldenOrder(const char *golden, u32 formatVersion, const InstructionSetT &instructions)
+{
+    SCOPED_TRACE("order record in format version " + std::to_string(formatVersion));
+    const std::string record = fromHex(golden);
+    ASSERT_LT(sizeof(u32), record.size());
+    u32 word = 0;
+    std::memcpy(&word, record.data(), sizeof(word));
+    EXPECT_EQ(static_cast<u32>(StorageRecordDispatcher::ORDER_RECORDTYPE), word & 0xffff);
+    EXPECT_EQ(formatVersion, word >> 16);
+    const std::unique_ptr<OrderEntry> expected = goldenOrder();
+    const std::unique_ptr<OrderEntry> order(
+        OrderCodec::decode(GOLDEN_ORDER_ID, word >> 16, record.data() + sizeof(word), record.size() - sizeof(word)));
+    ASSERT_NE(nullptr, order);
+    EXPECT_EQ(GOLDEN_ORDER_ID, order->orderId_);
+    EXPECT_EQ(expected->source_.getId(), order->source_.getId());
+    EXPECT_EQ(expected->destination_.getId(), order->destination_.getId());
+    EXPECT_EQ(expected->clOrderId_.getId(), order->clOrderId_.getId());
+    EXPECT_EQ(expected->origClOrderId_.getId(), order->origClOrderId_.getId());
+    EXPECT_EQ(expected->instrument_.getId(), order->instrument_.getId());
+    EXPECT_EQ(expected->account_.getId(), order->account_.getId());
+    EXPECT_EQ(expected->clearing_.getId(), order->clearing_.getId());
+    EXPECT_EQ(expected->executions_.getId(), order->executions_.getId());
+    EXPECT_EQ(expected->origOrderId_, order->origOrderId_);
+    EXPECT_EQ(expected->creationTime_, order->creationTime_);
+    EXPECT_EQ(expected->lastUpdateTime_, order->lastUpdateTime_);
+    EXPECT_EQ(expected->expireTime_, order->expireTime_);
+    EXPECT_EQ(expected->settlDate_, order->settlDate_);
+    EXPECT_EQ(expected->price_, order->price_);
+    EXPECT_EQ(expected->stopPx_, order->stopPx_);
+    EXPECT_EQ(expected->avgPx_, order->avgPx_);
+    EXPECT_EQ(expected->dayAvgPx_, order->dayAvgPx_);
+    EXPECT_EQ(expected->status_, order->status_);
+    EXPECT_EQ(expected->side_, order->side_);
+    EXPECT_EQ(expected->ordType_, order->ordType_);
+    EXPECT_EQ(expected->tif_, order->tif_);
+    EXPECT_EQ(expected->settlType_, order->settlType_);
+    EXPECT_EQ(expected->capacity_, order->capacity_);
+    EXPECT_EQ(expected->currency_, order->currency_);
+    EXPECT_EQ(expected->minQty_, order->minQty_);
+    EXPECT_EQ(expected->orderQty_, order->orderQty_);
+    EXPECT_EQ(expected->leavesQty_, order->leavesQty_);
+    EXPECT_EQ(expected->cumQty_, order->cumQty_);
+    EXPECT_EQ(expected->dayOrderQty_, order->dayOrderQty_);
+    EXPECT_EQ(expected->dayCumQty_, order->dayCumQty_);
+    EXPECT_EQ(expected->stateMachinePersistance_.stateZone1Id_, order->stateMachinePersistance_.stateZone1Id_);
+    EXPECT_EQ(expected->stateMachinePersistance_.stateZone2Id_, order->stateMachinePersistance_.stateZone2Id_);
+    EXPECT_EQ(instructions, order->execInstruct_);
+}
+
+/// The golden order records, each with the format version it was written in
+const std::vector<std::pair<const char *, u32>> &goldenOrderRecords()
+{
+    static const std::vector<std::pair<const char *, u32>> records = { { GOLDEN_ORDER_RECORD_V0, 0 },
+                                                                       { GOLDEN_ORDER_RECORD_V1, 1 } };
+    return records;
+}
+} // namespace
 
 TEST_F(StorageRecordDispatcherTest, ReadsEveryFieldOfTheGoldenRecords)
 {
@@ -1706,49 +1805,9 @@ TEST_F(StorageRecordDispatcherTest, ReadsEveryFieldOfTheGoldenRecords)
     EXPECT_EQ(GOLDEN_ID_LIMIT, dispatcher_->restoredIdLimit());
 
     // The order's codec, by itself: restoring an order looks its ClOrdID up in WideDataStorage, which the golden
-    // record's ids don't name
-    const std::string record = fromHex(GOLDEN_ORDER_RECORD);
-    ASSERT_LT(sizeof(int), record.size());
-    int type = 0;
-    std::memcpy(&type, record.data(), sizeof(type));
-    EXPECT_EQ(StorageRecordDispatcher::ORDER_RECORDTYPE, type);
-    const std::unique_ptr<OrderEntry> expected = goldenOrder();
-    const std::unique_ptr<OrderEntry> order(
-        OrderCodec::decode(GOLDEN_ORDER_ID, 0, record.data() + sizeof(type), record.size() - sizeof(type)));
-    ASSERT_NE(nullptr, order);
-    EXPECT_EQ(GOLDEN_ORDER_ID, order->orderId_);
-    EXPECT_EQ(expected->source_.getId(), order->source_.getId());
-    EXPECT_EQ(expected->destination_.getId(), order->destination_.getId());
-    EXPECT_EQ(expected->clOrderId_.getId(), order->clOrderId_.getId());
-    EXPECT_EQ(expected->origClOrderId_.getId(), order->origClOrderId_.getId());
-    EXPECT_EQ(expected->instrument_.getId(), order->instrument_.getId());
-    EXPECT_EQ(expected->account_.getId(), order->account_.getId());
-    EXPECT_EQ(expected->clearing_.getId(), order->clearing_.getId());
-    EXPECT_EQ(expected->executions_.getId(), order->executions_.getId());
-    EXPECT_EQ(expected->origOrderId_, order->origOrderId_);
-    EXPECT_EQ(expected->creationTime_, order->creationTime_);
-    EXPECT_EQ(expected->lastUpdateTime_, order->lastUpdateTime_);
-    EXPECT_EQ(expected->expireTime_, order->expireTime_);
-    EXPECT_EQ(expected->settlDate_, order->settlDate_);
-    EXPECT_EQ(expected->price_, order->price_);
-    EXPECT_EQ(expected->stopPx_, order->stopPx_);
-    EXPECT_EQ(expected->avgPx_, order->avgPx_);
-    EXPECT_EQ(expected->dayAvgPx_, order->dayAvgPx_);
-    EXPECT_EQ(expected->status_, order->status_);
-    EXPECT_EQ(expected->side_, order->side_);
-    EXPECT_EQ(expected->ordType_, order->ordType_);
-    EXPECT_EQ(expected->tif_, order->tif_);
-    EXPECT_EQ(expected->settlType_, order->settlType_);
-    EXPECT_EQ(expected->capacity_, order->capacity_);
-    EXPECT_EQ(expected->currency_, order->currency_);
-    EXPECT_EQ(expected->minQty_, order->minQty_);
-    EXPECT_EQ(expected->orderQty_, order->orderQty_);
-    EXPECT_EQ(expected->leavesQty_, order->leavesQty_);
-    EXPECT_EQ(expected->cumQty_, order->cumQty_);
-    EXPECT_EQ(expected->dayOrderQty_, order->dayOrderQty_);
-    EXPECT_EQ(expected->dayCumQty_, order->dayCumQty_);
-    EXPECT_EQ(expected->stateMachinePersistance_.stateZone1Id_, order->stateMachinePersistance_.stateZone1Id_);
-    EXPECT_EQ(expected->stateMachinePersistance_.stateZone2Id_, order->stateMachinePersistance_.stateZone2Id_);
+    // record's ids don't name. Every version this build has written is still read (#172).
+    expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V1, 1, goldenOrder()->execInstruct_);
+    expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V0, 0, InstructionSetT());
 }
 
 namespace
@@ -1791,13 +1850,18 @@ TEST_F(StorageRecordDispatcherTest, EveryRecordCutShortIsRejected)
         }
     }
 
-    const std::string order = fromHex(GOLDEN_ORDER_RECORD).substr(sizeof(u32));
-    for (size_t length = 0; length < order.size(); ++length)
+    for (const auto &golden : goldenOrderRecords())
     {
-        const std::unique_ptr<char[]> cut = exactCopy(order.substr(0, length));
-        EXPECT_THROW(std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_ORDER_ID, 0, cut.get(), length)),
-                     std::runtime_error)
-            << "order record cut to " << length << " of " << order.size() << " bytes";
+        const std::string order = fromHex(golden.first).substr(sizeof(u32));
+        for (size_t length = 0; length < order.size(); ++length)
+        {
+            const std::unique_ptr<char[]> cut = exactCopy(order.substr(0, length));
+            EXPECT_THROW(
+                std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_ORDER_ID, golden.second, cut.get(), length)),
+                std::runtime_error)
+                << "order record in format version " << golden.second << " cut to " << length << " of " << order.size()
+                << " bytes";
+        }
     }
 }
 
@@ -1815,10 +1879,15 @@ TEST_F(StorageRecordDispatcherTest, EveryRecordWithAByteMoreIsRejected)
             << toHex(record.substr(0, 4)) << " record with a byte more";
     }
 
-    const std::string order = fromHex(GOLDEN_ORDER_RECORD).substr(sizeof(u32)) + '.';
-    const std::unique_ptr<char[]> longer = exactCopy(order);
-    EXPECT_THROW(std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_ORDER_ID, 0, longer.get(), order.size())),
-                 std::runtime_error);
+    for (const auto &golden : goldenOrderRecords())
+    {
+        const std::string order = fromHex(golden.first).substr(sizeof(u32)) + '.';
+        const std::unique_ptr<char[]> longer = exactCopy(order);
+        EXPECT_THROW(
+            std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_ORDER_ID, golden.second, longer.get(), order.size())),
+            std::runtime_error)
+            << "order record in format version " << golden.second << " with a byte more";
+    }
 }
 
 TEST_F(StorageRecordDispatcherTest, ARecordInANewerFormatIsRejected)
@@ -1842,9 +1911,20 @@ TEST_F(StorageRecordDispatcherTest, ARecordInANewerFormatIsRejected)
                 << toHex(record.substr(0, 4)) << ": " << ex.what();
         }
     }
-    std::string order = fromHex(GOLDEN_ORDER_RECORD);
-    order[2] = 1;
-    EXPECT_THROW(dispatcher_->onRecordLoaded(GOLDEN_ORDER_ID, 0, order.data(), order.size()), std::runtime_error);
+    // The order codec is at a version of its own (#172): one past it is refused the same way
+    std::string order = fromHex(GOLDEN_ORDER_RECORD_V1);
+    order[2] = static_cast<char>(OrderCodec::FORMAT_VERSION + 1);
+    try
+    {
+        dispatcher_->onRecordLoaded(GOLDEN_ORDER_ID, 0, order.data(), order.size());
+        ADD_FAILURE() << "an order record one format version past this build's was loaded";
+    }
+    catch (const std::runtime_error &ex)
+    {
+        EXPECT_NE(std::string::npos,
+                  std::string(ex.what()).find("format version " + std::to_string(OrderCodec::FORMAT_VERSION + 1)))
+            << ex.what();
+    }
 
     // A type no build has written is still refused as one
     std::string unknown = fromHex(GOLDEN_STRING_RECORD);
@@ -1864,8 +1944,9 @@ TEST_F(StorageRecordDispatcherTest, ARecordInANewerFormatIsRejected)
 // Golden swap record (#149, FX)
 // =============================================================================
 //
-// A swap's record is an order's, then '.', its far price, '.', and its far settlement date (#144). The bytes are what
-// this branch's codec wrote before #149, which changes no byte of it: the record still starts with its type alone.
+// A swap's record is an order's, then '.', its far price, '.', and its far settlement date (#144). Version 0's bytes are
+// what this branch's codec wrote before #149, which changes no byte of it: the record still starts with its type alone.
+// Since #172 the order's fields end with its execution instructions, before the far leg (format version 1).
 
 namespace
 {
@@ -1881,21 +1962,47 @@ std::unique_ptr<OrderEntry> goldenSwap()
     return val;
 }
 
-const char *const GOLDEN_SWAP_RECORD = "06000000952835013a65000000000000002e060000003a10000000000000002e"
-                                       "070000003a11000000000000002e020000003a0c000000000000002e03000000"
-                                       "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
-                                       "00000000002e080000003a12000000000000002e942835013a5b110000000000"
-                                       "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
-                                       "35a10100002e00000000005059402e00000000002059402e0000000000485940"
-                                       "2e00000000004459402e060000002e020000002e050000002e030000002e0400"
-                                       "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
-                                       "2ee90300002e910100002e030000003a020000002e000000000000f13f2e0500"
-                                       "863ba1010000";
+const char *const GOLDEN_SWAP_RECORD_V0 = "06000000952835013a65000000000000002e060000003a10000000000000002e"
+                                          "070000003a11000000000000002e020000003a0c000000000000002e03000000"
+                                          "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
+                                          "00000000002e080000003a12000000000000002e942835013a5b110000000000"
+                                          "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
+                                          "35a10100002e00000000005059402e00000000002059402e0000000000485940"
+                                          "2e00000000004459402e060000002e020000002e050000002e030000002e0400"
+                                          "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
+                                          "2ee90300002e910100002e030000003a020000002e000000000000f13f2e0500"
+                                          "863ba1010000";
+// The swap as OrderCodec has written it since #172, in format version 1: version 0's order fields, '.' and the
+// mask of its execution instructions, then its far leg
+const char *const GOLDEN_SWAP_RECORD_V1 = "06000100952835013a65000000000000002e060000003a10000000000000002e"
+                                          "070000003a11000000000000002e020000003a0c000000000000002e03000000"
+                                          "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
+                                          "00000000002e080000003a12000000000000002e942835013a5b110000000000"
+                                          "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
+                                          "35a10100002e00000000005059402e00000000002059402e0000000000485940"
+                                          "2e00000000004459402e060000002e020000002e050000002e030000002e0400"
+                                          "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
+                                          "2ee90300002e910100002e030000003a020000002e060000002e000000000000"
+                                          "f13f2e0500863ba1010000";
 
-/// The swap's record without its 4-byte type: what OrderCodec::decode() reads
-std::string goldenSwapPayload()
+/// A swap's record without its 4-byte record word: what OrderCodec::decode() reads
+std::string goldenSwapPayload(const char *golden)
 {
-    return fromHex(GOLDEN_SWAP_RECORD).substr(sizeof(u32));
+    return fromHex(golden).substr(sizeof(u32));
+}
+
+/// Each golden swap record, the format version its record word names, and the execution instructions it holds
+struct GoldenSwap
+{
+    const char *name_;
+    const char *record_;
+    u32 formatVersion_;
+    InstructionSetT instructions_;
+};
+std::vector<GoldenSwap> goldenSwaps()
+{
+    return { { "GOLDEN_SWAP_RECORD_V0", GOLDEN_SWAP_RECORD_V0, 0, InstructionSetT() },
+             { "GOLDEN_SWAP_RECORD_V1", GOLDEN_SWAP_RECORD_V1, 1, goldenSwap()->execInstruct_ } };
 }
 } // namespace
 
@@ -1907,18 +2014,29 @@ TEST_F(StorageRecordDispatcherTest, WritesAndReadsTheGoldenSwapRecord)
     dispatcher_->save(*swap);
     const auto it = saver_->records_.find(GOLDEN_SWAP_ID);
     ASSERT_NE(saver_->records_.end(), it);
-    expectGolden("GOLDEN_SWAP_RECORD", it->second.record_, GOLDEN_SWAP_RECORD);
+    expectGolden("GOLDEN_SWAP_RECORD_V1", it->second.record_, GOLDEN_SWAP_RECORD_V1);
 
-    const std::string payload = goldenSwapPayload();
-    const std::unique_ptr<OrderEntry> order(OrderCodec::decode(GOLDEN_SWAP_ID, 0, payload.data(), payload.size()));
-    ASSERT_NE(nullptr, order);
-    EXPECT_EQ(FXSWAP_ORDERTYPE, order->ordType_);
-    EXPECT_EQ(swap->farPrice_, order->farPrice_);
-    EXPECT_EQ(swap->farSettlDate_, order->farSettlDate_);
-    EXPECT_EQ(swap->price_, order->price_);
-    EXPECT_EQ(swap->settlDate_, order->settlDate_);
-    EXPECT_EQ(swap->orderQty_, order->orderQty_);
-    EXPECT_EQ(swap->stateMachinePersistance_.stateZone2Id_, order->stateMachinePersistance_.stateZone2Id_);
+    for (const GoldenSwap &golden : goldenSwaps())
+    {
+        SCOPED_TRACE(golden.name_);
+        const std::string record = fromHex(golden.record_);
+        u32 word = 0;
+        std::memcpy(&word, record.data(), sizeof(word));
+        EXPECT_EQ(static_cast<u32>(StorageRecordDispatcher::ORDER_RECORDTYPE), word & 0xffff);
+        EXPECT_EQ(golden.formatVersion_, word >> 16);
+        const std::string payload = goldenSwapPayload(golden.record_);
+        const std::unique_ptr<OrderEntry> order(
+            OrderCodec::decode(GOLDEN_SWAP_ID, golden.formatVersion_, payload.data(), payload.size()));
+        ASSERT_NE(nullptr, order);
+        EXPECT_EQ(FXSWAP_ORDERTYPE, order->ordType_);
+        EXPECT_EQ(swap->farPrice_, order->farPrice_);
+        EXPECT_EQ(swap->farSettlDate_, order->farSettlDate_);
+        EXPECT_EQ(swap->price_, order->price_);
+        EXPECT_EQ(swap->settlDate_, order->settlDate_);
+        EXPECT_EQ(swap->orderQty_, order->orderQty_);
+        EXPECT_EQ(swap->stateMachinePersistance_.stateZone2Id_, order->stateMachinePersistance_.stateZone2Id_);
+        EXPECT_EQ(golden.instructions_, order->execInstruct_);
+    }
 }
 
 TEST_F(StorageRecordDispatcherTest, ASwapRecordCutShortOrWithAByteMoreIsRejected)
@@ -1926,19 +2044,25 @@ TEST_F(StorageRecordDispatcherTest, ASwapRecordCutShortOrWithAByteMoreIsRejected
     // Cut right before its far leg, a swap's record used to restore as a swap with a far leg of 0: the decoder took the
     // missing marker for an order without one. A swap now needs its far leg (#149).
     restoreGoldenInstrument();
-    const std::string payload = goldenSwapPayload();
-    for (size_t length = 0; length < payload.size(); ++length)
+    for (const GoldenSwap &golden : goldenSwaps())
     {
-        const std::unique_ptr<char[]> cut = exactCopy(payload.substr(0, length));
-        EXPECT_THROW(std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_SWAP_ID, 0, cut.get(), length)),
-                     std::runtime_error)
-            << "swap record cut to " << length << " of " << payload.size() << " bytes";
-    }
+        SCOPED_TRACE(golden.name_);
+        const u32 version = golden.formatVersion_;
+        const std::string payload = goldenSwapPayload(golden.record_);
+        for (size_t length = 0; length < payload.size(); ++length)
+        {
+            const std::unique_ptr<char[]> cut = exactCopy(payload.substr(0, length));
+            EXPECT_THROW(std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_SWAP_ID, version, cut.get(), length)),
+                         std::runtime_error)
+                << "swap record cut to " << length << " of " << payload.size() << " bytes";
+        }
 
-    const std::string longer = payload + '.';
-    const std::unique_ptr<char[]> copy = exactCopy(longer);
-    EXPECT_THROW(std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_SWAP_ID, 0, copy.get(), longer.size())),
-                 std::runtime_error);
+        const std::string longer = payload + '.';
+        const std::unique_ptr<char[]> copy = exactCopy(longer);
+        EXPECT_THROW(
+            std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_SWAP_ID, version, copy.get(), longer.size())),
+            std::runtime_error);
+    }
 }
 
 // =============================================================================
