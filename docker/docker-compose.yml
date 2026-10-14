@@ -54,6 +54,13 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.oms-server
+    # Seeds the data volume if it has no instrument yet, then runs the server (#161). A server with nothing seeded refused
+    # every order. --if-empty leaves a volume with instruments alone, since what seedData adds is test data; it does seed
+    # one a server ran on before it was seeded, which has an LMDB file but no instrument. Not a one-shot service:
+    # podman-compose makes a dependency a container that must be running when the server starts.
+    entrypoint: ["sh", "-c", "seedData --if-empty --data-dir /data && exec orderProcessorServer \"$$@\"", "oms-server"]
+    # The image's CMD, repeated: an entrypoint set here clears it
+    command: ["--port", "8080", "--data-dir", "/data"]
     restart: unless-stopped
     # A small init runs as PID 1 and starts the server (#203). As PID 1 itself, the server ignored SIGTERM until its
     # handler was set, after the data directory's restore, and an abort became a SIGSEGV.
