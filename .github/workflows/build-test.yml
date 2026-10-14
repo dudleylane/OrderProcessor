@@ -45,8 +45,8 @@ jobs:
     # Self-hosted runner on the dev box.  The same toolchain CI used to
     # install via `dnf install` is already on this host: gcc-toolset-15
     # at /opt/rh/gcc-toolset-15, cmake, ninja, tbb-devel, spdlog-devel,
-    # boost-devel, lmdb-devel, numactl-devel.  BUILD_PG is OFF because
-    # libpqxx is optional.
+    # boost-devel, lmdb-devel, numactl-devel, and libpqxx-devel 8.0.2 from
+    # PostgreSQL's own repository (PGDG), for BUILD_PG (#151).
     # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
     # A pull request can delete this line, so the runner's job-started hook,
     # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
@@ -82,7 +82,7 @@ jobs:
             -DBUILD_TESTS=ON \
             -DBUILD_BENCHMARKS=ON \
             -DBUILD_APP=ON \
-            -DBUILD_PG=OFF \
+            -DBUILD_PG=ON \
             -DWARNINGS_AS_ERRORS=ON
 
       - name: Build
@@ -97,3 +97,19 @@ jobs:
         # (#59); the slowest test takes about 4 s alone.
         shell: bash
         run: ctest --test-dir build --output-on-failure --timeout 300 -j"$(nproc)"
+
+      - name: Postgres write-behind tests, against a throwaway database
+        # The step above built these and skipped them, for want of a database (#151). This starts one with the schema,
+        # in a container on a loopback port, and leaves the host's own PostgreSQL alone.
+        shell: bash
+        run: |
+          trap 'scripts/pg-for-tests.sh stop orderprocessor-ci-pg-release' EXIT
+          PG_CONNECTION_STRING="$(scripts/pg-for-tests.sh start orderprocessor-ci-pg-release)"
+          export PG_CONNECTION_STRING
+          ctest --test-dir build --output-on-failure --timeout 300 --no-tests=error -R 'PGWriteBehind|Postgres' \
+            | tee "$RUNNER_TEMP/pg-tests.log"
+          # A test that found no database skipped, and ctest counts a skip as a pass
+          if grep -q '(Skipped)' "$RUNNER_TEMP/pg-tests.log"; then
+            echo "::error::a Postgres test skipped: PG_CONNECTION_STRING didn't reach it"
+            exit 1
+          fi

@@ -109,6 +109,15 @@ public:
         }
     }
 
+    template <typename Fn> void forEachClearing(Fn &&fn) const
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+        for (const auto &[id, entry] : clearings_)
+        {
+            fn(id, *entry);
+        }
+    }
+
     SourceIdT findInstrumentBySymbol(const StringT &symbol) const
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);

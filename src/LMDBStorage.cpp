@@ -698,6 +698,37 @@ bool LMDBStorage::isExists(const IdT &id, u32 version) const
     return rc == MDB_SUCCESS;
 }
 
+FileSaver::Newest LMDBStorage::loadNewest(const IdT &id, std::vector<char> *buf)
+{
+    assert(nullptr != env_);
+    assert(nullptr != buf);
+    std::lock_guard<std::mutex> lock(txnLock_);
+
+    MDB_txn *txn = nullptr;
+    int rc = mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn);
+    checkLMDB(rc, "LMDBStorage::loadNewest mdb_txn_begin");
+    // One read transaction for both steps, and the id's own versions only: getTopVersion() walks every record
+    bool found = false;
+    u32 newest = 0;
+    rc = newestVersion(txn, id, &found, &newest);
+    MDB_val data{};
+    if ((MDB_SUCCESS == rc) && found)
+    {
+        const CompositeKey ck(id, newest);
+        MDB_val key = makeKey(ck);
+        rc = mdb_get(txn, dbi_, &key, &data);
+    }
+    if ((MDB_SUCCESS != rc) || !found)
+    {
+        mdb_txn_abort(txn);
+        checkLMDB(rc, "LMDBStorage::loadNewest");
+        return Newest::None;
+    }
+    buf->assign(static_cast<const char *>(data.mv_data), static_cast<const char *>(data.mv_data) + data.mv_size);
+    mdb_txn_abort(txn);
+    return Newest::Found;
+}
+
 u32 LMDBStorage::getTopVersion(const IdT &id) const
 {
     assert(nullptr != env_);

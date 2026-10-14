@@ -40,6 +40,13 @@
 
 #include <filesystem>
 
+#ifdef BUILD_PG
+#include <pqxx/pqxx>
+
+#include "PGWriteBehind.h"
+#include "WideDataStorage.h"
+#endif
+
 using namespace COP;
 using namespace COP::Codec;
 using namespace COP::Store;
@@ -913,6 +920,152 @@ TEST_F(StorageRecordDispatcherTest, SaveMultipleRecordTypes)
 // =============================================================================
 // Restart Round Trip (#20)
 // =============================================================================
+
+#ifdef BUILD_PG
+namespace
+{
+/// The database scripts/pg-for-tests.sh starts, named by PG_CONNECTION_STRING (#151)
+std::string pgConnection()
+{
+    const char *env = std::getenv("PG_CONNECTION_STRING");
+    return (nullptr != env) ? std::string(env) : std::string();
+}
+
+std::string pgSelect(const std::string &connection, const std::string &sql)
+{
+    pqxx::connection conn(connection);
+    pqxx::nontransaction txn(conn);
+    const pqxx::result rows = txn.exec(sql);
+    return (rows.empty() || rows[0][0].is_null()) ? std::string() : rows[0][0].as<std::string>();
+}
+
+/// Removes what an earlier run of a test left of an order, so the test sees only its own writes
+void pgForget(const std::string &connection, u64 orderNumber)
+{
+    pqxx::connection conn(connection);
+    pqxx::work txn(conn);
+    txn.exec("DELETE FROM orders WHERE order_id = " + std::to_string(orderNumber));
+    txn.commit();
+}
+
+/// A resting order whose every reference WideDataStorage holds, as PGRequestBuilder needs
+OrderEntry *pgTestOrder(u64 orderNumber)
+{
+    WideParamsDataStorage *wide = WideDataStorage::instance();
+    const SourceIdT instrument = addInstrument("PGDISP_INSTR", "S", "SRC");
+    const SourceIdT account = test::addAccount("PGDISP_ACCT");
+    const SourceIdT clearing = test::addClearing("PGDISP_CLR");
+    const SourceIdT source = wide->add(new StringT("SRC"));
+    const SourceIdT destination = wide->add(new StringT("DST"));
+    const SourceIdT clOrderId = addTestRawData("PGDISP-CL-" + std::to_string(orderNumber));
+    const SourceIdT executions = wide->add(new ExecutionsT());
+    auto order = new OrderEntry(source, destination, clOrderId, SourceIdT(), instrument, account, clearing, executions);
+    order->orderId_ = IdT(orderNumber, 1792022400);
+    order->status_ = NEW_ORDSTATUS;
+    order->side_ = BUY_SIDE;
+    order->ordType_ = LIMIT_ORDERTYPE;
+    order->tif_ = DAY_TIF;
+    order->settlType_ = _2_SETTLTYPE;
+    order->capacity_ = AGENCY_CAPACITY;
+    order->currency_ = USD_CURRENCY;
+    order->price_ = 10.5;
+    order->orderQty_ = 100;
+    order->leavesQty_ = 100;
+    order->stateMachinePersistance_.orderData_ = order;
+    order->stateMachinePersistance_.stateZone1Id_ = 6;
+    order->stateMachinePersistance_.stateZone2Id_ = 7;
+    return order;
+}
+} // namespace
+
+TEST_F(StorageRecordDispatcherTest, PostgresFollowsARollbackToTheVersionLmdbKeeps)
+{
+    // save() mirrors each version to Postgres as LMDB takes it, and a rollback used to leave Postgres with the version
+    // LMDB erased (#151): now the row goes back to LMDB's newest version, or away when none is left.
+    const std::string connection = pgConnection();
+    if (connection.empty())
+    {
+        GTEST_SKIP() << "PG_CONNECTION_STRING isn't set: scripts/pg-for-tests.sh starts a database for this";
+    }
+    pgForget(connection, 151101);
+    const std::string dir = test::uniqueTestPath("dispatcher-pg-rollback");
+    std::unique_ptr<OrderEntry> order(pgTestOrder(151101));
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        {
+            PG::PGWriteBehind writer(connection);
+            dispatcher_->setPGWriter(&writer);
+            dispatcher_->syncToPG(*WideDataStorage::instance()); // the order's instrument, account and clearing firm
+            dispatcher_->save(*order);                           // resting
+            order->status_ = FILLED_ORDSTATUS;
+            order->cumQty_ = 100;
+            order->leavesQty_ = 0;
+            const u32 filled = dispatcher_->save(*order);
+            dispatcher_->erase(order->orderId_, filled); // the fill's transaction rolled back
+            dispatcher_->setPGWriter(nullptr);
+            writer.shutdown();
+            EXPECT_EQ(0u, writer.totalErrors());
+        }
+        EXPECT_EQ("NEW", pgSelect(connection, "SELECT status::text FROM orders WHERE order_id = 151101"));
+        EXPECT_EQ("100", pgSelect(connection, "SELECT leaves_qty::text FROM orders WHERE order_id = 151101"));
+        {
+            // The first version too: a new order whose first persist rolled back has no version left
+            PG::PGWriteBehind writer(connection);
+            dispatcher_->setPGWriter(&writer);
+            dispatcher_->erase(order->orderId_, 0);
+            dispatcher_->setPGWriter(nullptr);
+            writer.shutdown();
+            EXPECT_EQ(0u, writer.totalErrors());
+        }
+        EXPECT_EQ("0", pgSelect(connection, "SELECT count(*) FROM orders WHERE order_id = 151101"));
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_F(StorageRecordDispatcherTest, PostgresGetsWhatTheDirectoryHeldBeforeItWasWiredUp)
+{
+    // LMDB's load restores orders without save(), so a server started with Postgres for the first time would never have
+    // mirrored them (#151): syncToPG() hands over everything the directory holds
+    const std::string connection = pgConnection();
+    if (connection.empty())
+    {
+        GTEST_SKIP() << "PG_CONNECTION_STRING isn't set: scripts/pg-for-tests.sh starts a database for this";
+    }
+    pgForget(connection, 151102);
+    const std::string dir = test::uniqueTestPath("dispatcher-pg-sync");
+    std::unique_ptr<OrderEntry> order(pgTestOrder(151102));
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        dispatcher_->save(*order); // no Postgres yet
+    }
+    {
+        OrderDataStorage storageAfter;
+        TestOrderBook bookAfter;
+        StorageRecordDispatcher dispatcherAfter;
+        LMDBStorage lmdbAfter;
+        dispatcherAfter.init(restore_.get(), &bookAfter, &lmdbAfter, &storageAfter);
+        lmdbAfter.load(dir, &dispatcherAfter);
+        ASSERT_NE(nullptr, storageAfter.locateByOrderId(order->orderId_));
+
+        PG::PGWriteBehind writer(connection);
+        dispatcherAfter.setPGWriter(&writer);
+        dispatcherAfter.syncToPG(*WideDataStorage::instance());
+        dispatcherAfter.setPGWriter(nullptr);
+        writer.shutdown();
+        EXPECT_EQ(0u, writer.totalErrors());
+    }
+    EXPECT_EQ("NEW", pgSelect(connection, "SELECT status::text FROM orders WHERE order_id = 151102"));
+    EXPECT_EQ("PGDISP_INSTR", pgSelect(connection, "SELECT i.symbol FROM orders o JOIN instruments i ON "
+                                                   "i.id = o.instrument_id WHERE o.order_id = 151102"));
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+#endif
 
 TEST_F(StorageRecordDispatcherTest, OrderSurvivesRestartWithItsFinalState)
 {

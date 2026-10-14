@@ -41,7 +41,7 @@ struct ClearingWrite
 struct OrderWrite
 {
     u64 orderId;
-    u32 orderDate;
+    u32 orderDate; // IdT::date_: Unix seconds when the id was drawn; the row's order_date is its day in UTC (#151)
     std::string clOrderId;
     std::string origClOrderId;
     std::string source;
@@ -70,10 +70,20 @@ struct OrderWrite
     unsigned int dayOrderQty;
     unsigned int dayCumQty;
 
-    u64 expireTime;
-    u64 settlDate;
+    u64 expireTime; // DateTimeT: milliseconds since the epoch, 0 for none
+    u64 settlDate;  // DateTimeT: milliseconds since the epoch at midnight UTC of the day, 0 for none
 };
 
-using PGWriteRequest = std::variant<InstrumentWrite, AccountWrite, ClearingWrite, OrderWrite>;
+/// Removes an order's row: a rollback erased the only version LMDB had of it (#151)
+struct DeleteOrderWrite
+{
+    u64 orderId;
+    u32 orderDate; // as OrderWrite's
+};
+
+/// A write for PGWriteBehind. Each one sets a whole row or deletes one, so writing it twice leaves what writing it once
+/// does: the writer writes a batch again when its connection is lost, and a commit cut off may have landed. A write
+/// that adds to what is there, such as a row per execution, would need a key that makes a second write a no-op.
+using PGWriteRequest = std::variant<InstrumentWrite, AccountWrite, ClearingWrite, OrderWrite, DeleteOrderWrite>;
 
 } // namespace COP::PG

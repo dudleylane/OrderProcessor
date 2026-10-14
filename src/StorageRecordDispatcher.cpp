@@ -24,8 +24,12 @@
 #include "OrderMatcher.h"
 
 #ifdef BUILD_PG
+#include <memory>
+
+#include "Logger.h"
 #include "PGRequestBuilder.h"
 #include "PGWriteBehind.h"
+#include "WideDataStorage.h"
 #endif
 
 using namespace std;
@@ -371,7 +375,82 @@ void StorageRecordDispatcher::erase(const IdT &orderId, u32 version)
 {
     assert(nullptr != fileStorage_);
     fileStorage_->erase(orderId, version);
+#ifdef BUILD_PG
+    if (pgWriter_)
+    {
+        // Postgres follows LMDB back (#151): to the newest version a rollback left, or to no row when it left none. save()
+        // had mirrored the erased version already. This runs inside a rollback, whose remaining steps an exception would
+        // skip, so it never throws.
+        try
+        {
+            std::vector<char> record;
+            switch (fileStorage_->loadNewest(orderId, &record))
+            {
+            case FileSaver::Newest::Found:
+            {
+                u32 word = 0;
+                if (record.size() < sizeof(word))
+                {
+                    throw std::runtime_error("a record shorter than its record word");
+                }
+                std::memcpy(&word, record.data(), sizeof(word));
+                std::unique_ptr<OrderEntry> order(Codec::OrderCodec::decode(
+                    orderId, word >> 16, record.data() + sizeof(word), record.size() - sizeof(word)));
+                pgWriter_->enqueue(PG::PGRequestBuilder::fromOrder(*order));
+                break;
+            }
+            case FileSaver::Newest::None:
+                pgWriter_->enqueue(PG::DeleteOrderWrite{ orderId.id_, orderId.date_ });
+                break;
+            case FileSaver::Newest::Unknown:
+                aux::ExchLogger::instance()->warn("Postgres can't follow the rollback of order " +
+                                                  std::to_string(orderId.id_) +
+                                                  ": the storage can't say what it holds");
+                break;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            aux::ExchLogger::instance()->error("Postgres can't follow the rollback of order " +
+                                               std::to_string(orderId.id_) + ": " + e.what());
+        }
+    }
+#endif
 }
+
+#ifdef BUILD_PG
+void StorageRecordDispatcher::syncToPG(const WideParamsDataStorage &wideData) const
+{
+    if (nullptr == pgWriter_)
+    {
+        return;
+    }
+    // Reference data first: an order's row looks its instrument, account and clearing firm up when it is written
+    wideData.forEachInstrument(
+        [this](const SourceIdT &, const InstrumentEntry &entry)
+        {
+            pgWriter_->enqueue(PG::PGRequestBuilder::fromInstrument(entry));
+        });
+    wideData.forEachAccount(
+        [this](const SourceIdT &, const AccountEntry &entry)
+        {
+            pgWriter_->enqueue(PG::PGRequestBuilder::fromAccount(entry));
+        });
+    wideData.forEachClearing(
+        [this](const SourceIdT &, const ClearingEntry &entry)
+        {
+            pgWriter_->enqueue(PG::PGRequestBuilder::fromClearing(entry));
+        });
+    if (nullptr != orderStorage_)
+    {
+        orderStorage_->forEachOrder(
+            [this](const IdT &, const OrderEntry &order)
+            {
+                pgWriter_->enqueue(PG::PGRequestBuilder::fromOrder(order));
+            });
+    }
+}
+#endif
 
 void StorageRecordDispatcher::beginGroup()
 {

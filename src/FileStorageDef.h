@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "TypesDef.h"
 
 namespace COP
@@ -48,6 +50,21 @@ public:
     virtual void erase(const IdT &id, u32 version) = 0;
     /// erases all versions of record from file
     virtual void erase(const IdT &id) = 0;
+
+    /// What loadNewest() found
+    enum class Newest
+    {
+        Found,
+        None,
+        /// The storage can't say: this default's answer, which FileStorage, deprecated, and test doubles give
+        Unknown,
+    };
+    /// Loads the newest version of the record into buf, as the storage holds it now (#151): after a rollback erased a
+    /// version, what the record went back to.
+    virtual Newest loadNewest(const IdT & /*id*/, std::vector<char> * /*buf*/)
+    {
+        return Newest::Unknown;
+    }
 
     /// A group of updates written as one (#163): the updates a thread makes between beginGroup() and commitGroup() reach
     /// the file together, in one transaction, or none of them do. A storage that can't group writes each update at once,
