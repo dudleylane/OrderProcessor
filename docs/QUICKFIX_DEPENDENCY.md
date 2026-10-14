@@ -3,6 +3,12 @@
 The FIX gateway (`-DBUILD_FIX=ON`) builds against **QuickFIX 22**, from the maintained fork at
 https://github.com/dudleylane/quickfix. The branch was last verified with **v22.1.0**, on 2026-10-11.
 
+One ref is the source of truth: `QUICKFIX_REF` in `docker/Dockerfile.oms-server`. The image builds
+it, and CI's FIX-on jobs read it and build the same ref with the same script,
+`scripts/build-quickfix.sh`, so CI tests what the image ships (#178). Before #178, CI built against
+whatever QuickFIX 22 the runner host had in `/usr/local`, which changes outside this repository: it
+was 22.2.0 while the image shipped 22.1.0.
+
 ## Why the major version is pinned
 
 The fork changes its SONAME at every major release where code built against the previous one must
@@ -25,17 +31,22 @@ the library and its SSL dependencies from one installation.
 
 ## Installed files
 
+`PREFIX` is `/usr/local` in the image, and `~/.cache/orderprocessor/quickfix-REF-gccVERSION` in CI
+(the runner's home, kept between jobs and rebuilt only when the ref or the compiler changes).
+
 | Property | Value |
 |----------|-------|
-| **Library** | `/usr/local/lib/libquickfix.so.22` → `libquickfix.so.22.1.0` (SONAME `libquickfix.so.22`) |
-| **Headers** | `/usr/local/include/quickfix/` (`QUICKFIX_VERSION` is in `QuickFIXVersion.h`) |
-| **CMake package** | `/usr/local/lib/cmake/quickfix/` (target `quickfix::quickfix`) |
-| **pkg-config** | `/usr/local/lib/pkgconfig/quickfix.pc` |
-| **Data dictionaries** | `/usr/local/share/quickfix/` |
+| **Library** | `PREFIX/lib/libquickfix.so.22` → `libquickfix.so.22.1.0` (SONAME `libquickfix.so.22`) |
+| **Headers** | `PREFIX/include/quickfix/` (`QUICKFIX_VERSION` is in `QuickFIXVersion.h`) |
+| **CMake package** | `PREFIX/lib/cmake/quickfix/` (target `quickfix::quickfix`) |
+| **pkg-config** | `PREFIX/lib/pkgconfig/quickfix.pc` |
+| **Data dictionaries** | `PREFIX/share/quickfix/` |
+| **Ref** | `PREFIX/quickfix-ref`: the ref and its commit, which the script writes last |
 | **Links** | `libssl`, `libcrypto`, `pthread` |
 
-Older majors (`libquickfix.so.18` to `.21`) stay installed beside it, so programs built against them
-still load, but every new build of this branch uses 22.
+A binary built against a prefix finds the library through its RUNPATH. A host may also have older
+majors (`libquickfix.so.18` to `.21`) installed for other programs; every new build of this branch
+uses 22.
 
 ## What the gateway uses
 
@@ -52,37 +63,33 @@ The data dictionary is the project's own copy, `config/spec/FIX44.xml`. It diffe
 `FIX44.xml` that QuickFIX installs only in the types of fields 139 (MiscFeeType) and 532
 (MassCancelRejectReason): CHAR here, STRING there. The gateway uses neither.
 
-## Installing a release
+## Building against the pinned release
 
-Build with gcc-toolset-15, as the rest of the project is:
-
-```bash
-cd ~/quickfix && git fetch --tags && git checkout v22.1.0
-cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
-  -DHAVE_SSL=ON -DENABLE_TBB_ALLOCATOR=OFF \
-  -DQUICKFIX_TESTS=OFF -DQUICKFIX_EXAMPLES=OFF -DHAVE_PYTHON3=OFF
-cmake --build build-release -j"$(nproc)"
-sudo cmake --install build-release
-sudo ldconfig
-```
-
-Check it:
+Build the pinned ref as CI does, with gcc-toolset-15 first on `PATH`, and point CMake at it. This
+needs no root, and leaves the host's `/usr/local` alone:
 
 ```bash
-grep 'define QUICKFIX_VERSION ' /usr/local/include/quickfix/QuickFIXVersion.h   # 22.1.0
-readlink /usr/local/lib/libquickfix.so                                         # libquickfix.so.22
-ldconfig -p | grep libquickfix.so.22
+REF=$(sed -n 's/^ARG QUICKFIX_REF=//p' docker/Dockerfile.oms-server | tr -d '\r')
+PREFIX=~/.cache/orderprocessor/quickfix-$REF-gcc$(g++ -dumpfullversion)
+[ -f "$PREFIX/quickfix-ref" ] || scripts/build-quickfix.sh "$REF" "$PREFIX"
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_FIX=ON -DCMAKE_PREFIX_PATH="$PREFIX"
 ```
 
-Then rebuild this branch from a clean build directory. A new major has a new SONAME, so nothing
-built against the old one picks it up.
+Check it: `cat "$PREFIX/quickfix-ref"` names the ref and its commit, and
+`ldd build/orderProcessorTest | grep quickfix` should show a library under `$PREFIX`.
 
-## Taking a new major
+Without `CMAKE_PREFIX_PATH`, CMake takes the first QuickFIX 22 it finds, usually the host's
+`/usr/local` one. So a build directory configured that way, as the pre-push hook's first configure
+is, may test another 22.x than CI. Configure a fresh build directory to switch: a build directory
+keeps the QuickFIX it found first (`quickfix_DIR` in its cache).
+
+## Taking a new release
 
 1. Read the release's library diff (`git diff vOLD vNEW -- src/C++`), not only its notes, for the
    classes listed above.
-2. Install it as above, raise the version in `find_package(quickfix 22 CONFIG REQUIRED)`, and raise
-   `QUICKFIX_REF` in `docker/Dockerfile.oms-server`, whose builder stage builds QuickFIX itself (#132).
+2. Raise `QUICKFIX_REF` in `docker/Dockerfile.oms-server`, the one place CI and the image take the
+   ref from (#178). For a new major, also raise the version in `find_package(quickfix 22 CONFIG
+   REQUIRED)`.
 3. Verify with FIX on: the pre-push hook (Release, `ctest -j1`, clang-format), ASan+UBSan and TSan
    as `sanitizers.yml` runs them, and a live FIX session (logon, orders that cross, a cancel, a
    two-leg FX swap) against `orderProcessorServer --fix-cfg`.

@@ -77,14 +77,15 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 | Boost | 1.70+ | Headers only (MPL for Meta State Machine) |
 | LMDB | Latest | Persistent key-value storage backend |
 | numactl | Latest | NUMA-aware memory allocation |
-| QuickFIX | 1.16.1-hardened | FIX protocol engine (optional, `BUILD_FIX=ON`) |
+| QuickFIX | 22 | FIX protocol engine (optional, `BUILD_FIX=ON`), from the maintained fork, at the ref that `QUICKFIX_REF` in `docker/Dockerfile.oms-server` pins: CI and the image both build it (#178) |
 
 Install on CentOS 10:
 ```bash
 # Core dependencies
 sudo dnf install tbb-devel spdlog-devel boost-devel cmake gcc-c++ lmdb-devel numactl-devel
 
-# Optional: QuickFIX for FIX protocol support (see docs/QUICKFIX_DEPENDENCY.md)
+# Optional: QuickFIX 22 for FIX protocol support. scripts/build-quickfix.sh builds the pinned ref
+# (see docs/QUICKFIX_DEPENDENCY.md)
 ```
 
 ---
