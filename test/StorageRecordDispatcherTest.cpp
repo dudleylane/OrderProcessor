@@ -36,6 +36,7 @@
 #include "OrderStorage.h"
 #include "LMDBStorage.h"
 #include "IdTGenerator.h"
+#include "OrderBookImpl.h"
 
 #include <filesystem>
 
@@ -1939,4 +1940,105 @@ TEST_F(StorageRecordDispatcherTest, ASwapRecordCutShortOrWithAByteMoreIsRejected
     const std::unique_ptr<char[]> copy = exactCopy(longer);
     EXPECT_THROW(std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_SWAP_ID, 0, copy.get(), longer.size())),
                  std::runtime_error);
+}
+
+// =============================================================================
+// Orders that lost their fills (#207)
+// =============================================================================
+
+namespace
+{
+/// An open limit order on the instrument, as the transaction that booked it wrote it
+std::unique_ptr<OrderEntry> bookedOrder(const SourceIdT &instrument, u64 number, Side side, PriceT price, QuantityT qty)
+{
+    std::unique_ptr<OrderEntry> order = test::createCorrectOrder(instrument);
+    test::assignClOrderId(order.get());
+    order->orderId_ = IdT(number, 20261014);
+    order->status_ = NEW_ORDSTATUS;
+    order->side_ = side;
+    order->price_ = price;
+    order->orderQty_ = qty;
+    order->leavesQty_ = qty;
+    // In New, with no cancel or replace pending: the ids #150 pins
+    order->stateMachinePersistance_.orderData_ = order.get();
+    order->stateMachinePersistance_.stateZone1Id_ = 2;
+    order->stateMachinePersistance_.stateZone2Id_ = 8;
+    return order;
+}
+
+void loadOrderRecord(StorageRecordDispatcher &dispatcher, const OrderEntry &order)
+{
+    std::string buf = createRecordTypePrefix(StorageRecordDispatcher::ORDER_RECORDTYPE);
+    IdT id;
+    u32 version = 0;
+    OrderCodec::encode(order, &buf, &id, &version);
+    dispatcher.onRecordLoaded(id, version, buf.c_str(), buf.size());
+}
+} // namespace
+
+TEST_F(StorageRecordDispatcherTest, RestoredOrdersThatCrossAnEarlierOneAreLeftToMatch)
+{
+    // Each restored order is checked against the orders that arrived before it (#207). X rests. Y crosses X. W crosses Y,
+    // which waits to be matched: matched first, Y rests, and W then trades with it at Y's price, as it did. Booked now,
+    // W would rest, and Y would trade with it at W's. Z crosses nothing. Only X and Z are booked.
+    const SourceIdT instrument = test::addInstrument("UNCROSS");
+    OrderBookImpl book;
+    OrderBookImpl::InstrumentsT instruments;
+    instruments.insert(instrument);
+    book.init(instruments);
+    dispatcher_->init(restore_.get(), &book, saver_.get(), orderStorage_.get());
+    dispatcher_->startLoad();
+    std::unique_ptr<OrderEntry> x = bookedOrder(instrument, 11, SELL_SIDE, 100.0, 100);
+    std::unique_ptr<OrderEntry> y = bookedOrder(instrument, 12, BUY_SIDE, 101.0, 200);
+    std::unique_ptr<OrderEntry> w = bookedOrder(instrument, 13, SELL_SIDE, 100.5, 50);
+    std::unique_ptr<OrderEntry> z = bookedOrder(instrument, 14, BUY_SIDE, 99.0, 10);
+    // In any order: the dispatcher restores them in the order they arrived
+    loadOrderRecord(*dispatcher_, *z);
+    loadOrderRecord(*dispatcher_, *w);
+    loadOrderRecord(*dispatcher_, *x);
+    loadOrderRecord(*dispatcher_, *y);
+    dispatcher_->finishLoad();
+
+    EXPECT_EQ(x->orderId_, book.getTop(instrument, SELL_SIDE));
+    EXPECT_EQ(z->orderId_, book.getTop(instrument, BUY_SIDE));
+    ASSERT_EQ(2u, dispatcher_->ordersToMatch().size());
+    EXPECT_EQ(y->orderId_, dispatcher_->ordersToMatch()[0]->orderId_);
+    EXPECT_EQ(w->orderId_, dispatcher_->ordersToMatch()[1]->orderId_);
+}
+
+TEST_F(StorageRecordDispatcherTest, RestoredSwapsAreLeftToMatchOnlyForAnOrderTheyTradeWith)
+{
+    // The restore asks the matcher (#207), so it follows the swap rules: a swap trades only with a swap of the same dates,
+    // on both legs, and an outright order passes over a swap (#212). S1 rests. S2 trades with it on both legs. O, an
+    // outright buy, crosses S1's near price but doesn't trade with a swap. S3 has other dates. Only S2 waits to be matched.
+    const SourceIdT instrument = test::addInstrument("UNCROSSFX");
+    OrderBookImpl book;
+    OrderBookImpl::InstrumentsT instruments;
+    instruments.insert(instrument);
+    book.init(instruments);
+    dispatcher_->init(restore_.get(), &book, saver_.get(), orderStorage_.get());
+    dispatcher_->startLoad();
+    auto swapOrder = [&](u64 number, Side side, PriceT near, PriceT far, DateTimeT farDate)
+    {
+        std::unique_ptr<OrderEntry> order = bookedOrder(instrument, number, side, near, 100);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->farPrice_ = far;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = farDate;
+        return order;
+    };
+    std::unique_ptr<OrderEntry> s1 = swapOrder(21, SELL_SIDE, 1.0850, 1.0872, 2000);
+    std::unique_ptr<OrderEntry> s2 = swapOrder(22, BUY_SIDE, 1.0860, 1.0860, 2000);
+    std::unique_ptr<OrderEntry> o = bookedOrder(instrument, 23, BUY_SIDE, 1.0900, 100);
+    std::unique_ptr<OrderEntry> s3 = swapOrder(24, BUY_SIDE, 1.0900, 1.0850, 3000);
+    loadOrderRecord(*dispatcher_, *s3);
+    loadOrderRecord(*dispatcher_, *o);
+    loadOrderRecord(*dispatcher_, *s2);
+    loadOrderRecord(*dispatcher_, *s1);
+    dispatcher_->finishLoad();
+
+    ASSERT_EQ(1u, dispatcher_->ordersToMatch().size());
+    EXPECT_EQ(s2->orderId_, dispatcher_->ordersToMatch()[0]->orderId_);
+    EXPECT_EQ(s1->orderId_, book.getTop(instrument, SELL_SIDE));
+    EXPECT_EQ(o->orderId_, book.getTop(instrument, BUY_SIDE)) << "O and S3 rest at 1.09, O first";
 }

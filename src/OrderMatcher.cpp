@@ -34,6 +34,12 @@ using namespace COP::Store;
 
 namespace
 {
+/// Whether order's price reaches contra's: a buy's at or above it, a sell's at or below. For swaps, their near prices.
+bool pricesCross(const OrderEntry &order, const OrderEntry &contra)
+{
+    return (BUY_SIDE == order.side_) ? (order.price_ >= contra.price_) : (order.price_ <= contra.price_);
+}
+
 class FindOpositeOrder : public OrderFunctor
 {
 public:
@@ -84,37 +90,13 @@ bool FindOpositeOrder::match(const IdT &order, bool *stop) const
     {
         return false;
     }
-    if (MARKET_ORDERTYPE == order_->ordType_)
+    if (OrderMatcher::tradesWith(*order_, *contrOrd))
     {
         return true;
     }
-    if (MARKET_ORDERTYPE == contrOrd->ordType_)
-    {
-        return true;
-    }
-    if (BUY_SIDE == order_->side_)
-    {
-        if (order_->price_ >= contrOrd->price_)
-        {
-            return true;
-        }
-        else
-        {
-            *stop = true;
-        }
-    }
-    else
-    {
-        if (order_->price_ <= contrOrd->price_)
-        {
-            return true;
-        }
-        else
-        {
-            *stop = true;
-        }
-    }
+    // The side is sorted by price, so no order further on trades with it either
     assert(nullptr != stop);
+    *stop = true;
     return false;
 }
 
@@ -160,62 +142,64 @@ bool FindOppositeSwapOrder::match(const IdT &order, bool *stop) const
     // read lock on contra order during field reads
     oneapi::tbb::spin_rw_mutex::scoped_lock contrLock(contrOrd->entryMutex_, false);
 
-    // Must be a swap order with remaining quantity
-    if (FXSWAP_ORDERTYPE != contrOrd->ordType_)
+    // Must be a swap order with remaining quantity: the search passes over the rest of the side
+    if ((FXSWAP_ORDERTYPE != contrOrd->ordType_) || (0 == contrOrd->leavesQty_))
     {
         return false;
     }
-    if (0 == contrOrd->leavesQty_)
+    if (OrderMatcher::tradesWith(*order_, *contrOrd))
     {
-        return false;
+        return true;
     }
-
-    // Settlement dates must match exactly (near-to-near, far-to-far)
-    if (contrOrd->settlDate_ != order_->settlDate_)
+    // The side is sorted by near price: a swap of the same dates whose near price doesn't cross ends the search, as no
+    // swap further on crosses either. One with other dates, or whose far price doesn't cross, doesn't end it.
+    if ((contrOrd->settlDate_ == order_->settlDate_) && (contrOrd->farSettlDate_ == order_->farSettlDate_) &&
+        !pricesCross(*order_, *contrOrd))
     {
-        return false;
-    }
-    if (contrOrd->farSettlDate_ != order_->farSettlDate_)
-    {
-        return false;
-    }
-
-    // Near-leg price compatibility (same logic as single-leg LIMIT)
-    bool nearOk = false;
-    if (BUY_SIDE == order_->side_)
-    {
-        nearOk = (order_->price_ >= contrOrd->price_);
-    }
-    else
-    {
-        nearOk = (order_->price_ <= contrOrd->price_);
-    }
-    if (!nearOk)
-    {
+        assert(nullptr != stop);
         *stop = true;
-        return false;
-    }
-
-    // Far-leg price compatibility (REVERSED side — buy near means sell far)
-    if (BUY_SIDE == order_->side_)
-    {
-        // Aggressor buys near, sells far → wants lowest far ask
-        if (order_->farPrice_ <= contrOrd->farPrice_)
-        {
-            return true;
-        }
-    }
-    else
-    {
-        // Aggressor sells near, buys far → wants highest far bid
-        if (order_->farPrice_ >= contrOrd->farPrice_)
-        {
-            return true;
-        }
     }
     return false;
 }
 } // namespace
+
+bool OrderMatcher::tradesWith(const OrderEntry &order, const OrderEntry &contra)
+{
+    // A swap trades only with a swap (#212), on both legs: the same near and far dates, the near prices crossing, and the
+    // far prices crossing the other way, since the buyer of the near leg sells the far one
+    const bool swap = (FXSWAP_ORDERTYPE == order.ordType_);
+    if (swap != (FXSWAP_ORDERTYPE == contra.ordType_))
+    {
+        return false;
+    }
+    if (swap)
+    {
+        if ((contra.settlDate_ != order.settlDate_) || (contra.farSettlDate_ != order.farSettlDate_) ||
+            !pricesCross(order, contra))
+        {
+            return false;
+        }
+        if (BUY_SIDE == order.side_)
+        {
+            return order.farPrice_ <= contra.farPrice_;
+        }
+        return order.farPrice_ >= contra.farPrice_;
+    }
+    if ((MARKET_ORDERTYPE == order.ordType_) || (MARKET_ORDERTYPE == contra.ordType_))
+    {
+        return true;
+    }
+    return pricesCross(order, contra);
+}
+
+IdT OrderMatcher::findContra(OrderEntry *order, const OrderBook &book, OrderDataStorage *storage)
+{
+    if (FXSWAP_ORDERTYPE == order->ordType_)
+    {
+        return book.find(FindOppositeSwapOrder(order, storage));
+    }
+    return book.find(FindOpositeOrder(order, storage));
+}
 
 OrderMatcher::OrderMatcher(void) : defered_(nullptr)
 {
@@ -250,7 +234,7 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
         return;
     }
 
-    IdT id = ctxt.orderBook_->find(FindOpositeOrder(order, ctxt.orderStorage_));
+    IdT id = findContra(order, *ctxt.orderBook_, ctxt.orderStorage_);
     if (!id.isValid())
     {
         if (MARKET_ORDERTYPE == order->ordType_)
@@ -323,7 +307,7 @@ void OrderMatcher::matchSwap(OrderEntry *order, const Context &ctxt)
     assert(nullptr != ctxt.orderStorage_);
     assert(FXSWAP_ORDERTYPE == order->ordType_);
 
-    IdT id = ctxt.orderBook_->find(FindOppositeSwapOrder(order, ctxt.orderStorage_));
+    IdT id = findContra(order, *ctxt.orderBook_, ctxt.orderStorage_);
     if (!id.isValid())
     {
         // No swap match — rest on book (swaps don't auto-cancel like MARKET orders)

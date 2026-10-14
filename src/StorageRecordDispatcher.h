@@ -84,6 +84,15 @@ public:
     {
         return restoredIdLimit_;
     }
+    /// The orders the last load restored without booking, in the order they arrived: each lost the fills its booking
+    /// started, because the transaction that booked it committed and the one with its fills didn't (#207). An open
+    /// market order is one, and so is an order that crosses one that arrived before it; booked as they were, they
+    /// would leave the book crossed. Processor::matchRestored() matches each as the transaction that booked it did,
+    /// and the server calls it for each, in this order, before it takes orders.
+    const std::vector<OrderEntry *> &ordersToMatch() const
+    {
+        return ordersToMatch_;
+    }
 
 #ifdef BUILD_PG
 public:
@@ -110,6 +119,11 @@ public:
     };
 
 private:
+    /// Whether a restored order would have traded with an order that arrived before it: one the matcher's own search
+    /// finds among the orders booked so far, or one already left to match (#207)
+    bool crossesAnEarlierOrder(OrderEntry *order) const;
+
+private:
     DataStorageRestore *storage_;
     OrderBook *orderBook_;
     FileSaver *fileStorage_;
@@ -130,6 +144,7 @@ private:
     /// and erasing the old leaves two, and saveIdLimit() erases all but the one it writes (#81)
     u64 restoredIdLimit_;
     std::vector<u32> idLimitVersions_;
+    std::vector<OrderEntry *> ordersToMatch_;
 #ifdef BUILD_PG
     PG::PGWriteBehind *pgWriter_ = nullptr;
 #endif
