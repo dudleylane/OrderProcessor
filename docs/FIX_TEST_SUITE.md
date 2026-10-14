@@ -126,7 +126,10 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ReplaceRequest_ForAnotherSessionsOrder_IsNotQueued` | Replace naming another session's ClOrdID → likewise (#71) |
 | `CancelRequest_ForItsOwnOrderStoredUnderTheClOrdIdAlone_IsQueued` | The session's own order stored before #71, under its ClOrdID alone → still cancelled |
 | `CancelRequest_ForAnotherSourcesOrderStoredUnderTheClOrdIdAlone_IsNotQueued` | A WebSocket order's ClOrdID, or another session's from before #71 → not found (#71) |
-| `NewOrderMultileg_FxSwap_PushesToQueue` | 2-leg multileg → FXSWAP OrderEntry with near/far prices+dates |
+| `NewOrderMultileg_FxSwap_PushesToQueue` | 2-leg multileg → FXSWAP OrderEntry with near/far prices, and LegSettlDates as midnight UTC of their days (#198) |
+| `ASwapsSettlementDatesAreReadAsDates` | A NewOrderSingle swap's SettlDate (64) and 6501, LocalMktDates, become midnight UTC of their days (#198) |
+| `ASwapWithADateThatIsntOneIsNotQueued` | `-5`, a non-number, 21 digits or a day that doesn't exist, in 64, 6501 or a leg's 588 → refused before anything is stored, nothing pushed (#190) |
+| `ExecutionReport_ASwapsLegsCarryTheirSideDateAndPrice` | Each leg's report carries its side, its LegSettlDate as `YYYYMMDD` (#198), its price, and a TradeLinkID (#153) |
 | `NewOrderMultileg_NonSwapOrdType_Rejected` | Non-FXSWAP OrdType in multileg → rejected, no push |
 | `NewOrderMultileg_TooFewLegs_Rejected` | Single leg multileg → rejected, no push |
 | `SessionMapPopulatedOnLogon` | `onLogon()` makes the session known |
@@ -289,6 +292,18 @@ Runs `orderProcessorServer` with this branch's `config/fix.cfg` and a credential
 - `--hash-fix-password` makes a hash Python's own PBKDF2 agrees with, with 600000 iterations.
 
 `test/fix_client.py` holds the raw-socket FIX client and server harness it shares with `FixResendTest.py`.
+
+---
+
+## 14. FixLocalMktDateTest — Settlement Dates
+
+**File:** `test/FixGatewayTest.cpp`
+**Requires:** `BUILD_FIX=ON`
+
+| Test | Description |
+|------|-------------|
+| `ADateIsMidnightUtcOfThatDay` | `YYYYMMDD` in, milliseconds since the epoch at midnight UTC out, a leap day included; back to `YYYYMMDD`, from any millisecond of the day; a date past 9999-12-31 is written as that day (#198) |
+| `AnythingElseIsNotADate` | `-5`, `1000`, 7 or 9 digits, letters, a sign or space, 21 digits, 2023-02-29, month 13 or 0, day 32, and 1969-12-31 → not dates (#190) |
 
 ---
 

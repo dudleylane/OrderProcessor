@@ -4,6 +4,7 @@
 
 #include <quickfix/Application.h>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <oneapi/tbb/spin_rw_mutex.h>
@@ -98,6 +99,10 @@ private:
     void rejectMessage(const FIX::Message &msg, const FIX::SessionID &sid, int reason, const std::string &text);
     /// refuses a new order to its sender with buildOrderRefusal()'s ExecutionReport, before the engine sees it (#145)
     void refuseOrder(const FIX::Message &msg, const FIX::SessionID &sid, int ordRejReason, const std::string &text);
+    /// Reads a settlement date field from fields, the order msg or one of its legs, if set, as a LocalMktDate (#198).
+    /// Returns false, having refused msg to its sender, if it isn't one (#190). name says which field, in the Text.
+    bool readSettlDate(const FIX::FieldMap &fields, const FIX::Message &msg, const FIX::SessionID &sid, int tag,
+                       const char *name, DateTimeT *date);
     /// Applies the session's account list to an order's Account (#147): an order that names none trades the
     /// counterparty's first account, and one that names another account is refused, with OrdRejReason 15. Returns false
     /// when it refused the order. Without credentials, the account stays as the order names it.
@@ -135,6 +140,13 @@ public:
     /// and above zero unless the order is a market order, which trades at no price of its own. QuickFIX accepts any
     /// number of digits in a PRICE field, and 310 of them convert to infinity (#145).
     static bool isTradablePrice(double price, OrderType ordType);
+    /// A LocalMktDate (YYYYMMDD), as the engine keeps a settlement date: milliseconds since the epoch at midnight UTC of
+    /// that day, as the frontend sends one (#198). Nothing for anything else: not 8 digits, no such day, or before 1970.
+    /// The gateway used to read these fields with std::stoull, as milliseconds: "20261015" was 5.6 hours into 1970, "-5"
+    /// wrapped to 18446744073709551611, and a non-number threw after the order was half stored (#190).
+    static std::optional<DateTimeT> fromLocalMktDate(std::string_view text);
+    /// The LocalMktDate of a settlement date the engine keeps: its day in UTC (#198)
+    static std::string toLocalMktDate(DateTimeT date);
 
     // Internal → FIX enum conversions
     static char fromOrdStatus(OrderStatus s);

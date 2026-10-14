@@ -31,6 +31,7 @@
 
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 
 using namespace COP;
@@ -179,8 +180,10 @@ protected:
         return msg;
     }
 
-    /// An FX swap built as NewOrderMultileg_FxSwap_PushesToQueue builds it; it names no account
-    FIX44::NewOrderMultileg makeFxSwap(const std::string &clOrdId)
+    /// An FX swap built as NewOrderMultileg_FxSwap_PushesToQueue builds it; it names no account. Its legs settle on these
+    /// LocalMktDates (#198).
+    FIX44::NewOrderMultileg makeFxSwap(const std::string &clOrdId, const std::string &nearDate = "20261015",
+                                       const std::string &farDate = "20261115")
     {
         FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
         FIX44::NewOrderMultileg msg;
@@ -196,14 +199,14 @@ protected:
         nearLeg.set(FIX::LegSymbol("aaa"));
         nearLeg.set(FIX::LegSide(FIX::Side_BUY));
         nearLeg.set(FIX::LegPrice(1.2650));
-        nearLeg.set(FIX::LegSettlDate("1000"));
+        nearLeg.set(FIX::LegSettlDate(nearDate));
         msg.addGroup(nearLeg);
 
         FIX44::NewOrderMultileg::NoLegs farLeg;
         farLeg.set(FIX::LegSymbol("aaa"));
         farLeg.set(FIX::LegSide(FIX::Side_SELL));
         farLeg.set(FIX::LegPrice(1.2680));
-        farLeg.set(FIX::LegSettlDate("2000"));
+        farLeg.set(FIX::LegSettlDate(farDate));
         msg.addGroup(farLeg);
 
         return msg;
@@ -783,7 +786,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_PushesToQueue)
     nearLeg.set(FIX::LegSymbol("aaa"));
     nearLeg.set(FIX::LegSide(FIX::Side_BUY));
     nearLeg.set(FIX::LegPrice(1.2650));
-    nearLeg.set(FIX::LegSettlDate("1000"));
+    nearLeg.set(FIX::LegSettlDate("20261015"));
     msg.addGroup(nearLeg);
 
     // Far leg: SELL at 1.2680, settl T+92
@@ -791,7 +794,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_PushesToQueue)
     farLeg.set(FIX::LegSymbol("aaa"));
     farLeg.set(FIX::LegSide(FIX::Side_SELL));
     farLeg.set(FIX::LegPrice(1.2680));
-    farLeg.set(FIX::LegSettlDate("2000"));
+    farLeg.set(FIX::LegSettlDate("20261115"));
     msg.addGroup(farLeg);
 
     gateway_->onMessage(msg, TEST_SID);
@@ -799,10 +802,10 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_PushesToQueue)
     ASSERT_NE(nullptr, capturedOrder);
     EXPECT_EQ(FXSWAP_ORDERTYPE, capturedOrder->ordType_);
     EXPECT_EQ(BUY_SIDE, capturedOrder->side_);
-    EXPECT_DOUBLE_EQ(1.2650, capturedOrder->price_);    // near (matches root side)
-    EXPECT_DOUBLE_EQ(1.2680, capturedOrder->farPrice_); // far (opposite side)
-    EXPECT_EQ(1000u, capturedOrder->settlDate_);
-    EXPECT_EQ(2000u, capturedOrder->farSettlDate_);
+    EXPECT_DOUBLE_EQ(1.2650, capturedOrder->price_);           // near (matches root side)
+    EXPECT_DOUBLE_EQ(1.2680, capturedOrder->farPrice_);        // far (opposite side)
+    EXPECT_EQ(1792022400000ULL, capturedOrder->settlDate_);    // 2026-10-15, midnight UTC (#198)
+    EXPECT_EQ(1794700800000ULL, capturedOrder->farSettlDate_); // 2026-11-15
     EXPECT_EQ(1000000u, capturedOrder->orderQty_);
 
     delete capturedOrder;
@@ -945,8 +948,8 @@ TEST_F(FixGatewayInboundTest, NewOrderSingle_FxSwapFarPriceNoOrderTradesAt_IsNot
         auto msg = makeNewOrderSingle("SWAP-FAR-" + std::to_string(++n), "aaa", FIX::Side_BUY, FIX::OrdType_FOREX_SWAP,
                                       1.0850, 1000000);
         msg.setField(6500, farPrice);
-        msg.setField(6501, "2000");
-        msg.setField(FIX::FIELD::SettlDate, "1000");
+        msg.setField(6501, "20261115");
+        msg.setField(FIX::FIELD::SettlDate, "20261015");
         gateway_->onMessage(msg, TEST_SID);
     }
 }
@@ -1775,8 +1778,8 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsLegsCarryTheirSideDateAndPri
     assignClOrderId(order.get());
     order->side_ = BUY_SIDE;
     order->ordType_ = FXSWAP_ORDERTYPE;
-    order->settlDate_ = 1000;
-    order->farSettlDate_ = 2000;
+    order->settlDate_ = 1792022400000ULL;    // 2026-10-15, midnight UTC
+    order->farSettlDate_ = 1794700800000ULL; // 2026-11-15
     order->farPrice_ = 1.0872;
     for (const ExecLegType leg : { NEAR_LEG, FAR_LEG })
     {
@@ -1793,10 +1796,10 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsLegsCarryTheirSideDateAndPri
         FIX::LegSide side;
         group.get(side);
         EXPECT_EQ((NEAR_LEG == leg) ? FIX::Side_BUY : FIX::Side_SELL, side.getValue()) << "leg " << leg;
-        // Which date each leg gets. The format is still the engine's milliseconds, where FIX wants YYYYMMDD (#198).
+        // Which date each leg gets, as a LocalMktDate: it used to be the engine's milliseconds (#198)
         FIX::LegSettlDate date;
         group.get(date);
-        EXPECT_EQ((NEAR_LEG == leg) ? "1000" : "2000", date.getString()) << "leg " << leg;
+        EXPECT_EQ((NEAR_LEG == leg) ? "20261015" : "20261115", date.getString()) << "leg " << leg;
         FIX::LegLastPx px;
         group.get(px);
         EXPECT_DOUBLE_EQ(trade.lastPx_, px.getValue()) << "leg " << leg;
@@ -1809,6 +1812,79 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsLegsCarryTheirSideDateAndPri
     FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&plain, *order);
     EXPECT_EQ(0u, report.groupCount(FIX::FIELD::NoLegs));
     EXPECT_FALSE(report.isSetField(820));
+}
+
+// --- Settlement dates, as FIX's LocalMktDate (#198, #190) ---
+
+/// 2026-10-15 and 2026-11-15 at midnight UTC, in the engine's milliseconds, as the frontend sends them
+const DateTimeT OCT_15 = 1792022400000ULL;
+const DateTimeT NOV_15 = 1794700800000ULL;
+
+TEST(FixLocalMktDateTest, ADateIsMidnightUtcOfThatDay)
+{
+    EXPECT_EQ(std::optional<DateTimeT>(OCT_15), FixGateway::fromLocalMktDate("20261015"));
+    EXPECT_EQ(std::optional<DateTimeT>(0u), FixGateway::fromLocalMktDate("19700101"));
+    EXPECT_EQ(std::optional<DateTimeT>(1709164800000ULL), FixGateway::fromLocalMktDate("20240229")); // a leap day
+    EXPECT_EQ("20261015", FixGateway::toLocalMktDate(OCT_15));
+    EXPECT_EQ("20261015", FixGateway::toLocalMktDate(OCT_15 + 86399999)); // its last millisecond
+    EXPECT_EQ("20261016", FixGateway::toLocalMktDate(OCT_15 + 86400000));
+    EXPECT_EQ("19700101", FixGateway::toLocalMktDate(0));
+    EXPECT_EQ("99991231", FixGateway::toLocalMktDate(std::numeric_limits<DateTimeT>::max()));
+}
+
+TEST(FixLocalMktDateTest, AnythingElseIsNotADate)
+{
+    // std::stoull took the first two, as 18446744073709551611 and 1000 ms into 1970, and threw on the rest (#190)
+    for (const char *text :
+         { "-5", "1000", "2026101", "202610150", "abcdefgh", "", " 2026101", "+2026101", "123456789012345678901",
+           "2026-10-", "20230229", "20261301", "20261000", "20261032", "19691231" })
+    {
+        EXPECT_FALSE(FixGateway::fromLocalMktDate(text).has_value()) << "'" << text << "'";
+    }
+}
+
+TEST_F(FixGatewayInboundTest, ASwapsSettlementDatesAreReadAsDates)
+{
+    // NewOrderSingle's 64 and 6501 here; NewOrderMultileg_FxSwap_PushesToQueue checks each leg's 588
+    OrderEntry *capturedOrder = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                capturedOrder = evt.order_;
+            }));
+    auto msg = makeNewOrderSingle("SWAP-DATE-1", "aaa", FIX::Side_BUY, FIX::OrdType_FOREX_SWAP, 1.0850, 1000000);
+    msg.setField(6500, "1.0872");
+    msg.setField(FIX::FIELD::SettlDate, "20261015");
+    msg.setField(6501, "20261115");
+    gateway_->onMessage(msg, TEST_SID);
+
+    ASSERT_NE(nullptr, capturedOrder);
+    EXPECT_EQ(OCT_15, capturedOrder->settlDate_);
+    EXPECT_EQ(NOV_15, capturedOrder->farSettlDate_);
+    delete capturedOrder;
+}
+
+TEST_F(FixGatewayInboundTest, ASwapWithADateThatIsntOneIsNotQueued)
+{
+    // Refused to the sender before anything is stored (#190); there is no session here to send that to
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    int n = 0;
+    for (const char *bad : { "-5", "abc", "123456789012345678901", "20261301" })
+    {
+        for (const int field : { static_cast<int>(FIX::FIELD::SettlDate), 6501 })
+        {
+            auto msg = makeNewOrderSingle("SWAP-BAD-" + std::to_string(++n), "aaa", FIX::Side_BUY,
+                                          FIX::OrdType_FOREX_SWAP, 1.0850, 1000000);
+            msg.setField(6500, "1.0872");
+            msg.setField(FIX::FIELD::SettlDate, "20261015");
+            msg.setField(6501, "20261115");
+            msg.setField(field, bad);
+            gateway_->onMessage(msg, TEST_SID);
+        }
+        gateway_->onMessage(makeFxSwap("SWAP-BAD-" + std::to_string(++n), bad, "20261115"), TEST_SID);
+        gateway_->onMessage(makeFxSwap("SWAP-BAD-" + std::to_string(++n), "20261015", bad), TEST_SID);
+    }
 }
 
 } // anonymous namespace
