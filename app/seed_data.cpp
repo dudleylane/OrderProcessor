@@ -16,7 +16,8 @@ using namespace COP;
 
 namespace
 {
-const char *const USAGE = "usage: seedData [--data-dir DIR | DIR]   (default ./data)\n";
+const char *const USAGE = "usage: seedData [--if-empty] [--data-dir DIR | DIR]   (default ./data)\n"
+                          "  --if-empty  seed only a directory with no instrument yet (#161)\n";
 }
 
 int main(int argc, char *argv[])
@@ -28,13 +29,13 @@ int main(int argc, char *argv[])
         return 0;
     }
     std::string error;
-    const std::optional<std::string> parsed = App::parseSeedDataArgs(args, &error);
+    const std::optional<App::SeedDataArgs> parsed = App::parseSeedDataArgs(args, &error);
     if (!parsed)
     {
         std::cerr << "seedData: " << error << "\n" << USAGE;
         return 2;
     }
-    const std::string dataDir = *parsed;
+    const std::string dataDir = parsed->dataDir;
 
     // 1. Create singletons
     aux::ExchLogger::create();
@@ -48,9 +49,36 @@ int main(int argc, char *argv[])
     auto dispatcher = std::make_unique<Store::StorageRecordDispatcher>();
     dispatcher->init(Store::WideDataStorage::instance(), nullptr, lmdbStorage.get(), nullptr);
 
+    // WideDataStorage goes first, while the dispatcher it is bound to still exists: it never calls its saver while being
+    // destroyed, and a bound storage cannot be unbound, since bindStorage() binds once and asserts against nullptr (#41).
+    const auto cleanup = [&]()
+    {
+        IdTGenerator::destroy();
+        Store::WideDataStorage::destroy();
+        dispatcher.reset();
+        lmdbStorage.reset();
+        aux::ExchLogger::destroy();
+    };
+
     // Load existing data first (so IDs don't collide)
     lmdbStorage->load(dataDir, dispatcher.get());
     aux::ExchLogger::instance()->note("Existing data loaded");
+
+    if (parsed->ifEmpty)
+    {
+        bool hasInstrument = false;
+        Store::WideDataStorage::instance()->forEachInstrument(
+            [&hasInstrument](const SourceIdT &, const InstrumentEntry &)
+            {
+                hasInstrument = true;
+            });
+        if (hasInstrument)
+        {
+            std::cout << "seedData: " << dataDir << " has instruments already, so it isn't seeded (--if-empty)\n";
+            cleanup();
+            return 0;
+        }
+    }
 
     // Bind storage so new adds get persisted
     Store::WideDataStorage::instance()->bindStorage(dispatcher.get());
@@ -136,14 +164,7 @@ int main(int argc, char *argv[])
     std::cout << "\nSeeded " << instrCount << " instruments, " << acctCount << " accounts and " << clearingCount
               << " clearing firms into " << dataDir << "\n";
 
-    // 6. Cleanup. WideDataStorage goes first, while the dispatcher it is bound to still exists: it never calls
-    // its saver while being destroyed, and a bound storage cannot be unbound, since bindStorage() binds once and
-    // asserts against nullptr (#41).
-    IdTGenerator::destroy();
-    Store::WideDataStorage::destroy();
-    dispatcher.reset();
-    lmdbStorage.reset();
-    aux::ExchLogger::destroy();
-
+    // 6. Cleanup
+    cleanup();
     return 0;
 }
