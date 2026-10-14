@@ -6,26 +6,27 @@ This directory contains everything needed to run the full OrderProcessor OMS sta
 
 - Docker or Podman with `docker compose` (or `podman-compose`)
 - About 3 GB of disk to build the stack: the base images take about 780 MB, the server's build stage about 1.5 GB (the build cache keeps it), and the server's image about 210 MB
-- Ports 3000, 5432, and 8080 available
+- Ports 3000 and 5001 available: the stack publishes only the frontend's and the FIX acceptor's (#146)
 
 ## Quick Start
 
 ```bash
 cd docker
 cp .env.example .env          # Set PostgreSQL credentials
+sed -i "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$(openssl rand -hex 32)/" .env   # The access token
 docker compose up --build -d   # Build and start all services
 ```
 
-Open **http://localhost:3000** to access the OMS frontend. The first `up` seeds the new data volume with test instruments, accounts and the clearing firm, so the stack takes orders at once (see [Seed Test Data](#seed-test-data)).
+Open **http://localhost:3000** to access the OMS frontend. It asks for the access token first, the `OMS_WS_TOKEN` in `.env` (`grep OMS_WS_TOKEN .env` shows it), and keeps it until the tab closes (see [Access](#access)). The first `up` seeds the new data volume with test instruments, accounts and the clearing firm, so the stack takes orders at once (see [Seed Test Data](#seed-test-data)).
 
 The first build takes several minutes (C++ compilation inside the container). Subsequent starts use the Docker layer cache and are fast.
 
 ## Services
 
-| Service | Port | Image | Description |
-|---------|------|-------|-------------|
-| `oms-db` | 5432 | `postgres:16-alpine` | PostgreSQL database with OMS schema |
-| `oms-server` | 8080 | `Dockerfile.oms-server` | C++ OrderProcessor WebSocket server |
+| Service | Host port | Image | Description |
+|---------|-----------|-------|-------------|
+| `oms-db` | none (5432 in the stack) | `postgres:16-alpine` | PostgreSQL database with OMS schema |
+| `oms-server` | 5001, the FIX acceptor (8080 only in the stack) | `Dockerfile.oms-server` | C++ OrderProcessor WebSocket server and FIX acceptor |
 | `oms-frontend` | 3000 | `Dockerfile.oms-frontend` | React UI served by nginx |
 
 ### Startup Order
@@ -38,7 +39,7 @@ All three restart unless stopped (`restart: unless-stopped`), and each has a hea
 
 On a host with SELinux enforcing, as el10 is by default, compose relabels `init-db/` so the database container can read it (the `z` on its mount, #201). Without that, Postgres can't read its init scripts and never starts.
 
-CI brings this stack up with `scripts/check-compose-stack.sh` (#140), when `docker/` changes and weekly. The script checks that every service becomes healthy, that Postgres loaded the schema, that the server seeded its volume, and that a new order sent to the frontend's `/ws` gets its execution report. Run it before changing `docker-compose.yml`, `nginx.conf`, `.env.example` or `init-db/`. It takes about three minutes, and it publishes no host port, so it can run beside a stack that is already up.
+CI brings this stack up with `scripts/check-compose-stack.sh` (#140), when `docker/` changes and weekly. The script checks that compose refuses to start without an access token and publishes only the frontend's port and the FIX acceptor's, that every service becomes healthy, that Postgres loaded the schema, that the server seeded its volume, that `/ws` refuses an upgrade without the token or from another Origin, and that a new order sent to the frontend's `/ws` with the token gets its execution report. Run it before changing `docker-compose.yml`, `nginx.conf`, `.env.example` or `init-db/`. It takes about three minutes, and it publishes no host port, so it can run beside a stack that is already up.
 
 The server runs as the user `oms`, which owns `/data`, and nginx as the user `nginx`; neither container runs as root. nginx looks the server up through the container's own DNS resolver when a request needs it, so it starts while the server is still down, and it finds a re-created server container at its new address.
 
@@ -52,6 +53,8 @@ Browser :3000 ──→ nginx (oms-frontend)
 
 The nginx config (`nginx.conf`) handles WebSocket upgrade headers so the frontend connects to `ws://localhost:3000/ws`, which is proxied internally to the C++ server.
 
+Only the frontend's port and the FIX acceptor's, 5001, are published (#146). The server's WebSocket port and Postgres listen only on the stack's network, so a browser reaches the server through nginx's `/ws`, and `docker compose exec` reaches Postgres. To reach either from the host, publish its port on the loopback address in an override file, such as `127.0.0.1:8080:8080`.
+
 ## Configuration
 
 ### Environment Variables
@@ -62,8 +65,21 @@ Copy `.env.example` to `.env` and set values:
 POSTGRES_USER=oms              # PostgreSQL username
 POSTGRES_PASSWORD=changeme     # PostgreSQL password (change this!)
 POSTGRES_DB=oms                # Database name
-POSTGRES_PORT=5432             # Host port for PostgreSQL
+OMS_WS_TOKEN=                  # WebSocket access token, required: openssl rand -hex 32 makes one (#146)
+OMS_ALLOWED_ORIGINS=           # Pages a browser may connect from, comma-separated; empty allows any (#146)
 ```
+
+### Access
+
+The server refuses a WebSocket client that doesn't offer the access token, `OMS_WS_TOKEN` in `.env`, and compose won't start without one (#146). A browser can't set a WebSocket's headers, so a client offers the token as a subprotocol, `oms-token.<token>`, beside the protocol's own, `oms-v1`; the server names only `oms-v1` in its answer. The app asks for the token when a tab opens it, and **Change token** in its header asks again. A token has at least <!-- DOC_CHECK:ws_min_token_length -->16<!-- /DOC_CHECK --> letters, digits, `.`, `_` or `-`.
+
+`OMS_ALLOWED_ORIGINS`, comma-separated, such as `http://oms.example.com:3000`, limits the pages a browser may connect from: a page from another Origin is refused, even with the token. Empty, as in `.env.example`, allows a page from anywhere that has the token. A client that sends no Origin isn't a browser, and the token alone decides.
+
+The server answers an upgrade without the right token with 401, one from an Origin off the list with 403, and a request that isn't a WebSocket upgrade with 426, then closes the connection.
+
+What this doesn't do yet:
+- **Authorization** (#225): everyone with the token sees every account and order, and can trade on any account.
+- **TLS** (#226): the stack serves plain HTTP, so the token crosses the network in the clear. When the network between the browser and the host isn't trusted, put a TLS-terminating proxy in front of port 3000; the app opens `wss:` when its page comes over `https:`.
 
 ### Server Options
 
@@ -84,6 +100,9 @@ oms-server:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--port` | 8080 | WebSocket listen port |
+| `--bind` | `0.0.0.0` | The WebSocket server's address: an IP address, such as `127.0.0.1` for this host only (#146). The FIX acceptor listens where `--fix-cfg`'s settings say: `SocketAcceptPort`, on every interface unless `SocketAcceptAddress` is set |
+| `--ws-token-file` | none | A file whose first line is the access token. `OMS_WS_TOKEN` gives it too, but not both; with neither, any client may connect, and the server warns (#146) |
+| `--allowed-origin` | any | An Origin a browser page may connect from; repeat it for more. `OMS_ALLOWED_ORIGINS` adds a comma-separated list (#146) |
 | `--data-dir` | `./data` | LMDB persistence directory. The image's command gives `/data`, its volume |
 | `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
@@ -123,6 +142,8 @@ docker compose top                   # Running processes per service
 ```
 
 ### Database Access
+
+Postgres publishes no host port (#146); `docker compose exec` reaches it from the host.
 
 ```bash
 # Connect to PostgreSQL via psql
@@ -262,12 +283,15 @@ docker compose logs oms-server
 # - Other LMDB errors → corrupt data (docker compose down -v starts again, and deletes it)
 ```
 
-### Frontend shows "Disconnected"
+### Frontend shows "Disconnected" or "Not connected"
 
-1. Check that `oms-server` is running: `docker compose ps`
-2. Check server logs: `docker compose logs oms-server`
-3. Verify nginx proxy: `curl -i http://localhost:3000/ws` should return a WebSocket upgrade error (not 404)
-4. Check browser console for WebSocket connection errors
+"Not connected: the server is down, or refused the access token" means no connection has opened since the token was entered: a browser doesn't tell the app why a WebSocket failed (#146).
+
+1. Check the token: `grep OMS_WS_TOKEN .env`, then **Change token** in the app's header
+2. Check that `oms-server` is running: `docker compose ps`
+3. Check server logs: `docker compose logs oms-server`
+4. Verify nginx proxy: `curl -i http://localhost:3000/ws` should get the server's `426 Upgrade Required` (not 404 or 502)
+5. Check browser console for WebSocket connection errors: a 401 is the token, a 403 the page's Origin (`OMS_ALLOWED_ORIGINS`)
 
 ### Reset everything
 

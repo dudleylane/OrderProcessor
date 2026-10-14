@@ -2,15 +2,19 @@
 
 #include <charconv>
 #include <cstddef>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <string>
 #include <system_error>
 #include <vector>
 
+#include <boost/asio/ip/address.hpp>
+
 #include "LMDBStorage.h"
 #include "ServerDefaults.h"
 #include "TypesDef.h"
+#include "WsAuth.h"
 
 namespace COP
 {
@@ -20,7 +24,8 @@ namespace App
 /// What orderProcessorServer is asked to do
 struct ServerArgs
 {
-    unsigned short port = 8080; // 0: a port the system picks
+    unsigned short port = 8080;          // 0: a port the system picks
+    std::string bindAddress = "0.0.0.0"; // the address the server listens on (#146)
     std::string dataDir = "./data";
     int workers = 0;
     int cpuAffinityStart = -1; // -1 = disabled, >= 0 = pin starting from this core
@@ -32,6 +37,10 @@ struct ServerArgs
     // LMDB's starting map, in MiB: a write that finds the map full doubles it (#148)
     u64 lmdbMapMb = Store::LMDBStorage::DEFAULT_MAP_SIZE >> 20;
     WsLimits wsLimits; // what WebSocket clients may hold of the server (#159)
+    // Who may open a WebSocket session (#146): the file the access token is in, and the Origins a browser may come from.
+    // The token may come from OMS_WS_TOKEN instead, and the Origins from OMS_ALLOWED_ORIGINS, which main() reads.
+    std::string wsTokenFile;
+    std::vector<std::string> allowedOrigins;
     bool help = false; // --help: print the usage and exit
 };
 
@@ -40,6 +49,7 @@ inline std::string serverUsage()
 {
     return "usage: orderProcessorServer [OPTION]...\n"
            "  --port N                  WebSocket port, 0 to 65535 (default 8080; 0: one the system picks)\n"
+           "  --bind ADDRESS            the WebSocket server's IP address (default 0.0.0.0, every interface)\n"
            "  --data-dir DIR            LMDB data directory (default ./data)\n"
            "  --workers N               TBB worker threads, and as many event and transaction processor pairs\n"
            "                            (default 0: TBB's default, and 2 pairs)\n"
@@ -64,6 +74,10 @@ inline std::string serverUsage()
            "  --max-session-queue-mb N  MiB of messages that may wait for one client (default " +
            std::to_string(DEFAULT_MAX_SESSION_QUEUE_MB) +
            ")\n"
+           "  --ws-token-file FILE      the access token every WebSocket client must offer, from FILE; or set\n"
+           "                            OMS_WS_TOKEN. Without one, any client that reaches the port may trade\n"
+           "  --allowed-origin ORIGIN   a browser Origin that may connect; repeat for more, or set\n"
+           "                            OMS_ALLOWED_ORIGINS, comma-separated (default: any)\n"
            "  -h, --help                print this and exit\n";
 }
 
@@ -113,6 +127,7 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
             "--port",         "--data-dir",        "--workers",
             "--cpu-affinity", "--clearing-firm",   "--default-account",
             "--lmdb-map-mb",  "--max-connections", "--max-session-queue-mb",
+            "--bind",         "--ws-token-file",   "--allowed-origin",
             "--fix-cfg"
         };
         bool takesValue = false;
@@ -177,6 +192,25 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
         {
             parsed.dataDir = value;
         }
+        else if ("--bind" == arg)
+        {
+            boost::system::error_code ec;
+            boost::asio::ip::make_address(value, ec);
+            if (ec)
+            {
+                *error = "--bind needs an IP address, not '" + value + "'";
+                return std::nullopt;
+            }
+            parsed.bindAddress = value;
+        }
+        else if ("--ws-token-file" == arg)
+        {
+            parsed.wsTokenFile = value;
+        }
+        else if ("--allowed-origin" == arg)
+        {
+            parsed.allowedOrigins.push_back(value);
+        }
         else if ("--clearing-firm" == arg)
         {
             parsed.clearingFirm = value;
@@ -202,6 +236,81 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
         }
     }
     return parsed;
+}
+
+/// Who may open a WebSocket session (#146), from the arguments and the environment: the access token from
+/// --ws-token-file or OMS_WS_TOKEN, not both, and the Origins from --allowed-origin and OMS_ALLOWED_ORIGINS,
+/// comma-separated. Returns false, with the reason in *error, for a token file it can't read, two tokens, or a token
+/// isValidWsToken() refuses: a usage error, as a flag it can't read is.
+inline bool resolveWsAuth(const ServerArgs &args, const char *envToken, const char *envOrigins, WsAuth *auth,
+                          std::string *error)
+{
+    WsAuth resolved;
+    if (!args.wsTokenFile.empty())
+    {
+        std::ifstream file(args.wsTokenFile);
+        if (!file)
+        {
+            *error = "can't read the token file " + args.wsTokenFile;
+            return false;
+        }
+        // The first line; a CR or spaces at its end, as an editor may leave them, aren't part of the token
+        std::getline(file, resolved.token);
+        while (!resolved.token.empty() &&
+               (('\r' == resolved.token.back()) || (' ' == resolved.token.back()) || ('\t' == resolved.token.back())))
+        {
+            resolved.token.pop_back();
+        }
+        // A secret that failed to render would otherwise start a server anyone may use
+        if (resolved.token.empty())
+        {
+            *error = "the token file " + args.wsTokenFile + " has no token on its first line";
+            return false;
+        }
+    }
+    if (nullptr != envToken)
+    {
+        if ('\0' == *envToken)
+        {
+            *error = "OMS_WS_TOKEN is set, but empty: unset it to run without a token";
+            return false;
+        }
+        if (!resolved.token.empty())
+        {
+            *error = "the WebSocket token is given twice, by --ws-token-file and by OMS_WS_TOKEN";
+            return false;
+        }
+        resolved.token = envToken;
+    }
+    if (!resolved.token.empty() && !isValidWsToken(resolved.token))
+    {
+        *error = "the WebSocket token needs at least " + std::to_string(WS_MIN_TOKEN_LENGTH) +
+                 " letters, digits, '.', '_' or '-' (`openssl rand -hex 32` makes one)";
+        return false;
+    }
+    // An Origin is scheme://host[:port], which a browser sends without a trailing '/': one written with it would match
+    // no page
+    const auto addOrigin = [&resolved](std::string_view origin)
+    {
+        while (!origin.empty() && ('/' == origin.back()))
+        {
+            origin.remove_suffix(1);
+        }
+        if (!origin.empty())
+        {
+            resolved.allowedOrigins.emplace_back(origin);
+        }
+    };
+    for (const std::string &origin : args.allowedOrigins)
+    {
+        addOrigin(origin);
+    }
+    if (nullptr != envOrigins)
+    {
+        detail::forEachEntry(envOrigins, addOrigin);
+    }
+    *auth = std::move(resolved);
+    return true;
 }
 
 } // namespace App

@@ -58,7 +58,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **File Storage:** Legacy versioned file persistence (deprecated in favor of LMDB)
 
 ### Deployment
-- **Docker Compose:** 3-service stack — PostgreSQL 16, C++ server, React/nginx frontend
+- **Docker Compose:** 3-service stack — PostgreSQL 16, C++ server, React/nginx frontend. Only the frontend's port and the FIX acceptor's (5001) are published, and a WebSocket client needs the access token (#146)
 - **Multi-Stage Dockerfiles:** CentOS Stream 10 build stage, minimal runtime images
 
 ---
@@ -146,6 +146,9 @@ Server options:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--port` | 8080 | WebSocket listen port |
+| `--bind` | `0.0.0.0` | The WebSocket server's address: an IP address, such as `127.0.0.1` for this host only (#146). The FIX acceptor listens where `--fix-cfg`'s settings say: `SocketAcceptPort`, on every interface unless `SocketAcceptAddress` is set |
+| `--ws-token-file` | none | A file whose first line is the access token a WebSocket client must offer (#146). `OMS_WS_TOKEN` gives it too, but not both |
+| `--allowed-origin` | any | An Origin a browser page may connect from; repeat it for more. `OMS_ALLOWED_ORIGINS` adds a comma-separated list (#146) |
 | `--data-dir` | `./data` | LMDB persistence directory |
 | `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
@@ -158,6 +161,8 @@ Server options:
 | `--max-connections` | <!-- DOC_CHECK:ws_max_connections -->256<!-- /DOC_CHECK --> | WebSocket clients connected at once. One more is closed as soon as it's accepted |
 | `--max-session-queue-mb` | <!-- DOC_CHECK:ws_max_session_queue_mb -->16<!-- /DOC_CHECK --> | What may wait to be sent to one client, in MiB. A client that doesn't read is dropped once more waits, and gets the current state again when it reconnects |
 
+Without `--ws-token-file` or `OMS_WS_TOKEN`, any client that reaches the server may connect, and the server warns once at startup (#146). A token has at least <!-- DOC_CHECK:ws_min_token_length -->16<!-- /DOC_CHECK --> letters, digits, `.`, `_` or `-` (`openssl rand -hex 32` makes one); see [Connecting](#connecting) for how a client offers it. A token file with nothing on its first line, or `OMS_WS_TOKEN` set but empty, is refused rather than taken as no token.
+
 An option the server doesn't know, an option without its value, or a number outside the option's range is a usage error: the server prints why and its usage on standard error, and exits with status 2 (#173). `--help` prints the usage.
 
 The log goes to `exchange.log` in the working directory. The environment variable `EXCHANGE_LOG` sends it elsewhere: a file's path, or `-` for standard output, which the Docker image uses, so `docker compose logs` shows it.
@@ -167,6 +172,7 @@ The log goes to `exchange.log` in the working directory. The environment variabl
 ```bash
 cd docker
 cp .env.example .env        # Set PostgreSQL credentials
+sed -i "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$(openssl rand -hex 32)/" .env   # The access token (#146)
 docker compose up --build -d
 ```
 
@@ -174,13 +180,13 @@ The first `up` seeds the new data volume with test data, so the stack takes orde
 
 This starts 3 services:
 
-| Service | Port | Description |
-|---------|------|-------------|
-| `oms-db` | 5432 | PostgreSQL 16 (Alpine) with schema initialization |
-| `oms-server` | 8080 | C++ OrderProcessor WebSocket server |
+| Service | Host port | Description |
+|---------|-----------|-------------|
+| `oms-db` | none (5432 in the stack) | PostgreSQL 16 (Alpine) with schema initialization |
+| `oms-server` | 5001, the FIX acceptor (8080 only in the stack) | C++ OrderProcessor WebSocket server and FIX acceptor |
 | `oms-frontend` | 3000 | React UI served by nginx, proxies `/ws` to server |
 
-Open **http://localhost:3000** to access the OMS frontend.
+Open **http://localhost:3000** to access the OMS frontend. It asks for the access token, the `OMS_WS_TOKEN` in `docker/.env`. The stack serves plain HTTP, so the token crosses the network in the clear: TLS is #226. [docker/README.md](docker/README.md#access) has the details.
 
 ```bash
 docker compose logs -f              # Follow all logs
@@ -197,7 +203,7 @@ npm install
 npm run dev                         # Vite dev server at http://localhost:3000
 ```
 
-The app connects to `/ws` on the host and port it was loaded from, and the dev server passes that on to the server at `ws://localhost:8080/ws`. The image's nginx does the same for the server's container. To point a build somewhere else, set `VITE_WS_URL` when building.
+The app asks for the server's access token first: leave it empty for a server run without one. It connects to `/ws` on the host and port it was loaded from, and the dev server passes that on to the server at `ws://localhost:8080/ws`. The image's nginx does the same for the server's container. To point a build somewhere else, set `VITE_WS_URL` when building.
 
 ---
 
@@ -337,6 +343,10 @@ reaches LMDB.
 
 The server communicates with clients via JSON messages over WebSocket. All messages have a `type` field for dispatch. A server message's payload is in a `data` field, except `error`'s, whose text is a top-level `message`. A client's `new_order`, `cancel_order` and `replace_order` put theirs in `data` too, `{"type": "new_order", "data": {...}}`, while `subscribe_book` and `unsubscribe_book` give `symbol` at the top level.
 
+### Connecting
+
+A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. When the server has an access token (#146), the client offers it too, as a second subprotocol, `oms-token.<token>`: a browser can't set a WebSocket's headers, but it can name subprotocols. The server names `oms-v1` in its answer when the client offered it, never the token's. It refuses an upgrade without the right token with 401, one whose `Origin` isn't among `--allowed-origin` and `OMS_ALLOWED_ORIGINS` (when either is set) with 403, and a request that isn't a WebSocket upgrade with 426. Anyone with the token may still do everything the protocol allows, on any account: authorization is #225.
+
 ### Server → Client
 
 | Type | Payload | When Sent |
@@ -444,6 +454,7 @@ OrderProcessor/
 │   ├── main.cpp            # Server entry point
 │   ├── WsServer.cpp/h      # Boost Beast WebSocket server
 │   ├── WsSession.cpp/h     # Per-client session with strand
+│   ├── WsAuth.h            # Who may open a session: access token and Origins (#146)
 │   ├── JsonSerializer.cpp/h # JSON encoding/decoding
 │   ├── MetricsPublisher.cpp/h # Periodic system metrics broadcast
 │   ├── SessionManager.cpp/h # Thread-safe session registry + broadcast
@@ -455,7 +466,7 @@ OrderProcessor/
 │   ├── Dockerfile.oms-frontend # Multi-stage React build (Node 24 + nginx)
 │   ├── nginx.conf          # Frontend proxy config (serves :3000, proxies /ws)
 │   ├── init-db/            # PostgreSQL schema initialization
-│   └── .env.example        # PostgreSQL credentials template
+│   └── .env.example        # PostgreSQL credentials and the access token, a template
 ├── scripts/                # Tooling
 │   └── benchmark-regression.sh  # Before/after benchmark comparison
 ├── docs/                   # Architecture documentation
