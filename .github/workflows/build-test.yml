@@ -23,6 +23,10 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
+    # A hung step would hold the only runner for GitHub's six-hour default (#169). The job's last 25 successful runs, on
+    # either branch to 2026-10-14, took 7.5 minutes at most; the rest is room for a loaded laptop and for a FetchContent
+    # clone on a cold cache.
+    timeout-minutes: 45
     env:
       # Activate gcc-toolset-15 the same way the container path did:
       # put its binaries first on PATH, its libs first on LD_LIBRARY_PATH.
