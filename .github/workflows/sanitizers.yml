@@ -82,10 +82,22 @@ jobs:
         # Same oneTBB version as the system tbb-devel, built with
         # -fsanitize=thread by the job's compiler and installed under the
         # runner's home.  Rebuilt only when the version or compiler changes.
+        # The version is pinned, and the job fails when tbb-devel moves
+        # (#176): the TSan job would otherwise test a oneTBB the Release
+        # builds don't link.  Follow an update by changing TBB_VERSION, which
+        # fetches and builds the new tag here only once a person has asked.
         if: matrix.sanitizer == 'tsan'
         shell: bash
         run: |
           TBB_VERSION=v2021.11.0
+          SYSTEM_TBB="v$(rpm -q --qf '%{VERSION}' tbb-devel)" || {
+            echo "::error::tbb-devel isn't installed, so there is no oneTBB version to match (#176)"
+            exit 1
+          }
+          if [ "$SYSTEM_TBB" != "$TBB_VERSION" ]; then
+            echo "::error::the system's tbb-devel is $SYSTEM_TBB, but this job builds oneTBB $TBB_VERSION for TSan (#176)"
+            exit 1
+          fi
           PREFIX="$HOME/.cache/orderprocessor/onetbb-$TBB_VERSION-tsan-gcc$(g++ -dumpfullversion)"
           if [ ! -f "$PREFIX/lib64/cmake/TBB/TBBConfig.cmake" ]; then
             SRC=$(mktemp -d)
