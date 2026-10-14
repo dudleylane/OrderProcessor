@@ -1,6 +1,6 @@
 import React from 'react';
-import type { Execution, Order, TradeExecution, RejectExecution, CorrectExecution, TradeCancelExecution, ReplaceExecution } from '../types';
-import { ExecType } from '../types/enums';
+import type { Execution, Order } from '../types';
+import { isCorrection, isRejection, isReplacement, isTrade, isTradeCancel } from '../types';
 import { formatQuantity, formatPrice, formatTime, formatId } from '../utils/format';
 import { EXEC_TYPE_COLORS, ORDER_STATUS_LABELS, ORDER_STATUS_COLORS } from '../utils/constants';
 import { downloadCsv } from '../utils/csv';
@@ -10,31 +10,24 @@ interface ExecutionBlotterProps {
   orders: Map<string, Order>;
 }
 
+// By the fields a report's class adds, not its type (#179): a refused replace is type REPLACE too, and showed nothing
 function execDetails(exec: Execution): string {
-  switch (exec.type) {
-    case ExecType.TRADE: {
-      const t = exec as TradeExecution;
-      return `${formatQuantity(t.lastQty)} @ ${formatPrice(t.lastPx)}`;
-    }
-    case ExecType.REJECT: {
-      const r = exec as RejectExecution;
-      return r.rejectReason || 'Rejected';
-    }
-    case ExecType.CORRECT: {
-      const c = exec as CorrectExecution;
-      return `Ref: ${formatId(c.execRefId)} | ${formatQuantity(c.lastQty)} @ ${formatPrice(c.lastPx)}`;
-    }
-    case ExecType.CANCEL: {
-      const tc = exec as TradeCancelExecution;
-      return tc.execRefId ? `Ref: ${formatId(tc.execRefId)}` : '';
-    }
-    case ExecType.REPLACE: {
-      const rp = exec as ReplaceExecution;
-      return rp.origOrderId ? `Orig: ${formatId(rp.origOrderId)}` : '';
-    }
-    default:
-      return '';
+  if (isRejection(exec)) {
+    return exec.rejectReason || 'Rejected';
   }
+  if (isTrade(exec)) {
+    return `${formatQuantity(exec.lastQty)} @ ${formatPrice(exec.lastPx)}`;
+  }
+  if (isCorrection(exec)) {
+    return `Ref: ${formatId(exec.execRefId)} | ${formatQuantity(exec.lastQty)} @ ${formatPrice(exec.lastPx)}`;
+  }
+  if (isTradeCancel(exec)) {
+    return `Ref: ${formatId(exec.execRefId)}`;
+  }
+  if (isReplacement(exec)) {
+    return `Orig: ${formatId(exec.origOrderId)}`;
+  }
+  return '';
 }
 
 function handleExport(executions: Execution[], orders: Map<string, Order>) {
@@ -45,7 +38,7 @@ function handleExport(executions: Execution[], orders: Map<string, Order>) {
 
   const rows = executions.map(exec => {
     const order = orders.get(String(exec.orderId));
-    const trade = exec.type === ExecType.TRADE ? exec as TradeExecution : null;
+    const trade = isTrade(exec) ? exec : null;
     return [
       new Date(exec.transactTime).toISOString(),
       exec.execId,
@@ -98,7 +91,7 @@ export function ExecutionBlotter({ executions, orders }: ExecutionBlotterProps) 
         <tbody>
           {executions.map(exec => {
             const order = orders.get(String(exec.orderId));
-            const trade = exec.type === ExecType.TRADE ? exec as TradeExecution : null;
+            const trade = isTrade(exec) ? exec : null;
 
             return (
               <tr
