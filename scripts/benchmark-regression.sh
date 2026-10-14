@@ -102,8 +102,12 @@ done
 
 [[ "$THRESHOLD" =~ ^[0-9]+([.][0-9]+)?$ ]] || usage_error "--threshold needs a number, got '$THRESHOLD'"
 # 10# keeps a leading zero from making bash read the number as octal.
-[[ "$ROUNDS" =~ ^[0-9]+$ ]] && (( 10#$ROUNDS >= 2 )) || usage_error "--rounds needs a whole number of at least 2, got '$ROUNDS'"
-[[ "$REPETITIONS" =~ ^[0-9]+$ ]] && (( 10#$REPETITIONS >= 1 )) || usage_error "--repetitions needs a whole number of at least 1, got '$REPETITIONS'"
+if ! [[ "$ROUNDS" =~ ^[0-9]+$ ]] || (( 10#$ROUNDS < 2 )); then
+    usage_error "--rounds needs a whole number of at least 2, got '$ROUNDS'"
+fi
+if ! [[ "$REPETITIONS" =~ ^[0-9]+$ ]] || (( 10#$REPETITIONS < 1 )); then
+    usage_error "--repetitions needs a whole number of at least 1, got '$REPETITIONS'"
+fi
 ROUNDS=$(( 10#$ROUNDS ))
 REPETITIONS=$(( 10#$REPETITIONS ))
 if [[ -n "$MEMORY_CAP_GIB" ]]; then
@@ -128,6 +132,7 @@ WORK=$(mktemp -d /tmp/benchmark_compare_XXXXXX)
 # (a failed build, copy or run, set -e, an interrupt) is a setup error and exits 2,
 # so it can't read as a slowdown.
 VERDICT=""
+# shellcheck disable=SC2329 # trap runs it, on EXIT below
 on_exit() {
     local rc=$?
     rm -rf -- "${WORK:?}"
@@ -187,6 +192,7 @@ if $UPDATE_BASELINE; then
     sed 's/^/  /' "$BASELINE.info"
     echo "It belongs to this machine and toolchain, and is deliberately not committed."
     echo "Make your change and rebuild, then compare:"
+    # shellcheck disable=SC2016 # the quotes are text in the command printed; $FILTER does expand inside the "..."
     echo "  $0 --no-build --pinned ${PINNED_CORES:-2-5}${BASELINE_ARG}${FILTER:+ --filter '$FILTER'}"
     exit 0
 fi
@@ -226,6 +232,7 @@ count_benchmarks() {
 AFTER_COUNT=$(count_benchmarks "$BENCH_EXE")
 BEFORE_COUNT=$(count_benchmarks "$BASELINE")
 if (( AFTER_COUNT == 0 && BEFORE_COUNT == 0 )); then
+    # shellcheck disable=SC2016 # the quotes are text in the message; $FILTER does expand inside the "..."
     echo "ERROR: No benchmark matches${FILTER:+ --filter '$FILTER'} in either binary" >&2
     exit 2
 fi
