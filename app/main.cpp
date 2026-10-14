@@ -8,7 +8,9 @@
 #include <string>
 #include <csignal>
 #include <memory>
+#include <optional>
 #include <thread>
+#include <vector>
 
 #include <spdlog/spdlog.h>
 
@@ -35,6 +37,7 @@
 #include "CpuAffinity.h"
 #include "HugePages.h"
 #include "ServerDefaults.h"
+#include "ServerArgs.h"
 #include "ServerData.h"
 
 using namespace COP;
@@ -48,8 +51,8 @@ const u64 ID_RESERVATION_BLOCK = 10000;
 
 // What an exception that nothing catches does (#203). It reaches std::terminate where it was thrown, before any
 // destructor runs, so a half-built engine is never torn down, and onTerminate takes over from there:
-//  - Until the server listens, it's a server that can't start: a data directory it can't open, a port in use, a bad
-//    flag. onTerminate logs the reason at Fatal, writes the log out, and exits with 1. It doesn't abort: the reason
+//  - Until the server listens, it's a server that can't start: a data directory it can't open, or a port in use.
+//    onTerminate logs the reason at Fatal, writes the log out, and exits with 1. It doesn't abort: the reason
 //    would be lost from the log, and in the image every restart would dump core.
 //  - Once the server listens, an exception that escapes is a bug. onTerminate logs it the same way, then aborts, so it
 //    leaves a core dump.
@@ -105,81 +108,27 @@ std::atomic<bool> terminating{ false };
     std::_Exit(1);
 }
 
-struct Config
-{
-    unsigned short port = 8080;
-    std::string dataDir = "./data";
-    int workers = 0;
-    int cpuAffinityStart = -1; // -1 = disabled, >= 0 = pin starting from this core
-    bool hugePages = false;
-    std::string clearingFirm = App::DEFAULT_CLEARING_FIRM; // the clearing firm on every order (#34)
-    std::string defaultAccount = App::DEFAULT_ACCOUNT;     // the account of an order that names none (#34)
-    bool debug = false;                                    // debug logging, off unless asked for (#76)
-    // LMDB's starting map, in MiB: a write that finds the map full doubles it (#148)
-    u64 lmdbMapMb = Store::LMDBStorage::DEFAULT_MAP_SIZE >> 20;
-    App::WsLimits wsLimits; // what WebSocket clients may hold of the server (#159)
-};
-
-Config parseArgs(int argc, char *argv[])
-{
-    Config cfg;
-    for (int i = 1; i < argc; ++i)
-    {
-        std::string arg = argv[i];
-        if (arg == "--port" && i + 1 < argc)
-        {
-            cfg.port = static_cast<unsigned short>(std::stoi(argv[++i]));
-        }
-        else if (arg == "--data-dir" && i + 1 < argc)
-        {
-            cfg.dataDir = argv[++i];
-        }
-        else if (arg == "--workers" && i + 1 < argc)
-        {
-            cfg.workers = std::stoi(argv[++i]);
-        }
-        else if (arg == "--cpu-affinity" && i + 1 < argc)
-        {
-            cfg.cpuAffinityStart = std::stoi(argv[++i]);
-        }
-        else if (arg == "--huge-pages")
-        {
-            cfg.hugePages = true;
-        }
-        else if (arg == "--clearing-firm" && i + 1 < argc)
-        {
-            cfg.clearingFirm = argv[++i];
-        }
-        else if (arg == "--default-account" && i + 1 < argc)
-        {
-            cfg.defaultAccount = argv[++i];
-        }
-        else if (arg == "--debug")
-        {
-            cfg.debug = true;
-        }
-        else if (arg == "--lmdb-map-mb" && i + 1 < argc)
-        {
-            cfg.lmdbMapMb = std::max<u64>(1, std::stoull(argv[++i]));
-        }
-        else if (arg == "--max-connections" && i + 1 < argc)
-        {
-            cfg.wsLimits.maxConnections = std::max<u64>(1, std::stoull(argv[++i]));
-        }
-        else if (arg == "--max-session-queue-mb" && i + 1 < argc)
-        {
-            cfg.wsLimits.maxQueuedBytes = std::max<u64>(1, std::stoull(argv[++i])) << 20;
-        }
-    }
-    return cfg;
-}
-
 } // namespace
 
 int main(int argc, char *argv[])
 {
     std::set_terminate(onTerminate);
-    Config cfg = parseArgs(argc, argv);
+    // A flag the server doesn't know, or a value it can't read, is a usage error: the reason and the usage on standard
+    // error, and exit status 2, as seedData does (#173). Before, the server ignored it and ran with the defaults.
+    const std::vector<std::string> args(argv + 1, argv + argc);
+    std::string usageError;
+    const std::optional<App::ServerArgs> parsed = App::parseServerArgs(args, &usageError);
+    if (!parsed)
+    {
+        std::cerr << "orderProcessorServer: " << usageError << "\n" << App::serverUsage();
+        return 2;
+    }
+    if (parsed->help)
+    {
+        std::cout << App::serverUsage();
+        return 0;
+    }
+    App::ServerArgs cfg = *parsed;
 
     // 1. Create singletons
     aux::ExchLogger::create();
