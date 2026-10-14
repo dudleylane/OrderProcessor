@@ -372,7 +372,7 @@ bool OrderEntry::isValid(std::string *invalid) const
     return false;
 }
 
-bool OrderEntry::isReplaceValid(std::string *invalid) const
+bool OrderEntry::isReplaceValid([[maybe_unused]] std::string *invalid) const
 {
     assert(nullptr != invalid);
     bool rez = true;

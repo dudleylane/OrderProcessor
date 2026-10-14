@@ -60,8 +60,8 @@ struct ObjectInTransaction
     IdT id_;
     ObjectType type_;
 
-    constexpr ObjectInTransaction() : type_(invalid_ObjectType), id_() {}
-    constexpr ObjectInTransaction(const ObjectType &type, const IdT &id) : type_(type), id_(id) {}
+    constexpr ObjectInTransaction() : id_(), type_(invalid_ObjectType) {}
+    constexpr ObjectInTransaction(const ObjectType &type, const IdT &id) : id_(id), type_(type) {}
 };
 constexpr bool operator<(const ObjectInTransaction &left, const ObjectInTransaction &right)
 {
@@ -88,7 +88,7 @@ struct ObjectsInTransaction
 
 typedef ObjectsInTransaction ObjectsInTransactionT;
 
-typedef enum OperationType
+enum OperationType
 {
     INVALID_TROPERATION = 0,
     CREATE_EXECREPORT_TROPERATION, // creates and enqueues ExecutionReport for the changed order

@@ -731,7 +731,6 @@ TEST_F(StorageRecordDispatcherTest, SaveStringRecord)
     StringT val = "string_";
     std::string expectedBuf = createRecordTypePrefix(StorageRecordDispatcher::STRING_RECORDTYPE);
     IdT id(1, 1234);
-    u32 version = 0;
     StringTCodec::encode(val, &expectedBuf);
 
     dispatcher_->save(id, val);

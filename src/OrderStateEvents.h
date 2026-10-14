@@ -50,24 +50,23 @@ struct OrderStateEvent
     Store::PublishGuard *publishGuard_;
 
     OrderStateEvent()
-        : generator_(nullptr), orderStorage_(nullptr), transaction_(nullptr), testStateMachine_(false),
-          testStateMachineCheckResult_(true), orderId_(), order4StateMachine_(nullptr), orderBook_(nullptr),
-          publishGuard_(nullptr)
+        : generator_(nullptr), orderStorage_(nullptr), transaction_(nullptr), orderId_(), order4StateMachine_(nullptr),
+          testStateMachine_(false), testStateMachineCheckResult_(true), orderBook_(nullptr), publishGuard_(nullptr)
     {
     }
 
     OrderStateEvent(IdTValueGenerator *generator, Store::OrderDataStorage *orderStorage, const IdT &orderId,
                     OrderBook *orderBook, bool testStateMachine, bool testStateMachineCheckResult)
-        : generator_(generator), orderStorage_(orderStorage), orderId_(orderId), testStateMachine_(testStateMachine),
-          testStateMachineCheckResult_(testStateMachineCheckResult), order4StateMachine_(nullptr),
-          transaction_(nullptr), orderBook_(orderBook), publishGuard_(nullptr)
+        : generator_(generator), orderStorage_(orderStorage), transaction_(nullptr), orderId_(orderId),
+          order4StateMachine_(nullptr), testStateMachine_(testStateMachine),
+          testStateMachineCheckResult_(testStateMachineCheckResult), orderBook_(orderBook), publishGuard_(nullptr)
     {
     }
 
     OrderStateEvent(const OrderStateEvent &evnt)
-        : generator_(evnt.generator_), orderStorage_(evnt.orderStorage_), orderId_(evnt.orderId_),
-          testStateMachine_(evnt.testStateMachine_), testStateMachineCheckResult_(evnt.testStateMachineCheckResult_),
-          order4StateMachine_(nullptr), transaction_(evnt.transaction_), orderBook_(evnt.orderBook_),
+        : generator_(evnt.generator_), orderStorage_(evnt.orderStorage_), transaction_(evnt.transaction_),
+          orderId_(evnt.orderId_), order4StateMachine_(nullptr), testStateMachine_(evnt.testStateMachine_),
+          testStateMachineCheckResult_(evnt.testStateMachineCheckResult_), orderBook_(evnt.orderBook_),
           publishGuard_(evnt.publishGuard_)
     {
     }
