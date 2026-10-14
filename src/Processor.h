@@ -99,6 +99,12 @@ public:
     /// Appends the operation that persists the order when the transaction commits (#20), once per transaction (#148)
     static void persistOrder(ACID::Scope *transaction, const OrderEntry &order);
 
+    /// Matches a restored order that lost its fills, and books it if it is a limit order, as the transaction that booked
+    /// it did when it ran (#207). The fills go to the transaction manager, each in a transaction of its own, but they
+    /// are applied before this returns, so the next order matched sees them. Call it before the server takes orders,
+    /// for each of StorageRecordDispatcher::ordersToMatch() in turn. Throws if the order can't be matched or booked.
+    void matchRestored(OrderEntry *order);
+
 private:
     /// Enqueues a state change of the order with id, to be decided on the transaction worker (#96). caller names the
     /// handler in the error when the order doesn't exist.
