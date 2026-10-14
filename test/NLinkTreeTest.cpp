@@ -110,20 +110,25 @@ TEST_F(NLinkTreeTest, AddWithDependency)
     int readyToExecute = 0;
     Transaction *tr = nullptr;
 
-    // Add node A (independent)
+    // A transaction waits for the earlier ones that share an object with it. A and B both relate to one order, so B
+    // waits for A. This test gave A no object, so B didn't wait, and it checked nothing about B (#167).
+    const ObjectInTransaction order(COP::ACID::order_ObjectType, COP::IdT(42, 20260119));
+
+    // Add node A, the first on the order
     COP::IdT keyA(1, 20260119);
     DependObjs depsA;
+    depsA.list_[0] = order;
+    depsA.size_ = 1;
     tree_->add(keyA, tr, depsA, &readyToExecute);
     EXPECT_EQ(1, readyToExecute);
 
-    // Add node B depending on A (object dependency via order_ObjectType)
+    // Add node B, on the same order
     COP::IdT keyB(2, 20260119);
     DependObjs depsB;
-    depsB.list_[0] = ObjectInTransaction(COP::ACID::order_ObjectType, keyA);
+    depsB.list_[0] = order;
     depsB.size_ = 1;
-
     tree_->add(keyB, tr, depsB, &readyToExecute);
-    // B should not add to readyToExecute since it depends on A
+    EXPECT_EQ(0, readyToExecute) << "B is ready though A, on the same order, hasn't run";
 }
 
 TEST_F(NLinkTreeTest, RemovingDependencyUnblocksChild)
@@ -131,23 +136,30 @@ TEST_F(NLinkTreeTest, RemovingDependencyUnblocksChild)
     int readyToExecute = 0;
     Transaction *tr = nullptr;
 
+    // A and B share an order, so B waits for A, and removing A makes it ready. This test gave A no object, so B never
+    // waited, and it checked only that a count wasn't negative (#167).
+    const ObjectInTransaction order(COP::ACID::order_ObjectType, COP::IdT(42, 20260119));
+
     // Add A
     COP::IdT keyA(1, 20260119);
     DependObjs depsA;
+    depsA.list_[0] = order;
+    depsA.size_ = 1;
     tree_->add(keyA, tr, depsA, &readyToExecute);
-    int readyAfterA = readyToExecute;
+    EXPECT_EQ(1, readyToExecute);
 
-    // Add B depending on A
+    // Add B, on the same order
     COP::IdT keyB(2, 20260119);
     DependObjs depsB;
-    depsB.list_[0] = ObjectInTransaction(COP::ACID::order_ObjectType, keyA);
+    depsB.list_[0] = order;
     depsB.size_ = 1;
     tree_->add(keyB, tr, depsB, &readyToExecute);
+    EXPECT_EQ(0, readyToExecute);
 
-    // Remove A — should unblock B
+    // Remove A, which unblocks B
     int newReady = 0;
     tree_->remove(keyA, &newReady);
-    EXPECT_GE(newReady, 0);
+    EXPECT_EQ(1, newReady);
 }
 
 // =============================================================================

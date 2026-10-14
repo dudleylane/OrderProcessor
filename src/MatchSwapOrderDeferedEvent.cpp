@@ -27,7 +27,8 @@ MatchSwapOrderDeferedEvent::MatchSwapOrderDeferedEvent(OrderEntry *ord) : order_
     assert(nullptr != order_);
 }
 
-void MatchSwapOrderDeferedEvent::execute(DeferedEventFunctor *func, const Context &cnxt, ACID::Scope * /*scope*/)
+void MatchSwapOrderDeferedEvent::execute([[maybe_unused]] DeferedEventFunctor *func, const Context &cnxt,
+                                         ACID::Scope * /*scope*/)
 {
     assert(nullptr != func);
     assert(nullptr != order_);

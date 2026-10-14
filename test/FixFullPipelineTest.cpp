@@ -211,7 +211,7 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
 
     // --- STEP 1: Submit SELL via FixGateway ---
     {
-        FIX::UtcTimeStamp now;
+        FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
         FIX44::NewOrderSingle sellMsg;
         sellMsg.set(FIX::ClOrdID("PIPE-SELL-001"));
         sellMsg.set(FIX::Side(FIX::Side_SELL));
@@ -231,7 +231,7 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
 
     // --- STEP 2: Submit BUY at same price ---
     {
-        FIX::UtcTimeStamp now;
+        FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
         FIX44::NewOrderSingle buyMsg;
         buyMsg.set(FIX::ClOrdID("PIPE-BUY-001"));
         buyMsg.set(FIX::Side(FIX::Side_BUY));
@@ -271,6 +271,7 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
     // --- [WideDataStorage] Instrument, account, clearing resolved ---
     EXPECT_EQ("GBPUSD", sellOrder->instrument_.get().symbol_) << "[WideDataStorage] instrument resolved";
     EXPECT_EQ("PIPELINE_ACCT", sellOrder->account_.get().account_) << "[WideDataStorage] account resolved";
+    EXPECT_EQ(acctId, sellOrder->account_.getId()) << "[WideDataStorage] the account added above";
     EXPECT_EQ("PIPELINE_CLR", sellOrder->clearing_.get().firm_) << "[WideDataStorage] clearing resolved";
 
     // --- [IdTGenerator] Unique IDs assigned ---

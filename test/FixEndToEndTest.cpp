@@ -234,7 +234,7 @@ protected:
     FIX44::NewOrderSingle makeNOS(const std::string &clOrdId, char side, char ordType, double price, double qty,
                                   char tif = FIX::TimeInForce_DAY)
     {
-        FIX::UtcTimeStamp now;
+        FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
         FIX44::NewOrderSingle msg;
         msg.set(FIX::ClOrdID(clOrdId));
         msg.set(FIX::Side(side));
@@ -413,7 +413,7 @@ TEST_F(FixEndToEndTest, CancelOrder_ViaFix_Completes)
     ASSERT_NE(nullptr, order);
     EXPECT_EQ(NEW_ORDSTATUS, order->status_);
 
-    FIX::UtcTimeStamp now;
+    FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
     FIX44::OrderCancelRequest cancelMsg;
     cancelMsg.set(FIX::OrigClOrdID("FIX-CNL-001"));
     cancelMsg.set(FIX::ClOrdID("FIX-CNL-002"));

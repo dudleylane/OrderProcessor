@@ -24,6 +24,13 @@ if(BUILD_FIX)
     find_package(quickfix 22 CONFIG REQUIRED)
 endif()
 option(BUILD_FUZZ "Build fuzz targets in test/fuzz (libFuzzer with Clang, corpus replay otherwise)" OFF)
+option(WARNINGS_AS_ERRORS "Fail the build on a warning in this project's own code; CI's Release job and the pre-push hook turn it on (#167)" OFF)
+
+# Warnings for this project's own targets, which the FetchContent dependencies don't get: -Wall -Wextra, and -Werror with
+# WARNINGS_AS_ERRORS (#167)
+function(op_warnings target)
+    target_compile_options(${target} PRIVATE -Wall -Wextra $<$<BOOL:${WARNINGS_AS_ERRORS}>:-Werror>)
+endfunction()
 
 # Compiler flags
 add_compile_options(-msse2 -fexceptions)
@@ -34,13 +41,13 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebI
         -O3                    # Aggressive optimization
         -march=native          # CPU-specific optimizations
         -mtune=native          # CPU-specific tuning
-        -flto                  # Link-time optimization
+        -flto=auto             # Link-time optimization, its LTRANS jobs in parallel: plain -flto warned of serial ones (#167)
         -ffast-math            # Fast floating-point, but its -ffinite-math-only lets the compiler delete every
         -fno-finite-math-only  # inf/NaN check (#142: a price of 1e400 parsed as inf), so turn that part back off
         -funroll-loops         # Loop unrolling
         -fomit-frame-pointer   # Free up register for hot paths
     )
-    add_link_options(-flto)    # Enable LTO at link time
+    add_link_options(-flto=auto) # Enable LTO at link time
 endif()
 
 add_compile_definitions(
@@ -66,6 +73,7 @@ message(STATUS "Boost_LIBRARY_DIRS = ${Boost_LIBRARY_DIRS}")
 # Main library
 add_library(orderEngine STATIC)
 add_subdirectory(src)
+op_warnings(orderEngine)
 
 target_link_libraries(orderEngine
     PUBLIC
@@ -113,6 +121,7 @@ if(BUILD_TESTS)
 
     add_executable(orderProcessorTest)
     add_subdirectory(test)
+    op_warnings(orderProcessorTest)
 
     target_link_libraries(orderProcessorTest
         PRIVATE
@@ -143,6 +152,7 @@ if(BUILD_BENCHMARKS)
 
     add_executable(orderProcessorBench)
     add_subdirectory(bench)
+    op_warnings(orderProcessorBench)
 
     target_link_libraries(orderProcessorBench
         PRIVATE
@@ -161,6 +171,7 @@ endif()
 if(BUILD_APP)
     add_executable(orderProcessorServer)
     add_subdirectory(app)
+    op_warnings(orderProcessorServer)
     target_link_libraries(orderProcessorServer PRIVATE
         orderEngine nlohmann_json::nlohmann_json pthread)
 
@@ -170,6 +181,7 @@ if(BUILD_APP)
     endif()
 
     add_executable(seedData app/seed_data.cpp)
+    op_warnings(seedData)
     target_link_libraries(seedData PRIVATE orderEngine pthread)
 
     if(BUILD_TESTS)

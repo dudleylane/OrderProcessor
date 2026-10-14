@@ -121,7 +121,7 @@ public:
 
 FIX44::NewOrderSingle makeBenchNOS(const std::string &clOrdId, char side, char ordType, double price, double qty)
 {
-    FIX::UtcTimeStamp now;
+    FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
     FIX44::NewOrderSingle msg;
     msg.set(FIX::ClOrdID(clOrdId));
     msg.set(FIX::Side(side));

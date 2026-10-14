@@ -54,7 +54,7 @@ public:
         }
     }
 
-    bool executeTransaction(const Context &cnxt) override
+    bool executeTransaction(const Context & /*cnxt*/) override
     {
         executed_ = true;
         return true;

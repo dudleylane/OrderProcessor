@@ -24,6 +24,10 @@ using namespace COP::Store;
 using namespace test;
 using test::DummyOrderSaver;
 
+// This file tests FileStorage, which is deprecated for production use: LMDBStorage replaced it. The tests use it on
+// purpose, so its deprecation warnings are off here, and only here (#167).
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 namespace
 {
 

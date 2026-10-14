@@ -81,13 +81,15 @@ private:
         IdT id_;
         u32 version_;
 
+        // Zeroes the padding too: these bytes are LMDB's key, which it compares as raw bytes, on disk. Through void *,
+        // because a memset of a class with constructors otherwise warns (-Wclass-memaccess, #167).
         CompositeKey()
         {
-            std::memset(this, 0, sizeof(CompositeKey));
+            std::memset(static_cast<void *>(this), 0, sizeof(CompositeKey));
         }
         CompositeKey(const IdT &id, u32 version)
         {
-            std::memset(this, 0, sizeof(CompositeKey));
+            std::memset(static_cast<void *>(this), 0, sizeof(CompositeKey));
             id_ = id;
             version_ = version;
         }

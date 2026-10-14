@@ -160,7 +160,7 @@ protected:
     FIX44::NewOrderSingle makeNewOrderSingle(const std::string &clOrdId, const std::string &symbol, char side,
                                              char ordType, double price, double qty, char tif = FIX::TimeInForce_DAY)
     {
-        FIX::UtcTimeStamp now;
+        FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
         FIX44::NewOrderSingle msg;
         msg.set(FIX::ClOrdID(clOrdId));
         msg.set(FIX::Side(side));
@@ -180,7 +180,7 @@ protected:
     /// An FX swap built as NewOrderMultileg_FxSwap_PushesToQueue builds it; it names no account
     FIX44::NewOrderMultileg makeFxSwap(const std::string &clOrdId)
     {
-        FIX::UtcTimeStamp now;
+        FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
         FIX44::NewOrderMultileg msg;
         msg.set(FIX::ClOrdID(clOrdId));
         msg.set(FIX::Side(FIX::Side_BUY));
@@ -420,7 +420,7 @@ TEST_F(FixGatewayInboundTest, CancelRequest_PushesToQueue)
                 EXPECT_EQ("CANCEL001", evt.requestClOrdId_);
             }));
 
-    FIX::UtcTimeStamp now;
+    FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
     FIX44::OrderCancelRequest cancelMsg;
     cancelMsg.set(FIX::OrigClOrdID(clOrdStr));
     cancelMsg.set(FIX::ClOrdID("CANCEL001"));
@@ -451,7 +451,7 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_PushesToQueue)
                 capturedReplacement = evt.replacementOrder_;
             }));
 
-    FIX::UtcTimeStamp now2;
+    FIX::UtcTimeStamp now2 = FIX::UtcTimeStamp::now();
     FIX44::OrderCancelReplaceRequest replaceMsg;
     replaceMsg.set(FIX::OrigClOrdID(clOrdStr));
     replaceMsg.set(FIX::ClOrdID("REPLACE001"));
@@ -667,7 +667,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_PushesToQueue)
                 capturedOrder = evt.order_;
             }));
 
-    FIX::UtcTimeStamp now;
+    FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
     FIX44::NewOrderMultileg msg;
     msg.set(FIX::ClOrdID("SWAP-001"));
     msg.set(FIX::Side(FIX::Side_BUY)); // near-leg side
@@ -712,7 +712,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_NonSwapOrdType_Rejected)
     // NewOrderMultileg with non-FXSwap OrdType should be rejected (no push)
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
 
-    FIX::UtcTimeStamp now;
+    FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
     FIX44::NewOrderMultileg msg;
     msg.set(FIX::ClOrdID("MLEG-BAD"));
     msg.set(FIX::Side(FIX::Side_BUY));
@@ -728,7 +728,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_TooFewLegs_Rejected)
 {
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
 
-    FIX::UtcTimeStamp now;
+    FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
     FIX44::NewOrderMultileg msg;
     msg.set(FIX::ClOrdID("MLEG-1"));
     msg.set(FIX::Side(FIX::Side_BUY));

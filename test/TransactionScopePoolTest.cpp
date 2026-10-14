@@ -116,6 +116,8 @@ TEST_F(TransactionScopePoolTest, CacheMissCounterIncrementsOnExhaustion)
     size_t idx1, idx2, idx3;
     auto *s1 = pool.acquire(idx1);
     auto *s2 = pool.acquire(idx2);
+    EXPECT_NE(nullptr, s1);
+    EXPECT_NE(s1, s2) << "two slots";
 
     EXPECT_EQ(0u, pool.cacheMisses());
 

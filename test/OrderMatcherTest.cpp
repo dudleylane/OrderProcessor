@@ -248,9 +248,8 @@ TEST_F(OrderMatcherTest, NoMatchWhenPricesDontCross)
 
     matcher_->match(buyOrder, context_);
 
-    // No additional deferred events for non-matching orders
-    // (exact behavior depends on implementation)
-    SUCCEED();
+    // A limit order that crosses nothing adds no deferred event: it only rests
+    EXPECT_EQ(eventsBefore, deferedContainer_->eventCount());
 }
 
 // =============================================================================
