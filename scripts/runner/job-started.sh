@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runner/job-started.sh: refuse a job that a fork's pull request started (#143).
+# runner/job-started.sh: refuse a job that a fork's pull request started (#143), or that Dependabot started (#168).
 #
 # This repository's CI runs on a self-hosted runner, the maintainer's laptop, and its jobs
 # run as the maintainer's user. The repository is public, so anyone can open a pull request
@@ -16,6 +16,12 @@
 # manual dispatch, runs as before. The payload must be the one the runner wrote for this
 # job, in its own _work directory: a job is refused when the payload is anywhere else or
 # can't be parsed.
+#
+# Dependabot pushes its branches into this repository itself, so its pull requests pass the fork check, and the push of
+# its branch starts every workflow too. Its jobs would run the updated dependencies, a new action's code among them,
+# before anyone has looked at them. So a job whose event Dependabot sent is refused, push and pull request alike, and a
+# re-run is refused too, since it replays the same payload. Check a Dependabot pull request locally with the pre-push
+# gate (and `npm run build` for an npm update), then merge it: the push to the branch it targets runs CI as usual.
 #
 # Install it in the runner's directory, outside _work, and restart the runner when it is
 # idle, since the runner reads .env when it starts:
@@ -47,7 +53,9 @@ verdict=$(jq -e -r --slurp '
     if length != 1 or (.[0] | type) != "object" then
         error("not one JSON object")
     else .[0] end
-    | if has("pull_request") | not then
+    | if (.sender.login // "") == "dependabot[bot]" then
+        "refuse: dependabot[bot] sent the event"
+    elif has("pull_request") | not then
         "run: not a pull request"
     elif (.pull_request | type) != "object" then
         "refuse: a pull_request that is not an object"
@@ -58,8 +66,12 @@ verdict=$(jq -e -r --slurp '
         "refuse: a pull request from \(.pull_request.head.repo.full_name // "a deleted repository") into \(.pull_request.base.repo.full_name // "an unknown repository")"
     end' "$event" 2>&1) || refuse "can't parse the event payload $event: $verdict"
 
-echo "job-started hook (#143): ${GITHUB_EVENT_NAME:-unknown} event, $verdict"
+echo "job-started hook (#143, #168): ${GITHUB_EVENT_NAME:-unknown} event, $verdict"
 if [[ "$verdict" != "run: "* ]]; then
-    echo "A fork's pull request doesn't run on this self-hosted runner (#143)." >&2
+    if [[ "$verdict" == *"dependabot[bot]"* ]]; then
+        echo "Dependabot's jobs don't run on this self-hosted runner: check its pull request locally (#168)." >&2
+    else
+        echo "A fork's pull request doesn't run on this self-hosted runner (#143)." >&2
+    fi
     exit 1
 fi

@@ -1,0 +1,27 @@
+# Dependency updates (#168): weekly, for the frontend's npm packages and the workflows' actions, on both branches.
+# Dependabot reads this file only from the default branch, so the FX branch's updates are entries here with a
+# target-branch. Its pull requests don't run CI on the self-hosted runner: its job-started hook refuses a job Dependabot
+# started, and every workflow skips one. Check a Dependabot pull request locally with the pre-push gate, and with
+# `npm run build` for an npm update, then merge it by hand: the policy's review applies, never an auto-merge.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /src/oms-frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: npm
+    directory: /src/oms-frontend
+    target-branch: feature/fx-swap-support
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: feature/fx-swap-support
+    schedule:
+      interval: weekly
