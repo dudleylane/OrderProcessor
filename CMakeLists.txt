@@ -176,6 +176,10 @@ if(BUILD_APP)
         # Run seedData itself, so the Debug and sanitizer CI jobs see an abort in its own code (#41). The
         # directory persists in the build tree, so later runs exercise the already-seeded path too.
         add_test(NAME SeedDataRunsCleanly COMMAND seedData ${CMAKE_CURRENT_BINARY_DIR}/seed-data-test)
+        # seedData --if-empty seeds a directory with no instrument, and leaves one with instruments alone (#161)
+        add_test(NAME SeedDataIfEmptySeedsOnlyADirectoryWithoutInstruments
+                 COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/SeedDataIfEmptyTest.sh $<TARGET_FILE:seedData>
+                         $<TARGET_FILE:orderProcessorServer>)
         # Run the server so that it can't start: it must say why and exit, not abort (#203)
         add_test(NAME ServerThatCannotStartExits
                  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/ServerStartupTest.sh $<TARGET_FILE:orderProcessorServer>)

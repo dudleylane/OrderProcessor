@@ -16,7 +16,7 @@ cp .env.example .env          # Set PostgreSQL credentials
 docker compose up --build -d   # Build and start all services
 ```
 
-Open **http://localhost:3000** to access the OMS frontend.
+Open **http://localhost:3000** to access the OMS frontend. The first `up` seeds the new data volume with test instruments, accounts and the clearing firm, so the stack takes orders at once (see [Seed Test Data](#seed-test-data)).
 
 The first build takes several minutes (C++ compilation inside the container). Subsequent starts use the Docker layer cache and are fast.
 
@@ -31,7 +31,7 @@ The first build takes several minutes (C++ compilation inside the container). Su
 ### Startup Order
 
 1. **oms-db** starts first, initializes schema from `init-db/001_schema.sql`
-2. **oms-server** waits for `oms-db` to be healthy (`pg_isready` check), then starts the C++ engine on port 8080
+2. **oms-server** waits for `oms-db` to be healthy (`pg_isready` check), seeds the data volume if it has no instrument yet, then starts the C++ engine on port 8080
 3. **oms-frontend** waits for `oms-server` to be healthy (it answers HTTP on 8080, which it does only after restoring its data), then serves the React app on port 3000
 
 All three restart unless stopped (`restart: unless-stopped`), and each has a health check, a memory limit and a process limit in `docker-compose.yml`. The server's and the frontend's health checks are also in their images; compose repeats them because podman builds OCI images by default, and those don't keep a `HEALTHCHECK`. The server's 2 GB is a starting point: raise it for a large book or a large LMDB map. The server answers only after restoring its data directory, and its health check allows two minutes for that: raise `start_period` for a larger directory, or Docker Compose will find the server unhealthy and won't start the frontend.
@@ -136,7 +136,9 @@ SELECT * FROM executions ORDER BY exec_time DESC LIMIT 10;
 
 ### Seed Test Data
 
-The `seedData` utility is included in the server image. The server reads reference data only when it starts, so seed with it stopped:
+A new `oms-data` volume is seeded on the first `up`: the server's container runs `seedData --if-empty` before the server, every time it starts (#161). That seeds a volume with no instrument yet, including one a server ran on before it was seeded, and leaves a volume with instruments alone, since what `seedData` adds is test data.
+
+The `seedData` utility is included in the server image. To seed a volume that has instruments, run it by hand. The server reads reference data only when it starts, so seed with it stopped:
 
 ```bash
 docker compose stop oms-server

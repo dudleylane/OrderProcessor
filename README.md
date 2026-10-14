@@ -126,6 +126,7 @@ cmake --build . -j$(nproc)
 ### Standalone Server
 
 ```bash
+./build/seedData --data-dir ./data      # test instruments, accounts and the clearing firm; skips any that exist
 ./build/orderProcessorServer --port 8080 --data-dir ./data
 ```
 
@@ -133,6 +134,8 @@ With FIX gateway enabled (requires `BUILD_FIX=ON`):
 ```bash
 ./build/orderProcessorServer --port 8080 --data-dir ./data --fix-cfg config/fix.cfg
 ```
+
+Seed a new data directory first. Until then it has no instruments, accounts or clearing firm, and the server answers every order with an `error` (#161). `seedData` seeds test data, so don't run it on a directory in real use.
 
 Server options:
 
@@ -160,6 +163,8 @@ cd docker
 cp .env.example .env        # Set PostgreSQL credentials
 docker compose up --build -d
 ```
+
+The first `up` seeds the new data volume with test data, so the stack takes orders at once: the server's container runs `seedData --if-empty` before the server (#161).
 
 This starts 3 services:
 
