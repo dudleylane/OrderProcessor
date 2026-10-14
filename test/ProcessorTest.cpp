@@ -482,6 +482,34 @@ TEST_F(ProcessorTest, CancelCompletesAPendingCancelLeftByAnOlderServer)
     EXPECT_EQ(0u, saved->leavesQty_);
 }
 
+TEST_F(ProcessorTest, CancelCompletesAPendingReplaceLeftByAnOlderServer)
+{
+    // Builds from 6c3ada4 to 584e6a6 persisted an original after it took a replace, and nothing completed the replace:
+    // restored, the order stays in GoingReplace. A cancel found no transition and was refused as one already pending,
+    // a replace is refused too, and the order stayed in the book and still traded (#164). A cancel must end it.
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor_->process();
+    OrderEntry *saved = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, saved);
+
+    int goingReplace = 0;
+    while ("GoingReplace" != OrdState::OrderState::getStateName(goingReplace)) // throws past the last state
+    {
+        ++goingReplace;
+    }
+    OrdState::OrderStatePersistence persisted = saved->stateMachinePersistance();
+    persisted.stateZone2Id_ = goingReplace;
+    saved->setStateMachinePersistance(persisted);
+
+    inQueues_->push("test", OrderCancelEvent(saved->orderId_, "ending it"));
+    processor_->process();
+
+    EXPECT_EQ(CANCELED_ORDSTATUS, saved->status_);
+    EXPECT_EQ(0u, saved->leavesQty_);
+}
+
 // =============================================================================
 // Replace Event Tests
 // =============================================================================
