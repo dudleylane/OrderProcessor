@@ -36,15 +36,58 @@ jobs:
       - name: Remove what an interrupted run left behind
         # The host has powered off mid-job (#32), and a run that dies never
         # cleans up.  Jobs run one at a time on this runner, so anything named
-        # orderprocessor-ci-* belongs to an earlier run.
+        # orderprocessor-ci-* belongs to an earlier run.  The frontend image's
+        # check below makes a network (#139).
         shell: bash
         run: |
           stale() { grep '^orderprocessor-ci-' || true; }
           podman ps -a --format '{{.Names}}' | stale | xargs -r podman rm -f -t 0
           podman volume ls --format '{{.Name}}' | stale | xargs -r podman volume rm -f
+          podman network ls --format '{{.Name}}' | stale | xargs -r podman network rm -f
           podman images --format '{{.Repository}}' | sed 's|^localhost/||' | stale | sort -u \
             | sed 's|^|localhost/|' | xargs -r podman rmi -f
 
       - name: Build the server image and run it
         shell: bash
         run: scripts/check-server-image.sh
+
+  frontend-image:
+    name: Frontend image build + run
+    # Builds docker/Dockerfile.oms-frontend and runs it (#139).  The image's
+    # build runs npm ci and npm run build (tsc && vite build), and nothing
+    # else in CI does: until #139 a TypeScript error in src/oms-frontend,
+    # such as a wire-protocol type that app/JsonSerializer.cpp no longer
+    # matches, turned no check red.  scripts/check-frontend-image.sh says
+    # what it checks; run it locally the same way.  Like the server image's
+    # check, it names what it makes after the run and removes it.
+    # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
+    # A pull request can delete this line, so the runner's job-started hook,
+    # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
+    # same-repository pull requests run as before.
+    # Dependabot's jobs are refused by the same hook, and skipped here (#168): its pull requests are checked locally.
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      && github.actor != 'dependabot[bot]'
+    runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
+    # A hung npm ci would hold the only runner until it is killed (#59).  A
+    # run took 20 seconds here on 2026-10-14, with the base images cached.
+    timeout-minutes: 15
+    env:
+      CHECK_NAME: orderprocessor-ci-${{ github.run_id }}-${{ github.run_attempt }}-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove what an interrupted run left behind
+        # As in server-image above.
+        shell: bash
+        run: |
+          stale() { grep '^orderprocessor-ci-' || true; }
+          podman ps -a --format '{{.Names}}' | stale | xargs -r podman rm -f -t 0
+          podman volume ls --format '{{.Name}}' | stale | xargs -r podman volume rm -f
+          podman network ls --format '{{.Name}}' | stale | xargs -r podman network rm -f
+          podman images --format '{{.Repository}}' | sed 's|^localhost/||' | stale | sort -u \
+            | sed 's|^|localhost/|' | xargs -r podman rmi -f
+
+      - name: Build the frontend image and run it
+        shell: bash
+        run: scripts/check-frontend-image.sh
