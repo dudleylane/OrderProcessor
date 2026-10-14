@@ -129,7 +129,8 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `NewOrderMultileg_FxSwap_PushesToQueue` | 2-leg multileg → FXSWAP OrderEntry with near/far prices+dates |
 | `NewOrderMultileg_NonSwapOrdType_Rejected` | Non-FXSWAP OrdType in multileg → rejected, no push |
 | `NewOrderMultileg_TooFewLegs_Rejected` | Single leg multileg → rejected, no push |
-| `SessionMapPopulatedOnLogon` | `onLogon()` adds session, `onLogout()` removes it |
+| `SessionMapPopulatedOnLogon` | `onLogon()` makes the session known |
+| `ASessionStaysKnownWhileItsClientIsAway` | A session is known from `onCreate()`, before any logon, and still after `onLogout()`, so a report for its order reaches QuickFIX, which keeps it for a ResendRequest (#160) |
 | `MakeSourceString_Format` | Source string format: `"FIX:SENDER->TARGET"` |
 | `FromApp_RoutesAGenericNewOrderSingle` | `fromApp()` given a plain `FIX::Message` builds the typed message, without the cracker's bad cast that UBSan reported |
 | `FromApp_RoutesAGenericCancelRequest` | The same for a cancel request |
@@ -232,6 +233,29 @@ Tests for FX Swap data model, matching, validation, and codec support.
 | `SwapCodecRoundTrip` | Encode/decode preserves farPrice + farSettlDate (v1) |
 | `LegacyCodecCompat_V0DefaultsSwapFields` | v0 orders decode with swap defaults (0.0, 0) |
 | `NonSwapOrderUnchanged_LimitMatch` | Regular LIMIT matching still works (regression) |
+
+## 10. FixRotatingLogTest — Bounded FIX Logs
+
+**File:** `test/FixRotatingLogTest.cpp`
+**Requires:** `BUILD_FIX=ON`
+
+The QuickFIX log the gateway uses since #160, whose files rotate where QuickFIX's own FileLog grew without limit.
+
+| Test | Description |
+|------|-------------|
+| `ASessionsFilesAreBounded` | 4 MiB of messages, at 1 MiB a file and two backups, leave three files of at most 1 MiB each |
+| `LinesAreWrittenAsFileLogWritesThem` | `<UTC timestamp> : <text>`, messages to one file and events to the other, with braces and SOH separators kept |
+| `TheLogOutsideASessionIsNamedGlobal` | As QuickFIX's FileLogFactory names it |
+| `LimitsThatMakeNoSenseAreRefused` | `FileLogMaxMB` or `FileLogBackups` that can't be used → refused |
+
+---
+
+## 11. FixClientRecoversMissedReports — A Real Server, Two Sessions
+
+**File:** `test/FixResendTest.py`, a ctest
+**Requires:** `BUILD_FIX=ON`, Python 3
+
+Runs `orderProcessorServer` with this branch's `config/fix.cfg` and two FIX clients on raw sockets. CLIENT_A rests a buy and drops its connection; CLIENT_B's sell fills it while A is away; A logs on again, with its sequence numbers continuing, and its ResendRequest must get the fill back, with PossDupFlag (43=Y). Before #160 the gateway forgot a session at logout and dropped the report, and `ResetOnLogon=Y` started both sides from 1.
 
 ---
 

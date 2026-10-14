@@ -94,8 +94,10 @@ if(BUILD_FIX)
         FixGatewayTest.cpp
         FixEndToEndTest.cpp
         FixFullPipelineTest.cpp
+        FixRotatingLogTest.cpp
         ${CMAKE_SOURCE_DIR}/app/FixGateway.cpp
         ${CMAKE_SOURCE_DIR}/app/FixOutQueues.cpp
+        ${CMAKE_SOURCE_DIR}/app/FixRotatingLog.cpp
         ${CMAKE_SOURCE_DIR}/app/MultiOutQueues.cpp)
 endif()
 

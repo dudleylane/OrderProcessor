@@ -179,6 +179,14 @@ if(BUILD_APP)
         # Run the server so that it can't start: it must say why and exit, not abort (#203)
         add_test(NAME ServerThatCannotStartExits
                  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/ServerStartupTest.sh $<TARGET_FILE:orderProcessorServer>)
+        if(BUILD_FIX)
+            # A FIX client that reconnects gets back the reports it missed: the server, its settings, two sessions (#160)
+            find_package(Python3 REQUIRED COMPONENTS Interpreter)
+            add_test(NAME FixClientRecoversMissedReports
+                     COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixResendTest.py
+                             $<TARGET_FILE:orderProcessorServer> $<TARGET_FILE:seedData>
+                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec/FIX44.xml)
+        endif()
     endif()
 endif()
 

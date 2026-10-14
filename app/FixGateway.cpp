@@ -160,6 +160,11 @@ OrderEntry *FixGateway::locateSessionOrder(const std::string &source, const std:
 void FixGateway::onCreate(const FIX::SessionID &sid)
 {
     aux::ExchLogger::instance()->note("FIX session created: " + sid.toString());
+    // Known from now on, logged on or not (#160). The map used to hold a session only while it was logged on, so a report
+    // for its order was dropped while the client was away, and a ResendRequest couldn't get it back.
+    std::string source = makeSourceString(sid);
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, true);
+    sessionMap_[source] = sid;
 }
 
 void FixGateway::onLogon(const FIX::SessionID &sid)
@@ -168,6 +173,7 @@ void FixGateway::onLogon(const FIX::SessionID &sid)
     std::string source = makeSourceString(sid);
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, true);
     sessionMap_[source] = sid;
+    loggedOn_.insert(source);
 }
 
 void FixGateway::onLogout(const FIX::SessionID &sid)
@@ -175,7 +181,7 @@ void FixGateway::onLogout(const FIX::SessionID &sid)
     aux::ExchLogger::instance()->note("FIX logout: " + sid.toString());
     std::string source = makeSourceString(sid);
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, true);
-    sessionMap_.erase(source);
+    loggedOn_.erase(source); // the session stays known: QuickFIX keeps what it is sent for the client's return (#160)
 }
 
 void FixGateway::toAdmin(FIX::Message & /*msg*/, const FIX::SessionID & /*sid*/) {}
@@ -1198,11 +1204,11 @@ void FixGateway::sendBusinessReject(const IdT &refOrderId, const std::string &re
     }
     else
     {
-        // No order reference — send to every live FIX session
+        // No order reference — send to every live FIX session: those logged on, as before #160 kept the others known
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, false);
-        for (const auto &kv : sessionMap_)
+        for (const auto &source : loggedOn_)
         {
-            targets.push_back(kv.second);
+            targets.push_back(sessionMap_.at(source));
         }
     }
 

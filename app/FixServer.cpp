@@ -3,12 +3,12 @@
 // QuickFIX headers isolated in this TU via PIMPL (FixServer::Impl).
 #include <quickfix/ThreadedSocketAcceptor.h>
 #include <quickfix/FileStore.h>
-#include <quickfix/FileLog.h>
 #include <quickfix/SessionSettings.h>
 
 #include "FixServer.h"
 #include "FixGateway.h"
 #include "FixOutQueues.h"
+#include "FixRotatingLog.h"
 #include "Logger.h"
 
 using namespace COP;
@@ -20,7 +20,7 @@ struct FixServer::Impl
     std::unique_ptr<FixOutQueues> fixOutQueues;
     std::unique_ptr<FIX::SessionSettings> settings;
     std::unique_ptr<FIX::FileStoreFactory> storeFactory;
-    std::unique_ptr<FIX::FileLogFactory> logFactory;
+    std::unique_ptr<FixRotatingLogFactory> logFactory; // FileLog's files, bounded (#160)
     std::unique_ptr<FIX::ThreadedSocketAcceptor> acceptor;
 };
 
@@ -42,7 +42,7 @@ void FixServer::start(const std::string &configFile)
 {
     impl_->settings = std::make_unique<FIX::SessionSettings>(configFile);
     impl_->storeFactory = std::make_unique<FIX::FileStoreFactory>(*impl_->settings);
-    impl_->logFactory = std::make_unique<FIX::FileLogFactory>(*impl_->settings);
+    impl_->logFactory = std::make_unique<FixRotatingLogFactory>(*impl_->settings);
     impl_->acceptor = std::make_unique<FIX::ThreadedSocketAcceptor>(*impl_->gateway, *impl_->storeFactory,
                                                                     *impl_->settings, *impl_->logFactory);
     impl_->acceptor->start();

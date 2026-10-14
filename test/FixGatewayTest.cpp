@@ -968,8 +968,19 @@ TEST_F(FixGatewayInboundTest, SessionMapPopulatedOnLogon)
     EXPECT_FALSE(gateway_->hasFixSession(source));
     gateway_->onLogon(TEST_SID);
     EXPECT_TRUE(gateway_->hasFixSession(source));
+}
+
+TEST_F(FixGatewayInboundTest, ASessionStaysKnownWhileItsClientIsAway)
+{
+    // QuickFIX creates each session it is configured with at start, before any logon, and keeps what it is sent while
+    // the client is logged out, for a ResendRequest. A report for the session's order must reach it then too: the
+    // gateway used to forget a session at logout, and dropped the report (#160).
+    std::string source = FixGateway::makeSourceString(TEST_SID);
+    gateway_->onCreate(TEST_SID);
+    EXPECT_TRUE(gateway_->hasFixSession(source)) << "a session isn't known until its client logs on";
+    gateway_->onLogon(TEST_SID);
     gateway_->onLogout(TEST_SID);
-    EXPECT_FALSE(gateway_->hasFixSession(source));
+    EXPECT_TRUE(gateway_->hasFixSession(source)) << "a session was forgotten when its client logged out";
 }
 
 TEST_F(FixGatewayInboundTest, MakeSourceString_Format)
