@@ -124,8 +124,9 @@ export interface NewOrderRequest {
   minQty?: number;
   tif: TimeInForce;
   account?: string;
-  currency?: Currency;
-  capacity?: Capacity;
+  // Required by the server, which refuses an order without them (#166)
+  currency: Currency;
+  capacity: Capacity;
 }
 
 export interface CancelOrderRequest {
