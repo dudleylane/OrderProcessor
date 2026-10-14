@@ -122,6 +122,13 @@ fi
 
 BASELINE="${BASELINE:-$PROJECT_ROOT/benchmark_baseline.bin}"
 BUILD_DIR="${BUILD_DIR:-$PROJECT_ROOT/build}"
+# Made absolute once (#180): the binaries run from a scratch directory, where a relative path given here named nothing,
+# and --update-baseline and a comparison have to agree on where the baseline is
+BASELINE="$(realpath -m -- "$BASELINE")"
+BUILD_DIR="$(realpath -m -- "$BUILD_DIR")"
+if [[ -n "$BASELINE_ARG" ]]; then
+    BASELINE_ARG=" --baseline $BASELINE"
+fi
 BENCH_EXE="$BUILD_DIR/orderProcessorBench"
 
 # The benchmarks run in a scratch directory: they write exchange.log in their
@@ -226,8 +233,16 @@ FILTER_ARGS=()
 if [[ -n "$FILTER" ]]; then
     FILTER_ARGS=("--benchmark_filter=$FILTER")
 fi
+# The number of the binary's benchmarks the filter matches. A binary that lists nothing says why on standard error: that
+# was discarded, so a binary that couldn't run read as a filter that matched nothing (#180).
 count_benchmarks() {
-    ( cd "$WORK" && "$1" --benchmark_list_tests=true "${FILTER_ARGS[@]}" 2>/dev/null ) | grep -c . || true
+    local listed
+    listed=$( cd "$WORK" && "$1" --benchmark_list_tests=true "${FILTER_ARGS[@]}" 2>"$WORK/list-errors" ) || true
+    if [[ -z "$listed" && -s "$WORK/list-errors" ]]; then
+        echo "  $1 listed nothing:" >&2
+        sed 's/^/    /' "$WORK/list-errors" >&2
+    fi
+    grep -c . <<< "$listed" || true
 }
 AFTER_COUNT=$(count_benchmarks "$BENCH_EXE")
 BEFORE_COUNT=$(count_benchmarks "$BASELINE")
