@@ -623,8 +623,12 @@ void ChangeOrderStateTrOperation::rollback(const Context &cnxt)
     }
 }
 
+// Related to the instrument as well as the order, as a cancel is: a match reads the instrument's book, so it runs after
+// every earlier transaction on the instrument, and a market order's booking, which has no book operation, is ordered
+// with the others too. Without it two orders could match the same resting order at once (#209).
 MatchOrderTrOperation::MatchOrderTrOperation(OrderEntry *order)
-    : Operation(MATCH_ORDER_TROPERATION, order->orderId_), order_(order), eventCountBefore_(0)
+    : Operation(MATCH_ORDER_TROPERATION, order->orderId_, order->instrument_.getId()), order_(order),
+      eventCountBefore_(0)
 {
 }
 
