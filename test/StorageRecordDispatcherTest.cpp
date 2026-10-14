@@ -2042,3 +2042,83 @@ TEST_F(StorageRecordDispatcherTest, RestoredSwapsAreLeftToMatchOnlyForAnOrderThe
     EXPECT_EQ(s1->orderId_, book.getTop(instrument, SELL_SIDE));
     EXPECT_EQ(o->orderId_, book.getTop(instrument, BUY_SIDE)) << "O and S3 rest at 1.09, O first";
 }
+
+// =============================================================================
+// Which restored orders are booked, for every status (#165, #215)
+// =============================================================================
+
+TEST_F(StorageRecordDispatcherTest, OnlyAWorkingOrderIsBookedOrLeftToMatch)
+{
+    // A live book holds only orders that are NEW or PARTFILL with quantity left, and a restore must book exactly those. It
+    // booked every status but a list of terminal ones, SUSPENDED included, though suspending takes an order out of the
+    // book (#215). A market order is never booked: an open one is left to match (#207). PENDINGNEW is never set and
+    // INVALID never on an order, and RECEIVEDNEW is an order before acceptance, so none of the three should come back.
+    // On this branch a swap is booked as a limit order is.
+    enum Outcome
+    {
+        NEITHER,
+        BOOKED,
+        TO_MATCH
+    };
+    struct Case
+    {
+        OrderStatus status_;
+        Outcome limit_;  // a limit order or a swap, with quantity left
+        Outcome market_; // with quantity left
+    };
+    const Case cases[] = {
+        { INVALID_ORDSTATUS, NEITHER, NEITHER },        { RECEIVEDNEW_ORDSTATUS, NEITHER, NEITHER },
+        { REJECTED_ORDSTATUS, NEITHER, NEITHER },       { PENDINGNEW_ORDSTATUS, NEITHER, NEITHER },
+        { PENDINGREPLACE_ORDSTATUS, NEITHER, NEITHER }, { NEW_ORDSTATUS, BOOKED, TO_MATCH },
+        { PARTFILL_ORDSTATUS, BOOKED, TO_MATCH },       { FILLED_ORDSTATUS, NEITHER, NEITHER },
+        { EXPIRED_ORDSTATUS, NEITHER, NEITHER },        { DFD_ORDSTATUS, NEITHER, NEITHER },
+        { SUSPENDED_ORDSTATUS, NEITHER, NEITHER },      { REPLACED_ORDSTATUS, NEITHER, NEITHER },
+        { CANCELED_ORDSTATUS, NEITHER, NEITHER },
+    };
+    static_assert(std::size(cases) == CANCELED_ORDSTATUS + 1, "a case for every status");
+    const char *const names[] = { "neither", "booked", "left to match" };
+
+    const SourceIdT instrument = test::addInstrument("STATUSES");
+    u64 number = 100;
+    for (const Case &c : cases)
+    {
+        for (const OrderType type : { LIMIT_ORDERTYPE, MARKET_ORDERTYPE, FXSWAP_ORDERTYPE })
+        {
+            for (const QuantityT leaves : { QuantityT(100), QuantityT(0) })
+            {
+                OrderBookImpl book;
+                OrderBookImpl::InstrumentsT instruments;
+                instruments.insert(instrument);
+                book.init(instruments);
+                OrderDataStorage storage;
+                TestFileSaver saver;
+                StorageRecordDispatcher dispatcher;
+                dispatcher.init(restore_.get(), &book, &saver, &storage);
+                dispatcher.startLoad();
+                std::unique_ptr<OrderEntry> order = bookedOrder(instrument, ++number, BUY_SIDE, 10.0, 100);
+                order->status_ = c.status_;
+                order->ordType_ = type;
+                if (FXSWAP_ORDERTYPE == type)
+                {
+                    order->farPrice_ = 10.5;
+                    order->settlDate_ = 1000;
+                    order->farSettlDate_ = 2000;
+                }
+                order->leavesQty_ = leaves;
+                loadOrderRecord(dispatcher, *order);
+                dispatcher.finishLoad();
+
+                const Outcome expected = (0 == leaves) ? NEITHER : (MARKET_ORDERTYPE == type) ? c.market_ : c.limit_;
+                const Outcome actual = book.getTop(instrument, BUY_SIDE).isValid() ? BOOKED
+                                       : dispatcher.ordersToMatch().empty()        ? NEITHER
+                                                                                   : TO_MATCH;
+                EXPECT_EQ(std::string(names[expected]), std::string(names[actual]))
+                    << "status " << c.status_ << ", "
+                    << ((LIMIT_ORDERTYPE == type)    ? "limit"
+                        : (MARKET_ORDERTYPE == type) ? "market"
+                                                     : "swap")
+                    << ", " << leaves << " left";
+            }
+        }
+    }
+}

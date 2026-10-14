@@ -1556,3 +1556,47 @@ TEST_F(ProcessorTest, AMarketOrdersBookingWaitsForTheBookingBeforeItOnItsInstrum
     EXPECT_EQ(1u, parents.count(ids[1])) << "the second market order's booking runs alongside the first's";
     manager.stop();
 }
+
+// =============================================================================
+// A suspended order across a restart (#215)
+// =============================================================================
+
+TEST_F(ProcessorTest, ASuspendedOrderStaysOutOfTheBookAfterARestartAndIsBookedOnceWhenResumed)
+{
+    // Suspending an order takes it out of the book. A restart put it back, so it traded while suspended, and resuming it
+    // booked it a second time (#215).
+    const std::string dir = test::uniqueTestPath("suspended-restart");
+    std::filesystem::remove_all(dir);
+    IdT id;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory before(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        const OrderEntry *stored = before.process(clOrdId);
+        id = stored->orderId_;
+        inQueues_->push("test", OrderChangeStateEvent(id, OrderChangeStateEvent::SUSPEND));
+        before.processor_.process();
+        ASSERT_EQ(SUSPENDED_ORDSTATUS, stored->status_);
+        ASSERT_FALSE(before.book_.getTop(instrId1_, BUY_SIDE).isValid())
+            << "suspending takes the order out of the book";
+    }
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    const OrderEntry *restored = restarted.storage_.locateByOrderId(id);
+    ASSERT_NE(nullptr, restored);
+    EXPECT_EQ(SUSPENDED_ORDSTATUS, restored->status_);
+    EXPECT_FALSE(restarted.book_.getTop(instrId1_, BUY_SIDE).isValid())
+        << "the suspended order came back into the book";
+
+    inQueues_->push("test", OrderChangeStateEvent(id, OrderChangeStateEvent::RESUME));
+    restarted.processor_.process();
+    EXPECT_EQ(NEW_ORDSTATUS, restored->status_);
+    const BookSnapshot book = restarted.book_.getSnapshot(instrId1_, &restarted.storage_);
+    ASSERT_EQ(1u, book.bids.size());
+    EXPECT_EQ(1u, book.bids[0].orderCount) << "the resumed order is booked twice";
+    EXPECT_EQ(100u, book.bids[0].totalQty);
+    std::filesystem::remove_all(dir);
+}

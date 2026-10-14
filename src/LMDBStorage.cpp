@@ -157,22 +157,41 @@ void LMDBStorage::load(const std::string &path, FileStorageObserver *observer)
         checkLMDB(rc, "LMDBStorage::load mdb_dbi_open");
     }
 
-    // Scan all existing records and notify observer
-    observer->startLoad();
-
+    // Scan all existing records and notify observer. A record the observer refuses throws out of the scan: close the
+    // cursor, the transaction and the environment first, as the failures above do. Left open, the cursor leaked and the
+    // destructor closed the environment under an open write transaction (#216).
     MDB_cursor *cursor = nullptr;
-    rc = mdb_cursor_open(txn, dbi_, &cursor);
-    if (rc == MDB_SUCCESS)
+    try
     {
-        MDB_val key, data;
-        while (mdb_cursor_get(cursor, &key, &data, MDB_NEXT) == MDB_SUCCESS)
+        observer->startLoad();
+        rc = mdb_cursor_open(txn, dbi_, &cursor);
+        if (rc == MDB_SUCCESS)
         {
-            if (key.mv_size == sizeof(CompositeKey))
+            MDB_val key, data;
+            while (mdb_cursor_get(cursor, &key, &data, MDB_NEXT) == MDB_SUCCESS)
             {
-                CompositeKey ck = readKey(key);
-                observer->onRecordLoaded(ck.id_, ck.version_, static_cast<const char *>(data.mv_data), data.mv_size);
+                if (key.mv_size == sizeof(CompositeKey))
+                {
+                    CompositeKey ck = readKey(key);
+                    observer->onRecordLoaded(ck.id_, ck.version_, static_cast<const char *>(data.mv_data),
+                                             data.mv_size);
+                }
             }
         }
+    }
+    catch (...)
+    {
+        if (nullptr != cursor)
+        {
+            mdb_cursor_close(cursor);
+        }
+        mdb_txn_abort(txn);
+        mdb_env_close(env_);
+        env_ = nullptr;
+        throw;
+    }
+    if (nullptr != cursor)
+    {
         mdb_cursor_close(cursor);
     }
 
