@@ -37,6 +37,7 @@
 #include "StateMachine.h"
 #include "LMDBStorage.h"
 #include "StorageRecordDispatcher.h"
+#include "TransactionMgr.h"
 
 using namespace COP;
 using namespace COP::Queues;
@@ -1409,4 +1410,64 @@ TEST_F(ProcessorTest, AMarketOrderThatFillsCompletelyIsReportedFilled)
         EXPECT_EQ(70u, restarted.storage_.locateByOrderId(sell)->leavesQty_);
     }
     std::filesystem::remove_all(dir);
+}
+
+// =============================================================================
+// A market order's booking is ordered with the others on its instrument (#209)
+// =============================================================================
+
+namespace
+{
+/// The transactions the processor built for the orders queued, kept rather than run, then handed to a real manager in
+/// the same order: what each one waits for is what the manager would make it wait for. Returns their ids.
+std::vector<TransactionId> bookingsAsTheManagerOrdersThem(TestTransactionManager &kept, TransactionMgr &manager)
+{
+    std::vector<TransactionId> ids;
+    for (std::unique_ptr<Transaction> &tr : kept.kept_)
+    {
+        tr->setTransactionId(TransactionId()); // the test manager numbers them all alike
+        Transaction *added = tr.get();
+        manager.addTransaction(tr);
+        ids.push_back(added->transactionId());
+    }
+    kept.kept_.clear();
+    return ids;
+}
+} // namespace
+
+TEST_F(ProcessorTest, AMarketOrdersBookingWaitsForTheBookingBeforeItOnItsInstrument)
+{
+    // A market order's booking related only to the order: its match has no book operation, which is what relates a limit
+    // order's booking to the instrument. So the manager ran it alongside another booking on the instrument, both matched
+    // the same resting order, and the second's fill threw and left its order NEW for good (#209).
+    auto sell = createTestOrder(instrId1_, SELL_SIDE, 10.0, 100);
+    inQueues_->push("test", OrderEvent(sell.release()));
+    processor_->process();
+
+    transMgr_->keep_ = true;
+    auto limit = createTestOrder(instrId1_, BUY_SIDE, 10.0, 60);
+    inQueues_->push("test", OrderEvent(limit.release()));
+    processor_->process();
+    auto market = createTestOrder(instrId1_, BUY_SIDE, 0.0, 60);
+    market->ordType_ = MARKET_ORDERTYPE;
+    inQueues_->push("test", OrderEvent(market.release()));
+    processor_->process();
+    auto secondMarket = createTestOrder(instrId1_, BUY_SIDE, 0.0, 60);
+    secondMarket->ordType_ = MARKET_ORDERTYPE;
+    inQueues_->push("test", OrderEvent(secondMarket.release()));
+    processor_->process();
+    transMgr_->keep_ = false;
+    ASSERT_EQ(3u, transMgr_->kept_.size());
+
+    TransactionMgr manager;
+    TransactionMgrParams params(IdTGenerator::instance());
+    manager.init(params);
+    const std::vector<TransactionId> ids = bookingsAsTheManagerOrdersThem(*transMgr_, manager);
+    TransactionIdsT parents;
+    manager.getParentTransactions(ids[1], &parents);
+    EXPECT_EQ(1u, parents.count(ids[0])) << "the market order's booking runs alongside the limit order's";
+    parents.clear();
+    manager.getParentTransactions(ids[2], &parents);
+    EXPECT_EQ(1u, parents.count(ids[1])) << "the second market order's booking runs alongside the first's";
+    manager.stop();
 }
