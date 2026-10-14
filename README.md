@@ -436,7 +436,7 @@ OrderProcessor/
 ├── docker/                 # Docker deployment
 │   ├── docker-compose.yml  # PostgreSQL + C++ server + React frontend
 │   ├── Dockerfile.oms-server   # Multi-stage C++ build (CentOS Stream 10)
-│   ├── Dockerfile.oms-frontend # Multi-stage React build (Node 20 + nginx)
+│   ├── Dockerfile.oms-frontend # Multi-stage React build (Node 24 + nginx)
 │   ├── nginx.conf          # Frontend proxy config (serves :3000, proxies /ws)
 │   ├── init-db/            # PostgreSQL schema initialization
 │   └── .env.example        # PostgreSQL credentials template
