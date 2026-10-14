@@ -354,7 +354,7 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
 
         EXPECT_EQ(sellOrder->orderId_, codecId) << "[OrderCodec] encoded orderId matches";
 
-        OrderEntry *decoded = codec.decode(codecId, version, buf.data(), buf.size());
+        OrderEntry *decoded = codec.decode(codecId, COP::Codec::OrderCodec::FORMAT_VERSION, buf.data(), buf.size());
         ASSERT_NE(nullptr, decoded) << "[OrderCodec] decode succeeded";
 
         EXPECT_EQ(FILLED_ORDSTATUS, decoded->status_) << "[OrderCodec] round-trip preserves FILLED status";
