@@ -42,6 +42,7 @@
 #include <string>
 
 #include "DataModelDef.h"
+#include "ServerDefaults.h"
 #include "TransactionScope.h"
 #include "TransactionScopePool.h"
 
@@ -191,6 +192,14 @@ TEST_F(DocConsistencyTest, OrderStatusCount)
 TEST_F(DocConsistencyTest, ExecTypeCount)
 {
     expectDocEq("exec_type_count", static_cast<int>(COP::PEND_REPLACE_EXECTYPE));
+}
+
+// What WebSocket clients may hold of the server (#159)
+TEST_F(DocConsistencyTest, WebSocketLimits)
+{
+    expectDocEq("ws_max_connections", COP::App::DEFAULT_MAX_CONNECTIONS);
+    expectDocEq("ws_max_session_queue_mb", COP::App::DEFAULT_MAX_SESSION_QUEUE_MB);
+    expectDocEq("ws_max_client_message_kib", COP::App::MAX_CLIENT_MESSAGE_BYTES / 1024);
 }
 
 } // namespace

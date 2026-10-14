@@ -1,14 +1,16 @@
 #pragma once
 
+#include <atomic>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <deque>
-#include <set>
 #include <boost/beast/core.hpp>
 #include <boost/beast/websocket.hpp>
 #include <boost/asio/strand.hpp>
 
 #include "TypesDef.h"
+#include "ServerDefaults.h"
 
 namespace COP
 {
@@ -39,16 +41,19 @@ public:
     /// unset when the server could not resolve it at startup; the session then refuses the orders that need it (#34).
     WsSession(boost::asio::ip::tcp::socket &&socket, SessionManager *sessionMgr, Store::WideParamsDataStorage *wideData,
               Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues, IdTValueGenerator *idGen,
-              OrderBookImpl *orderBook, SourceIdT defaultClearingId, SourceIdT defaultAccountId);
+              OrderBookImpl *orderBook, SourceIdT defaultClearingId, SourceIdT defaultAccountId,
+              const WsLimits &limits = WsLimits(), std::shared_ptr<std::atomic<std::size_t>> connections = nullptr);
+    ~WsSession();
 
     void run();
     void send(const std::string &msg);
+    /// Queues a message that other sessions may share: a broadcast is one copy, however many clients get it (#159)
+    void send(std::shared_ptr<const std::string> msg);
 
     boost::asio::any_io_executor executor()
     {
         return ws_.get_executor();
     }
-    bool isSubscribedTo(const std::string &symbol) const;
 
 private:
     void onAccept(boost::beast::error_code ec);
@@ -60,6 +65,8 @@ private:
     OrderEntry *findOrder(u64 number, const std::string &clOrdId, bool *answered);
     void doWrite();
     void onWrite(boost::beast::error_code ec, std::size_t bytesTransferred);
+    /// Ends the session of a client that doesn't read, once what waits for it passes the limit (#159)
+    void drop();
 
     boost::beast::websocket::stream<boost::beast::tcp_stream> ws_;
     boost::beast::flat_buffer buffer_;
@@ -72,9 +79,13 @@ private:
     OrderBookImpl *orderBook_;
     SourceIdT defaultClearingId_;
     SourceIdT defaultAccountId_;
+    WsLimits limits_;
+    /// Counts the server's sessions, for its connection limit; null for a session no WsServer made (#159)
+    std::shared_ptr<std::atomic<std::size_t>> connections_;
 
-    std::deque<std::string> writeQueue_;
-    std::set<std::string> bookSubscriptions_;
+    std::deque<std::shared_ptr<const std::string>> writeQueue_;
+    std::size_t queuedBytes_ = 0; // what writeQueue_ holds, against limits_.maxQueuedBytes (#159)
+    bool dropped_ = false;
 };
 
 } // namespace App
