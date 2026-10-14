@@ -108,7 +108,7 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 |------|-------------|
 | `NewOrderSingle_PushesToQueue` | Limit order: correct side, ordType, price, qty, tif, status |
 | `NewOrderSingle_MarketOrder` | Market order: ordType=MARKET, side=SELL, qty=50 |
-| `NewOrderSingle_UnknownSymbol_NoPush` | Unknown symbol → no event pushed, error logged |
+| `NewOrderSingle_UnknownSymbol_NoPush` | Unknown symbol → no event pushed; refused to the sender, 103=1 (#189) |
 | `NewOrderSingle_WithoutAccount_GetsTheServerDefaults` | No Account (1) → the server's default account and clearing firm (#34) |
 | `NewOrderSingle_NamingAnAccount_KeepsIt` | An Account (1) the server knows → kept |
 | `NewOrderSingle_RefusedWhenTheServerHasNoClearingFirm` | The server has no clearing firm → refused at the gateway, nothing pushed (#34) |
@@ -130,8 +130,8 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ASwapsSettlementDatesAreReadAsDates` | A NewOrderSingle swap's SettlDate (64) and 6501, LocalMktDates, become midnight UTC of their days (#198) |
 | `ASwapWithADateThatIsntOneIsNotQueued` | `-5`, a non-number, 21 digits or a day that doesn't exist, in 64, 6501 or a leg's 588 → refused before anything is stored, nothing pushed (#190) |
 | `ExecutionReport_ASwapsLegsCarryTheirSideDateAndPrice` | Each leg's report carries its side, its LegSettlDate as `YYYYMMDD` (#198), its price, and a TradeLinkID (#153) |
-| `NewOrderMultileg_NonSwapOrdType_Rejected` | Non-FXSWAP OrdType in multileg → rejected, no push |
-| `NewOrderMultileg_TooFewLegs_Rejected` | Single leg multileg → rejected, no push |
+| `NewOrderMultileg_NonSwapOrdType_Rejected` | Non-FXSWAP OrdType in multileg → no push; refused to the sender, 103=11 (#189) |
+| `NewOrderMultileg_TooFewLegs_Rejected` | Single leg multileg → no push; refused to the sender, 103=11 (#189) |
 | `SessionMapPopulatedOnLogon` | `onLogon()` makes the session known |
 | `ALogonNeedsItsCounterpartysUsernameAndPassword` | With credentials, `fromAdmin()` accepts a Logon only with its counterparty's Username and Password, and from a CompID the credentials name; it refuses with `RejectLogon` and a text that doesn't say which was wrong. Other admin messages aren't checked (#147) |
 | `WithoutCredentialsEveryLogonIsAccepted` | The gateway without credentials, as tests run it, checks nothing; the server won't run FIX that way (#147) |
@@ -304,6 +304,15 @@ Runs `orderProcessorServer` with this branch's `config/fix.cfg` and a credential
 |------|-------------|
 | `ADateIsMidnightUtcOfThatDay` | `YYYYMMDD` in, milliseconds since the epoch at midnight UTC out, a leap day included; back to `YYYYMMDD`, from any millisecond of the day; a date past 9999-12-31 is written as that day (#198) |
 | `AnythingElseIsNotADate` | `-5`, `1000`, 7 or 9 digits, letters, a sign or space, 21 digits, 2023-02-29, month 13 or 0, day 32, and 1969-12-31 → not dates (#190) |
+
+---
+
+## 15. FixRefusalsReachOnlyTheirSender — A Real Server's Refusals
+
+**File:** `test/FixRefusalTest.py`, a ctest
+**Requires:** `BUILD_FIX=ON`, Python 3
+
+Two counterparties log on. CLIENT_A sends a NewOrderSingle for an unknown symbol, and NewOrderMultilegs that aren't an FX swap, have one leg, or name an unknown symbol. Each must come back to CLIENT_A alone, as an ExecutionReport with 150=8, 39=8 and OrdRejReason 1 or 11, and CLIENT_B must get nothing. Before #189 the first got no answer, and the others went to every session logged on as BusinessMessageRejects naming no order.
 
 ---
 
