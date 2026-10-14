@@ -31,7 +31,9 @@ COPY app/ app/
 
 COPY config/ config/
 
-RUN cmake -B out -DCMAKE_BUILD_TYPE=Release \
+# x86-64-v3, not -march=native (#170): native tied the image to the build machine's CPU. v3 is what CentOS Stream 10
+# itself is built for, so the image asks no more of a host's CPU than its base image does.
+RUN cmake -B out -DCMAKE_BUILD_TYPE=Release -DMARCH=x86-64-v3 \
         -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_APP=ON -DBUILD_FIX=ON \
     && cmake --build out -j$(nproc)
 
