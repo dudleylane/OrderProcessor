@@ -93,10 +93,57 @@ TEST(ClientMessageParserTest, UnknownTypeIsPassedThroughForTheCaller)
 
 TEST(ClientMessageParserTest, QuantityAboveUnsignedRangeIsRejected)
 {
-    auto msg = parse(R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","minQty":1e30}})");
+    auto msg = parse(
+        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","orderQty":5,"minQty":1e30}})");
 
     EXPECT_EQ("error", msg.type);
     EXPECT_NE(std::string::npos, msg.error.find("minQty"));
+}
+
+// --- An order for nothing (issue #187: it was accepted, and traded for 0) ---
+
+TEST(ClientMessageParserTest, NewOrderWithoutAQuantityIsRejected)
+{
+    auto msg = parse(R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","price":10}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("orderQty: expected an integer from 1")) << msg.error;
+}
+
+TEST(ClientMessageParserTest, NewOrderForZeroIsRejected)
+{
+    auto msg = parse(R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","orderQty":0}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("orderQty: expected an integer from 1")) << msg.error;
+}
+
+TEST(ClientMessageParserTest, SwapOrderWithoutAQuantityIsRejected)
+{
+    // As a new order is (#187): on this branch new_swap_order builds orders too
+    auto msg = parse(R"({"type":"new_swap_order","data":{"symbol":"EURUSD","side":"BUY","nearPrice":1.085,)"
+                     R"("farPrice":1.0875,"settlDate":1000,"farSettlDate":2000}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("orderQty: expected an integer from 1")) << msg.error;
+}
+
+TEST(ClientMessageParserTest, SwapOrderForZeroIsRejected)
+{
+    auto msg = parse(R"({"type":"new_swap_order","data":{"symbol":"EURUSD","side":"BUY","nearPrice":1.085,)"
+                     R"("farPrice":1.0875,"settlDate":1000,"farSettlDate":2000,"orderQty":0}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("orderQty: expected an integer from 1")) << msg.error;
+}
+
+TEST(ClientMessageParserTest, ReplaceToZeroIsRejected)
+{
+    // A replace without orderQty keeps the quantity (ReplaceOrderReportsWhichFieldsArePresent); one to 0 is refused
+    auto msg = parse(R"({"type":"replace_order","data":{"orderId":7,"orderQty":0}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("orderQty: expected an integer from 1")) << msg.error;
 }
 
 TEST(ClientMessageParserTest, NegativeQuantityIsRejected)

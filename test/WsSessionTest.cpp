@@ -623,14 +623,14 @@ TEST_F(WsSessionTest, OrdersWithAQuantityOutOfRangeAreRefused)
                  R"("orderQty":-1,"tif":"DAY","currency":"USD","capacity":"AGENCY"}})");
     auto reply = readUntil(client, "error");
     ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
-    EXPECT_EQ("Invalid message: invalid orderQty: expected an integer from 0 to 4294967295",
+    EXPECT_EQ("Invalid message: invalid orderQty: expected an integer from 1 to 4294967295",
               reply->value("message", ""));
 
     send(client, R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":150.0,)"
                  R"("farPrice":151.0,"orderQty":1e20}})");
     reply = readUntil(client, "error");
     ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
-    EXPECT_EQ("Invalid message: invalid orderQty: expected an integer from 0 to 4294967295",
+    EXPECT_EQ("Invalid message: invalid orderQty: expected an integer from 1 to 4294967295",
               reply->value("message", ""));
     EXPECT_EQ(0u, inQueues_.size());
 }
