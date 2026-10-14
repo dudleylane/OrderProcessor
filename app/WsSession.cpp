@@ -66,16 +66,27 @@ void logContained(const char *where, const std::string &request, const char *wha
 
 WsSession::WsSession(tcp::socket &&socket, SessionManager *sessionMgr, Store::WideParamsDataStorage *wideData,
                      Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues, IdTValueGenerator *idGen,
-                     OrderBookImpl *orderBook, SourceIdT defaultClearingId, SourceIdT defaultAccountId)
+                     OrderBookImpl *orderBook, SourceIdT defaultClearingId, SourceIdT defaultAccountId,
+                     const WsLimits &limits, std::shared_ptr<std::atomic<std::size_t>> connections)
     : ws_(std::move(socket)), sessionMgr_(sessionMgr), wideData_(wideData), orderStorage_(orderStorage),
       inQueues_(inQueues), idGen_(idGen), orderBook_(orderBook), defaultClearingId_(defaultClearingId),
-      defaultAccountId_(defaultAccountId)
+      defaultAccountId_(defaultAccountId), limits_(limits), connections_(std::move(connections))
 {
+}
+
+WsSession::~WsSession()
+{
+    if (connections_)
+    {
+        connections_->fetch_sub(1, std::memory_order_relaxed);
+    }
 }
 
 void WsSession::run()
 {
     ws_.set_option(websocket::stream_base::timeout::suggested(beast::role_type::server));
+    // A larger message fails the read, and the session ends: Beast's default let a client send 16 MiB (#159)
+    ws_.read_message_max(limits_.maxMessageBytes);
     ws_.set_option(websocket::stream_base::decorator(
         [](websocket::response_type &res)
         {
@@ -376,19 +387,22 @@ void WsSession::handleMessage(const std::string &msgStr)
     }
     else if (msg.type == "subscribe_book")
     {
-        bookSubscriptions_.insert(msg.symbol);
+        // Only a symbol the server trades: any string was kept, so a client could grow the set without limit (#159)
+        SourceIdT instrId = wideData_->findInstrumentBySymbol(msg.symbol);
+        if (!instrId.isValid())
+        {
+            send(serializeError("Unknown instrument: " + msg.symbol));
+            return;
+        }
+        sessionMgr_->subscribe(shared_from_this(), msg.symbol);
 
         // Send initial snapshot
-        SourceIdT instrId = wideData_->findInstrumentBySymbol(msg.symbol);
-        if (instrId.isValid())
-        {
-            BookSnapshot snap = orderBook_->getSnapshot(instrId, orderStorage_);
-            send(serializeBookUpdate(msg.symbol, snap));
-        }
+        BookSnapshot snap = orderBook_->getSnapshot(instrId, orderStorage_);
+        send(serializeBookUpdate(msg.symbol, snap));
     }
     else if (msg.type == "unsubscribe_book")
     {
-        bookSubscriptions_.erase(msg.symbol);
+        sessionMgr_->unsubscribe(shared_from_this(), msg.symbol);
     }
     else
     {
@@ -398,11 +412,49 @@ void WsSession::handleMessage(const std::string &msgStr)
 
 void WsSession::send(const std::string &msg)
 {
-    writeQueue_.push_back(msg);
+    send(std::make_shared<const std::string>(msg));
+}
+
+void WsSession::send(std::shared_ptr<const std::string> msg)
+{
+    if (dropped_)
+    {
+        return;
+    }
+    // A client that doesn't read made the server keep everything sent to it, without limit (#159). A message is always
+    // taken when nothing waits: the order snapshot a client gets when it connects can be larger than the limit.
+    if (!writeQueue_.empty() && (queuedBytes_ + msg->size() > limits_.maxQueuedBytes))
+    {
+        drop();
+        return;
+    }
+    queuedBytes_ += msg->size();
+    writeQueue_.push_back(std::move(msg));
     if (writeQueue_.size() == 1)
     {
         doWrite();
     }
+}
+
+void WsSession::drop()
+{
+    dropped_ = true;
+    beast::error_code ec;
+    const tcp::endpoint peer = beast::get_lowest_layer(ws_).socket().remote_endpoint(ec);
+    aux::ExchLogger::instance()->warn(
+        "WsSession: dropped the client at " +
+        (ec ? std::string("an unknown address") : peer.address().to_string() + ":" + std::to_string(peer.port())) +
+        ", which isn't reading: " + std::to_string(queuedBytes_) + " bytes were waiting for it, and the limit is " +
+        std::to_string(limits_.maxQueuedBytes) + " (--max-session-queue-mb)");
+    sessionMgr_->removeSession(shared_from_this());
+    // The write in progress still uses the first message; the rest go now
+    if (writeQueue_.size() > 1)
+    {
+        writeQueue_.erase(writeQueue_.begin() + 1, writeQueue_.end());
+    }
+    queuedBytes_ = writeQueue_.empty() ? 0 : writeQueue_.front()->size();
+    // Ends the read and the write in progress, which then fail and let the session go
+    beast::get_lowest_layer(ws_).close();
 }
 
 OrderEntry *WsSession::findOrder(u64 number, const std::string &clOrdId, bool *answered)
@@ -439,7 +491,7 @@ void WsSession::doWrite()
     }
 
     ws_.text(true);
-    ws_.async_write(net::buffer(writeQueue_.front()),
+    ws_.async_write(net::buffer(*writeQueue_.front()),
                     beast::bind_front_handler(&WsSession::onWrite, shared_from_this()));
 }
 
@@ -451,14 +503,10 @@ void WsSession::onWrite(beast::error_code ec, std::size_t /*bytesTransferred*/)
         return;
     }
 
+    queuedBytes_ -= writeQueue_.front()->size();
     writeQueue_.pop_front();
-    if (!writeQueue_.empty())
+    if (!writeQueue_.empty() && !dropped_)
     {
         doWrite();
     }
-}
-
-bool WsSession::isSubscribedTo(const std::string &symbol) const
-{
-    return bookSubscriptions_.count(symbol) > 0;
 }
