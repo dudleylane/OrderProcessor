@@ -38,6 +38,8 @@ All three restart unless stopped (`restart: unless-stopped`), and each has a hea
 
 On a host with SELinux enforcing, as el10 is by default, compose relabels `init-db/` so the database container can read it (the `z` on its mount, #201). Without that, Postgres can't read its init scripts and never starts.
 
+CI brings this stack up with `scripts/check-compose-stack.sh` (#140), when `docker/` changes and weekly. The script checks that every service becomes healthy, that Postgres loaded the schema, that the server seeded its volume, and that a new order sent to the frontend's `/ws` gets its execution report. Run it before changing `docker-compose.yml`, `nginx.conf`, `.env.example` or `init-db/`. It takes about three minutes, and it publishes no host port, so it can run beside a stack that is already up.
+
 The server runs as the user `oms`, which owns `/data`, and nginx as the user `nginx`; neither container runs as root. nginx looks the server up through the container's own DNS resolver when a request needs it, so it starts while the server is still down, and it finds a re-created server container at its new address.
 
 ### Networking
