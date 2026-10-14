@@ -206,24 +206,12 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
 
 namespace
 {
-/// Whether a restored order can still trade: it isn't finished, and has quantity left. Before #20 every record was a
-/// pre-acceptance snapshot, so booking all of them was right; now terminal states persist too.
-bool canStillTrade(const OrderEntry &order)
+/// Whether a restored order is working: NEW or PARTFILL, with quantity left. A live book holds only such orders, and a live
+/// market order is open only while it is one (#207). Every other status is out of the book: finished, never accepted, or
+/// suspended, which takes an order out until it is resumed (#215). A list of the statuses to leave out missed that one.
+bool isWorking(const OrderEntry &order)
 {
-    switch (order.status_)
-    {
-    case FILLED_ORDSTATUS:
-    case CANCELED_ORDSTATUS:
-    case REJECTED_ORDSTATUS:
-    case EXPIRED_ORDSTATUS:
-    case DFD_ORDSTATUS:
-    case REPLACED_ORDSTATUS:
-    case PENDINGREPLACE_ORDSTATUS: // a replacement that was never accepted (#74)
-        return false;
-    default:
-        break;
-    }
-    return 0 < order.leavesQty_;
+    return ((NEW_ORDSTATUS == order.status_) || (PARTFILL_ORDSTATUS == order.status_)) && (0 < order.leavesQty_);
 }
 } // namespace
 
@@ -280,7 +268,7 @@ void StorageRecordDispatcher::finishLoad()
                 storage_->restore(executionsId, new ExecutionsT());
             }
         }
-        if ((nullptr == orderBook_) || !canStillTrade(*restored))
+        if ((nullptr == orderBook_) || !isWorking(*restored))
         {
             continue;
         }
