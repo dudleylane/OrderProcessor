@@ -1369,3 +1369,44 @@ TEST_F(ProcessorTest, AnOpenMarketOrderACrashLeftTradesAndIsCanceledOnceRestarte
     }
     std::filesystem::remove_all(dir);
 }
+
+TEST_F(ProcessorTest, AMarketOrderThatFillsCompletelyIsReportedFilled)
+{
+    // A fill that leaves an order nothing removes it from the book, and a market order was never in it. The removal
+    // threw, the state machine swallowed it, and the order never reached Filled: it stayed NEW with nothing left, its
+    // client told nothing of its trade, and it was persisted so (#211).
+    const std::string dir = test::uniqueTestPath("market-full-fill");
+    std::filesystem::remove_all(dir);
+    IdT sell;
+    IdT market;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory engine(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 100);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        sell = engine.process(clOrdId)->orderId_;
+        order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 30);
+        order->ordType_ = MARKET_ORDERTYPE;
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        const OrderEntry *bought = engine.process(clOrdId);
+        market = bought->orderId_;
+
+        EXPECT_EQ(FILLED_ORDSTATUS, bought->status_);
+        EXPECT_EQ(0u, bought->leavesQty_);
+        EXPECT_EQ(30u, bought->cumQty_);
+        EXPECT_EQ(std::vector<std::string>{ "30@10" }, reports.tradesOf(market))
+            << "the market order's trade went unreported";
+        EXPECT_EQ(std::vector<std::string>{ "30@10" }, reports.tradesOf(sell));
+        EXPECT_EQ(sell, engine.book_.getTop(instrId1_, SELL_SIDE)) << "the sell rests with what is left";
+    }
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(market)->status_);
+        EXPECT_EQ(PARTFILL_ORDSTATUS, restarted.storage_.locateByOrderId(sell)->status_);
+        EXPECT_EQ(70u, restarted.storage_.locateByOrderId(sell)->leavesQty_);
+    }
+    std::filesystem::remove_all(dir);
+}
