@@ -36,3 +36,29 @@ jobs:
           find src test app bench \
                \( -name '*.h' -o -name '*.cpp' \) -print0 \
             | xargs -0 clang-format-22 --dry-run -Werror
+
+  lint:
+    name: shellcheck, actionlint, hadolint
+    # scripts/lint.sh (#174): each linter from its official image, pinned by
+    # digest, over a read-only copy of the tracked files, with no network.
+    # The first run pulls the images; later runs use the copies in the
+    # podman store this user shares.  A tool changes only when someone
+    # changes its digest in the script.
+    # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
+    # A pull request can delete this line, so the runner's job-started hook,
+    # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
+    # same-repository pull requests run as before.
+    # Dependabot's jobs are refused by the same hook, and skipped here (#168): its pull requests are checked locally.
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      && github.actor != 'dependabot[bot]'
+    runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
+    # A hung pull would hold the only runner until it is killed (#59).  A run
+    # takes seconds once the images are in the store.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint the shell scripts, the workflows and the Dockerfiles
+        shell: bash
+        run: scripts/lint.sh
