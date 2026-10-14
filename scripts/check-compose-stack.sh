@@ -8,8 +8,10 @@
 # docker/init-db, and nginx passing /ws to the server by its service name. It runs
 # podman-compose under a project name of its own, with an override file that publishes
 # no host port (this machine runs PostgreSQL on 5432, and development servers use 3000
-# and 8080) and gives oms-db .env.example's settings, so it neither reads nor writes a
-# docker/.env. Then:
+# and 8080) and gives oms-db .env.example's settings, with an access token made for the
+# run and an Origin list, so it neither reads nor writes a docker/.env. Then:
+#   0. Before it builds anything: compose refuses .env.example as it is, which sets no
+#      access token, and docker-compose.yml publishes only the frontend's port (#146).
 #   1. The services become healthy, in their depends_on order: oms-db, oms-server,
 #      oms-frontend, within START_TIMEOUT. Their health checks are compose's, since
 #      podman-compose builds OCI images, which keep none of their own. On an SELinux
@@ -18,10 +20,12 @@
 #   2. Postgres created every table docker/init-db/*.sql creates.
 #   3. oms-server seeded its new volume before it started (#161).
 #   4. Through nginx, inside the frontend's container: GET / is the app, and /ws answers
-#      a WebSocket upgrade with the server's 101.
-#   5. A client on the stack's network sends a new order to the frontend's /ws and gets
-#      an execution report with status NEW: a browser's order's path, through nginx, to
-#      a seeded engine.
+#      a WebSocket upgrade that offers the token with the server's 101 and its
+#      subprotocol, one without the token with 401, and one from a page off the Origin
+#      list with 403 (#146).
+#   5. A client on the stack's network sends a new order to the frontend's /ws, offering
+#      the token as the app does, and gets an execution report with status NEW: a
+#      browser's order's path, through nginx, to a seeded engine.
 #   6. Stopping the stack ends every container with exit code 0, and the server's log
 #      has no errors.
 # The containers, pod, network, volumes and images it makes are removed when it exits,
@@ -50,6 +54,8 @@ NAME="${CHECK_NAME:-orderprocessor-check-$$}"
 START_TIMEOUT="${START_TIMEOUT:-300}"
 SERVICES=(oms-db oms-server oms-frontend) # in their depends_on order
 FRONTEND_PORT=3000                        # the port docker/nginx.conf listens on
+# What docker-compose.yml may publish on the host, as "service published:container" (#146)
+PUBLISHED=("oms-frontend 3000:3000")
 
 usage_error() {
     echo "check-compose-stack: $1" >&2
@@ -122,6 +128,12 @@ trap 'exit 143' TERM
 
 cd "$ROOT"
 
+# compose takes a variable from the shell before its env file (podman-compose 1.5.0), so a setting exported here, such
+# as a developer's OMS_WS_TOKEN, would replace this run's own, and fail the checks that use it
+while IFS='=' read -r variable _; do
+    unset "$variable"
+done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' docker/.env.example | tr -d '\r')
+
 # .env.example's settings, for compose's variables and for oms-db's environment
 cp docker/.env.example "$WORK/env"
 setting() {
@@ -130,18 +142,38 @@ setting() {
 DB_USER="$(setting POSTGRES_USER)"
 DB_NAME="$(setting POSTGRES_DB)"
 [[ -n "$DB_USER" && -n "$DB_NAME" ]] || fail "docker/.env.example sets no POSTGRES_USER or POSTGRES_DB"
+# This run's access token, and the one Origin a browser page may connect from (#146)
+grep -q '^OMS_WS_TOKEN=' "$WORK/env" || fail "docker/.env.example has no OMS_WS_TOKEN line"
+grep -q '^OMS_ALLOWED_ORIGINS=' "$WORK/env" || fail "docker/.env.example has no OMS_ALLOWED_ORIGINS line"
+TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+ORIGIN="http://localhost:$FRONTEND_PORT"
+sed -i -e "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$TOKEN/" -e "s|^OMS_ALLOWED_ORIGINS=.*|OMS_ALLOWED_ORIGINS=$ORIGIN|" "$WORK/env"
+# Resets only the ports PUBLISHED names, which the step below checks are all there are: podman-compose 1.5.0 fails on a
+# !reset of a key the file doesn't have
 cat > "$WORK/override.yml" <<EOF
 # check-compose-stack.sh's changes to docker/docker-compose.yml: no host ports, and .env.example for oms-db
 services:
   oms-db:
     env_file: !override
       - $WORK/env
-    ports: !reset []
-  oms-server:
-    ports: !reset []
   oms-frontend:
     ports: !reset []
 EOF
+
+step "what compose would publish, and whether it starts without a token"
+# docker-compose.yml as committed: this run's override publishes nothing, so the stack's ports are checked here
+published="$(podman-compose -p "$NAME" -f docker/docker-compose.yml --env-file "$WORK/env" config 2>/dev/null | awk '
+    /^  [^ ].*:$/ { service = $1; sub(/:$/, "", service); inports = 0; next }
+    /^    ports:$/ { inports = 1; next }
+    /^    [^ -]/ { inports = 0 }
+    inports && /^    - / { sub(/^    - /, ""); print service " " $0 }')" || fail "compose config failed"
+[[ "$published" == "$(printf '%s\n' "${PUBLISHED[@]}")" ]] \
+    || fail "docker-compose.yml publishes '${published//$'\n'/, }', not only '${PUBLISHED[*]}'"
+echo "published: ${published//$'\n'/, }"
+if podman-compose -p "$NAME" -f docker/docker-compose.yml --env-file docker/.env.example config >/dev/null 2>&1; then
+    fail "compose accepts docker/.env.example, which sets no OMS_WS_TOKEN: its server would let anyone in"
+fi
+echo "compose refuses docker/.env.example as it is: it sets no OMS_WS_TOKEN"
 
 if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
     chcon -R --reference=docker docker/init-db || fail "couldn't give docker/init-db its directory's SELinux label"
@@ -213,12 +245,24 @@ page="$(podman exec "$frontend" curl -s --max-time 5 -w '\n%{http_code}' "http:/
 [[ "${page##*$'\n'}" == 200 ]] || fail "GET / answered '${page##*$'\n'}', not 200"
 grep -q '<div id="root"></div>' <<< "$page" || fail "GET / isn't the app's index.html: it has no <div id=\"root\">"
 echo "GET / is the app's index.html"
-# The upgraded connection stays open, so curl ends at --max-time; the status line is what counts.
-upgrade="$(podman exec "$frontend" curl -s -i -N --max-time 3 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
-    -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
-    "http://127.0.0.1:$FRONTEND_PORT/ws" | head -n 1 | tr -d '\r')" || true
-[[ "$upgrade" == "HTTP/1.1 101"* ]] || fail "/ws answered '${upgrade:-nothing}', not 101"
-echo "/ws: $upgrade"
+# Prints the answer's head to a WebSocket upgrade on /ws with the headers given. An upgraded connection stays open, so
+# curl ends at --max-time; the head is what counts.
+upgrade() {
+    podman exec "$frontend" curl -s -i -N --max-time 3 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+        -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$@" \
+        "http://127.0.0.1:$FRONTEND_PORT/ws" | tr -d '\r' | sed '/^$/q' || true
+}
+OFFER="Sec-WebSocket-Protocol: oms-v1, oms-token.$TOKEN"
+answer="$(upgrade -H "$OFFER" -H "Origin: $ORIGIN")"
+[[ "$answer" == "HTTP/1.1 101"* ]] || fail "/ws answered '${answer%%$'\n'*}' to an upgrade with the token, not 101"
+grep -qix 'sec-websocket-protocol: oms-v1' <<< "$answer" || fail "the 101 doesn't name the subprotocol oms-v1: $answer"
+echo "/ws, with the token, from $ORIGIN: ${answer%%$'\n'*}, subprotocol oms-v1"
+answer="$(upgrade -H 'Sec-WebSocket-Protocol: oms-v1')"
+[[ "$answer" == "HTTP/1.1 401"* ]] || fail "/ws answered '${answer%%$'\n'*}' to an upgrade without the token, not 401"
+echo "/ws, without the token: ${answer%%$'\n'*}"
+answer="$(upgrade -H "$OFFER" -H 'Origin: http://elsewhere.example')"
+[[ "$answer" == "HTTP/1.1 403"* ]] || fail "/ws answered '${answer%%$'\n'*}' to a page off the Origin list, not 403"
+echo "/ws, with the token, from another Origin: ${answer%%$'\n'*}"
 
 step "a new order through nginx"
 # A client on the stack's network, in the frontend's builder image, which the build has just pulled
@@ -227,11 +271,14 @@ node_image="$(sed -n 's/^FROM \(node:[^ ]*\).*/\1/p' docker/Dockerfile.oms-front
 network="$(podman inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' "$frontend")"
 network="${network%% *}"
 client='
-const ws = new WebSocket(process.argv[1]);
+const ws = new WebSocket(process.argv[1], ["oms-v1", "oms-token." + process.argv[2]]);
 const timer = setTimeout(() => { console.log("no execution report within 10 s"); process.exit(1); }, 10000);
 ws.onerror = () => { console.log("no connection to " + process.argv[1]); process.exit(1); };
-ws.onopen = () => ws.send(JSON.stringify({ type: "new_order", data: { symbol: "AAPL", side: "BUY", ordType: "LIMIT",
-    price: 150.25, orderQty: 100, tif: "DAY", currency: "USD", capacity: "AGENCY" } }));
+ws.onopen = () => {
+    if (ws.protocol !== "oms-v1") { console.log("the server answered with subprotocol \"" + ws.protocol + "\""); process.exit(1); }
+    ws.send(JSON.stringify({ type: "new_order", data: { symbol: "AAPL", side: "BUY", ordType: "LIMIT", price: 150.25,
+        orderQty: 100, tif: "DAY", currency: "USD", capacity: "AGENCY" } }));
+};
 ws.onmessage = (event) => {
     const message = JSON.parse(event.data);
     if (message.type === "error") { console.log("error: " + message.message); process.exit(1); }
@@ -243,7 +290,7 @@ ws.onmessage = (event) => {
     }
 };'
 report="$(podman run --rm --network "$network" "$node_image" node -e "$client" \
-    "ws://oms-frontend:$FRONTEND_PORT/ws" 2>&1)" || fail "the order got no execution report: $report"
+    "ws://oms-frontend:$FRONTEND_PORT/ws" "$TOKEN" 2>&1)" || fail "the order got no execution report: $report"
 [[ "$report" == "execution_report NEW" ]] || fail "the order got '$report', not an execution report with status NEW"
 echo "$report"
 

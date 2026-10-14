@@ -11,8 +11,8 @@
 
  This test enforces doc-code consistency for facts that are coupled to code.
 
- Documentation files (README.md, docs/ARCHITECTURE.md) embed values inline
- using HTML comment markers:
+ Documentation files (README.md, docs/ARCHITECTURE.md, docker/README.md) embed
+ values inline using HTML comment markers:
 
      ...the pool has <!-- DOC_CHECK:pool_size -->1024<!-- /DOC_CHECK --> slots...
 
@@ -27,8 +27,8 @@
    4. Do NOT delete or bypass the DOC_CHECK marker to "fix" the test.
 
  When adding a new code-coupled fact:
-   1. Add the fact to README.md or docs/ARCHITECTURE.md wrapped in DOC_CHECK
-      markers: `<!-- DOC_CHECK:my_fact -->VALUE<!-- /DOC_CHECK -->`
+   1. Add the fact to README.md, docs/ARCHITECTURE.md or docker/README.md wrapped
+      in DOC_CHECK markers: `<!-- DOC_CHECK:my_fact -->VALUE<!-- /DOC_CHECK -->`
    2. Add an EXPECT_DOC_EQ() line below pointing to the source-of-truth.
 */
 
@@ -51,6 +51,7 @@
 #include "StateMachineDef.h"
 #include "TransactionScope.h"
 #include "TransactionScopePool.h"
+#include "WsAuth.h"
 
 namespace
 {
@@ -127,7 +128,7 @@ std::filesystem::path projectRoot()
 }
 
 // ----------------------------------------------------------------------------
-// Test fixture: parses README.md and docs/ARCHITECTURE.md once and exposes the marker map
+// Test fixture: parses README.md, docs/ARCHITECTURE.md and docker/README.md once and exposes the marker map
 // ----------------------------------------------------------------------------
 
 class DocConsistencyTest : public ::testing::Test
@@ -140,13 +141,14 @@ protected:
         const auto root = projectRoot();
         parseDocCheckMarkers(root, "README.md", docs_);
         parseDocCheckMarkers(root, "docs/ARCHITECTURE.md", docs_);
+        parseDocCheckMarkers(root, "docker/README.md", docs_);
     }
 
     // Helper: assert that every documented value of a marker equals an actual code value.
     template <typename T> void expectDocEq(const std::string &marker, T actual)
     {
         ASSERT_TRUE(docs_.count(marker)) << "Missing DOC_CHECK marker '" << marker
-                                         << "' in README.md and docs/ARCHITECTURE.md. "
+                                         << "' in README.md, docs/ARCHITECTURE.md and docker/README.md. "
                                          << "Either add the marker to the doc or remove the assertion.";
         std::ostringstream oss;
         oss << actual;
@@ -232,6 +234,11 @@ TEST_F(DocConsistencyTest, WebSocketLimits)
     expectDocEq("ws_max_connections", COP::App::DEFAULT_MAX_CONNECTIONS);
     expectDocEq("ws_max_session_queue_mb", COP::App::DEFAULT_MAX_SESSION_QUEUE_MB);
     expectDocEq("ws_max_client_message_kib", COP::App::MAX_CLIENT_MESSAGE_BYTES / 1024);
+}
+
+TEST_F(DocConsistencyTest, WebSocketAccessToken)
+{
+    expectDocEq("ws_min_token_length", COP::App::WS_MIN_TOKEN_LENGTH);
 }
 
 } // namespace
