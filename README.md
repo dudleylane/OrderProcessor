@@ -58,7 +58,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 
 ### Persistence
 - **LMDB Storage:** Memory-mapped key-value store with versioned records. An order keeps its newest version and the one before it, and the map doubles when a write finds it full (#148)
-- **PostgreSQL Write-Behind:** PGWriteBehind builds with `BUILD_PG=ON`, but nothing connects it to the server yet, so nothing reaches Postgres (#151)
+- **PostgreSQL Write-Behind:** with `BUILD_PG=ON` and a connection string, the server mirrors its reference data and orders to Postgres, behind LMDB, which stays its record (#151)
 - **File Storage:** Legacy versioned file persistence (deprecated in favor of LMDB)
 
 ### Deployment
@@ -113,7 +113,7 @@ cmake --build . -j$(nproc)
 | `BUILD_TESTS` | ON | Build unit tests with Google Test |
 | `BUILD_BENCHMARKS` | ON | Build benchmarks with Google Benchmark |
 | `BUILD_APP` | ON | Build WebSocket server and seed data utility |
-| `BUILD_PG` | OFF | Build PostgreSQL write-behind layer (requires libpqxx); nothing connects it to the server yet (#151) |
+| `BUILD_PG` | OFF | Build the PostgreSQL write-behind (requires libpqxx 8); the server mirrors to Postgres when it's given a connection string (#151) |
 | `BUILD_FIX` | OFF | Build FIX 4.4 protocol gateway (requires QuickFIX/C++) |
 | `BUILD_FUZZ` | OFF | Build the `parseClientMessage` fuzz target (`docs/DEBUGGING.md`, Fuzzing) |
 | `WARNINGS_AS_ERRORS` | OFF | Fail the build on a warning in the project's own code; CI's Release job and the pre-push hook turn it on (#167) |
@@ -160,6 +160,7 @@ Server options:
 | `--bind` | `0.0.0.0` | The WebSocket server's address: an IP address, such as `127.0.0.1` for this host only (#146). The FIX acceptor listens where `--fix-cfg`'s settings say: `SocketAcceptPort`, on every interface unless `SocketAcceptAddress` is set |
 | `--ws-token-file` | none | A file whose first line is the access token a WebSocket client must offer (#146). `OMS_WS_TOKEN` gives it too, but not both |
 | `--allowed-origin` | any | An Origin a browser page may connect from; repeat it for more. `OMS_ALLOWED_ORIGINS` adds a comma-separated list (#146) |
+| `--pg-connection` | none | The Postgres to mirror to, a libpq connection string (#151). `OMS_PG_CONNECTION` gives it too, but not both: prefer it, since every user on the host can see a flag in the process list. Needs `BUILD_PG=ON` |
 | `--data-dir` | `./data` | LMDB persistence directory |
 | `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
@@ -430,12 +431,14 @@ The MetricsPublisher runs on the server's ASIO io_context thread and broadcasts 
 
 ## PostgreSQL Integration
 
-Write-behind persistence to PostgreSQL, built with `BUILD_PG=ON` (requires `libpqxx`). Nothing connects it to the server yet, so the server writes nothing to Postgres (#151).
+With `BUILD_PG=ON` (libpqxx 8) and a libpq connection string, from `OMS_PG_CONNECTION` or `--pg-connection`, the server mirrors to Postgres what it keeps in LMDB (#151): its instruments, accounts and clearing firms, and every version of every order. LMDB stays the server's record. Postgres is a copy for queries and reports, written behind it on a thread of its own, so nothing waits for it. Without a connection string the server keeps LMDB only, as it always did.
 
-- **PGWriteBehind:** Async write-behind from the order engine to PostgreSQL
-- **PGRequestBuilder:** Maps C++ data structures to SQL statements
-- **Schema:** Enum types (Side, OrderType, OrderStatus, TimeInForce, ExecType, Currency, Capacity) and tables matching the C++ data model
-- **Docker:** `docker-compose.yml` includes a PostgreSQL 16 service with schema initialization via `docker/init-db/001_schema.sql`
+- **When:** each save is queued as LMDB takes it, and the writer writes them in order, in transactions of up to 256. At startup the server first queues everything its data directory holds, which LMDB's load restores without saving. A rollback takes an order's row back to the version LMDB kept, or removes it if LMDB kept none.
+- **Failures:** a write Postgres refuses is logged and counted, and the rest of its transaction's writes land. A lost connection is retried, with the same writes in the same order. Connecting gives up after `connect_timeout`, 5 seconds unless the string sets one, and at shutdown what can't be written then is dropped, counted and logged.
+- **What it holds:** a write can reach Postgres before LMDB commits it, so after a crash Postgres may hold a version LMDB lost. The next start sends what LMDB holds again, but doesn't delete such a row. Executions aren't mirrored, as LMDB doesn't keep them either, and nothing uses the `users` and `audit_log` tables yet (#225).
+- **Schema:** `docker/init-db/001_schema.sql`. `PGSchemaTest` checks that every enum string the writer sends is one of its type's values.
+- **Tests:** `scripts/pg-for-tests.sh start NAME` starts a throwaway Postgres with the schema and prints its connection string; with it in `PG_CONNECTION_STRING`, `ctest -R 'PGWriteBehind|Postgres'` runs the writer's tests. CI runs them so, in the Release and sanitizer jobs.
+- **Docker:** compose builds the server with `BUILD_PG=ON` and points it at `oms-db` (docker/README.md)
 
 ---
 

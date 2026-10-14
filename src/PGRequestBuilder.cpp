@@ -106,6 +106,12 @@ OrderWrite PGRequestBuilder::fromOrder(const OrderEntry &val)
 
     w.expireTime = val.expireTime_;
     w.settlDate = val.settlDate_;
+    // A swap's far leg; the engine keeps the fields on every order, so only a swap's are written
+    if (FXSWAP_ORDERTYPE == val.ordType_)
+    {
+        w.farPrice = val.farPrice_;
+        w.farSettlDate = val.farSettlDate_;
+    }
 
     return w;
 }

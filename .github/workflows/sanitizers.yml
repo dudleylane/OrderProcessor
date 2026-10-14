@@ -194,7 +194,7 @@ jobs:
             -DBUILD_BENCHMARKS=${{ matrix.extras }} \
             -DBUILD_FUZZ=${{ matrix.extras }} \
             -DBUILD_APP=ON \
-            -DBUILD_PG=OFF \
+            -DBUILD_PG=ON \
             "${TBB_PREFIX_ARG[@]}" \
             -DCMAKE_CXX_FLAGS="${{ matrix.cxxflags }}" \
             -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.ldflags }}" \
@@ -235,6 +235,26 @@ jobs:
           UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
           TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1"
         run: ctest --test-dir build --output-on-failure --timeout 600 -j1
+
+      - name: Postgres write-behind tests, against a throwaway database
+        # As build-test.yml runs them (#151), here under the sanitizer: the writer is the code that runs a thread of its
+        # own, and libpqxx's calls, uninstrumented, stay on it
+        shell: bash
+        env:
+          ASAN_OPTIONS: "abort_on_error=1:halt_on_error=1:detect_leaks=1"
+          UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+          TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1"
+        run: |
+          trap 'scripts/pg-for-tests.sh stop orderprocessor-ci-pg-${{ matrix.sanitizer }}' EXIT
+          PG_CONNECTION_STRING="$(scripts/pg-for-tests.sh start orderprocessor-ci-pg-${{ matrix.sanitizer }})"
+          export PG_CONNECTION_STRING
+          ctest --test-dir build --output-on-failure --timeout 600 -j1 --no-tests=error -R 'PGWriteBehind|Postgres' \
+            | tee "$RUNNER_TEMP/pg-tests.log"
+          # A test that found no database skipped, and ctest counts a skip as a pass
+          if grep -q '(Skipped)' "$RUNNER_TEMP/pg-tests.log"; then
+            echo "::error::a Postgres test skipped: PG_CONNECTION_STRING didn't reach it"
+            exit 1
+          fi
 
       - name: Benchmark smoke run
         # Every benchmark once (#155), to show they run at all: not a timing, which #12 ruled out gating on. The

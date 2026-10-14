@@ -13,9 +13,14 @@
 #include "PGWriteBehind.h"
 
 #include <pqxx/pqxx>
-#include <spdlog/spdlog.h>
-#include <chrono>
+
 #include <algorithm>
+#include <chrono>
+#include <memory>
+#include <optional>
+#include <vector>
+
+#include "Logger.h"
 
 namespace COP::PG
 {
@@ -27,6 +32,7 @@ const char *UPSERT_INSTRUMENT = "pg_upsert_instrument";
 const char *UPSERT_ACCOUNT = "pg_upsert_account";
 const char *UPSERT_CLEARING = "pg_upsert_clearing";
 const char *UPSERT_ORDER = "pg_upsert_order";
+const char *DELETE_ORDER = "pg_delete_order";
 
 const char *UPSERT_INSTRUMENT_SQL = "INSERT INTO instruments (symbol, security_id, security_id_source) "
                                     "VALUES ($1, $2, $3) "
@@ -44,6 +50,10 @@ const char *UPSERT_CLEARING_SQL = "INSERT INTO clearing_firms (firm) "
                                   "VALUES ($1) "
                                   "ON CONFLICT (firm) DO NOTHING";
 
+// The day an order's id was drawn, in UTC: IdT::date_ is Unix seconds. It was read as YYYYMMDD, and the times as
+// seconds and YYYYMMDD, where the engine keeps milliseconds (#151). The update covers every column but the key, since
+// a rollback can take an order back to any earlier version.
+const char *ORDER_DATE_SQL = "(to_timestamp($2::bigint) AT TIME ZONE 'UTC')::date";
 const char *UPSERT_ORDER_SQL =
     "INSERT INTO orders ("
     "  order_id, order_date, cl_order_id, orig_cl_order_id, "
@@ -52,9 +62,9 @@ const char *UPSERT_ORDER_SQL =
     "  day_order_qty, day_cum_qty, day_avg_px, "
     "  status, time_in_force, settl_type, capacity, currency, "
     "  instrument_id, account_id, clearing_firm_id, "
-    "  expire_time, settl_date"
+    "  expire_time, settl_date, far_price, far_settl_date"
     ") VALUES ("
-    "  $1, to_date($2::text, 'YYYYMMDD'), $3, $4, "
+    "  $1, (to_timestamp($2::bigint) AT TIME ZONE 'UTC')::date, $3, $4, "
     "  $5, $6, $7::side, $8::order_type, $9, $10, "
     "  $11, $12, $13, $14, $15, "
     "  $16, $17, $18, "
@@ -62,19 +72,27 @@ const char *UPSERT_ORDER_SQL =
     "  (SELECT id FROM instruments WHERE symbol = $24), "
     "  (SELECT id FROM accounts WHERE account = $25), "
     "  (SELECT id FROM clearing_firms WHERE firm = $26), "
-    "  CASE WHEN $27::bigint = 0 THEN NULL ELSE to_timestamp($27::bigint) END, "
-    "  CASE WHEN $28::bigint = 0 THEN NULL ELSE to_date($28::text, 'YYYYMMDD') END"
+    "  CASE WHEN $27::bigint = 0 THEN NULL ELSE to_timestamp($27::bigint::float8 / 1000) END, "
+    "  CASE WHEN $28::bigint = 0 THEN NULL ELSE (to_timestamp($28::bigint::float8 / 1000) AT TIME ZONE 'UTC')::date "
+    "END, "
+    "  $29, "
+    "  CASE WHEN $30::bigint = 0 THEN NULL ELSE (to_timestamp($30::bigint::float8 / 1000) AT TIME ZONE 'UTC')::date END"
     ") "
     "ON CONFLICT (order_id, order_date) DO UPDATE SET "
-    "  status = EXCLUDED.status, "
-    "  leaves_qty = EXCLUDED.leaves_qty, "
-    "  cum_qty = EXCLUDED.cum_qty, "
-    "  avg_px = EXCLUDED.avg_px, "
-    "  day_order_qty = EXCLUDED.day_order_qty, "
-    "  day_cum_qty = EXCLUDED.day_cum_qty, "
-    "  day_avg_px = EXCLUDED.day_avg_px, "
-    "  cl_order_id = EXCLUDED.cl_order_id, "
-    "  orig_cl_order_id = EXCLUDED.orig_cl_order_id";
+    "  cl_order_id = EXCLUDED.cl_order_id, orig_cl_order_id = EXCLUDED.orig_cl_order_id, "
+    "  source = EXCLUDED.source, destination = EXCLUDED.destination, "
+    "  side = EXCLUDED.side, ord_type = EXCLUDED.ord_type, price = EXCLUDED.price, stop_px = EXCLUDED.stop_px, "
+    "  order_qty = EXCLUDED.order_qty, min_qty = EXCLUDED.min_qty, leaves_qty = EXCLUDED.leaves_qty, "
+    "  cum_qty = EXCLUDED.cum_qty, avg_px = EXCLUDED.avg_px, "
+    "  day_order_qty = EXCLUDED.day_order_qty, day_cum_qty = EXCLUDED.day_cum_qty, day_avg_px = EXCLUDED.day_avg_px, "
+    "  status = EXCLUDED.status, time_in_force = EXCLUDED.time_in_force, settl_type = EXCLUDED.settl_type, "
+    "  capacity = EXCLUDED.capacity, currency = EXCLUDED.currency, "
+    "  instrument_id = EXCLUDED.instrument_id, account_id = EXCLUDED.account_id, "
+    "  clearing_firm_id = EXCLUDED.clearing_firm_id, "
+    "  expire_time = EXCLUDED.expire_time, settl_date = EXCLUDED.settl_date, "
+    "  far_price = EXCLUDED.far_price, far_settl_date = EXCLUDED.far_settl_date";
+const std::string DELETE_ORDER_SQL =
+    std::string("DELETE FROM orders WHERE order_id = $1 AND order_date = ") + ORDER_DATE_SQL;
 
 void prepareStatements(pqxx::connection &conn)
 {
@@ -82,33 +100,32 @@ void prepareStatements(pqxx::connection &conn)
     conn.prepare(UPSERT_ACCOUNT, UPSERT_ACCOUNT_SQL);
     conn.prepare(UPSERT_CLEARING, UPSERT_CLEARING_SQL);
     conn.prepare(UPSERT_ORDER, UPSERT_ORDER_SQL);
+    conn.prepare(DELETE_ORDER, DELETE_ORDER_SQL);
 }
 
-void executeWrite(pqxx::connection &conn, const InstrumentWrite &w)
+void execute(pqxx::work &txn, const InstrumentWrite &w)
 {
-    pqxx::work txn(conn);
     txn.exec(pqxx::prepped{ UPSERT_INSTRUMENT }, pqxx::params{ w.symbol, w.securityId, w.securityIdSource });
-    txn.commit();
 }
 
-void executeWrite(pqxx::connection &conn, const AccountWrite &w)
+void execute(pqxx::work &txn, const AccountWrite &w)
 {
-    pqxx::work txn(conn);
     txn.exec(pqxx::prepped{ UPSERT_ACCOUNT }, pqxx::params{ w.account, w.firm, w.type });
-    txn.commit();
 }
 
-void executeWrite(pqxx::connection &conn, const ClearingWrite &w)
+void execute(pqxx::work &txn, const ClearingWrite &w)
 {
-    pqxx::work txn(conn);
     txn.exec(pqxx::prepped{ UPSERT_CLEARING }, pqxx::params{ w.firm });
-    txn.commit();
 }
 
-void executeWrite(pqxx::connection &conn, const OrderWrite &w)
+void execute(pqxx::work &txn, const OrderWrite &w)
 {
-    pqxx::work txn(conn);
-    auto settlOpt = w.settlType.empty() ? std::optional<std::string>{} : std::optional<std::string>{ w.settlType };
+    const auto settlType =
+        w.settlType.empty() ? std::optional<std::string>{} : std::optional<std::string>{ w.settlType };
+    // A swap's far price; NULL for any other order, whose far leg PGRequestBuilder leaves at 0
+    const bool farLeg = (0 != w.farSettlDate) || (0.0 != w.farPrice);
+    const auto farPrice = farLeg ? std::optional<double>{ w.farPrice } : std::optional<double>{};
+    // Quantities are BIGINT: an unsigned QuantityT doesn't fit INTEGER, and was cast to int (#151)
     txn.exec(pqxx::prepped{ UPSERT_ORDER }, pqxx::params{ static_cast<int64_t>(w.orderId),
                                                           static_cast<int64_t>(w.orderDate),
                                                           w.clOrderId,
@@ -119,30 +136,69 @@ void executeWrite(pqxx::connection &conn, const OrderWrite &w)
                                                           w.ordType,
                                                           w.price,
                                                           w.stopPx,
-                                                          static_cast<int>(w.orderQty),
-                                                          static_cast<int>(w.minQty),
-                                                          static_cast<int>(w.leavesQty),
-                                                          static_cast<int>(w.cumQty),
+                                                          static_cast<int64_t>(w.orderQty),
+                                                          static_cast<int64_t>(w.minQty),
+                                                          static_cast<int64_t>(w.leavesQty),
+                                                          static_cast<int64_t>(w.cumQty),
                                                           w.avgPx,
-                                                          static_cast<int>(w.dayOrderQty),
-                                                          static_cast<int>(w.dayCumQty),
+                                                          static_cast<int64_t>(w.dayOrderQty),
+                                                          static_cast<int64_t>(w.dayCumQty),
                                                           w.dayAvgPx,
                                                           w.status,
                                                           w.tif,
-                                                          settlOpt,
+                                                          settlType,
                                                           w.capacity,
                                                           w.currency,
                                                           w.instrumentSymbol,
                                                           w.accountName,
                                                           w.clearingFirm,
                                                           static_cast<int64_t>(w.expireTime),
-                                                          static_cast<int64_t>(w.settlDate) });
+                                                          static_cast<int64_t>(w.settlDate),
+                                                          farPrice,
+                                                          static_cast<int64_t>(w.farSettlDate) });
+}
+
+void execute(pqxx::work &txn, const DeleteOrderWrite &w)
+{
+    txn.exec(pqxx::prepped{ DELETE_ORDER },
+             pqxx::params{ static_cast<int64_t>(w.orderId), static_cast<int64_t>(w.orderDate) });
+}
+
+/// Writes requests [first, last) in one transaction
+void writeAll(pqxx::connection &conn, std::vector<PGWriteRequest>::const_iterator first,
+              std::vector<PGWriteRequest>::const_iterator last)
+{
+    pqxx::work txn(conn);
+    for (auto it = first; it != last; ++it)
+    {
+        std::visit(
+            [&txn](const auto &w)
+            {
+                execute(txn, w);
+            },
+            *it);
+    }
     txn.commit();
 }
 
 } // anonymous namespace
 
-PGWriteBehind::PGWriteBehind(const std::string &connString) : connString_(connString)
+std::string PGWriteBehind::withConnectTimeout(const std::string &connString)
+{
+    if (std::string::npos != connString.find("connect_timeout"))
+    {
+        return connString;
+    }
+    // A URI takes it as a query parameter, the keyword form as one more keyword
+    const bool uri = (0 == connString.rfind("postgresql://", 0)) || (0 == connString.rfind("postgres://", 0));
+    if (uri)
+    {
+        return connString + ((std::string::npos == connString.find('?')) ? "?" : "&") + "connect_timeout=5";
+    }
+    return connString + (connString.empty() ? "" : " ") + "connect_timeout=5";
+}
+
+PGWriteBehind::PGWriteBehind(const std::string &connString) : connString_(withConnectTimeout(connString))
 {
     thread_ = std::thread(&PGWriteBehind::run, this);
 }
@@ -154,17 +210,21 @@ PGWriteBehind::~PGWriteBehind()
 
 void PGWriteBehind::enqueue(PGWriteRequest &&req)
 {
-    queue_.push(std::move(req));
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queue_.push_back(std::move(req));
+    }
     totalEnqueued_.fetch_add(1, std::memory_order_relaxed);
+    wake_.notify_one();
 }
 
 void PGWriteBehind::shutdown()
 {
-    bool expected = false;
-    if (!shutdown_.compare_exchange_strong(expected, true))
     {
-        return;
+        std::lock_guard<std::mutex> lock(mutex_);
+        stopping_ = true;
     }
+    wake_.notify_one();
     if (thread_.joinable())
     {
         thread_.join();
@@ -174,110 +234,150 @@ void PGWriteBehind::shutdown()
 void PGWriteBehind::run()
 {
     using namespace std::chrono;
-
+    auto *log = aux::ExchLogger::instance();
     std::unique_ptr<pqxx::connection> conn;
-    auto backoff = milliseconds(1000);
+    const auto firstBackoff = milliseconds(1000);
     const auto maxBackoff = milliseconds(30000);
+    auto backoff = firstBackoff;
+    bool everConnected = false;
+    // Connections lost since a write last landed. The first is replaced at once, as one a firewall dropped while it sat
+    // idle would be; after that the writer waits between attempts, as it does for a database it can't reach.
+    unsigned lostInARow = 0;
+    std::vector<PGWriteRequest> batch; // what is being written; kept until it lands, so nothing is reordered
 
-    auto tryConnect = [&]() -> bool
+    // Before connecting again: waits, twice as long each time. False when stopping, with what is left dropped and
+    // counted: shutdown doesn't wait for a database that isn't there.
+    const auto retryLater = [&]
     {
-        try
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (stopping_)
         {
-            conn = std::make_unique<pqxx::connection>(connString_);
-            prepareStatements(*conn);
-            backoff = milliseconds(1000);
-            spdlog::info("PGWriteBehind: connected to PostgreSQL");
-            return true;
-        }
-        catch (const std::exception &e)
-        {
-            spdlog::error("PGWriteBehind: connection failed: {}", e.what());
-            conn.reset();
+            const u64 dropped = batch.size() + queue_.size();
+            queue_.clear();
+            batch.clear();
+            totalDropped_.fetch_add(dropped, std::memory_order_relaxed);
+            log->error("PGWriteBehind: " + std::to_string(dropped) +
+                       " write(s) dropped at shutdown: PostgreSQL can't be reached");
             return false;
         }
+        wake_.wait_for(lock, backoff,
+                       [this]
+                       {
+                           return stopping_;
+                       });
+        backoff = std::min(backoff * 2, maxBackoff);
+        return true;
     };
-
-    tryConnect();
+    const auto landed = [&](std::size_t requests)
+    {
+        totalWritten_.fetch_add(requests, std::memory_order_relaxed);
+        lostInARow = 0;
+        backoff = firstBackoff; // only once writes land: a database can accept connections and still drop each one
+    };
+    // Whether a write failed because the connection is gone, not because Postgres refused it: libpqxx's broken_connection,
+    // or any error on a connection that no longer reads as open, such as in_doubt_error, a commit cut off. Its requests
+    // are written again, which PGWriteRequest allows.
+    const auto connectionLost = [&](const std::exception &e)
+    {
+        return (nullptr != dynamic_cast<const pqxx::broken_connection *>(&e)) || !conn->is_open();
+    };
 
     while (true)
     {
-        PGWriteRequest req;
-        if (queue_.try_pop(req))
+        if (batch.empty())
         {
-            if (!conn && !tryConnect())
+            std::unique_lock<std::mutex> lock(mutex_);
+            wake_.wait(lock,
+                       [this]
+                       {
+                           return stopping_ || !queue_.empty();
+                       });
+            if (queue_.empty())
             {
-                // Re-enqueue and back off
-                queue_.push(std::move(req));
-                std::this_thread::sleep_for(backoff);
-                backoff = std::min(backoff * 2, maxBackoff);
-                continue;
+                break; // stopping, and everything is written
             }
+            const std::size_t n = std::min(queue_.size(), BATCH_SIZE);
+            batch.assign(std::make_move_iterator(queue_.begin()), std::make_move_iterator(queue_.begin() + n));
+            queue_.erase(queue_.begin(), queue_.begin() + n);
+        }
 
+        if (!conn)
+        {
             try
             {
-                std::visit(
-                    [&](const auto &w)
-                    {
-                        executeWrite(*conn, w);
-                    },
-                    req);
-                totalWritten_.fetch_add(1, std::memory_order_relaxed);
-            }
-            catch (const pqxx::broken_connection &e)
-            {
-                spdlog::error("PGWriteBehind: broken connection: {}", e.what());
-                conn.reset();
-                queue_.push(std::move(req));
-                std::this_thread::sleep_for(backoff);
-                backoff = std::min(backoff * 2, maxBackoff);
-            }
-            catch (const pqxx::sql_error &e)
-            {
-                spdlog::error("PGWriteBehind: SQL error: {} [query: {}]", e.what(), e.query());
-                totalErrors_.fetch_add(1, std::memory_order_relaxed);
+                conn = std::make_unique<pqxx::connection>(connString_);
+                prepareStatements(*conn);
+                log->note(std::string("PGWriteBehind: connected to PostgreSQL") + (everConnected ? " again" : ""));
+                everConnected = true;
             }
             catch (const std::exception &e)
             {
-                spdlog::error("PGWriteBehind: error: {}", e.what());
-                totalErrors_.fetch_add(1, std::memory_order_relaxed);
+                conn.reset();
+                log->error(std::string("PGWriteBehind: can't connect to PostgreSQL: ") + e.what());
+                if (!retryLater())
+                {
+                    break;
+                }
+                continue;
             }
         }
-        else
-        {
-            if (shutdown_.load(std::memory_order_acquire))
-            {
-                break;
-            }
-            std::this_thread::sleep_for(milliseconds(1));
-        }
-    }
 
-    // Drain remaining items
-    PGWriteRequest req;
-    while (queue_.try_pop(req))
-    {
-        if (!conn && !tryConnect())
-        {
-            break;
-        }
+        bool lost = false;
         try
         {
-            std::visit(
-                [&](const auto &w)
-                {
-                    executeWrite(*conn, w);
-                },
-                req);
-            totalWritten_.fetch_add(1, std::memory_order_relaxed);
+            writeAll(*conn, batch.cbegin(), batch.cend());
+            landed(batch.size());
+            batch.clear();
         }
         catch (const std::exception &e)
         {
-            spdlog::error("PGWriteBehind: drain error: {}", e.what());
-            totalErrors_.fetch_add(1, std::memory_order_relaxed);
+            if (connectionLost(e))
+            {
+                // Written again, from the start of the batch, on the next connection
+                log->error(std::string("PGWriteBehind: lost the connection: ") + e.what());
+                lost = true;
+            }
+            else
+            {
+                // Postgres refused a request: write the batch one at a time, so the rest land and each refusal is
+                // counted
+                log->warn(std::string("PGWriteBehind: a batch was refused, writing it a request at a time: ") +
+                          e.what());
+                std::size_t done = 0;
+                for (; done < batch.size(); ++done)
+                {
+                    try
+                    {
+                        writeAll(*conn, batch.cbegin() + done, batch.cbegin() + done + 1);
+                        landed(1);
+                    }
+                    catch (const std::exception &failed)
+                    {
+                        if (connectionLost(failed))
+                        {
+                            log->error(std::string("PGWriteBehind: lost the connection: ") + failed.what());
+                            lost = true;
+                            break;
+                        }
+                        totalErrors_.fetch_add(1, std::memory_order_relaxed);
+                        log->error(std::string("PGWriteBehind: PostgreSQL refused a write: ") + failed.what());
+                    }
+                }
+                batch.erase(batch.begin(), batch.begin() + done);
+            }
+        }
+        if (lost)
+        {
+            conn.reset();
+            if ((1 < ++lostInARow) && !retryLater())
+            {
+                break;
+            }
         }
     }
 
-    spdlog::info("PGWriteBehind: shutdown complete (written={}, errors={})", totalWritten_.load(), totalErrors_.load());
+    log->note("PGWriteBehind: stopped, " + std::to_string(totalWritten_.load()) + " written, " +
+              std::to_string(totalErrors_.load()) + " refused, " + std::to_string(totalDropped_.load()) + " dropped");
 }
 
 } // namespace COP::PG
