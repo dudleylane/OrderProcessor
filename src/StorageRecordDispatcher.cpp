@@ -348,6 +348,26 @@ void StorageRecordDispatcher::erase(const IdT &orderId, u32 version)
     fileStorage_->erase(orderId, version);
 }
 
+void StorageRecordDispatcher::beginGroup()
+{
+    assert(nullptr != fileStorage_);
+    fileStorage_->beginGroup();
+}
+
+void StorageRecordDispatcher::commitGroup()
+{
+    assert(nullptr != fileStorage_);
+    fileStorage_->commitGroup();
+}
+
+void StorageRecordDispatcher::abortGroup() noexcept
+{
+    if (nullptr != fileStorage_)
+    {
+        fileStorage_->abortGroup();
+    }
+}
+
 void StorageRecordDispatcher::saveIdLimit(u64 limit)
 {
     assert(nullptr != fileStorage_);
