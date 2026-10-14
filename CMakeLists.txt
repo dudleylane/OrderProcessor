@@ -17,6 +17,8 @@ option(BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(BUILD_APP "Build production WebSocket server" ON)
 option(BUILD_FUZZ "Build fuzz targets in test/fuzz (libFuzzer with Clang, corpus replay otherwise)" OFF)
 option(WARNINGS_AS_ERRORS "Fail the build on a warning in this project's own code; CI's Release job and the pre-push hook turn it on (#167)" OFF)
+set(MARCH "native" CACHE STRING
+    "The CPU a Release build targets (-march): native, this machine's, or an ISA level such as x86-64-v3 for a binary that runs on other machines; the server image uses x86-64-v3 (#170)")
 
 # Warnings for this project's own targets, which the FetchContent dependencies don't get: -Wall -Wextra, and -Werror with
 # WARNINGS_AS_ERRORS (#167)
@@ -29,10 +31,16 @@ add_compile_options(-msse2 -fexceptions)
 
 # Ultra low-latency optimization flags for Release builds
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    # Tune for this machine when building for it, and for no CPU in particular otherwise, as GCC does by default (#170)
+    if(MARCH STREQUAL "native")
+        set(MTUNE native)
+    else()
+        set(MTUNE generic)
+    endif()
     add_compile_options(
         -O3                    # Aggressive optimization
-        -march=native          # CPU-specific optimizations
-        -mtune=native          # CPU-specific tuning
+        -march=${MARCH}        # The target CPU's instructions: native by default (#170)
+        -mtune=${MTUNE}        # Its scheduling
         -flto=auto             # Link-time optimization, its LTRANS jobs in parallel: plain -flto warned of serial ones (#167)
         -ffast-math            # Fast floating-point, but its -ffinite-math-only lets the compiler delete every
         -fno-finite-math-only  # inf/NaN check (#142: a price of 1e400 parsed as inf), so turn that part back off
