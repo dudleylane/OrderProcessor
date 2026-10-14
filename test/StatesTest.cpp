@@ -297,6 +297,35 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_ZeroQuantity)
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 }
 
+TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_LimitPriceNotAboveZero)
+{
+    // A limit order at 0 or less was accepted: a sell at 0 sold at any bid (#188)
+    for (const PriceT price : { 0.0, -1.5 })
+    {
+        SCOPED_TRACE(price);
+        TestTransactionContext trCntxt;
+        OrderStateWrapper p;
+        std::unique_ptr<OrderEntry> order(createCorrectOrder());
+        assignClOrderId(order.get());
+
+        p.start();
+        p.checkStates("Rcvd_New", "NoCnlReplace");
+
+        onOrderReceived recvevnt;
+        recvevnt.order_ = order.get();
+        recvevnt.generator_ = IdTGenerator::instance();
+        recvevnt.transaction_ = &trCntxt;
+        recvevnt.orderStorage_ = OrderStorage::instance();
+        recvevnt.order_->ordType_ = LIMIT_ORDERTYPE;
+        recvevnt.order_->price_ = price;
+
+        p.processEvent(recvevnt);
+        p.checkStates("Rejected", "NoCnlReplace");
+        EXPECT_EQ(1u, trCntxt.op_.size());
+        EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
+    }
+}
+
 TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_InvalidSide)
 {
     TestTransactionContext trCntxt;

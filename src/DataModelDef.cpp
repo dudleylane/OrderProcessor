@@ -367,9 +367,23 @@ bool OrderEntry::isValid(std::string *invalid) const
             *invalid = "Invalid value of the order quantity!";
             return false;
         }
+        // A limit price is above 0 (#188): at 0 a limit sell sold at any bid, as a market order does. Written so that a
+        // NaN is refused as well.
+        if (((LIMIT_ORDERTYPE == ordType_) || (STOPLIMIT_ORDERTYPE == ordType_)) && !(price_ > 0))
+        {
+            *invalid = "Invalid value of the order price!";
+            return false;
+        }
         if (FXSWAP_ORDERTYPE == ordType_)
         {
-            if (farPrice_ <= 0.0)
+            // Both legs' prices are above 0, as a limit order's is (#188); the near leg's is price_. Written so that a
+            // NaN is refused as well
+            if (!(price_ > 0))
+            {
+                *invalid = "FX Swap order requires a positive near leg price!";
+                return false;
+            }
+            if (!(farPrice_ > 0))
             {
                 *invalid = "FX Swap order requires a positive far leg price!";
                 return false;

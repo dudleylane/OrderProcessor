@@ -53,7 +53,8 @@ TEST(ClientMessageParserTest, AbsentOptionalNumbersDefaultToZero)
 TEST(ClientMessageParserTest, LargestQuantityIsAccepted)
 {
     const unsigned int maxQty = std::numeric_limits<unsigned int>::max();
-    auto msg = parse(R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","orderQty":)" +
+    auto msg = parse(R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","price":10,)"
+                     R"("orderQty":)" +
                      std::to_string(maxQty) + "}}");
 
     EXPECT_EQ("new_order", msg.type);
@@ -98,6 +99,40 @@ TEST(ClientMessageParserTest, QuantityAboveUnsignedRangeIsRejected)
 
     EXPECT_EQ("error", msg.type);
     EXPECT_NE(std::string::npos, msg.error.find("minQty"));
+}
+
+// --- A limit order's price (issue #188: an absent one was 0, and a limit sell at 0 sold at any bid) ---
+
+TEST(ClientMessageParserTest, LimitOrderWithoutAPriceIsRejected)
+{
+    for (const char *ordType : { "LIMIT", "STOPLIMIT" })
+    {
+        auto msg = parse(std::string(R"({"type":"new_order","data":{"symbol":"AAPL","side":"SELL","ordType":")") +
+                         ordType + R"(","orderQty":100}})");
+
+        EXPECT_EQ("error", msg.type) << ordType;
+        EXPECT_NE(std::string::npos, msg.error.find("needs one above 0")) << ordType << ": " << msg.error;
+    }
+}
+
+TEST(ClientMessageParserTest, LimitPriceNotAboveZeroIsRejected)
+{
+    for (const char *price : { "0", "-5", "-0.0001" })
+    {
+        auto msg = parse(std::string(R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)") +
+                         R"("orderQty":100,"price":)" + price + "}}");
+
+        EXPECT_EQ("error", msg.type) << price;
+        EXPECT_NE(std::string::npos, msg.error.find("needs one above 0")) << price << ": " << msg.error;
+    }
+}
+
+TEST(ClientMessageParserTest, ReplaceToAPriceNotAboveZeroIsRejected)
+{
+    auto msg = parse(R"({"type":"replace_order","data":{"orderId":7,"price":0}})");
+
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("price: expected a number above 0")) << msg.error;
 }
 
 // --- An order for nothing (issue #187: it was accepted, and traded for 0) ---
