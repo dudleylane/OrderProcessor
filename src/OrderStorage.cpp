@@ -261,6 +261,30 @@ void OrderDataStorage::unpersist(const IdT &orderId, u32 version)
     }
 }
 
+void OrderDataStorage::beginPersistGroup()
+{
+    if (nullptr != saver_)
+    {
+        saver_->beginGroup();
+    }
+}
+
+void OrderDataStorage::commitPersistGroup()
+{
+    if (nullptr != saver_)
+    {
+        saver_->commitGroup();
+    }
+}
+
+void OrderDataStorage::abortPersistGroup() noexcept
+{
+    if (nullptr != saver_)
+    {
+        saver_->abortGroup();
+    }
+}
+
 // ============================================================================
 // Execution operations - use concurrent_hash_map for fine-grained locking
 // ============================================================================
