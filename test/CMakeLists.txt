@@ -55,6 +55,8 @@ target_sources(orderProcessorTest
         # PostgreSQL write-behind tests (unit tests always, integration gated by env var)
         PGEnumStringsTest.cpp
         PGRequestBuilderTest.cpp
+        # The schema's enum types against the strings the write-behind sends (#151)
+        PGSchemaTest.cpp
 
         # FX Swap tests
         FxSwapTest.cpp

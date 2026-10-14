@@ -29,6 +29,19 @@ RUN dnf install -y openssl-devel && dnf clean all \
     && /tmp/build-quickfix.sh "$QUICKFIX_REF" /usr/local \
     && rm /tmp/build-quickfix.sh
 
+# libpqxx, PostgreSQL's C++ client, for the Postgres write-behind (#151). Neither CentOS nor EPEL packages it, so it is
+# built from its source at a release: the one CI's host has, from PostgreSQL's own repository (PGDG).
+ARG LIBPQXX_REF=8.0.2
+# hadolint ignore=DL3041
+RUN dnf install -y libpq-devel && dnf clean all \
+    && git clone --depth 1 --branch "$LIBPQXX_REF" https://github.com/jtv/libpqxx.git /tmp/libpqxx \
+    && cmake -S /tmp/libpqxx -B /tmp/libpqxx/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
+        -DSKIP_BUILD_TEST=ON -DBUILD_DOC=OFF -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && cmake --build /tmp/libpqxx/build -j"$(nproc)" \
+    && cmake --install /tmp/libpqxx/build \
+    && rm -rf /tmp/libpqxx
+ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig
+
 WORKDIR /build
 COPY CMakeLists.txt ./
 COPY src/ src/
@@ -39,7 +52,7 @@ COPY config/ config/
 # x86-64-v3, not -march=native (#170): native tied the image to the build machine's CPU. v3 is what CentOS Stream 10
 # itself is built for, so the image asks no more of a host's CPU than its base image does.
 RUN cmake -B out -DCMAKE_BUILD_TYPE=Release -DMARCH=x86-64-v3 \
-        -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_APP=ON -DBUILD_FIX=ON \
+        -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_APP=ON -DBUILD_FIX=ON -DBUILD_PG=ON \
     && cmake --build out -j"$(nproc)"
 
 # --- runtime stage ---
@@ -49,7 +62,7 @@ FROM quay.io/centos/centos:stream10
 # build, as the image check's --pull=newer intends (#135), so it gets their fixes. A pin would freeze them.
 # hadolint ignore=DL3041
 RUN dnf install -y epel-release \
-    && dnf install -y tbb lmdb-libs spdlog numactl-libs \
+    && dnf install -y tbb lmdb-libs spdlog numactl-libs libpq \
     && dnf clean all
 
 COPY --from=builder /build/out/orderProcessorServer /usr/local/bin/
@@ -61,6 +74,10 @@ COPY --from=builder /build/config/ /etc/orderprocessor/
 # linked to a library outside the system directories. This loader entry isn't needed for it; it covers a
 # binary without that RUNPATH, such as one installed with `cmake --install` (#132, corrected in #135).
 RUN echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf && ldconfig
+
+# The server finds libpqxx through its RUNPATH, /usr/local/lib64; the loader entry covers a binary without one (#151)
+COPY --from=builder /usr/local/lib64/libpqxx-*.so /usr/local/lib64/
+RUN echo /usr/local/lib64 > /etc/ld.so.conf.d/usr-local-lib64.conf && ldconfig
 
 # Not root (#158): the server and seedData run as oms, which owns /data. The directory is made before VOLUME declares it,
 # so a new volume starts out owned by oms.

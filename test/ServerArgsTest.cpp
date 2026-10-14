@@ -78,7 +78,9 @@ TEST(ServerArgsTest, EveryOptionIsRead)
                                                      "--allowed-origin",
                                                      "http://a.example",
                                                      "--allowed-origin",
-                                                     "https://b.example" });
+                                                     "https://b.example",
+                                                     "--pg-connection",
+                                                     "host=db dbname=oms" });
     ASSERT_TRUE(parsed);
     EXPECT_EQ(9090, parsed->port);
     EXPECT_EQ("/data", parsed->dataDir);
@@ -94,6 +96,33 @@ TEST(ServerArgsTest, EveryOptionIsRead)
     EXPECT_EQ("127.0.0.1", parsed->bindAddress);
     EXPECT_EQ("/run/secrets/oms_ws_token", parsed->wsTokenFile);
     EXPECT_EQ((std::vector<std::string>{ "http://a.example", "https://b.example" }), parsed->allowedOrigins);
+    EXPECT_EQ("host=db dbname=oms", parsed->pgConnection);
+}
+
+TEST(ServerArgsTest, ThePostgresConnectionComesFromItsFlagOrTheEnvironmentButNotBoth)
+{
+    // #151: the server mirrors to Postgres only when given a connection string
+    ServerArgs neither;
+    std::string connection = "unchanged";
+    std::string error;
+    ASSERT_TRUE(resolvePgConnection(neither, nullptr, &connection, &error)) << error;
+    EXPECT_TRUE(connection.empty()); // LMDB only, as before
+    EXPECT_FALSE(resolvePgConnection(neither, "", &connection, &error));
+    EXPECT_NE(std::string::npos, error.find("set, but empty")) << error;
+    ServerArgs flag;
+    flag.pgConnection = "host=db";
+    EXPECT_FALSE(resolvePgConnection(flag, "host=other", &connection, &error));
+    EXPECT_NE(std::string::npos, error.find("given twice")) << error;
+#ifdef BUILD_PG
+    ASSERT_TRUE(resolvePgConnection(flag, nullptr, &connection, &error)) << error;
+    EXPECT_EQ("host=db", connection);
+    ASSERT_TRUE(resolvePgConnection(neither, "host=env", &connection, &error)) << error;
+    EXPECT_EQ("host=env", connection);
+#else
+    // A build that can't use it says so, rather than run without the mirror it was asked for
+    EXPECT_FALSE(resolvePgConnection(flag, nullptr, &connection, &error));
+    EXPECT_NE(std::string::npos, error.find("without BUILD_PG")) << error;
+#endif
 }
 
 TEST(ServerArgsTest, BindTakesAnIpAddress)
@@ -188,6 +217,7 @@ TEST(ServerArgsTest, TheUsageNamesEveryOption)
         { "--bind", "0.0.0.0" },
         { "--ws-token-file", "f" },
         { "--allowed-origin", "o" },
+        { "--pg-connection", "s" },
         { "--max-session-queue-mb", "1" },
         { "--help" },
     };

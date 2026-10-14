@@ -39,6 +39,9 @@
 #include "ServerDefaults.h"
 #include "ServerArgs.h"
 #include "ServerData.h"
+#ifdef BUILD_PG
+#include "PGWriteBehind.h"
+#endif
 
 #ifdef BUILD_FIX
 #include "FixServer.h"
@@ -162,6 +165,13 @@ int main(int argc, char *argv[])
         std::cerr << "orderProcessorServer: " << usageError << "\n";
         return 2;
     }
+    // The Postgres to mirror to (#151), if any
+    std::string pgConnection;
+    if (!App::resolvePgConnection(cfg, std::getenv("OMS_PG_CONNECTION"), &pgConnection, &usageError))
+    {
+        std::cerr << "orderProcessorServer: " << usageError << "\n";
+        return 2;
+    }
 
     // 1. Create singletons
     aux::ExchLogger::create();
@@ -218,6 +228,21 @@ int main(int argc, char *argv[])
     std::unique_ptr<OrderBookImpl> orderBook = std::move(data.orderBook);
     const SourceIdT defaultClearingId = data.defaultClearingId;
     const SourceIdT defaultAccountId = data.defaultAccountId;
+
+    // 5b. Postgres, a copy of what LMDB holds, written behind it (#151). It gets everything the directory holds first,
+    // which LMDB's load restored without saving, then whatever the server saves from here on, the restored orders'
+    // matches below included.
+#ifdef BUILD_PG
+    std::unique_ptr<PG::PGWriteBehind> pgWriter;
+    if (!pgConnection.empty())
+    {
+        pgWriter = std::make_unique<PG::PGWriteBehind>(pgConnection);
+        dispatcher->setPGWriter(pgWriter.get());
+        dispatcher->syncToPG(*Store::WideDataStorage::instance());
+        aux::ExchLogger::instance()->note("Postgres: mirroring the data directory, " +
+                                          std::to_string(pgWriter->totalEnqueued()) + " writes queued to start (#151)");
+    }
+#endif
 
     // 6. Create SessionManager and WsOutQueues
     auto sessionMgr = std::make_unique<App::SessionManager>();
@@ -421,6 +446,15 @@ int main(int argc, char *argv[])
     inQueues.reset();
     sessionMgr.reset();
     orderBook.reset();
+#ifdef BUILD_PG
+    // Nothing saves now: write what is queued, then stop (#151)
+    if (pgWriter)
+    {
+        dispatcher->setPGWriter(nullptr);
+        pgWriter->shutdown();
+        pgWriter.reset();
+    }
+#endif
     dispatcher.reset();
     lmdbStorage.reset();
 

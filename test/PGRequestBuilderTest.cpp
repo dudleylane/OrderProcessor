@@ -114,6 +114,28 @@ TEST_F(PGRequestBuilderTest, FromOrder)
     EXPECT_EQ(225u, w.settlDate);
 }
 
+TEST_F(PGRequestBuilderTest, FromSwapOrderCarriesItsFarLeg)
+{
+    // On this branch an FX swap's far leg is its own price and settlement date (#151's FX pick). The engine keeps the
+    // fields on every order, so only a swap's reach the row.
+    auto swap = test::createCorrectOrder();
+    swap->orderId_ = IdT(12346, 20260212);
+    swap->ordType_ = FXSWAP_ORDERTYPE;
+    swap->farPrice_ = 1.0875;
+    swap->farSettlDate_ = 1797379200000ULL;
+    const auto w = PGRequestBuilder::fromOrder(*swap);
+    EXPECT_EQ("FX_SWAP", w.ordType);
+    EXPECT_DOUBLE_EQ(1.0875, w.farPrice);
+    EXPECT_EQ(1797379200000ULL, w.farSettlDate);
+
+    auto limit = test::createCorrectOrder();
+    limit->farPrice_ = 1.0875;
+    limit->farSettlDate_ = 1797379200000ULL;
+    const auto o = PGRequestBuilder::fromOrder(*limit);
+    EXPECT_DOUBLE_EQ(0.0, o.farPrice);
+    EXPECT_EQ(0u, o.farSettlDate);
+}
+
 TEST_F(PGRequestBuilderTest, FromOrderCheckAllQuantities)
 {
     auto order = test::createCorrectOrder();
