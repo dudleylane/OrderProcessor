@@ -148,6 +148,7 @@ TEST_F(PGRequestBuilderTest, FromOrderCheckAllQuantities)
     order->avgPx_ = 1.50;
     order->dayAvgPx_ = 1.48;
     order->stopPx_ = 1.40;
+    order->stopTriggered_ = true;
 
     auto w = PGRequestBuilder::fromOrder(*order);
 
@@ -159,4 +160,5 @@ TEST_F(PGRequestBuilderTest, FromOrderCheckAllQuantities)
     EXPECT_DOUBLE_EQ(1.50, w.avgPx);
     EXPECT_DOUBLE_EQ(1.48, w.dayAvgPx);
     EXPECT_DOUBLE_EQ(1.40, w.stopPx);
+    EXPECT_TRUE(w.stopTriggered); // #236
 }

@@ -1576,6 +1576,8 @@ char FixGateway::fromExecType(ExecType t)
         return FIX::ExecType_ORDER_STATUS;
     case RESTATED_EXECTYPE:
         return FIX::ExecType_RESTATED;
+    case TRIGGERED_EXECTYPE: // a held stop released by a trade at its stop (#223, #236)
+        return FIX::ExecType_TRIGGERED_OR_ACTIVATED_BY_SYSTEM;
     default:
         return FIX::ExecType_NEW;
     }

@@ -221,11 +221,33 @@ public:
     void execute(const Context &cnxt) override;
     void rollback(const Context &cnxt) override;
 
+    /// Whether this release released the order when it executed
+    bool released() const
+    {
+        return released_;
+    }
+
 private:
     OrderEntry *order_;
     size_t eventCountBefore_ = 0;
     bool released_ = false;
     bool booked_ = false;
+};
+
+/// Reports a stop's release with a TRIGGERED execution report, FIX's ExecType L (#236). It follows the release and the
+/// persist that records it, so the order is durable before its client hears (#28). It reports only if the release
+/// released the order: a release that found the stop canceled, replaced, finished or already released reports nothing.
+/// The release's trades are reported after it, by their own transactions.
+class ReportReleaseTrOperation final : public Operation
+{
+public:
+    ReportReleaseTrOperation(const ReleaseStopTrOperation &release, const OrderEntry &order);
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    const ReleaseStopTrOperation &release_;
 };
 
 void executeEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);

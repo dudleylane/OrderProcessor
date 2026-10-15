@@ -234,6 +234,35 @@ TEST_F(PGWriteBehindTest, AQuantityAboveIntegersRangeLands)
     EXPECT_EQ("4000000000", select("SELECT leaves_qty::text FROM orders WHERE order_id = 151003"));
 }
 
+TEST_F(PGWriteBehindTest, AStopsReleaseReachesItsRow)
+{
+    // stop_triggered says whether a stop order's stop was reached (#236). The query copy couldn't tell a held stop from
+    // a released one.
+    forget(151236);
+    OrderWrite held = makeOrder(151236);
+    held.ordType = "STOPLIMIT";
+    held.stopPx = 101.0;
+    {
+        PGWriteBehind writer(connection_);
+        writeReferenceData(writer);
+        writer.enqueue(PGWriteRequest{ OrderWrite(held) });
+        writer.shutdown();
+        ASSERT_EQ(0u, writer.totalErrors());
+    }
+    EXPECT_EQ("false", select("SELECT stop_triggered::text FROM orders WHERE order_id = 151236"));
+
+    OrderWrite released = held;
+    released.stopTriggered = true;
+    {
+        PGWriteBehind writer(connection_);
+        writer.enqueue(PGWriteRequest{ std::move(released) });
+        writer.shutdown();
+        ASSERT_EQ(0u, writer.totalErrors());
+    }
+    EXPECT_EQ("true", select("SELECT stop_triggered::text FROM orders WHERE order_id = 151236"));
+    forget(151236);
+}
+
 TEST_F(PGWriteBehindTest, ALaterWriteOfAnOrderReplacesItsRowAndADeleteRemovesIt)
 {
     forget(151004);

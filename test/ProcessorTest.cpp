@@ -1276,7 +1276,16 @@ public:
 
     void push(const Queues::ExecReportEvent &evnt, const std::string &) override
     {
-        if ((nullptr != evnt.exec_) && (TRADE_EXECTYPE == evnt.exec_->type_))
+        if (nullptr == evnt.exec_)
+        {
+            return;
+        }
+        reports_.push_back(Report{ evnt.exec_->orderId_, evnt.exec_->type_ });
+        if (nullptr != log_)
+        {
+            log_->push_back(std::string("report ") + typeName(evnt.exec_->type_));
+        }
+        if (TRADE_EXECTYPE == evnt.exec_->type_)
         {
             const TradeExecEntry *trade = static_cast<const TradeExecEntry *>(evnt.exec_);
             trades_.push_back(Trade{ trade->orderId_, trade->lastQty_, trade->lastPx_ });
@@ -1301,7 +1310,47 @@ public:
         return result;
     }
 
+    /// The types of the reports sent for the order, in the order they were sent
+    std::vector<ExecType> reportTypesOf(const IdT &orderId) const
+    {
+        std::vector<ExecType> result;
+        for (const Report &report : reports_)
+        {
+            if (report.orderId_ == orderId)
+            {
+                result.push_back(report.type_);
+            }
+        }
+        return result;
+    }
+
+    static const char *typeName(ExecType type)
+    {
+        switch (type)
+        {
+        case NEW_EXECTYPE:
+            return "NEW";
+        case TRADE_EXECTYPE:
+            return "TRADE";
+        case CANCEL_EXECTYPE:
+            return "CANCEL";
+        case TRIGGERED_EXECTYPE:
+            return "TRIGGERED";
+        default:
+            return "OTHER";
+        }
+    }
+
+    struct Report
+    {
+        IdT orderId_;
+        ExecType type_;
+    };
+
     std::vector<Trade> trades_;
+    std::vector<Report> reports_;
+    /// If set, every report is noted here as "report <type>"
+    std::vector<std::string> *log_ = nullptr;
 };
 
 /// One run of the engine over a data directory, wired as app/main.cpp wires it, except that transactions run as they
@@ -1791,6 +1840,9 @@ TEST_F(ProcessorTest, AStopSellIsHeldUntilATradeReachesItsStopThenSellsAsAMarket
     EXPECT_TRUE(stop->stopTriggered_);
     EXPECT_EQ(std::vector<std::string>{ "50@9" }, engine.reports_.tradesOf(stop->orderId_));
     EXPECT_EQ(FILLED_ORDSTATUS, stop->status_);
+    // The release is reported, as FIX's ExecType L, before the trades it led to (#236)
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRIGGERED_EXECTYPE, TRADE_EXECTYPE }),
+              engine.reports_.reportTypesOf(stop->orderId_));
     EXPECT_EQ(40u, lowerBid->leavesQty_);
     EXPECT_FALSE(orderBook_->holdsStops(instrId1_));
 }
@@ -1812,6 +1864,8 @@ TEST_F(ProcessorTest, AStopReachedDuringASweepIsReleasedOnceTheSweepIsDone)
     EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty())
         << "the stop traded ahead of the sweep that reached it";
     EXPECT_EQ(CANCELED_ORDSTATUS, stop->status_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRIGGERED_EXECTYPE, CANCEL_EXECTYPE }),
+              engine.reports_.reportTypesOf(stop->orderId_));
     EXPECT_FALSE(orderBook_->holdsStops(instrId1_));
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "a released STOP rests in the price book";
 }
@@ -1830,6 +1884,8 @@ TEST_F(ProcessorTest, AStopLimitIsReleasedAsALimitOrderAndRestsWithWhatIsLeft)
     engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
     EXPECT_TRUE(stop->stopTriggered_);
     EXPECT_EQ(std::vector<std::string>{ "15@10" }, engine.reports_.tradesOf(stop->orderId_));
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRIGGERED_EXECTYPE, TRADE_EXECTYPE }),
+              engine.reports_.reportTypesOf(stop->orderId_));
     EXPECT_EQ(PARTFILL_ORDSTATUS, stop->status_);
     EXPECT_EQ(35u, stop->leavesQty_);
     EXPECT_EQ(stop->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
@@ -1914,6 +1970,8 @@ TEST_F(ProcessorTest, ACancelEnqueuedBeforeAStopsReleaseWins)
     EXPECT_EQ(CANCELED_ORDSTATUS, stop->status_);
     EXPECT_FALSE(stop->stopTriggered_);
     EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty());
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, CANCEL_EXECTYPE }), engine.reports_.reportTypesOf(stop->orderId_))
+        << "a release that found the stop canceled reported it triggered";
     EXPECT_EQ(95u, bid->leavesQty_);
     EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
 }
@@ -2002,11 +2060,59 @@ TEST_F(ProcessorTest, AStopTwoTradesReachBeforeItsReleaseRunsIsReleasedOnce)
     EXPECT_EQ(90u, ask->leavesQty_);
     EXPECT_TRUE(stop->stopTriggered_);
     EXPECT_EQ(NEW_ORDSTATUS, stop->status_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRIGGERED_EXECTYPE }),
+              engine.reports_.reportTypesOf(stop->orderId_))
+        << "the second release, which found the stop released, reported it again";
     EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
     const BookSnapshot book = orderBook_->getSnapshot(instrId1_, OrderStorage::instance());
     ASSERT_EQ(1u, book.bids.size());
     EXPECT_EQ(1u, book.bids[0].orderCount) << "the stop limit was booked twice";
     EXPECT_EQ(10u, book.bids[0].totalQty);
+}
+
+namespace
+{
+/// Notes each version of a stop order it saves: "persist held", or "persist released" once its stop was reached
+class StopVersionLog final : public COP::OrderSaver
+{
+public:
+    explicit StopVersionLog(std::vector<std::string> *log) : log_(log) {}
+
+    COP::u32 save(const COP::OrderEntry &order) override
+    {
+        if ((STOP_ORDERTYPE == order.ordType_) || (STOPLIMIT_ORDERTYPE == order.ordType_))
+        {
+            log_->push_back(order.stopTriggered_ ? "persist released" : "persist held");
+        }
+        return version_++;
+    }
+    void erase(const COP::IdT &, COP::u32) override {}
+
+private:
+    std::vector<std::string> *log_;
+    COP::u32 version_ = 0;
+};
+} // namespace
+
+TEST_F(ProcessorTest, AStopsReleaseIsDurableBeforeItsTriggeredReport)
+{
+    // A client that hears TRIGGERED must find the release in the order's record after a crash, as for every report (#28)
+    std::vector<std::string> log;
+    StopVersionLog saver(&log);
+    OrderStorage::instance()->attach(&saver);
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.reports_.log_ = &log;
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5));
+    engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 9.5, 10), STOPLIMIT_ORDERTYPE, 10.0));
+    log.clear();
+
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
+
+    const auto released = std::find(log.begin(), log.end(), "persist released");
+    const auto triggered = std::find(log.begin(), log.end(), "report TRIGGERED");
+    ASSERT_NE(log.end(), released);
+    ASSERT_NE(log.end(), triggered);
+    EXPECT_LT(released, triggered) << "the release was reported before it was durable";
 }
 
 TEST_F(ProcessorTest, AReplacedStopIsHeldAtItsNewStopPrice)

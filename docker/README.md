@@ -320,6 +320,14 @@ docker compose exec oms-db psql -U oms -d oms -c "
   ALTER TABLE executions ALTER COLUMN last_qty TYPE BIGINT, ALTER COLUMN new_qty TYPE BIGINT;"
 ```
 
+A volume made before #236 also lacks `orders.stop_triggered`. The server then can't prepare its order write, so it writes nothing to Postgres, and at each retry logs `can't connect to PostgreSQL` with the missing column. Add the column and the `TRIGGERED` execution type:
+
+```bash
+docker compose exec oms-db psql -U oms -d oms -c "
+  ALTER TABLE orders ADD COLUMN IF NOT EXISTS stop_triggered BOOLEAN NOT NULL DEFAULT false;
+  ALTER TYPE exec_type ADD VALUE IF NOT EXISTS 'TRIGGERED';"
+```
+
 ## Troubleshooting
 
 ### Port conflicts

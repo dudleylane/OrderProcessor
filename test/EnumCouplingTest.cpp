@@ -139,7 +139,7 @@ TEST(EnumCouplingTest, TheFrontendKnowsEveryValueTheServerWrites)
     expectSame(ts, "OrderType", jsonValues(FXSWAP_ORDERTYPE), where);
     expectSame(ts, "TimeInForce", jsonValues(ATCLOSE_TIF), where);
     expectSame(ts, "OrderStatus", jsonValues(CANCELED_ORDSTATUS), where);
-    expectSame(ts, "ExecType", jsonValues(PEND_REPLACE_EXECTYPE), where);
+    expectSame(ts, "ExecType", jsonValues(TRIGGERED_EXECTYPE), where);
     expectSame(ts, "Currency", jsonValues(NZD_CURRENCY), where);
     expectSame(ts, "Capacity", jsonValues(AGENT_FOR_ANOTHER_MEMBER_CAPACITY), where);
     expectSame(ts, "AccountType", jsonValues(AGENCY_ACCOUNTTYPE), where);
