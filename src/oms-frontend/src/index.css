@@ -1,3 +1,48 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+/* Tailwind 3's colours, which the app keeps for now (#220): the file says why, and how to take Tailwind 4's */
+@import './tailwind-v3-palette.css';
+
+/* Tailwind 3's sans-serif fonts (#220). Tailwind 4.3's list names fonts, where 3's asked for the system's UI font,
+   which differs on a Linux desktop. Its monospace list is 3's. */
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
+/*
+  Tailwind 3's defaults where Tailwind 4 changed them (#220), so the app looks as it did. A utility on an element still
+  wins over these, which are in the base layer.
+  - Borders: Tailwind 4's default border colour is currentcolor, where 3's was gray-200 (from the upgrade tool).
+  - Buttons: 4 gives them the default cursor, where 3 gave a button that isn't disabled the pointer.
+  - Placeholders: 4 colours them with the text colour at half opacity, where 3 used gray-400.
+  - Table cells and options: 4's preflight takes every element's padding to 0, where 3 left the browser's: 1px on a
+    cell, and 2px each side and 1px below on an option.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+
+  td,
+  th {
+    padding: 1px;
+  }
+
+  option {
+    padding: 0 2px 1px;
+  }
+}

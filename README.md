@@ -182,6 +182,11 @@ npm run dev                         # Vite dev server at http://localhost:3000
 
 The app asks for the server's access token first: leave it empty for a server run without one. It connects to `/ws` on the host and port it was loaded from, and the dev server passes that on to the server at `ws://localhost:8080/ws`. The image's nginx does the same for the server's container. To point a build somewhere else, set `VITE_WS_URL` when building.
 
+The styles are Tailwind CSS 4 (#220), so the app needs a browser from 2023 or later: Safari 16.4, Chrome 111 or Firefox 128, the oldest that have the CSS features Tailwind 4 uses (cascade layers, `@property`, `color-mix()`). It keeps Tailwind 3's look:
+- **The palette:** `src/tailwind-v3-palette.css` keeps Tailwind 3's colours, and its header says how to take Tailwind 4's.
+- **Changed defaults:** `src/index.css` keeps the defaults Tailwind 4 changed: border colour, the button cursor, placeholder colour, and table-cell and option padding.
+- **Hover:** Tailwind 4 applies `hover:` styles only on a device that can hover, so a touch screen no longer shows them after a tap.
+
 ---
 
 ## Testing
