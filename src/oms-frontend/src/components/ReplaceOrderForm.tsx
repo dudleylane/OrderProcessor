@@ -65,7 +65,7 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
             inputMode="decimal"
             value={price}
             onChange={e => setPrice(e.target.value.replace(/[^0-9.]/g, ''))}
-            className="w-28 bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono"
+            className="w-28 bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm font-mono"
           />
         </div>
       )}
@@ -76,7 +76,7 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
           inputMode="numeric"
           value={orderQty}
           onChange={e => setOrderQty(e.target.value.replace(/[^0-9]/g, ''))}
-          className="w-28 bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono"
+          className="w-28 bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm font-mono"
         />
       </div>
       <div>
@@ -84,7 +84,7 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
         <select
           value={tif}
           onChange={e => setTif(e.target.value as TimeInForce)}
-          className="bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm"
+          className="bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm"
         >
           {Object.values(TimeInForce).map(t => (
             <option key={t} value={t}>{t}</option>
@@ -94,11 +94,11 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
       <button
         type="submit"
         disabled={problem !== ''}
-        className="px-3 py-1.5 rounded text-xs bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="px-3 py-1.5 rounded-sm text-xs bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         Send replace
       </button>
-      <button type="button" onClick={onClose} className="px-3 py-1.5 rounded text-xs text-gray-400 hover:text-gray-200">
+      <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-sm text-xs text-gray-400 hover:text-gray-200">
         Close
       </button>
       {problem && <span className="text-xs text-gray-500">{problem}</span>}

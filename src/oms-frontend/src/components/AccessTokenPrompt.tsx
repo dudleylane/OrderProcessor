@@ -33,7 +33,7 @@ export function AccessTokenPrompt({ onSubmit }: AccessTokenPromptProps) {
             autoFocus
             value={token}
             onChange={e => setToken(e.target.value)}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono"
+            className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm font-mono"
           />
           <div className="text-xs text-gray-600 mt-1">
             The server's OMS_WS_TOKEN. Leave it empty if the server runs without one.
@@ -45,7 +45,7 @@ export function AccessTokenPrompt({ onSubmit }: AccessTokenPromptProps) {
         <button
           type="submit"
           disabled={problem !== null}
-          className="w-full py-2.5 rounded font-medium text-sm transition-colors
+          className="w-full py-2.5 rounded-sm font-medium text-sm transition-colors
             bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500"
         >
           Connect

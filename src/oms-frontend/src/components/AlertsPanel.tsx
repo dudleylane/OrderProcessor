@@ -56,13 +56,13 @@ export function AlertsPanel({ alerts }: Props) {
           <div className="flex gap-2">
             <button
               onClick={alerts.resetRules}
-              className="px-3 py-1 text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded transition-colors"
+              className="px-3 py-1 text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded-sm transition-colors"
             >
               Reset Defaults
             </button>
             <button
               onClick={() => setShowAddRule(!showAddRule)}
-              className="px-3 py-1 text-xs text-blue-400 hover:text-blue-300 border border-blue-800 rounded transition-colors"
+              className="px-3 py-1 text-xs text-blue-400 hover:text-blue-300 border border-blue-800 rounded-sm transition-colors"
             >
               {showAddRule ? 'Cancel' : 'Add Rule'}
             </button>
@@ -79,7 +79,7 @@ export function AlertsPanel({ alerts }: Props) {
                   type="text"
                   value={newRule.name}
                   onChange={e => setNewRule(r => ({ ...r, name: e.target.value }))}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-100"
                   placeholder="Rule name"
                 />
               </div>
@@ -88,7 +88,7 @@ export function AlertsPanel({ alerts }: Props) {
                 <select
                   value={newRule.metric}
                   onChange={e => setNewRule(r => ({ ...r, metric: e.target.value }))}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-100"
                 >
                   {METRIC_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
@@ -98,7 +98,7 @@ export function AlertsPanel({ alerts }: Props) {
                 <select
                   value={newRule.operator}
                   onChange={e => setNewRule(r => ({ ...r, operator: e.target.value as AlertRule['operator'] }))}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-100"
                 >
                   {['>', '<', '>=', '<=', '=='].map(op => <option key={op} value={op}>{op}</option>)}
                 </select>
@@ -109,7 +109,7 @@ export function AlertsPanel({ alerts }: Props) {
                   type="number"
                   value={newRule.threshold}
                   onChange={e => setNewRule(r => ({ ...r, threshold: Number(e.target.value) }))}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-100"
                 />
               </div>
               <div>
@@ -117,7 +117,7 @@ export function AlertsPanel({ alerts }: Props) {
                 <select
                   value={newRule.severity}
                   onChange={e => setNewRule(r => ({ ...r, severity: e.target.value as AlertSeverity }))}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-100"
                 >
                   <option value="INFO">Info</option>
                   <option value="WARNING">Warning</option>
@@ -127,7 +127,7 @@ export function AlertsPanel({ alerts }: Props) {
               <div>
                 <button
                   onClick={handleAddRule}
-                  className="w-full px-3 py-1 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
+                  className="w-full px-3 py-1 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-sm transition-colors"
                 >
                   Add
                 </button>
@@ -138,7 +138,7 @@ export function AlertsPanel({ alerts }: Props) {
                 type="checkbox"
                 checked={newRule.useDelta}
                 onChange={e => setNewRule(r => ({ ...r, useDelta: e.target.checked }))}
-                className="rounded"
+                className="rounded-sm"
               />
               Compare rate of change (delta) instead of absolute value
             </label>
@@ -200,7 +200,7 @@ export function AlertsPanel({ alerts }: Props) {
           {alerts.unacknowledgedCount > 0 && (
             <button
               onClick={alerts.acknowledgeAll}
-              className="px-3 py-1 text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded transition-colors"
+              className="px-3 py-1 text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded-sm transition-colors"
             >
               Acknowledge All
             </button>
