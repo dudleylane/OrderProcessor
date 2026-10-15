@@ -740,7 +740,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 
 - **Records:** `stopTriggered_` is persisted (`OrderCodec` format version 2). Version 0 and 1 records decode as held.
 - **Restore:** a working held stop goes back into the stop book. A released STOP is left to match, as an open market order is, and a released STOPLIMIT is booked as a limit order. `app/main.cpp` waits for the transaction manager to hold nothing (`pendingTransactions()`) between the restored orders it matches, since a release matches on a transaction worker.
-- **Not yet:** no trade price survives a restart (#237).
+- **Last trade (#237):** each trade's transaction persists its instrument's last price, and an id drawn when the trade was made, in the commit that holds its fills (`PersistLastTradeTrOperation`, record type `LASTTRADE`, keyed by the instrument's number with date 2). A restore releases the held stops that price reached and that arrived before the trade, through `Processor::releaseRestored()`, once `app/main.cpp` has matched the orders that lost their fills: a lost release ran after the trades that crossing orders lost.
 
 **Associated Test Cases:**
 
@@ -1459,6 +1459,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | 1.4 | October 2026 | dudleylane, Claude | Stop orders (#223): the stop book, the matcher's trigger, the stop order flow |
 | 1.5 | October 2026 | dudleylane, Claude | The stop's TRIGGERED report (#236) |
 | 1.6 | October 2026 | dudleylane, Claude | A replace's stopPx (#238) |
+| 1.7 | October 2026 | dudleylane, Claude | The last trade's price survives a restart (#237) |
 
 ---
 

@@ -2265,3 +2265,101 @@ TEST_F(ProcessorTest, AReplacementAveragesItsFillsWithTheOriginals)
     ASSERT_EQ(30u, live->cumQty_);
     EXPECT_DOUBLE_EQ(340.0 / 30.0, live->avgPx_);
 }
+
+// =============================================================================
+// The last trade survives a restart (#237)
+// =============================================================================
+
+TEST_F(ProcessorTest, AStopWhoseReleaseACrashLostIsReleasedOnceRestarted)
+{
+    // The trade that reached the stop committed, and a crash lost the stop's release (#237). No trade price survived a
+    // restart, so the stop stayed held until the next trade, at whatever price that came. Now the trade persists its
+    // instrument's last trade, and the restart releases the stop from it. An earlier trade, at 10, didn't reach it:
+    // the restore must take the last one, at 9.
+    const std::string dir = test::uniqueTestPath("stop-release-lost");
+    std::filesystem::remove_all(dir);
+    IdT id;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        order = createTestOrder(instrId1_, BUY_SIDE, 9.0, 100);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        order = asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 9.5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        id = crashed.process(clOrdId)->orderId_;
+        order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        ASSERT_FALSE(crashed.storage_.locateByOrderId(id)->stopTriggered_)
+            << "a trade at 10 reached a sell stop at 9.5";
+
+        // A sell sweeps the bid at 10 and trades at 9, which reaches the stop
+        crashed.transactions_.keepNested_ = true;
+        order = createTestOrder(instrId1_, SELL_SIDE, 9.0, 100);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        ASSERT_EQ(4u, crashed.transactions_.kept_.size())
+            << "the two trades' transactions, the sweep's next match between them, and the stop's release";
+        crashed.transactions_.runKept(3);
+        ASSERT_FALSE(crashed.storage_.locateByOrderId(id)->stopTriggered_) << "the release is lost";
+    }
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    OrderEntry *restored = restarted.storage_.locateByOrderId(id);
+    ASSERT_NE(nullptr, restored);
+    ASSERT_FALSE(restored->stopTriggered_);
+    EXPECT_TRUE(restarted.dispatcher_.ordersToMatch().empty());
+    ASSERT_EQ(std::vector<OrderEntry *>{ restored }, restarted.dispatcher_.stopsReached());
+
+    restarted.processor_.releaseRestored(restored);
+    EXPECT_TRUE(restored->stopTriggered_);
+    EXPECT_EQ(std::vector<std::string>{ "10@9" }, reports.tradesOf(id));
+    EXPECT_EQ(FILLED_ORDSTATUS, restored->status_);
+    EXPECT_FALSE(restarted.book_.holdsStops(instrId1_));
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AStopThatArrivedAfterTheLastTradeWaitsForTheNextOneAfterARestart)
+{
+    // The last trade is at 10, and then a sell stop at 10.5 arrives, which a trade at 10 would reach. No trade has since
+    // it arrived, so it waits for the next one, restart or not: releasing every stop the last price reaches would
+    // release it at every restart (#237).
+    const std::string dir = test::uniqueTestPath("stop-after-last-trade");
+    std::filesystem::remove_all(dir);
+    IdT id;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory first(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        first.process(clOrdId);
+        order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        first.process(clOrdId);
+        order = asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        id = first.process(clOrdId)->orderId_;
+        ASSERT_FALSE(first.storage_.locateByOrderId(id)->stopTriggered_);
+    }
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    const OrderEntry *restored = restarted.storage_.locateByOrderId(id);
+    ASSERT_NE(nullptr, restored);
+    EXPECT_TRUE(restarted.dispatcher_.stopsReached().empty()) << "a stop that arrived after the last trade is released";
+    EXPECT_EQ(OrderBook::OrdersT{ id }, heldStops(restarted.book_, instrId1_));
+    std::filesystem::remove_all(dir);
+}
