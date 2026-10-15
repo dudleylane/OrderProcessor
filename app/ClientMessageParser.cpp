@@ -100,7 +100,8 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
             if (requireObject(d, &msg) && readPrice(d, "price", &msg.newOrder.price, &msg) &&
                 readPrice(d, "stopPx", &msg.newOrder.stopPx, &msg) &&
                 readQuantity(d, "orderQty", maxQty, &orderQty, &msg) &&
-                readUnsigned(d, "minQty", maxQty, &minQty, &msg))
+                readUnsigned(d, "minQty", maxQty, &minQty, &msg) &&
+                readUnsigned(d, "expireTime", maxId, &msg.newOrder.expireTime, &msg))
             {
                 msg.newOrder.symbol = d.value("symbol", "");
                 msg.newOrder.side = sideFromJson(d.value("side", ""));
@@ -127,6 +128,15 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
                 {
                     markInvalid(&msg, "invalid stopPx: a STOP or STOPLIMIT order needs one above 0");
                 }
+                // A GTD order expires at its expireTime, and an order of any other time in force has none (#240)
+                else if ((GTD_TIF == msg.newOrder.tif) && (0 == msg.newOrder.expireTime))
+                {
+                    markInvalid(&msg, "invalid expireTime: a GTD order needs one");
+                }
+                else if ((GTD_TIF != msg.newOrder.tif) && (0 != msg.newOrder.expireTime))
+                {
+                    markInvalid(&msg, "invalid expireTime: only a GTD order has one");
+                }
             }
         }
         else if (msg.type == "cancel_order")
@@ -144,6 +154,7 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
             if (requireObject(d, &msg) && readUnsigned(d, "orderId", maxId, &msg.replaceOrder.orderId, &msg) &&
                 readPrice(d, "price", &msg.replaceOrder.price, &msg) &&
                 readPrice(d, "stopPx", &msg.replaceOrder.stopPx, &msg) &&
+                readUnsigned(d, "expireTime", maxId, &msg.replaceOrder.expireTime, &msg) &&
                 (!d.contains("orderQty") || readQuantity(d, "orderQty", maxQty, &orderQty, &msg)))
             {
                 msg.replaceOrder.clOrderId = d.value("clOrderId", "");
@@ -151,6 +162,7 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
                 msg.replaceOrder.hasStopPx = d.contains("stopPx");
                 msg.replaceOrder.hasQty = d.contains("orderQty");
                 msg.replaceOrder.hasTif = d.contains("tif");
+                msg.replaceOrder.hasExpireTime = d.contains("expireTime");
                 msg.replaceOrder.orderQty = static_cast<unsigned int>(orderQty);
                 msg.replaceOrder.tif = tifFromJson(d.value("tif", ""));
                 // A new price is above 0 (#188), and so is a new stopPx, as a stop order's is when it arrives (#238)
@@ -161,6 +173,10 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
                 else if (msg.replaceOrder.hasStopPx && !(msg.replaceOrder.stopPx > 0))
                 {
                     markInvalid(&msg, "invalid stopPx: expected a number above 0");
+                }
+                else if (msg.replaceOrder.hasExpireTime && (0 == msg.replaceOrder.expireTime))
+                {
+                    markInvalid(&msg, "invalid expireTime: expected milliseconds since the epoch, above 0");
                 }
             }
         }

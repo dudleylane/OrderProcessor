@@ -755,6 +755,31 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 
 ---
 
+### 4.6 Time in Force (#240)
+
+The engine read an order's time in force and acted on none of it until #240.
+
+- **IOC and FOK never rest.** `OrderParams::book()` is `NONE` for them, as for a market order (`cancelsWhatIsLeft()`), but they keep their limit: `tradesWith()` still compares prices. When the sweep finds no contra, `OrderMatcher::match()` cancels what is left (`CancelOrderDeferedEvent`), as it does a market order's.
+- **FOK is checked first.** `OrderMatcher::matchNew()`, which a booking (`MatchOrderTrOperation`) and a release (`ReleaseStopTrOperation`) call for an order's first match, walks the other side in priority order with `findContra()`'s test, adding up what the orders it would take have left (`canFillAtOnce()`). Short, the order is canceled with nothing traded. The check and the sweep run in one transaction, and every transaction that books, cancels or matches on the instrument relates to it, so they see one book.
+- **Stop orders** take their time in force when released: a held stop doesn't match, and its release calls `matchNew()`.
+- **DAY and GTD expire on a timer.** `ExpiryScheduler` (one per server, created in `app/main.cpp`) holds a timer per order:
+  - a GTD order's at its `expireTime_`, as `TimerEvent::EXPIRATION`;
+  - a DAY order's at the first 17:00 New York after its `creationTime_` (21:00 or 22:00 UTC, with daylight time), or a replacement's after its `lastUpdateTime_`, the replace's time (it keeps its original's `creationTime_`), as `TimerEvent::DAY_END`.
+  - The processor sets an order's timer when it accepts the order, or a replacement (`Processor::scheduleExpiry()`). Its thread pushes each timer's event into the incoming queues when it comes due.
+  - The change is decided on the transaction worker (`Processor::process(OrderStateChange)`), with the order's other transactions. An order that isn't live (filled, canceled, replaced or expired) decides nothing: the state machine has no row for it, and its `no_transition` throws.
+  - `DAY_END` expires a live DAY order and starts a done-for-day order's next day (`onNewDay`, as before). For any other order it does nothing.
+- **Restore:** `App::scheduleRestoredExpiries()` sets the restored live DAY and GTD orders' timers before the server takes orders. One whose time passed while the server was down fires as soon as the timers start.
+- **OPG and ATCLOSE** need auctions the engine doesn't have; they rest as GTC orders.
+
+**Associated Test Cases:**
+
+| Test File | Test Case | Description |
+|-----------|-----------|-------------|
+| `ProcessorTest.cpp` | `*Ioc*`, `*Fok*` | IOC's rest canceled; FOK in full or not at all; a released IOC stop |
+| `ProcessorTest.cpp` | `*Gtd*`, `*Day*`, `ATimerOfAnOrderThatFilledDecidesNothing`, `AReplacementHasATimerOfItsOwn*` | Expiry at the order's time, and nothing for an order no longer live |
+| `ExpirySchedulerTest.cpp` | `ExpirySchedulerTest.*` | The day's end, which orders have a timer, firing order, the thread |
+| `ServerDataTest.cpp` | `RestoredDayAndGtdOrdersThatAreLiveGetTheirTimersBack` | Timers set again at a restart |
+
 ## 5. State Machine Design
 
 ### 5.1 Order State Diagram
@@ -1409,7 +1434,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 
 | Category | Files |
 |----------|-------|
-| **Core Pipeline** | `Processor.h/cpp`, `IncomingQueues.h/cpp`, `OutgoingQueues.h/cpp`, `QueuesManager.h/cpp` |
+| **Core Pipeline** | `Processor.h/cpp`, `IncomingQueues.h/cpp`, `OutgoingQueues.h/cpp`, `QueuesManager.h/cpp`, `ExpiryScheduler.h/cpp` |
 | **State Machine** | `StateMachine.h/cpp`, `StateMachineDef.h`, `OrderStateMachineImpl.h/cpp`, `OrderStates.h/cpp`, `OrderStateEvents.h` |
 | **Order Matching** | `OrderMatcher.h/cpp`, `OrderBookImpl.h/cpp` |
 | **Transactions** | `TransactionDef.h`, `TransactionMgr.h/cpp`, `TransactionScope.h/cpp`, `TransactionScopePool.h`, `TrOperations.h/cpp`, `NLinkedTree.h/cpp` |
@@ -1427,7 +1452,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 
 | Category | Files |
 |----------|-------|
-| **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
+| **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `ExpirySchedulerTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 | **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh` |
@@ -1460,6 +1485,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | 1.5 | October 2026 | dudleylane, Claude | The stop's TRIGGERED report (#236) |
 | 1.6 | October 2026 | dudleylane, Claude | A replace's stopPx (#238) |
 | 1.7 | October 2026 | dudleylane, Claude | The last trade's price survives a restart (#237) |
+| 1.8 | October 2026 | dudleylane, Claude | Time in force: IOC, FOK, DAY and GTD (#240) |
 
 ---
 

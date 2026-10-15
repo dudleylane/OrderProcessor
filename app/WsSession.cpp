@@ -275,6 +275,12 @@ void WsSession::handleMessage(const std::string &msgStr)
                                 " is missing, or isn't one the server knows"));
             return;
         }
+        // A GTD order expires at its expireTime (#240), which must be ahead of it
+        if ((GTD_TIF == no.tif) && (no.expireTime <= nowMillis()))
+        {
+            send(serializeError("Order refused: expireTime has passed"));
+            return;
+        }
 
         // Look up instrument
         SourceIdT instrId = wideData_->findInstrumentBySymbol(no.symbol);
@@ -347,6 +353,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         order->leavesQty_ = no.orderQty;
         order->minQty_ = no.minQty;
         order->tif_ = no.tif;
+        order->expireTime_ = no.expireTime;
         order->currency_ = no.currency;
         order->capacity_ = no.capacity;
         // The protocol has no settlement type, and an order without one settles regular, as in FIX (#34)
@@ -375,9 +382,9 @@ void WsSession::handleMessage(const std::string &msgStr)
     else if (msg.type == "replace_order")
     {
         const auto &ro = msg.replaceOrder;
-        if (!ro.hasPrice && !ro.hasStopPx && !ro.hasQty && !ro.hasTif)
+        if (!ro.hasPrice && !ro.hasStopPx && !ro.hasQty && !ro.hasTif && !ro.hasExpireTime)
         {
-            send(serializeError("replace_order changes nothing: give price, stopPx, orderQty or tif"));
+            send(serializeError("replace_order changes nothing: give price, stopPx, orderQty, tif or expireTime"));
             return;
         }
         // As for a new order (#166): a tif the server doesn't know would reach every client as "INVALID"
@@ -413,6 +420,31 @@ void WsSession::handleMessage(const std::string &msgStr)
             send(serializeError("Replace refused: stopPx is only for a STOP or STOPLIMIT order"));
             return;
         }
+        // A GTD replacement expires at its expireTime, the original's or a new one ahead of it, and only a GTD order has
+        // one (#240)
+        const TimeInForce tif = ro.hasTif ? ro.tif : replacement->tif_;
+        const char *expiryRefusal = nullptr;
+        if (GTD_TIF == tif)
+        {
+            if (ro.hasExpireTime && (ro.expireTime <= nowMillis()))
+            {
+                expiryRefusal = "Replace refused: expireTime has passed";
+            }
+            else if (!ro.hasExpireTime && (GTD_TIF != replacement->tif_))
+            {
+                expiryRefusal = "Replace refused: a GTD order needs an expireTime";
+            }
+        }
+        else if (ro.hasExpireTime)
+        {
+            expiryRefusal = "Replace refused: only a GTD order has an expireTime";
+        }
+        if (nullptr != expiryRefusal)
+        {
+            send(serializeError(expiryRefusal));
+            return;
+        }
+        replacement->expireTime_ = (GTD_TIF != tif) ? 0 : (ro.hasExpireTime ? ro.expireTime : replacement->expireTime_);
         replacement->orderId_ = IdT();
         replacement->clOrderId_ = newClOrderId();
         replacement->origClOrderId_ = original->clOrderId_;

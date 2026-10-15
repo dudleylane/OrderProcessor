@@ -359,6 +359,12 @@ bool OrderEntry::isValid(std::string *invalid) const
             *invalid = "Invalid value of the timeInForce!";
             return false;
         }
+        // A GTD order expires at its expireTime_ (#240)
+        if ((GTD_TIF == tif_) && (0 == expireTime_))
+        {
+            *invalid = "A GTD order needs an expireTime!";
+            return false;
+        }
         if (INVALID_SETTLTYPE == settlType_)
         {
             *invalid = "Invalid value of the settlement type!";

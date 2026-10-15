@@ -20,6 +20,15 @@
 
 namespace COP
 {
+namespace Proc
+{
+class ExpiryScheduler;
+}
+namespace Store
+{
+class OrderDataStorage;
+}
+
 namespace App
 {
 
@@ -50,6 +59,11 @@ struct ServerData
 /// open or a record this build can't read (#149, #150), and app/main.cpp then exits with the reason (#203).
 ServerData loadServerData(const std::string &dataDir, size_t lmdbMapSize, u64 idBlock, const std::string &clearingFirm,
                           const std::string &defaultAccount);
+
+/// Sets the timers of the restored DAY and GTD orders that are live (#240): one whose time passed while the server was
+/// down fires as soon as the timers start. Call it with nothing else running on the orders, before the server takes
+/// orders. Returns how many it set.
+size_t scheduleRestoredExpiries(const Store::OrderDataStorage &storage, Proc::ExpiryScheduler *expiry);
 
 } // namespace App
 } // namespace COP

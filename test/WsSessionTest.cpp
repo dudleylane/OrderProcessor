@@ -376,6 +376,56 @@ TEST_F(WsSessionTest, OrderThatNamesAnAccountKeepsIt)
     EXPECT_TRUE(order->isValid(&invalid)) << invalid;
 }
 
+TEST_F(WsSessionTest, AGtdOrderCarriesItsExpireTimeAndOneWhoseTimeHasPassedIsRefused)
+{
+    // A GTD order expires at its expireTime (#240): it is the order's, and it must be ahead of it
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    const std::string order = R"({"type":"new_order","data":{"symbol":"AAPL","side":"SELL","ordType":"LIMIT",)"
+                              R"("price":151.5,"orderQty":50,"tif":"GTD","currency":"USD","capacity":"AGENCY",)";
+
+    send(client, order + R"("expireTime":4102444800000}})"); // 2100-01-01
+    std::unique_ptr<OrderEntry> gtd = takeQueuedOrder();
+    ASSERT_NE(nullptr, gtd) << "no order queued; escaped: " << escaped();
+    EXPECT_EQ(GTD_TIF, gtd->tif_);
+    EXPECT_EQ(4102444800000ULL, gtd->expireTime_);
+    std::string invalid;
+    EXPECT_TRUE(gtd->isValid(&invalid)) << invalid;
+
+    send(client, order + R"("expireTime":1000}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Order refused: expireTime has passed", reply->value("message", ""));
+    EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0)));
+}
+
+TEST_F(WsSessionTest, AReplaceToGtdNeedsAnExpireTime)
+{
+    // A replacement that becomes GTD needs one, as a new GTD order does (#240); a GTD one keeps the original's
+    restoreOrder(IdT(7, 1790000100), "CL-7");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"replace_order","data":{"orderId":7,"tif":"GTD"}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Replace refused: a GTD order needs an expireTime", reply->value("message", ""));
+
+    send(client, R"({"type":"replace_order","data":{"orderId":7,"expireTime":4102444800000}})");
+    reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Replace refused: only a GTD order has an expireTime", reply->value("message", ""));
+
+    send(client, R"({"type":"replace_order","data":{"orderId":7,"tif":"GTD","expireTime":4102444800000}})");
+    auto replace = takeQueuedReplace();
+    ASSERT_TRUE(replace.has_value()) << "no replace queued; escaped: " << escaped();
+    ASSERT_NE(nullptr, replace->second);
+    EXPECT_EQ(GTD_TIF, replace->second->tif_);
+    EXPECT_EQ(4102444800000ULL, replace->second->expireTime_);
+}
+
 TEST_F(WsSessionTest, OrderIsRefusedWhenTheServerHasNoClearingFirm)
 {
     useDefaultClearing_ = false;
@@ -673,7 +723,8 @@ TEST_F(WsSessionTest, ReplaceThatChangesNothingIsRefused)
     send(client, R"({"type":"replace_order","data":{"orderId":7}})");
     auto reply = readUntil(client, "error");
     ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
-    EXPECT_EQ("replace_order changes nothing: give price, stopPx, orderQty or tif", reply->value("message", ""));
+    EXPECT_EQ("replace_order changes nothing: give price, stopPx, orderQty, tif or expireTime",
+              reply->value("message", ""));
     EXPECT_EQ(0u, inQueues_.size());
 }
 

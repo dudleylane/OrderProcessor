@@ -39,6 +39,7 @@ class TransactionManager;
 
 namespace Proc
 {
+class ExpiryScheduler;
 
 struct ProcessorParams
 {
@@ -49,6 +50,8 @@ struct ProcessorParams
     Queues::OutQueues *outQueues_;
     Queues::InQueuesContainer *inQueue_;
     ACID::TransactionManager *transactMgr_;
+    /// Expires DAY and GTD orders at their time (#240); none in most tests
+    ExpiryScheduler *expiry_ = nullptr;
 
     /// for the test purpose
     bool testStateMachine_;
@@ -99,6 +102,8 @@ public:
 
     /// Appends the operation that persists the order when the transaction commits (#20), once per transaction (#148)
     static void persistOrder(ACID::Scope *transaction, const OrderEntry &order);
+    /// Sets the timer of an order just accepted, if its time in force ends: a DAY or GTD order (#240)
+    void scheduleExpiry(const OrderEntry &order) const;
 
     /// Matches a restored order that lost its fills, and books it if it is a limit order, as the transaction that booked
     /// it did when it ran (#207). The fills go to the transaction manager, each in a transaction of its own, but they
@@ -157,6 +162,8 @@ private:
     Queues::OutQueues *outQueues_;
     Queues::InQueuesContainer *inQueue_;
     ACID::TransactionManager *transactMgr_;
+    /// Expires DAY and GTD orders at their time (#240); none in most tests
+    ExpiryScheduler *expiry_ = nullptr;
 
     /// for the test purpose
     bool testStateMachine_;

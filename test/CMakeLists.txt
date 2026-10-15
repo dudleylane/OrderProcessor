@@ -25,6 +25,7 @@ target_sources(orderProcessorTest
         OrderMatcherTest.cpp
         OrderStorageTest.cpp
         OutgoingQueuesTest.cpp
+        ExpirySchedulerTest.cpp
         TransactionMgrTest.cpp
         WideDataStorageTest.cpp
 

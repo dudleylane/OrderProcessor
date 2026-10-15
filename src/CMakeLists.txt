@@ -11,6 +11,7 @@ target_sources(orderEngine
         EventManager.cpp
         ExchUtils.cpp
         ExecutionDeferedEvent.cpp
+        ExpiryScheduler.cpp
         FileStorage.cpp
         FilterImpl.cpp
         IdTGenerator.cpp
