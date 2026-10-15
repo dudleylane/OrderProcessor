@@ -235,8 +235,14 @@ void OrderParams::applyTrade(const TradeExecEntry *trade)
     {
         throw std::runtime_error("OrderParams::applyTrade: trade quantity exceeds leaves quantity!");
     }
+    // The average fill price, weighted by quantity (#239). Nothing computed it before, so every order reported 0.
+    const QuantityT cumBefore = cumQty_;
     leavesQty_ -= trade->lastQty_;
     cumQty_ += trade->lastQty_;
+    if (0 < cumQty_) [[likely]]
+    {
+        avgPx_ = (avgPx_ * cumBefore + trade->lastPx_ * trade->lastQty_) / cumQty_;
+    }
 
     executions_.get()->push_back(EventData(trade->execId_));
 }
