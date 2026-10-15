@@ -152,7 +152,7 @@ export function ExecutionBlotter({ executions, orders }: ExecutionBlotterProps) 
       <div className="p-3 border-t border-gray-800 flex justify-end">
         <button
           onClick={() => handleExport(executions, orders)}
-          className="text-xs text-gray-500 hover:text-gray-300 px-3 py-1.5 border border-gray-700 rounded"
+          className="text-xs text-gray-500 hover:text-gray-300 px-3 py-1.5 border border-gray-700 rounded-sm"
         >
           Export CSV
         </button>

@@ -58,7 +58,7 @@ export function OrderBookPanel({
               <button
                 key={inst.id}
                 onClick={() => setSelectedSymbol(inst.symbol)}
-                className={`block w-full text-left px-2 py-1.5 text-xs font-mono rounded transition-colors
+                className={`block w-full text-left px-2 py-1.5 text-xs font-mono rounded-sm transition-colors
                   ${selectedSymbol === inst.symbol
                     ? 'bg-blue-900/40 text-blue-400'
                     : 'text-gray-400 hover:bg-gray-800'}`}
