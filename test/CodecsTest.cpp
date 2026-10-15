@@ -392,6 +392,56 @@ TEST_F(OrderCodecTest, BothEncodersWriteTheSameRecord)
     EXPECT_EQ(written, std::string(buf.data(), static_cast<size_t>(end - buf.data())));
 }
 
+// Since format version 3 a record carries the order's strings, each under its field's id (#192). A string given for a
+// field that names nothing could never be restored: the encoder refuses it, and so does the decoder, in a record.
+TEST_F(OrderCodecTest, AStringForAFieldThatNamesNothingIsRefused)
+{
+    SourceIdT instrId = addInstrument("instrument");
+    // source, destination, clOrderId, origClOrderId (unset), instrument, account, clearing, executions
+    OrderEntry val(SourceIdT(1, 0), SourceIdT(2, 0), SourceIdT(3, 1), SourceIdT(), instrId, SourceIdT(6, 1),
+                   SourceIdT(7, 1), SourceIdT(8, 1));
+    val.orderId_ = IdT(4444, 4445);
+    val.stateMachinePersistance_.stateZone1Id_ = 2;
+    val.stateMachinePersistance_.stateZone2Id_ = 8;
+    OrderStrings strings;
+    strings.origClOrderId.emplace(STRING_RAWDATATYPE, "CL-0", 4);
+    std::string buf;
+    IdT id;
+    u32 version = 0;
+    EXPECT_THROW(OrderCodec::encode(val, &buf, &id, &version, strings), std::invalid_argument);
+
+    // The record without it, then the same with the original's ClOrdID marked carried: its presence byte is the third
+    // from the end of the four ('.', 0) pairs that close a record carrying nothing
+    buf.clear();
+    OrderCodec::encode(val, &buf, &id, &version);
+    ASSERT_EQ('\0', buf[buf.size() - 5]);
+    std::string carried = buf.substr(0, buf.size() - 5) + std::string("\x01", 1) +
+                          std::string("\x01\0\0\0\x04\0\0\0CL-0", 12) + buf.substr(buf.size() - 4);
+    try
+    {
+        std::unique_ptr<OrderEntry>(OrderCodec::decode(id, OrderCodec::FORMAT_VERSION, carried.data(), carried.size()));
+        ADD_FAILURE() << "a record carrying a string for a field that names nothing was decoded";
+    }
+    catch (const std::runtime_error &ex)
+    {
+        EXPECT_NE(std::string::npos, std::string(ex.what()).find("for an unset id")) << ex.what();
+    }
+
+    // A string's id has date 0, which IdT::isValid() refuses, and it is carried all the same
+    buf.clear();
+    OrderStrings named;
+    named.source = "desk-a";
+    named.destination = "Internal";
+    OrderCodec::encode(val, &buf, &id, &version, named);
+    OrderStrings decoded;
+    std::unique_ptr<OrderEntry> order(
+        OrderCodec::decode(id, OrderCodec::FORMAT_VERSION, buf.data(), buf.size(), &decoded));
+    ASSERT_TRUE(decoded.source && decoded.destination);
+    EXPECT_EQ("desk-a", *decoded.source);
+    EXPECT_EQ("Internal", *decoded.destination);
+    EXPECT_FALSE(decoded.clOrderId || decoded.origClOrderId);
+}
+
 // A mask bit that no execution instruction has is a layout this build doesn't know (#172)
 TEST_F(OrderCodecTest, AnUnknownExecutionInstructionIsRefused)
 {
@@ -406,9 +456,10 @@ TEST_F(OrderCodecTest, AnUnknownExecutionInstructionIsRefused)
     u32 version = 0;
     OrderCodec::encode(val, &buf, &id, &version);
 
-    // The mask is the record's last 4 bytes
+    // The mask comes 10 bytes before the record's end: '.' and the stop flag (#223), then the four strings this order
+    // doesn't carry, each '.' and a 0 (#192)
     const u32 unknown = 1u << (static_cast<u32>(_INSTRUCTION) + 1);
-    std::memcpy(&buf[buf.size() - sizeof(unknown)], &unknown, sizeof(unknown));
+    std::memcpy(&buf[buf.size() - 10 - sizeof(unknown)], &unknown, sizeof(unknown));
     try
     {
         std::unique_ptr<OrderEntry>(OrderCodec::decode(id, OrderCodec::FORMAT_VERSION, buf.c_str(), buf.size()));

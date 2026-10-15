@@ -126,6 +126,32 @@ public:
         executionLists_.push_back(std::make_pair(id, val));
     }
 
+    // What an order's record carries is looked up here (#192): what was restored, as the real storage would have it
+    bool find(const SourceIdT &id, StringT *val) const override
+    {
+        for (const IdString &str : strings_)
+        {
+            if (id == str.id_)
+            {
+                *val = *str.str_;
+                return true;
+            }
+        }
+        return false;
+    }
+    bool find(const SourceIdT &id, RawDataEntry *val) const override
+    {
+        for (const RawDataEntry *raw : rawDatas_)
+        {
+            if (id == raw->id_)
+            {
+                *val = *raw;
+                return true;
+            }
+        }
+        return false;
+    }
+
 public:
     std::deque<InstrumentEntry *> instruments_;
     std::deque<AccountEntry *> accounts_;
@@ -1714,6 +1740,20 @@ void restoreGoldenInstrument()
     WideDataStorage::instance()->restore(new InstrumentEntry(goldenInstrument()));
 }
 
+/// The golden order's ClOrdID, its original's, its source and its destination, under the ids its fields name, where the
+/// dispatcher looks them up to carry them in the order's record (#192)
+void restoreGoldenOrderStrings(DataStorageRestore &store)
+{
+    auto *clOrderId = new RawDataEntry(STRING_RAWDATATYPE, "GOLDEN-CL-1", 11);
+    clOrderId->id_ = SourceIdT(13, 3);
+    store.restore(clOrderId);
+    auto *origClOrderId = new RawDataEntry(STRING_RAWDATATYPE, "GOLDEN-CL-0", 11);
+    origClOrderId->id_ = SourceIdT(14, 4);
+    store.restore(origClOrderId);
+    store.restore(SourceIdT(11, 1), new StringT("CLIENT-1"));
+    store.restore(SourceIdT(12, 2), new StringT("Internal"));
+}
+
 std::unique_ptr<OrderEntry> goldenOrder()
 {
     // source, destination, clOrderId, origClOrderId, instrument, account, clearing, executions
@@ -1789,6 +1829,21 @@ const char *const GOLDEN_ORDER_RECORD_V2 = "06000200952835013a65000000000000002e
                                            "2e00000000004459402e060000002e020000002e040000002e030000002e0400"
                                            "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
                                            "2ee90300002e910100002e030000003a020000002e060000002e01";
+// The order as OrderCodec has written it since #192, in format version 3: version 2's fields, then the order's strings,
+// each '.', a 1 for carried, and its value: the ClOrdID "GOLDEN-CL-1" and its original's "GOLDEN-CL-0" (type 1, a
+// string; length; bytes), the source "CLIENT-1" and the destination "Internal" (length; bytes)
+const char *const GOLDEN_ORDER_RECORD_V3 = "06000300952835013a65000000000000002e060000003a10000000000000002e"
+                                           "070000003a11000000000000002e020000003a0c000000000000002e03000000"
+                                           "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
+                                           "00000000002e080000003a12000000000000002e942835013a5b110000000000"
+                                           "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
+                                           "35a10100002e00000000005059402e00000000002059402e0000000000485940"
+                                           "2e00000000004459402e060000002e020000002e040000002e030000002e0400"
+                                           "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
+                                           "2ee90300002e910100002e030000003a020000002e060000002e012e01010000"
+                                           "000b000000474f4c44454e2d434c2d312e01010000000b000000474f4c44454e"
+                                           "2d434c2d302e0108000000434c49454e542d312e0108000000496e7465726e61"
+                                           "6c";
 const char *const GOLDEN_ID_LIMIT_RECORD = "09000000cb04fb711f010000";
 
 } // namespace
@@ -1796,6 +1851,7 @@ const char *const GOLDEN_ID_LIMIT_RECORD = "09000000cb04fb711f010000";
 TEST_F(StorageRecordDispatcherTest, WritesTheGoldenRecords)
 {
     restoreGoldenInstrument();
+    restoreGoldenOrderStrings(*restore_);
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
 
     dispatcher_->save(goldenInstrument());
@@ -1817,7 +1873,7 @@ TEST_F(StorageRecordDispatcherTest, WritesTheGoldenRecords)
     expectGolden("GOLDEN_ACCOUNT_RECORD", written(GOLDEN_ACCOUNT_ID), GOLDEN_ACCOUNT_RECORD);
     expectGolden("GOLDEN_CLEARING_RECORD", written(GOLDEN_CLEARING_ID), GOLDEN_CLEARING_RECORD);
     expectGolden("GOLDEN_RAWDATA_RECORD", written(GOLDEN_RAWDATA_ID), GOLDEN_RAWDATA_RECORD);
-    expectGolden("GOLDEN_ORDER_RECORD_V2", written(GOLDEN_ORDER_ID), GOLDEN_ORDER_RECORD_V2);
+    expectGolden("GOLDEN_ORDER_RECORD_V3", written(GOLDEN_ORDER_ID), GOLDEN_ORDER_RECORD_V3);
     expectGolden("GOLDEN_ID_LIMIT_RECORD", written(IdT(0, 1)), GOLDEN_ID_LIMIT_RECORD);
 }
 
@@ -1836,8 +1892,9 @@ void expectEveryFieldOfTheGoldenOrder(const char *golden, u32 formatVersion, con
     EXPECT_EQ(static_cast<u32>(StorageRecordDispatcher::ORDER_RECORDTYPE), word & 0xffff);
     EXPECT_EQ(formatVersion, word >> 16);
     const std::unique_ptr<OrderEntry> expected = goldenOrder();
-    const std::unique_ptr<OrderEntry> order(
-        OrderCodec::decode(GOLDEN_ORDER_ID, word >> 16, record.data() + sizeof(word), record.size() - sizeof(word)));
+    OrderStrings strings;
+    const std::unique_ptr<OrderEntry> order(OrderCodec::decode(
+        GOLDEN_ORDER_ID, word >> 16, record.data() + sizeof(word), record.size() - sizeof(word), &strings));
     ASSERT_NE(nullptr, order);
     EXPECT_EQ(GOLDEN_ORDER_ID, order->orderId_);
     EXPECT_EQ(expected->source_.getId(), order->source_.getId());
@@ -1875,6 +1932,22 @@ void expectEveryFieldOfTheGoldenOrder(const char *golden, u32 formatVersion, con
     EXPECT_EQ(instructions, order->execInstruct_);
     // Format version 2 says whether the stop was reached; an older record's stop order is held (#223)
     EXPECT_EQ(stopTriggered, order->stopTriggered_) << "format version " << formatVersion;
+    // Format version 3 carries the order's strings, under its fields' ids (#192); an older record carries none
+    if (3 <= formatVersion)
+    {
+        ASSERT_TRUE(strings.clOrderId && strings.origClOrderId && strings.source && strings.destination);
+        EXPECT_EQ("GOLDEN-CL-1", std::string(strings.clOrderId->data_, strings.clOrderId->length_));
+        EXPECT_EQ(STRING_RAWDATATYPE, strings.clOrderId->type_);
+        EXPECT_EQ(expected->clOrderId_.getId(), strings.clOrderId->id_);
+        EXPECT_EQ("GOLDEN-CL-0", std::string(strings.origClOrderId->data_, strings.origClOrderId->length_));
+        EXPECT_EQ(expected->origClOrderId_.getId(), strings.origClOrderId->id_);
+        EXPECT_EQ("CLIENT-1", *strings.source);
+        EXPECT_EQ("Internal", *strings.destination);
+    }
+    else
+    {
+        EXPECT_FALSE(strings.clOrderId || strings.origClOrderId || strings.source || strings.destination);
+    }
 }
 
 /// The golden order records, each with the format version it was written in
@@ -1882,10 +1955,108 @@ const std::vector<std::pair<const char *, u32>> &goldenOrderRecords()
 {
     static const std::vector<std::pair<const char *, u32>> records = { { GOLDEN_ORDER_RECORD_V0, 0 },
                                                                        { GOLDEN_ORDER_RECORD_V1, 1 },
-                                                                       { GOLDEN_ORDER_RECORD_V2, 2 } };
+                                                                       { GOLDEN_ORDER_RECORD_V2, 2 },
+                                                                       { GOLDEN_ORDER_RECORD_V3, 3 } };
     return records;
 }
 } // namespace
+
+TEST_F(StorageRecordDispatcherTest, AnOrderRecordRestoresTheStringsItCarriesBeforeItsOrder)
+{
+    // Since format version 3 an order's record carries its ClOrdID, its original's, its source and its destination, and
+    // nothing writes records of their own for them (#192). Restored, they come back under the ids the order's fields
+    // name, before the order is stored: storing it indexes its ClOrdID.
+    restoreGoldenInstrument();
+    OrderDataStorage storage;
+    TestFileSaver saver;
+    StorageRecordDispatcher dispatcher;
+    dispatcher.init(WideDataStorage::instance(), nullptr, &saver, &storage);
+    dispatcher.startLoad();
+    const std::string record = fromHex(GOLDEN_ORDER_RECORD_V3);
+    dispatcher.onRecordLoaded(GOLDEN_ORDER_ID, 0, record.data(), record.size());
+    dispatcher.finishLoad();
+
+    const RawDataEntry clOrdId(STRING_RAWDATATYPE, "GOLDEN-CL-1", 11);
+    const OrderEntry *order = storage.locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, order) << "the order isn't found by the ClOrdID its record carries";
+    EXPECT_EQ(GOLDEN_ORDER_ID, order->orderId_);
+    EXPECT_EQ("CLIENT-1", order->source_.get());
+    EXPECT_EQ("Internal", order->destination_.get());
+    EXPECT_EQ("GOLDEN-CL-0", std::string(order->origClOrderId_.get().data_, order->origClOrderId_.get().length_));
+    EXPECT_TRUE(saver.records_.empty()) << "restoring an order wrote a record";
+}
+
+TEST_F(StorageRecordDispatcherTest, AnOrdersRecordCarriesTheStringsItsSessionAddedAndRestoresThemUnderTheirIds)
+{
+    // As a WebSocket session stores a new order's strings (#192): a ClOrdID, a source and a destination, none of them
+    // saved. A string's id has date 0, which IdT::isValid() refuses, and the record must carry them anyway: a server
+    // that left the source and destination out restarted with orders that named strings nobody had.
+    restoreGoldenInstrument();
+    WideParamsDataStorage *wide = WideDataStorage::instance();
+    const SourceIdT clOrdId = wide->addUnsaved(new RawDataEntry(STRING_RAWDATATYPE, "WS-1-1", 6));
+    const SourceIdT source = wide->addUnsaved(new StringT("desk-a"));
+    const SourceIdT destination = wide->addUnsaved(new StringT("Internal"));
+    ASSERT_FALSE(source.isValid()) << "a string's id has date 0, which this test is about";
+    OrderEntry order(source, destination, clOrdId, SourceIdT(), GOLDEN_INSTRUMENT_ID, SourceIdT(16, 6),
+                     SourceIdT(17, 7), SourceIdT(18, 8));
+    order.orderId_ = IdT(192, 20261015);
+    order.status_ = NEW_ORDSTATUS;
+    order.side_ = BUY_SIDE;
+    order.ordType_ = LIMIT_ORDERTYPE;
+    order.price_ = 10.0;
+    order.orderQty_ = 5;
+    order.leavesQty_ = 5;
+    order.stateMachinePersistance_.stateZone1Id_ = 2;
+    order.stateMachinePersistance_.stateZone2Id_ = 8;
+
+    TestFileSaver saver;
+    OrderDataStorage storage;
+    StorageRecordDispatcher writer;
+    writer.init(wide, nullptr, &saver, &storage);
+    writer.save(order);
+    const auto written = saver.records_.find(order.orderId_);
+    ASSERT_NE(saver.records_.end(), written);
+
+    // Restored by a dispatcher whose storage only records what it is given
+    TestDataStorageRestore restored;
+    OrderDataStorage restoredOrders;
+    TestFileSaver restoredSaver;
+    StorageRecordDispatcher reader;
+    reader.init(&restored, nullptr, &restoredSaver, &restoredOrders);
+    reader.startLoad();
+    reader.onRecordLoaded(order.orderId_, 0, written->second.record_.data(), written->second.record_.size());
+    reader.finishLoad();
+
+    ASSERT_EQ(1u, restored.rawDatas_.size()) << "the ClOrdID wasn't carried";
+    EXPECT_EQ(clOrdId, restored.rawDatas_[0]->id_);
+    EXPECT_EQ("WS-1-1", std::string(restored.rawDatas_[0]->data_, restored.rawDatas_[0]->length_));
+    std::map<IdT, std::string> strings;
+    for (const auto &str : restored.strings_)
+    {
+        strings[str.id_] = *str.str_;
+    }
+    EXPECT_EQ((std::map<IdT, std::string>{ { source, "desk-a" }, { destination, "Internal" } }), strings)
+        << "the source or destination wasn't carried under its own id";
+}
+
+TEST_F(StorageRecordDispatcherTest, ARecordCutInsideACarriedStringIsRefused)
+{
+    // The golden version 3 record ends with its destination, "Internal". Cut 3 bytes short, from a buffer of its own
+    // length, the decoder must say the destination is short before it reads it: reading its length's worth went past
+    // the record (#192).
+    restoreGoldenInstrument();
+    const std::string golden = fromHex(GOLDEN_ORDER_RECORD_V3);
+    const std::vector<char> cut(golden.begin() + sizeof(u32), golden.end() - 3);
+    try
+    {
+        std::unique_ptr<OrderEntry>(OrderCodec::decode(GOLDEN_ORDER_ID, 3, cut.data(), cut.size()));
+        ADD_FAILURE() << "a record cut inside its destination was decoded";
+    }
+    catch (const std::runtime_error &ex)
+    {
+        EXPECT_NE(std::string::npos, std::string(ex.what()).find("unable decode destination_")) << ex.what();
+    }
+}
 
 TEST_F(StorageRecordDispatcherTest, ReadsEveryFieldOfTheGoldenRecords)
 {
@@ -1938,6 +2109,7 @@ TEST_F(StorageRecordDispatcherTest, ReadsEveryFieldOfTheGoldenRecords)
 
     // The order's codec, by itself: restoring an order looks its ClOrdID up in WideDataStorage, which the golden
     // record's ids don't name. Every version this build has written is still read (#172).
+    expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V3, 3, goldenOrder()->execInstruct_, true);
     expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V2, 2, goldenOrder()->execInstruct_, true);
     expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V1, 1, goldenOrder()->execInstruct_, false);
     expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V0, 0, InstructionSetT(), false);
@@ -2045,7 +2217,7 @@ TEST_F(StorageRecordDispatcherTest, ARecordInANewerFormatIsRejected)
         }
     }
     // The order codec is at a version of its own (#172): one past it is refused the same way
-    std::string order = fromHex(GOLDEN_ORDER_RECORD_V2);
+    std::string order = fromHex(GOLDEN_ORDER_RECORD_V3);
     order[2] = static_cast<char>(OrderCodec::FORMAT_VERSION + 1);
     try
     {
