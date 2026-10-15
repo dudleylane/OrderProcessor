@@ -2235,3 +2235,78 @@ TEST_F(ProcessorTest, ASwapsTradesReleaseNoStop)
     EXPECT_FALSE(orderBook_->holdsStops(instrId1_));
     EXPECT_EQ(std::vector<std::string>{ "10@1.09" }, engine.reports_.tradesOf(stop->orderId_));
 }
+
+// =============================================================================
+// Average price (#239)
+// =============================================================================
+
+TEST_F(ProcessorTest, AnOrdersAveragePriceIsItsFillsWeightedByQuantity)
+{
+    // Nothing computed avgPx_, so every order reported 0 (#239). A buy takes 10 at 10 and 30 at 11, and each ask
+    // averages its own price.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *atTen = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 10));
+    const OrderEntry *atEleven = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 30));
+    const OrderEntry *buy = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 11.0, 60));
+    ASSERT_EQ(40u, buy->cumQty_);
+    EXPECT_DOUBLE_EQ(10.75, buy->avgPx_);
+    EXPECT_DOUBLE_EQ(10.0, atTen->avgPx_);
+    EXPECT_DOUBLE_EQ(11.0, atEleven->avgPx_);
+
+    // The buy rests at 11 with 20 left, and a sell of 10 trades with it there: (10 x 10 + 30 x 11 + 10 x 11) / 50
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 10));
+    ASSERT_EQ(50u, buy->cumQty_);
+    EXPECT_DOUBLE_EQ(10.8, buy->avgPx_);
+}
+
+TEST_F(ProcessorTest, AReplacementAveragesItsFillsWithTheOriginals)
+{
+    // A replacement takes over the original's fills, so its average price starts at the original's
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 10));
+    OrderEntry *buy = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30));
+    ASSERT_EQ(10u, buy->cumQty_);
+    ASSERT_DOUBLE_EQ(10.0, buy->avgPx_);
+
+    OrderEntry *replacement = buy->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = buy->clOrderId_;
+    replacement->price_ = 12.0;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    replacement->cumQty_ = 0; // as a client's replacement has them: the engine carries the original's over
+    replacement->avgPx_ = 0.0;
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+    engine.request(OrderReplaceEvent(buy->orderId_, replacement));
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    ASSERT_EQ(PARTFILL_ORDSTATUS, live->status_) << "the replace was refused, or lost the original's fills";
+    EXPECT_DOUBLE_EQ(10.0, live->avgPx_);
+
+    // The replacement buys its other 20 at 12: (10 x 10 + 20 x 12) / 30
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 12.0, 20));
+    ASSERT_EQ(30u, live->cumQty_);
+    EXPECT_DOUBLE_EQ(340.0 / 30.0, live->avgPx_);
+}
+
+TEST_F(ProcessorTest, ASwapsAveragePriceIsItsNearLegs)
+{
+    // On this branch a swap's fills reach the engine through its near leg, so its average is the near leg's (#239): a buy
+    // swap takes 30 at 1.0850 and 30 at 1.0860 from two resting swaps of the same dates, whose far prices it crosses
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const auto swap = [this](Side side, PriceT nearPrice, QuantityT qty)
+    {
+        auto order = createTestOrder(instrId1_, side, nearPrice, qty);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->farPrice_ = 1.095;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        return order;
+    };
+    engine.submit(swap(SELL_SIDE, 1.085, 30));
+    engine.submit(swap(SELL_SIDE, 1.086, 30));
+    const OrderEntry *buy = engine.submit(swap(BUY_SIDE, 1.086, 60));
+    ASSERT_EQ(FILLED_ORDSTATUS, buy->status_) << "the swaps didn't trade";
+    EXPECT_DOUBLE_EQ(1.0855, buy->avgPx_);
+    EXPECT_DOUBLE_EQ(1.095, buy->farPrice_);
+}

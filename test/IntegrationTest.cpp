@@ -813,13 +813,16 @@ TEST_F(IntegrationTest, StopsASweepReachesAreReleasedAfterItOnFourTransactionWor
     ASSERT_NE(nullptr, stop);
     ASSERT_NE(nullptr, stopLimit);
     ASSERT_NE(nullptr, ask);
-    // The sweep took all of 10, 11 and 12, so the stops' 15 came from the ask at 13. (avgPx_ would say so directly, but
-    // nothing computes it: #239.)
+    // The sweep took all of 10, 11 and 12, so the stops' 15 came from the ask at 13
     EXPECT_EQ(FILLED_ORDSTATUS, sweep->status_);
     EXPECT_EQ(30u, sweep->cumQty_) << "a stop traded inside the sweep that released it";
+    EXPECT_DOUBLE_EQ(11.0, sweep->avgPx_);
     EXPECT_EQ(FILLED_ORDSTATUS, stop->status_);
+    EXPECT_DOUBLE_EQ(13.0, stop->avgPx_);
     EXPECT_EQ(FILLED_ORDSTATUS, stopLimit->status_);
+    EXPECT_DOUBLE_EQ(13.0, stopLimit->avgPx_);
     EXPECT_EQ(35u, ask->leavesQty_);
+    EXPECT_DOUBLE_EQ(13.0, ask->avgPx_);
     EXPECT_FALSE(books.holdsStops(instrId));
 
     transMgr.stop();

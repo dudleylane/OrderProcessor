@@ -432,7 +432,7 @@ Every order clears through the server's clearing firm (`--clearing-firm`), and a
 
 ### Key Data Types
 
-**Order** — 20+ fields including: `orderId`, `clOrderId`, `symbol`, `side`, `ordType`, `price`, `stopPx`, `stopTriggered`, `avgPx`, `orderQty`, `cumQty`, `leavesQty`, `status`, `tif`, `capacity`, `currency`, `account`, `creationTime`, `lastUpdateTime`, and on an FX swap `settlDate`, `farPrice` and `farSettlDate`.
+**Order** — 20+ fields including: `orderId`, `clOrderId`, `symbol`, `side`, `ordType`, `price`, `stopPx`, `stopTriggered`, `avgPx`, `orderQty`, `cumQty`, `leavesQty`, `status`, `tif`, `capacity`, `currency`, `account`, `creationTime`, `lastUpdateTime`, and on an FX swap `settlDate`, `farPrice` and `farSettlDate`. `avgPx` is the average price of the order's fills, weighted by quantity, and 0 until it trades. A replacement carries its original's fills, and their average with them (#239). A swap's is its near leg's: the price a swap trades at, while each far-leg report carries the far price.
 
 **ExecutionReport** — Base fields: `execId`, `orderId`, `type`, `orderStatus`, `market`, `transactTime`. Type-specific fields: `lastQty`/`lastPx` (trade), `rejectReason` (reject, and a rejected replace), `origOrderId` (replace/correct), `execRefId` (trade cancel/correct), and `execLegType` (`NEAR` or `FAR`) on an FX swap's fill, which is reported once per leg. An order cancel carries only the base fields. A report with `orderId` 0 is for an order the server refused without storing it, such as one whose ClOrdID is already in use; `rejectReason` says why.
 
