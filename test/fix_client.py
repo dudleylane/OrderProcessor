@@ -1,8 +1,10 @@
-"""fix_client.py: what the scripts that run a real FIX server share (FixResendTest.py, FixLogonTest.py).
+"""fix_client.py: what the scripts that run a real FIX server share (FixResendTest.py, FixLogonTest.py, FixTlsTest.py).
 
-  - Client: a FIX 4.4 client on a raw socket, which sends what it is told to and keeps every message it reads.
+  - Client: a FIX 4.4 client on a raw socket, which sends what it is told to and keeps every message it reads; over
+    TLS when given an ssl.SSLContext (#228).
   - Server: the server on a new, seeded data directory, with this branch's config/fix.cfg (only its paths and port
-    changed) and a credentials file for the counterparties given, as the server needs since #147.
+    changed, and any settings given added) and a credentials file for the counterparties given, as the server needs
+    since #147; serving TLS when given a certificate and key (#228).
   - hash_password(): a password as the credentials file stores it, made with Python's own PBKDF2, so the server's is
     checked against an independent implementation.
   - expect() and problems: each check's line, and the ones that failed.
@@ -12,6 +14,7 @@ import hashlib
 import os
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -46,10 +49,13 @@ def hash_password(password, iterations=1000):
 
 
 class Client:
-    """A FIX 4.4 client on a raw socket: it sends what it is told to, and keeps every message it reads"""
+    """A FIX 4.4 client on a raw socket: it sends what it is told to, and keeps every message it reads. With tls, an
+    ssl.SSLContext, it talks TLS, checking the server's certificate against the name localhost (#228); the handshake's
+    ssl.SSLError, if any, comes from here."""
 
-    def __init__(self, port, sender, seq=1):
-        self.sock = socket.create_connection(('127.0.0.1', port), timeout=10)
+    def __init__(self, port, sender, seq=1, tls=None):
+        sock = socket.create_connection(('127.0.0.1', port), timeout=10)
+        self.sock = tls.wrap_socket(sock, server_hostname='localhost') if tls else sock
         self.sender = sender
         self.seq = seq
         self.buf = b''
@@ -113,8 +119,9 @@ class Client:
         self.sock.close()
 
 
-def write_cfg(source, work, port, dictionary):
-    """This branch's settings, with their paths and port moved into work. They name no session: the credentials do."""
+def write_cfg(source, work, port, dictionary, extra=None):
+    """This branch's settings, with their paths and port moved into work, and extra's settings added. They name no
+    session: the credentials do."""
     overrides = {'FileStorePath': os.path.join(work, 'fix-store'), 'FileLogPath': os.path.join(work, 'fix-log'),
                  'SocketAcceptPort': str(port), 'DataDictionary': dictionary}
     lines = []
@@ -126,6 +133,7 @@ def write_cfg(source, work, port, dictionary):
             lines.append(line if line.endswith('\n') else line + '\n')
     if overrides:
         sys.exit(f'{source} has no {", ".join(sorted(overrides))}')
+    lines += [f'{key}={value}\n' for key, value in (extra or {}).items()]  # into [DEFAULT], the file's only section
     path = os.path.join(work, 'fix.cfg')
     with open(path, 'w') as cfg:
         cfg.writelines(lines)
@@ -143,13 +151,16 @@ def write_credentials(work, counterparties):
 
 
 class Server:
-    """The server with FIX on a free port: on a new, seeded data directory, with this branch's settings and a
-    credentials file for the counterparties given. On leaving, it stops the server, shows the end of its log if a check
-    failed, and removes the directory."""
+    """The server with FIX on a free port: on a new, seeded data directory, with this branch's settings, any settings
+    given added, and a credentials file for the counterparties given. With tls, a (certificate, key) pair, FIX serves
+    TLS (#228). On leaving, it stops the server, shows the end of its log if a check failed, and removes the
+    directory."""
 
-    def __init__(self, server, seed, cfg, dictionary, counterparties):
+    def __init__(self, server, seed, cfg, dictionary, counterparties, tls=None, settings=None):
         self.server, self.seed, self.cfg, self.dictionary = server, seed, cfg, dictionary
         self.counterparties = counterparties
+        self.tls = tls
+        self.settings = settings
         self.work = tempfile.mkdtemp(prefix='fix-server-')
         self.env = dict(os.environ, EXCHANGE_LOG=os.path.join(self.work, 'exchange.log'))
         self.data = os.path.join(self.work, 'data')
@@ -160,10 +171,11 @@ class Server:
         subprocess.run([self.seed, '--data-dir', self.data], check=True, env=self.env, stdout=subprocess.DEVNULL)
 
     def args(self):
-        """The server's arguments, with FIX on fix_port"""
+        """The server's arguments, with FIX on fix_port. --fix-credentials and its file come last."""
         self.fix_port = free_port()
+        tls = ['--fix-tls-cert', self.tls[0], '--fix-tls-key', self.tls[1]] if self.tls else []
         return [self.server, '--port', str(free_port()), '--data-dir', self.data,
-                '--fix-cfg', write_cfg(self.cfg, self.work, self.fix_port, self.dictionary),
+                '--fix-cfg', write_cfg(self.cfg, self.work, self.fix_port, self.dictionary, self.settings)] + tls + [
                 '--fix-credentials', write_credentials(self.work, self.counterparties)]
 
     def __enter__(self):

@@ -1,6 +1,7 @@
 #ifdef BUILD_FIX
 
 // QuickFIX headers isolated in this TU via PIMPL (FixServer::Impl).
+#include <quickfix/ThreadedSSLSocketAcceptor.h>
 #include <quickfix/ThreadedSocketAcceptor.h>
 #include <quickfix/FileStore.h>
 #include <quickfix/SessionSettings.h>
@@ -13,6 +14,7 @@
 #include "FixGateway.h"
 #include "FixOutQueues.h"
 #include "FixRotatingLog.h"
+#include "FixTls.h"
 #include "Logger.h"
 
 using namespace COP;
@@ -65,7 +67,7 @@ struct FixServer::Impl
     std::unique_ptr<FIX::SessionSettings> settings;
     std::unique_ptr<FIX::FileStoreFactory> storeFactory;
     std::unique_ptr<FixRotatingLogFactory> logFactory; // FileLog's files, bounded (#160)
-    std::unique_ptr<FIX::ThreadedSocketAcceptor> acceptor;
+    std::unique_ptr<FIX::Acceptor> acceptor;           // ThreadedSSLSocketAcceptor with TLS (#228)
 };
 
 FixServer::FixServer(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
@@ -82,9 +84,14 @@ FixServer::~FixServer()
     stop();
 }
 
-void FixServer::start(const std::string &configFile, const std::string &credentialsFile)
+void FixServer::start(const std::string &configFile, const std::string &credentialsFile, const FixTlsFiles &tls)
 {
     impl_->settings = std::make_unique<FIX::SessionSettings>(configFile);
+    if (tls.enabled())
+    {
+        // Into [DEFAULT] before the counterparties' sessions are made from it, though QuickFIX reads them from there
+        addFixTls(*impl_->settings, tls);
+    }
     impl_->credentials = std::make_unique<FixCredentials>(FixCredentials::load(credentialsFile));
     addCounterpartySessions(*impl_->settings, *impl_->credentials, credentialsFile);
     impl_->gateway->setCredentials(impl_->credentials.get());
@@ -104,10 +111,23 @@ void FixServer::start(const std::string &configFile, const std::string &credenti
     aux::ExchLogger::instance()->note("FIX counterparties, from " + credentialsFile + ": " + compIds);
     impl_->storeFactory = std::make_unique<FIX::FileStoreFactory>(*impl_->settings);
     impl_->logFactory = std::make_unique<FixRotatingLogFactory>(*impl_->settings);
+    if (tls.enabled())
+    {
+        impl_->acceptor = std::make_unique<FIX::ThreadedSSLSocketAcceptor>(*impl_->gateway, *impl_->storeFactory,
+                                                                           *impl_->settings, *impl_->logFactory);
+        impl_->acceptor->start();
+        aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSSLSocketAcceptor): TLS only, " +
+                                          impl_->settings->get().getString(FIX::SSL_PROTOCOL) + ", with " +
+                                          tls.certificate + " (#228)");
+        return;
+    }
     impl_->acceptor = std::make_unique<FIX::ThreadedSocketAcceptor>(*impl_->gateway, *impl_->storeFactory,
                                                                     *impl_->settings, *impl_->logFactory);
     impl_->acceptor->start();
     aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSocketAcceptor)");
+    aux::ExchLogger::instance()->warn("FIX runs over plain TCP: a counterparty's Logon password, and every order and "
+                                      "report, cross the network in the clear. --fix-tls-cert and --fix-tls-key "
+                                      "serve TLS (#228)");
 }
 
 void FixServer::stop()

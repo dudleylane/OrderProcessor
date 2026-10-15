@@ -11,17 +11,25 @@
 #      as feature/fx-swap-support's does, the image's own --hash-fix-password makes one
 #      for a test counterparty; and the CMD, run without that file mounted, must exit 1,
 #      saying it can't read it, rather than run FIX with no logon check (#147).
-#   2. The server starts on it with the image's own CMD, and that file mounted.
-#   3. Every port the image EXPOSEs is listened on: 8080, the WebSocket port, and on
+#   2. When the CMD names a certificate and key for FIX's TLS (#228), as
+#      feature/fx-swap-support's does, the CMD run without them must exit 1, naming the
+#      file it can't read. A throwaway pair is made with openssl, its key mode 0640 as
+#      docker/README.md says.
+#   3. The server starts on it with the image's own CMD, and those files mounted.
+#   4. Every port the image EXPOSEs is listened on: 8080, the WebSocket port, and on
 #      feature/fx-swap-support also 5001, the FIX acceptor's. This is checked inside the
 #      container, because rootless port forwarding accepts a connection on the host
 #      whether or not anything listens behind it.
-#   4. The image's health check passes, and fails while the server is stopped with
+#   5. The image's health check passes, and fails while the server is stopped with
 #      SIGSTOP: then the kernel still completes TCP handshakes, but nothing answers
 #      (#158). The image is built in docker format, because podman's default, OCI,
 #      drops a HEALTHCHECK.
-#   5. /ws, through the published port, answers a WebSocket upgrade with 101.
-#   6. SIGTERM stops the server with exit code 0, the clean stop that saves the next
+#   6. /ws, through the published port, answers a WebSocket upgrade with 101.
+#   7. With FIX's TLS, openssl s_client on the host completes a TLS handshake with the
+#      FIX acceptor through its published port, verifying the throwaway certificate.
+#      This one is checked from the host: the port forwarding can accept a connection
+#      with nothing behind it, but it can't complete a handshake with that certificate.
+#   8. SIGTERM stops the server with exit code 0, the clean stop that saves the next
 #      id (#81), and its log has no errors. The image logs to standard output
 #      (EXCHANGE_LOG=-, #156), so the log is the container's output, and nothing
 #      may write /exchange.log into the container's layer.
@@ -31,8 +39,9 @@
 # CI runs this on every push (.github/workflows/docker.yml). Run it the same way
 # before changing the Dockerfile, the build or a dependency:
 #   scripts/check-server-image.sh
-# It needs podman and network access (dnf mirrors, quay.io, github.com), and takes a
-# few minutes, because every run builds from scratch.
+# It needs podman and network access (dnf mirrors, quay.io, github.com), and openssl when
+# the image's CMD names TLS files, and takes a few minutes, because every run builds from
+# scratch.
 #
 # Environment:
 #   CHECK_NAME     names the image (localhost/$CHECK_NAME), the container and the
@@ -119,6 +128,29 @@ build_seconds=$SECONDS
 step "seed a volume with seedData"
 podman run --rm -v "$NAME:/data" --entrypoint seedData "$IMAGE" --data-dir /data || fail "seedData failed"
 
+# The certificate and key FIX serves TLS with, if the image's CMD names them: the deployment's, so the image holds none
+# (#228)
+tls=()
+fix_port=""
+cmd="$(podman image inspect --format '{{json .Config.Cmd}}' "$IMAGE")"
+tls_cert="$(sed -n 's/.*"--fix-tls-cert","\([^"]*\)".*/\1/p' <<< "$cmd")"
+tls_key="$(sed -n 's/.*"--fix-tls-key","\([^"]*\)".*/\1/p' <<< "$cmd")"
+if [[ -n "$tls_cert" || -n "$tls_key" ]]; then
+    step "the FIX TLS certificate and key the image's CMD names, $tls_cert and $tls_key (#228)"
+    [[ -n "$tls_cert" && -n "$tls_key" ]] || fail "the image's CMD names only one of --fix-tls-cert and --fix-tls-key"
+    command -v openssl >/dev/null 2>&1 || usage_error "openssl is not installed, and the image's CMD serves FIX over TLS"
+    mkdir "$WORK/tls"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -keyout "$WORK/tls/tls.key" -out "$WORK/tls/tls.crt" \
+        2>/dev/null || fail "openssl couldn't make a certificate"
+    # As docker/README.md says: the key readable by its owner and group 0, which the image's user is in
+    chmod 0640 "$WORK/tls/tls.key"
+    chmod 0644 "$WORK/tls/tls.crt"
+    tls=(-v "$WORK/tls/tls.crt:$tls_cert:ro,z" -v "$WORK/tls/tls.key:$tls_key:ro,z")
+    fix_port="$(sed -n 's/^SocketAcceptPort=//p' config/fix.cfg | tr -d '\r' | head -n 1)"
+    [[ "$fix_port" =~ ^[0-9]+$ ]] || fail "config/fix.cfg gives no SocketAcceptPort for the TLS handshake"
+fi
+
 # The FIX credentials file the image's CMD names, if it names one: the deployment's, so the image holds none (#147)
 credentials=()
 credentials_path="$(podman image inspect --format '{{json .Config.Cmd}}' "$IMAGE" \
@@ -133,7 +165,7 @@ if [[ -n "$credentials_path" ]]; then
     chmod 644 "$WORK/fix-credentials"
     echo "made with the image's --hash-fix-password: CHECK_CLIENT, trading TRADING-1"
     refused=0
-    timeout 120 podman run --rm -v "$NAME:/data" "$IMAGE" > "$WORK/no-credentials.log" 2>&1 || refused=$?
+    timeout 120 podman run --rm -v "$NAME:/data" "${tls[@]}" "$IMAGE" > "$WORK/no-credentials.log" 2>&1 || refused=$?
     if (( refused != 1 )) \
         || ! grep -q "Can't start: can't read the FIX credentials file $credentials_path" "$WORK/no-credentials.log"; then
         tail -n 5 "$WORK/no-credentials.log" >&2
@@ -142,6 +174,19 @@ if [[ -n "$credentials_path" ]]; then
     echo "without it, the image's CMD exits 1: can't read the FIX credentials file $credentials_path"
     credentials=(-v "$WORK/fix-credentials:$credentials_path:ro,Z")
 fi
+
+# Without the TLS files, and with the credentials (#228): the CMD exits 1 naming the certificate
+if (( ${#tls[@]} )); then
+    refused=0
+    timeout 120 podman run --rm -v "$NAME:/data" "${credentials[@]}" "$IMAGE" > "$WORK/no-tls.log" 2>&1 || refused=$?
+    if (( refused != 1 )) || ! grep -q "Can't start: can't read the FIX TLS certificate '$tls_cert'" "$WORK/no-tls.log"
+    then
+        tail -n 5 "$WORK/no-tls.log" >&2
+        fail "without $tls_cert, the image's CMD exited with code $refused, not 1 saying it can't read it"
+    fi
+    echo "without them, the image's CMD exits 1: can't read the FIX TLS certificate '$tls_cert'"
+fi
+
 
 mapfile -t ports < <(podman image inspect --format '{{range $p, $_ := .Config.ExposedPorts}}{{println $p}}{{end}}' \
     "$IMAGE" | sed '/^$/d')
@@ -153,8 +198,10 @@ done
 
 step "start the server and wait for it to listen on ${ports[*]}"
 # --health-interval=disable: the health check runs only when this script runs it
-podman run -d --name "$NAME" --health-interval=disable -v "$NAME:/data" "${credentials[@]}" -p "127.0.0.1::$WS_PORT" \
-    "$IMAGE" >/dev/null || fail "the container didn't start"
+publish=(-p "127.0.0.1::$WS_PORT")
+[[ -n "$fix_port" ]] && publish+=(-p "127.0.0.1::$fix_port")
+podman run -d --name "$NAME" --health-interval=disable -v "$NAME:/data" "${credentials[@]}" "${tls[@]}" \
+    "${publish[@]}" "$IMAGE" >/dev/null || fail "the container didn't start"
 deadline=$((SECONDS + START_TIMEOUT))
 while :; do
     [[ "$(podman inspect --format '{{.State.Running}}' "$NAME")" == true ]] \
@@ -201,6 +248,17 @@ for _ in 1 2 3 4 5; do
 done
 [[ "$status" == "HTTP/1.1 101"* ]] || fail "/ws on $published answered '${status:-nothing}', not 101"
 echo "$published/ws: $status"
+
+if [[ -n "$fix_port" ]]; then
+    step "FIX over TLS, through the published port (#228)"
+    fix_published="$(podman port "$NAME" "$fix_port/tcp" | head -n 1)"
+    handshake="$(openssl s_client -connect "$fix_published" -servername localhost -CAfile "$WORK/tls/tls.crt" \
+        -verify_return_error -brief < /dev/null 2>&1)" || fail "no TLS handshake with FIX on $fix_published: $handshake"
+    grep -q '^Verification: OK' <<< "$handshake" || fail "FIX's certificate on $fix_published didn't verify: $handshake"
+    protocol="$(sed -n 's/^Protocol version: //p' <<< "$handshake")"
+    [[ "$protocol" == TLSv1.2 || "$protocol" == TLSv1.3 ]] || fail "FIX on $fix_published spoke '$protocol', not TLS 1.2 or 1.3"
+    echo "$fix_published: $protocol, the certificate verified"
+fi
 
 step "stop the server with SIGTERM"
 podman stop -t 30 "$NAME" >/dev/null || fail "podman stop failed"

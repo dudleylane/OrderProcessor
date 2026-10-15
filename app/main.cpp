@@ -374,7 +374,7 @@ int main(int argc, char *argv[])
 #ifdef BUILD_FIX
     if (fixServer)
     {
-        fixServer->start(cfg.fixCfg, cfg.fixCredentials);
+        fixServer->start(cfg.fixCfg, cfg.fixCredentials, App::FixTlsFiles{ cfg.fixTlsCert, cfg.fixTlsKey });
     }
 #endif
 

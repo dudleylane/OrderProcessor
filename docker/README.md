@@ -41,7 +41,7 @@ CLIENT_A   client_a   pbkdf2-sha256$600000$<salt>$<key>     TRADING-1,TRADING-2
 - **The hash.** The quick start's line makes one with Python's PBKDF2. The server makes the same, `orderProcessorServer --hash-fix-password`, from a password on standard input.
 - **Readable by others.** The file holds only hashes, so it may be, and it must be: the server runs as `oms` (uid 10001), and rootless podman shows a file only its owner may read as root's, which `oms` can't read.
 - **Changes.** Add or change a line, then `docker compose restart oms-server`.
-- **No TLS yet.** FIX runs over plain TCP until #228, so a password crosses the network in the clear.
+- **TLS.** The acceptor serves TLS only (#228), with the stack's certificate and key (see [TLS](#tls)), so a password doesn't cross the network in the clear. A counterparty's client connects with TLS 1.2 or 1.3 and checks the certificate's name against the host it connects to.
 
 ## Services
 
@@ -111,6 +111,8 @@ nginx reads its certificate from `certs/tls.crt` and its key from `certs/tls.key
 - **Docker running as root:** also run `sudo chgrp 0 certs/tls.key`.
 
 openssl writes a key that only its owner may read (0600), and nginx can't read that in either case.
+
+On this branch the FIX acceptor serves TLS too, on 5001 (#228), with the same `certs/tls.crt` and `certs/tls.key`, which compose also mounts into the server's container at `/etc/orderprocessor/tls`. The server runs as `oms`, which is in group 0 as nginx is, so the same key serves both. Without them, or without a key it can read, the server's container stops at startup, and `docker compose logs oms-server` says which it can't read.
 
 A certificate must name the host the browser uses. The Quick Start's names `localhost` and `127.0.0.1`. To reach the stack from another machine, add that machine's name to `subjectAltName`, as `DNS:oms.example.com`.
 

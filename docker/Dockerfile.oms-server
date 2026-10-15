@@ -80,8 +80,9 @@ COPY --from=builder /usr/local/lib64/libpqxx-*.so /usr/local/lib64/
 RUN echo /usr/local/lib64 > /etc/ld.so.conf.d/usr-local-lib64.conf && ldconfig
 
 # Not root (#158): the server and seedData run as oms, which owns /data. The directory is made before VOLUME declares it,
-# so a new volume starts out owned by oms.
-RUN useradd --system --user-group --uid 10001 --home-dir /data --no-create-home oms \
+# so a new volume starts out owned by oms. oms is also in group 0 (#228), so it can read a TLS key mounted with mode 0640:
+# under rootless podman or Docker, the host user's own group is group 0 in the container.
+RUN useradd --system --user-group --groups root --uid 10001 --home-dir /data --no-create-home oms \
     && mkdir -p /data \
     && chown oms:oms /data
 
@@ -106,7 +107,9 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=120s --retries=3 \
 
 # FIX needs the deployment's credentials file (#147), which the image doesn't hold: mount it at this path, readable by oms.
 # It holds only password hashes, which `orderProcessorServer --hash-fix-password` makes. Without it the server exits 1,
-# saying it can't read the file.
+# saying it can't read the file. FIX serves TLS only (#228), with the deployment's certificate and key, mounted in
+# /etc/orderprocessor/tls: the key readable by group 0. Without them the server exits 1, saying which it can't read.
 ENTRYPOINT ["orderProcessorServer"]
 CMD ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/fix.cfg", \
+     "--fix-tls-cert", "/etc/orderprocessor/tls/tls.crt", "--fix-tls-key", "/etc/orderprocessor/tls/tls.key", \
      "--fix-credentials", "/etc/orderprocessor/fix-credentials"]

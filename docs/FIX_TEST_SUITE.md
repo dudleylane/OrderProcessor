@@ -316,6 +316,33 @@ Two counterparties log on. CLIENT_A sends a NewOrderSingle for an unknown symbol
 
 ---
 
+## 16. FixTlsTest — The Acceptor's TLS Settings
+
+**File:** `test/FixTlsTest.cpp`
+**Requires:** `BUILD_FIX=ON`
+
+| Test | Description |
+|------|-------------|
+| `TheFilesAndTheProtocolsGoIntoDefault` | `addFixTls()` puts the certificate and key files in `[DEFAULT]`, with TLS 1.2 and 1.3 only, where QuickFIX's default would allow SSLv3, TLS 1.0 and TLS 1.1; a counterparty's session made after carries them (#228) |
+| `TheSettingsOwnProtocolsAreKept` | An `SSLProtocol` that `config/fix.cfg` sets is kept (#228) |
+| `AFileItCantReadIsRefusedByName` | A certificate or key it can't read, or none, is refused, naming the file (#228) |
+
+---
+
+## 17. FixServesTlsOnly — A Real Server Over TLS
+
+**File:** `test/FixTlsTest.py`, a ctest
+**Requires:** `BUILD_FIX=ON`, Python 3, the `openssl` command
+
+Runs `orderProcessorServer` with a certificate made for the run, and checks, on the wire:
+- `--fix-tls-cert` without `--fix-tls-key` exits 2, and so do both without `--fix-cfg`; a key that isn't there exits 1, naming it;
+- a client that checks the certificate logs on over TLS 1.2 or 1.3, and its order is acknowledged;
+- a plain TCP client gets no answer, and the server closes the connection;
+- with the settings' own `SSLProtocol` at TLS 1.3 only, a TLS 1.2 client fails the handshake and a TLS 1.3 one logs on;
+- without the flags FIX runs over plain TCP, and the server warns so, once (#228).
+
+---
+
 ## Test Architecture
 
 ```

@@ -104,6 +104,7 @@ if(BUILD_FIX)
         FixEndToEndTest.cpp
         FixFullPipelineTest.cpp
         FixRotatingLogTest.cpp
+        FixTlsTest.cpp
         ${CMAKE_SOURCE_DIR}/app/FixCredentials.cpp
         ${CMAKE_SOURCE_DIR}/app/FixGateway.cpp
         ${CMAKE_SOURCE_DIR}/app/FixOutQueues.cpp
