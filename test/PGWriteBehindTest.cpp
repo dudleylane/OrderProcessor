@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <pqxx/pqxx>
 
@@ -269,7 +270,8 @@ TEST_F(PGWriteBehindTest, ManyWritesLandInOrder)
     }
     writer.shutdown();
 
-    EXPECT_EQ(writes + 3, writer.totalWritten());
+    // Writes of the order that were still queued when a later one came were replaced, not written (#231)
+    EXPECT_EQ(writes + 3, writer.totalWritten() + writer.totalCoalesced());
     EXPECT_EQ(0u, writer.totalErrors());
     EXPECT_EQ(std::to_string(writes), select("SELECT cum_qty::text FROM orders WHERE order_id = 151006"));
 }
@@ -363,6 +365,42 @@ TEST(PGWriteBehindOfflineTest, ShutdownDoesntWaitForADatabaseThatIsntThere)
     EXPECT_LT(took, std::chrono::seconds(15));
     EXPECT_EQ(0u, writer.totalWritten());
     EXPECT_EQ(3u, writer.totalDropped());
+}
+
+TEST(PGWriteBehindOfflineTest, AWriteOfARowStillQueuedReplacesTheQueuedOne)
+{
+    // While Postgres can't be reached, the queue holds a write per row, not one per change (#231). The writer takes the
+    // first request at once, and keeps it while it waits to connect again, so the rest stay queued.
+    PGWriteBehind writer("host=127.0.0.1 port=" + std::to_string(closedPort()) + " dbname=oms user=oms");
+    writer.enqueue(PGWriteRequest{ InstrumentWrite{ "OFFLINE_A", "S", "SRC" } });
+    ASSERT_TRUE(eventually(
+        [&]
+        {
+            return writer.queuedRows().empty();
+        }));
+
+    OrderWrite first = makeOrder(231001);
+    first.cumQty = 1;
+    writer.enqueue(PGWriteRequest{ std::move(first) });
+    OrderWrite second = makeOrder(231001);
+    second.cumQty = 2;
+    writer.enqueue(PGWriteRequest{ std::move(second) }); // replaces the first, in its place
+    // The writer has OFFLINE_A's first write, so this one is queued again, behind it
+    writer.enqueue(PGWriteRequest{ InstrumentWrite{ "OFFLINE_A", "S2", "SRC" } });
+    writer.enqueue(PGWriteRequest{ makeOrder(231002) });
+    // A rollback that left LMDB no version of 231001: the delete replaces its queued write
+    writer.enqueue(PGWriteRequest{ DeleteOrderWrite{ 231001, makeOrder(231001).orderDate } });
+    // 231001 keeps its first place, ahead of what was queued after it, as reference data stays ahead of its orders
+    const std::string date = std::to_string(makeOrder(231001).orderDate);
+    EXPECT_EQ((std::vector<std::string>{ "order 231001 " + date, "instrument OFFLINE_A", "order 231002 " + date }),
+              writer.queuedRows());
+    EXPECT_EQ(2u, writer.totalCoalesced());
+
+    writer.shutdown();
+    EXPECT_EQ(6u, writer.totalEnqueued());
+    EXPECT_EQ(4u, writer.totalDropped()); // the one the writer held, and the three queued
+    EXPECT_EQ(writer.totalEnqueued(),
+              writer.totalWritten() + writer.totalErrors() + writer.totalDropped() + writer.totalCoalesced());
 }
 
 TEST(PGWriteBehindOfflineTest, AConnectTimeoutIsAddedWhenTheStringSetsNone)
