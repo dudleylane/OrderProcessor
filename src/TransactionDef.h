@@ -105,7 +105,10 @@ enum OperationType
     CANCEL_ORDER_TROPERATION,              // hands a client's cancel to the processor once it is the order's turn
     REPLACE_ORDER_TROPERATION,             // hands a client's replace to the processor once it is the order's turn
     REFUSE_REPLACE_TROPERATION,            // tells the requester that its replace was refused
-    CHANGE_ORDER_STATE_TROPERATION         // hands a state change to the processor once it is the order's turn
+    CHANGE_ORDER_STATE_TROPERATION,        // hands a state change to the processor once it is the order's turn
+    ADD_STOPBOOK_TROPERATION,              // holds a stop order in its instrument's stop book (#223)
+    REMOVE_STOPBOOK_TROPERATION,           // takes a held stop order out of the stop book (#223)
+    RELEASE_STOP_TROPERATION               // releases a held stop order a trade reached, and matches it (#223)
 };
 
 struct Context

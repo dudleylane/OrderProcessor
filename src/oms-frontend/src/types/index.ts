@@ -38,6 +38,8 @@ export interface Order {
   ordType: OrderType;
   price: number;
   stopPx: number;
+  /** A STOP or STOPLIMIT order is held until a trade reaches its stop price, then released (#223) */
+  stopTriggered: boolean;
   avgPx: number;
   orderQty: number;
   cumQty: number;

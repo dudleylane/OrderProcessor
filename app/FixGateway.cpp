@@ -457,6 +457,27 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
         refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION, "Order refused: " + priceRefusal("Price (44)", ordTypeVal));
         return;
     }
+    // A stop order's stop price, StopPx (99) (#223): the engine holds a stop order until a trade reaches it, and refuses
+    // one without a stop price above 0, so the gateway reads it, and refuses a stop order without one first, as it does a
+    // Price (44) no order trades at (#145)
+    double stopPxVal = 0.0;
+    if ((STOP_ORDERTYPE == ordTypeVal) || (STOPLIMIT_ORDERTYPE == ordTypeVal))
+    {
+        FIX::StopPx stopPx;
+        if (!msg.isSet(stopPx))
+        {
+            refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION, "Order refused: a stop order needs StopPx (99)");
+            return;
+        }
+        msg.get(stopPx);
+        stopPxVal = stopPx.getValue();
+        if (!isTradablePrice(stopPxVal, ordTypeVal))
+        {
+            refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION,
+                        "Order refused: " + priceRefusal("StopPx (99)", ordTypeVal));
+            return;
+        }
+    }
     double farPrice = 0.0;
     if ((FXSWAP_ORDERTYPE == ordTypeVal) && msg.isSetField(6500))
     {
@@ -502,6 +523,7 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
     order->side_ = toSide(side.getValue());
     order->ordType_ = ordTypeVal;
     order->price_ = priceVal;
+    order->stopPx_ = stopPxVal;
     order->orderQty_ = *qty;
     order->leavesQty_ = order->orderQty_;
     order->tif_ = toTif(tifVal);

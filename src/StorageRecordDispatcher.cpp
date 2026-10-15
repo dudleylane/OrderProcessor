@@ -276,11 +276,19 @@ void StorageRecordDispatcher::finishLoad()
         {
             continue;
         }
-        // An open market order, or an order that crosses one that arrived before it, lost what its booking started:
-        // a market order is never left open, and an order that crosses an earlier one trades with it. The transaction
-        // that booked it committed, and the one with its fills didn't (#207). It is left for the server to match, in
-        // this order, and not booked as it is, which would leave the book crossed.
-        if ((MARKET_ORDERTYPE == restored->ordType_) || crossesAnEarlierOrder(restored))
+        // A held stop goes back into its instrument's stop book, in id order, so stops at one price keep their order,
+        // and waits there for a trade: no trade price survives a restart (#223)
+        if (restored->heldStop())
+        {
+            orderBook_->addStop(*restored);
+            continue;
+        }
+        // An open market order, or a STOP its stop released, or an order that crosses one that arrived before it, lost
+        // what its booking started: an order matched as a market order is never left open, and an order that crosses
+        // an earlier one trades with it. The transaction that booked it committed, and the one with its fills didn't
+        // (#207). It is left for the server to match, in this order, and not booked as it is, which would leave the
+        // book crossed.
+        if (restored->marketLike() || crossesAnEarlierOrder(restored))
         {
             ordersToMatch_.push_back(restored);
         }

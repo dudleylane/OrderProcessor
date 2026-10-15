@@ -135,6 +135,28 @@ TEST(ClientMessageParserTest, ReplaceToAPriceNotAboveZeroIsRejected)
     EXPECT_NE(std::string::npos, msg.error.find("price: expected a number above 0")) << msg.error;
 }
 
+// --- A stop order's stop price (issue #223: it releases the order, and at 0 a buy stop was released by any trade) ---
+
+TEST(ClientMessageParserTest, StopOrderWithoutAStopPriceIsRejected)
+{
+    for (const char *ordType : { "STOP", "STOPLIMIT" })
+    {
+        for (const char *stopPx : { "", R"(,"stopPx":0)", R"(,"stopPx":-2.5)" })
+        {
+            auto msg = parse(std::string(R"({"type":"new_order","data":{"symbol":"AAPL","side":"SELL","ordType":")") +
+                             ordType + R"(","price":10,"orderQty":100)" + stopPx + "}}");
+
+            EXPECT_EQ("error", msg.type) << ordType << stopPx;
+            EXPECT_NE(std::string::npos, msg.error.find("stopPx: a STOP or STOPLIMIT order needs one above 0"))
+                << ordType << stopPx << ": " << msg.error;
+        }
+    }
+    auto msg = parse(R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"STOP","orderQty":100,)"
+                     R"("stopPx":10.5}})");
+    EXPECT_EQ("new_order", msg.type) << msg.error;
+    EXPECT_DOUBLE_EQ(10.5, msg.newOrder.stopPx);
+}
+
 // --- An order for nothing (issue #187: it was accepted, and traded for 0) ---
 
 TEST(ClientMessageParserTest, NewOrderWithoutAQuantityIsRejected)

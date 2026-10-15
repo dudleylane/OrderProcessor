@@ -182,6 +182,52 @@ private:
     const OrderEntry &order_;
 };
 
+/// Holds a stop or stop limit order in its instrument's stop book until a trade reaches its stop price (#223)
+class AddToStopBookTrOperation final : public Operation
+{
+public:
+    AddToStopBookTrOperation(const OrderEntry &order, const IdT &instrId);
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    const OrderEntry &order_;
+};
+
+/// Takes a held stop order out of its instrument's stop book: it was cancelled, replaced or otherwise finished (#223)
+class RemoveFromStopBookTrOperation final : public Operation
+{
+public:
+    RemoveFromStopBookTrOperation(const OrderEntry &order, const IdT &instrId);
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    const OrderEntry &order_;
+};
+
+/// Releases a held stop order that a trade reached (#223). It runs after every earlier transaction on the order and on
+/// its instrument, so a cancel or replace of the order that came first has already taken it: if the order is no longer
+/// held and working, this does nothing. Otherwise the order leaves the stop book, is marked released, and is matched, a
+/// STOP as a market order and a STOPLIMIT as a limit order, which is then booked with what is left. Two trades can
+/// both reach a stop before its release runs; the second release finds it released and does nothing.
+class ReleaseStopTrOperation final : public Operation
+{
+public:
+    explicit ReleaseStopTrOperation(OrderEntry *order);
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    OrderEntry *order_;
+    size_t eventCountBefore_ = 0;
+    bool released_ = false;
+    bool booked_ = false;
+};
+
 void executeEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
 void rollbackEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
 void executeEnqueueOrderEvent(const OrdState::onExecReplace &event_, const Context &cnxt);
