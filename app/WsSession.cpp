@@ -375,9 +375,9 @@ void WsSession::handleMessage(const std::string &msgStr)
     else if (msg.type == "replace_order")
     {
         const auto &ro = msg.replaceOrder;
-        if (!ro.hasPrice && !ro.hasQty && !ro.hasTif)
+        if (!ro.hasPrice && !ro.hasStopPx && !ro.hasQty && !ro.hasTif)
         {
-            send(serializeError("replace_order changes nothing: give price, orderQty or tif"));
+            send(serializeError("replace_order changes nothing: give price, stopPx, orderQty or tif"));
             return;
         }
         // As for a new order (#166): a tif the server doesn't know would reach every client as "INVALID"
@@ -406,12 +406,23 @@ void WsSession::handleMessage(const std::string &msgStr)
             oneapi::tbb::spin_rw_mutex::scoped_lock lock(original->entryMutex_, false);
             replacement.reset(original->clone());
         }
+        // stopPx moves a stop order's stop (#238). Whether that stop was already reached is the engine's to decide: a
+        // release can run before the replace does.
+        if (ro.hasStopPx && (STOP_ORDERTYPE != replacement->ordType_) && (STOPLIMIT_ORDERTYPE != replacement->ordType_))
+        {
+            send(serializeError("Replace refused: stopPx is only for a STOP or STOPLIMIT order"));
+            return;
+        }
         replacement->orderId_ = IdT();
         replacement->clOrderId_ = newClOrderId();
         replacement->origClOrderId_ = original->clOrderId_;
         if (ro.hasPrice)
         {
             replacement->price_ = ro.price;
+        }
+        if (ro.hasStopPx)
+        {
+            replacement->stopPx_ = ro.stopPx;
         }
         if (ro.hasQty)
         {

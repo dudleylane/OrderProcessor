@@ -143,18 +143,24 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
             u64 orderQty = 0;
             if (requireObject(d, &msg) && readUnsigned(d, "orderId", maxId, &msg.replaceOrder.orderId, &msg) &&
                 readPrice(d, "price", &msg.replaceOrder.price, &msg) &&
+                readPrice(d, "stopPx", &msg.replaceOrder.stopPx, &msg) &&
                 (!d.contains("orderQty") || readQuantity(d, "orderQty", maxQty, &orderQty, &msg)))
             {
                 msg.replaceOrder.clOrderId = d.value("clOrderId", "");
                 msg.replaceOrder.hasPrice = d.contains("price");
+                msg.replaceOrder.hasStopPx = d.contains("stopPx");
                 msg.replaceOrder.hasQty = d.contains("orderQty");
                 msg.replaceOrder.hasTif = d.contains("tif");
                 msg.replaceOrder.orderQty = static_cast<unsigned int>(orderQty);
                 msg.replaceOrder.tif = tifFromJson(d.value("tif", ""));
-                // A new price is above 0 (#188)
+                // A new price is above 0 (#188), and so is a new stopPx, as a stop order's is when it arrives (#238)
                 if (msg.replaceOrder.hasPrice && !(msg.replaceOrder.price > 0))
                 {
                     markInvalid(&msg, "invalid price: expected a number above 0");
+                }
+                else if (msg.replaceOrder.hasStopPx && !(msg.replaceOrder.stopPx > 0))
+                {
+                    markInvalid(&msg, "invalid stopPx: expected a number above 0");
                 }
             }
         }

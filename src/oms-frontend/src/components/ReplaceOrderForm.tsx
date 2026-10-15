@@ -9,18 +9,25 @@ interface ReplaceOrderFormProps {
 }
 
 /**
- * Replaces an order: its price, quantity and time in force, prefilled from the order. Only the fields that change are
- * sent: the server builds the replacement from the changes the request carries, and refuses one with none (#84).
+ * Replaces an order: its price, stop price, quantity and time in force, prefilled from the order. Only the fields that
+ * change are sent: the server builds the replacement from the changes the request carries, and refuses one with none
+ * (#84). A stop order's stop can move only while the order is held: once a trade has reached it, the server refuses a
+ * new one (#238).
  */
 export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderFormProps) {
-  const isLimit = order.ordType === OrderType.LIMIT;
+  const isLimit = order.ordType === OrderType.LIMIT || order.ordType === OrderType.STOPLIMIT;
+  const isHeldStop =
+    (order.ordType === OrderType.STOP || order.ordType === OrderType.STOPLIMIT) && !order.stopTriggered;
   const [price, setPrice] = useState(String(order.price));
+  const [stopPx, setStopPx] = useState(String(order.stopPx));
   const [orderQty, setOrderQty] = useState(String(order.orderQty));
   const [tif, setTif] = useState<TimeInForce>(order.tif);
 
   const newPrice = parseFloat(price);
+  const newStopPx = parseFloat(stopPx);
   const newQty = parseInt(orderQty, 10);
   const priceChanged = isLimit && newPrice !== order.price;
+  const stopPxChanged = isHeldStop && newStopPx !== order.stopPx;
   const qtyChanged = newQty !== order.orderQty;
   const tifChanged = tif !== order.tif;
 
@@ -28,12 +35,16 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
   let problem = '';
   if (isLimit && !(newPrice > 0)) {
     problem = 'Price must be above 0';
+  } else if (isHeldStop && !(newStopPx > 0)) {
+    problem = 'Stop price must be above 0';
   } else if (!(newQty > 0)) {
     problem = 'Quantity must be above 0';
   } else if (newQty <= order.cumQty) {
     problem = `Quantity must be above the ${order.cumQty} already filled`;
-  } else if (!priceChanged && !qtyChanged && !tifChanged) {
-    problem = 'Change the price, quantity or time in force';
+  } else if (!priceChanged && !stopPxChanged && !qtyChanged && !tifChanged) {
+    problem = isHeldStop
+      ? 'Change the price, stop price, quantity or time in force'
+      : 'Change the price, quantity or time in force';
   }
 
   const submit = (e: React.FormEvent) => {
@@ -44,6 +55,9 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
     const req: ReplaceOrderRequest = { orderId: order.orderId, clOrderId: order.clOrderId };
     if (priceChanged) {
       req.price = newPrice;
+    }
+    if (stopPxChanged) {
+      req.stopPx = newStopPx;
     }
     if (qtyChanged) {
       req.orderQty = newQty;
@@ -65,6 +79,18 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
             inputMode="decimal"
             value={price}
             onChange={e => setPrice(e.target.value.replace(/[^0-9.]/g, ''))}
+            className="w-28 bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm font-mono"
+          />
+        </div>
+      )}
+      {isHeldStop && (
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Stop Price</label>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={stopPx}
+            onChange={e => setStopPx(e.target.value.replace(/[^0-9.]/g, ''))}
             className="w-28 bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm font-mono"
           />
         </div>

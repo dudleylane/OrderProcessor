@@ -171,6 +171,8 @@ export interface ReplaceOrderRequest {
   orderId: number;
   clOrderId?: string;
   price?: number;
+  /** A held STOP or STOPLIMIT order's new stop (#238) */
+  stopPx?: number;
   orderQty?: number;
   tif?: TimeInForce;
 }
