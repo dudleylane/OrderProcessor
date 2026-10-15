@@ -88,7 +88,7 @@ export function OrderEntryPanel({
           <select
             value={symbol}
             onChange={e => setSymbol(e.target.value)}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm"
+            className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm"
           >
             <option value="">Select...</option>
             {instruments.map(inst => (
@@ -105,7 +105,7 @@ export function OrderEntryPanel({
               <button
                 key={s}
                 onClick={() => setSide(s)}
-                className={`flex-1 py-2 rounded text-sm font-medium transition-colors
+                className={`flex-1 py-2 rounded-sm text-sm font-medium transition-colors
                   ${side === s
                     ? (s === Side.BUY ? 'bg-blue-600 text-white' : 'bg-orange-600 text-white')
                     : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
@@ -117,7 +117,7 @@ export function OrderEntryPanel({
           <select
             value={ADVANCED_SIDES.includes(side) ? side : ''}
             onChange={e => { if (e.target.value) setSide(e.target.value as Side); }}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-500"
+            className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-500"
           >
             <option value="">Advanced sides...</option>
             {ADVANCED_SIDES.map(s => (
@@ -134,7 +134,7 @@ export function OrderEntryPanel({
               <button
                 key={t}
                 onClick={() => setOrdType(t)}
-                className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors
+                className={`flex-1 py-1.5 rounded-sm text-xs font-medium transition-colors
                   ${ordType === t
                     ? 'bg-gray-600 text-white'
                     : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
@@ -154,7 +154,7 @@ export function OrderEntryPanel({
                 type="text"
                 value={price}
                 onChange={e => setPrice(e.target.value.replace(/[^0-9.]/g, ''))}
-                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono"
+                className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm font-mono"
                 placeholder="0.0000"
               />
             </div>
@@ -166,7 +166,7 @@ export function OrderEntryPanel({
                 type="text"
                 value={stopPx}
                 onChange={e => setStopPx(e.target.value.replace(/[^0-9.]/g, ''))}
-                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono"
+                className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm font-mono"
                 placeholder="0.0000"
               />
             </div>
@@ -181,7 +181,7 @@ export function OrderEntryPanel({
               type="text"
               value={orderQty}
               onChange={e => setOrderQty(e.target.value.replace(/[^0-9]/g, ''))}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono"
+              className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm font-mono"
               placeholder="0"
             />
             {orderQty && parseInt(orderQty) > 0 && (
@@ -200,7 +200,7 @@ export function OrderEntryPanel({
               type="text"
               value={minQty}
               onChange={e => setMinQty(e.target.value.replace(/[^0-9]/g, ''))}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono"
+              className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm font-mono"
               placeholder="Optional"
             />
           </div>
@@ -213,7 +213,7 @@ export function OrderEntryPanel({
             <select
               value={tif}
               onChange={e => setTif(e.target.value as TimeInForce)}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm"
+              className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm"
             >
               {Object.values(TimeInForce).map(t => (
                 <option key={t} value={t}>{t}</option>
@@ -225,7 +225,7 @@ export function OrderEntryPanel({
             <select
               value={account}
               onChange={e => setAccount(e.target.value)}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm"
+              className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm"
             >
               <option value="">Default</option>
               {accounts.map(a => (
@@ -242,7 +242,7 @@ export function OrderEntryPanel({
             <select
               value={currency}
               onChange={e => setCurrency(e.target.value as Currency)}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm"
+              className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm"
             >
               {Object.values(Currency).map(c => (
                 <option key={c} value={c}>{c}</option>
@@ -254,7 +254,7 @@ export function OrderEntryPanel({
             <select
               value={capacity}
               onChange={e => setCapacity(e.target.value as Capacity)}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm"
+              className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm"
             >
               {Object.values(Capacity).map(c => (
                 <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>
@@ -267,14 +267,14 @@ export function OrderEntryPanel({
         <button
           onClick={handleSubmit}
           disabled={!connected}
-          className="w-full py-2.5 rounded font-medium text-sm transition-colors
+          className="w-full py-2.5 rounded-sm font-medium text-sm transition-colors
             bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500"
         >
           {connected ? `Submit ${side} Order` : 'Disconnected'}
         </button>
 
         {lastResult && (
-          <div className={`text-xs p-2 rounded ${
+          <div className={`text-xs p-2 rounded-sm ${
             lastResult === 'Order submitted'
               ? 'bg-green-900/30 text-green-400'
               : 'bg-red-900/30 text-red-400'
