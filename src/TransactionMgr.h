@@ -43,6 +43,9 @@ public:
 
     void init(const TransactionMgrParams &params);
     void stop();
+    /// The transactions added and not yet removed, waiting or running. A transaction's deferred events add theirs before
+    /// it is removed, so this is 0 only once every transaction and each it led to is done (#223).
+    size_t pendingTransactions() const;
 
 public:
     /// reimplemented from TransactionManager

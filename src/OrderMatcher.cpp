@@ -91,7 +91,8 @@ bool FindOpositeOrder::match(const IdT &order, bool *stop) const
 
 bool OrderMatcher::tradesWith(const OrderEntry &order, const OrderEntry &contra)
 {
-    if ((MARKET_ORDERTYPE == order.ordType_) || (MARKET_ORDERTYPE == contra.ordType_))
+    // A stop order its stop released trades as a market order if it is a STOP, and at its limit if a STOPLIMIT (#223)
+    if (order.marketLike() || contra.marketLike())
     {
         return true;
     }
@@ -136,7 +137,8 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
     IdT id = findContra(order, *ctxt.orderBook_, ctxt.orderStorage_);
     if (!id.isValid())
     {
-        if (MARKET_ORDERTYPE == order->ordType_)
+        // A STOP its stop released is cancelled with what is left, as a market order is (#223)
+        if (order->marketLike())
         {
             /// if market not available - market order should be canceled
             aux::ExchLogger::instance()->error("Unable to find oposite order for Market order during order matching.");
@@ -189,6 +191,26 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
     firstLock.release();
 
     defered_->addDeferedEvent(defEvnt.release());
+
+    // The held stops this trade reaches are released after it (#223): each in a transaction of its own, which runs once
+    // this one is done, since both relate to the instrument. Queued after the trade, so a trade whose fill throws,
+    // which throws away the rest of the chain (Processor::processDeferedEvent), releases nothing, and a rolled-back
+    // match drops them with its other events (MatchOrderTrOperation::rollback).
+    const PriceT lastPx = trade.lastPx_;
+    const SourceIdT instrument = order->instrument_.getId();
+    if (ctxt.orderBook_->holdsStops(instrument)) [[unlikely]]
+    {
+        OrderBook::OrdersT reached;
+        ctxt.orderBook_->triggeredStops(instrument, lastPx, &reached);
+        for (const IdT &stopId : reached)
+        {
+            OrderEntry *stop = ctxt.orderStorage_->locateByOrderId(stopId);
+            if ((nullptr != stop) && defered_->claimStopRelease(stopId))
+            {
+                defered_->addDeferedEvent(new ReleaseStopDeferedEvent(stop));
+            }
+        }
+    }
 
     /// add another match event to continue matching
     if (remainingQty > 0)

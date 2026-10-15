@@ -779,6 +779,84 @@ TEST_F(MatchOrderOperationTest, PersistOrderRollbackWritesNothingWithoutASaver)
 }
 
 // =============================================================================
+// Stop release (#223)
+// =============================================================================
+
+namespace
+{
+/// The order made a stop limit held in the book's stop book: released, it buys at 100
+void holdAsStopLimit(OrderEntry *order, OrderBookImpl *book)
+{
+    order->ordType_ = STOPLIMIT_ORDERTYPE;
+    order->stopPx_ = 99.0;
+    order->status_ = NEW_ORDSTATUS;
+    book->addStop(*order);
+}
+} // namespace
+
+TEST_F(MatchOrderOperationTest, ReleaseStop_RelatesToTheOrderAndItsInstrument)
+{
+    // Related to the instrument, as a match is, so it runs after the transaction whose trade reached the stop; and to
+    // the order, so after every earlier transaction on it, a cancel's among them
+    ReleaseStopTrOperation op(buyOrder_);
+    EXPECT_EQ(buyOrder_->orderId_, op.getObjectId());
+    EXPECT_EQ(buyOrder_->instrument_.getId(), op.getRelatedId());
+}
+
+TEST_F(MatchOrderOperationTest, ReleaseStop_ReleasesAHeldStopAndRollbackHoldsItAgain)
+{
+    orderBook_->add(*sellOrder_);
+    holdAsStopLimit(buyOrder_, orderBook_.get());
+    ReleaseStopTrOperation op(buyOrder_);
+    Context ctx = createContext();
+
+    op.execute(ctx);
+    EXPECT_TRUE(buyOrder_->stopTriggered_);
+    EXPECT_FALSE(orderBook_->holdsStops(instrumentId_));
+    EXPECT_EQ(buyOrder_->orderId_, orderBook_->getTop(instrumentId_, BUY_SIDE)) << "a released stop limit rests";
+    ASSERT_EQ(1u, deferedContainer_.deferedEventCount()) << "its trade with the sell";
+    EXPECT_NE(nullptr, dynamic_cast<ExecutionDeferedEvent *>(deferedContainer_.events_[0]));
+
+    op.rollback(ctx);
+    EXPECT_FALSE(buyOrder_->stopTriggered_);
+    EXPECT_TRUE(orderBook_->holdsStops(instrumentId_));
+    EXPECT_FALSE(orderBook_->getTop(instrumentId_, BUY_SIDE).isValid());
+    EXPECT_EQ(0u, deferedContainer_.deferedEventCount());
+}
+
+TEST_F(MatchOrderOperationTest, ReleaseStop_DoesNothingToAStopNoLongerHeldOrWorking)
+{
+    // A transaction on the order before it decided first: a cancel, whose own operations take the stop out of the stop
+    // book, or another trade's release
+    orderBook_->add(*sellOrder_);
+    holdAsStopLimit(buyOrder_, orderBook_.get());
+    buyOrder_->status_ = CANCELED_ORDSTATUS;
+    Context ctx = createContext();
+    {
+        ReleaseStopTrOperation op(buyOrder_);
+        op.execute(ctx);
+        EXPECT_FALSE(buyOrder_->stopTriggered_);
+        EXPECT_TRUE(orderBook_->holdsStops(instrumentId_));
+        EXPECT_EQ(0u, deferedContainer_.deferedEventCount());
+        op.rollback(ctx);
+        EXPECT_TRUE(orderBook_->holdsStops(instrumentId_));
+    }
+
+    buyOrder_->status_ = NEW_ORDSTATUS;
+    orderBook_->removeStop(*buyOrder_);
+    buyOrder_->stopTriggered_ = true;
+    {
+        ReleaseStopTrOperation op(buyOrder_);
+        op.execute(ctx);
+        EXPECT_FALSE(orderBook_->getTop(instrumentId_, BUY_SIDE).isValid());
+        EXPECT_EQ(0u, deferedContainer_.deferedEventCount());
+        op.rollback(ctx);
+        EXPECT_FALSE(orderBook_->holdsStops(instrumentId_)) << "undoing a release that did nothing held the stop";
+        EXPECT_TRUE(buyOrder_->stopTriggered_);
+    }
+}
+
+// =============================================================================
 // A transaction's persists, written as one (#163)
 // =============================================================================
 

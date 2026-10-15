@@ -48,6 +48,8 @@ json orderToJson(const OrderEntry &order)
     j["ordType"] = toJsonString(order.ordType_);
     j["price"] = order.price_;
     j["stopPx"] = order.stopPx_;
+    // A stop order is held until a trade reaches its stop price; then it is released (#223)
+    j["stopTriggered"] = order.stopTriggered_;
     j["avgPx"] = order.avgPx_;
     j["orderQty"] = order.orderQty_;
     j["cumQty"] = order.cumQty_;

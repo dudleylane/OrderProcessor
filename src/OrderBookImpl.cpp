@@ -245,6 +245,94 @@ void OrderBookImpl::remove(const OrderEntry &order)
     }
 }
 
+namespace
+{
+/// Erases (price, id) from a multimap of one side's stops, and whether it was there
+template <typename StopsT> bool eraseStop(StopsT *stops, PriceT price, const IdT &id)
+{
+    for (auto range = stops->equal_range(price); range.first != range.second; ++range.first)
+    {
+        if (id == range.first->second)
+        {
+            stops->erase(range.first);
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
+
+void OrderBookImpl::addStop(const OrderEntry &order)
+{
+    assert(order.orderId_.isValid());
+    OrderGroupsByInstrumentT::iterator it = orderGroups_.find(order.instrument_.getId());
+    if (orderGroups_.end() == it)
+    {
+        throw std::runtime_error("Unable to hold stop order - instrument not registered!");
+    }
+    OrdersGroup &group = *it->second;
+    tbb::mutex::scoped_lock lock(group.stopLock_);
+    if (BUY_SIDE == order.side_)
+    {
+        group.buyStops_.insert(OrdersByPriceAscT::value_type(order.stopPx_, order.orderId_));
+    }
+    else if (SELL_SIDE == order.side_)
+    {
+        group.sellStops_.insert(OrdersByPriceDescT::value_type(order.stopPx_, order.orderId_));
+    }
+    else
+    {
+        throw std::runtime_error("Unable to hold stop order - side is not supported!");
+    }
+    group.stopCount_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void OrderBookImpl::removeStop(const OrderEntry &order)
+{
+    OrderGroupsByInstrumentT::iterator it = orderGroups_.find(order.instrument_.getId());
+    if (orderGroups_.end() == it)
+    {
+        throw std::runtime_error("Unable to remove stop order - instrument not registered!");
+    }
+    OrdersGroup &group = *it->second;
+    tbb::mutex::scoped_lock lock(group.stopLock_);
+    const bool erased = (BUY_SIDE == order.side_)    ? eraseStop(&group.buyStops_, order.stopPx_, order.orderId_)
+                        : (SELL_SIDE == order.side_) ? eraseStop(&group.sellStops_, order.stopPx_, order.orderId_)
+                                                     : false;
+    if (!erased)
+    {
+        throw std::runtime_error("Unable to remove stop order - order not held!");
+    }
+    group.stopCount_.fetch_sub(1, std::memory_order_relaxed);
+}
+
+bool OrderBookImpl::holdsStops(const SourceIdT &instrument) const
+{
+    OrderGroupsByInstrumentT::const_iterator it = orderGroups_.find(instrument);
+    return (orderGroups_.end() != it) && (0 != it->second->stopCount_.load(std::memory_order_relaxed));
+}
+
+void OrderBookImpl::triggeredStops(const SourceIdT &instrument, PriceT lastPx, OrdersT *result) const
+{
+    assert(nullptr != result);
+    OrderGroupsByInstrumentT::const_iterator it = orderGroups_.find(instrument);
+    if (orderGroups_.end() == it)
+    {
+        return;
+    }
+    const OrdersGroup &group = *it->second;
+    tbb::mutex::scoped_lock lock(group.stopLock_);
+    // A trade at lastPx reaches a buy stop at or below it, and a sell stop at or above it
+    for (auto sit = group.buyStops_.begin(); (group.buyStops_.end() != sit) && (sit->first <= lastPx); ++sit)
+    {
+        result->push_back(sit->second);
+    }
+    for (auto sit = group.sellStops_.begin(); (group.sellStops_.end() != sit) && (sit->first >= lastPx); ++sit)
+    {
+        result->push_back(sit->second);
+    }
+}
+
 IdT OrderBookImpl::find(const OrderFunctor &functor) const
 {
     OrderGroupsByInstrumentT::const_iterator it = orderGroups_.find(functor.instrument());

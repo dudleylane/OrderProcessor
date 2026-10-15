@@ -142,6 +142,12 @@ bool TransactionMgr::getRelatedTransactions(const TransactionId &id, Transaction
     }
 }
 
+size_t TransactionMgr::pendingTransactions() const
+{
+    tbb::mutex::scoped_lock lock(lock_);
+    return transactionTree_.size();
+}
+
 TransactionIterator *TransactionMgr::iterator()
 {
     return this;

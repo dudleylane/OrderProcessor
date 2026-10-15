@@ -19,6 +19,7 @@ target_sources(orderEngine
         LMDBStorage.cpp
         Logger.cpp
         MatchOrderDeferedEvent.cpp
+        ReleaseStopDeferedEvent.cpp
         NLinkedTree.cpp
         OrderBookImpl.cpp
         OrderCodec.cpp

@@ -233,6 +233,10 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
     const u32 instructions = instructionMask(val.execInstruct_);
     memcpy(typebuf, &instructions, sizeof(instructions));
     buf->append(typebuf, sizeof(instructions));
+    buf->append(1, '.');
+
+    // Format version 2 (#223)
+    buf->append(1, val.stopTriggered_ ? '\x01' : '\x00');
 }
 
 char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version)
@@ -394,6 +398,12 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     const u32 instructions = instructionMask(val.execInstruct_);
     memcpy(p, &instructions, sizeof(instructions));
     p += sizeof(instructions);
+    *p = '.';
+    ++p;
+
+    // Format version 2 (#223)
+    *p = val.stopTriggered_ ? '\x01' : '\x00';
+    ++p;
     return p;
 }
 
@@ -639,6 +649,25 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
         memcpy(&instructions, p, sizeof(instructions));
         p += sizeof(instructions);
         val->execInstruct_ = instructionsFromMask(instructions);
+    }
+    // Format version 2 (#223): whether a stop order's stop was reached. Not reached from an older version, said here
+    // rather than left to the field's initialiser: a stop order from before #223 is held, where a released STOP would
+    // trade at once as a market order.
+    val->stopTriggered_ = false;
+    if (2 <= formatVersion)
+    {
+        p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after execInstruct_!");
+        if (end == p)
+        {
+            throw std::runtime_error(
+                "Invalid format of the encoded OrderEntry - size less than required, unable decode stopTriggered_!");
+        }
+        if ((0 != *p) && (1 != *p))
+        {
+            throw std::runtime_error("Invalid format of the encoded OrderEntry - stopTriggered_ is neither 0 nor 1!");
+        }
+        val->stopTriggered_ = (1 == *p);
+        ++p;
     }
     expectConsumed(p, end, "OrderEntry");
 

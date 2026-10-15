@@ -378,4 +378,96 @@ TEST_F(OrderBookTest, RemoveNonExistentSellOrderThrows)
     EXPECT_THROW(orderBook_->remove(*nonExistent), std::exception);
 }
 
+// =============================================================================
+// Stop Book Tests (#223)
+// =============================================================================
+
+TEST_F(OrderBookTest, AHeldStopIsInNeitherSideOfThePriceBook)
+{
+    auto stop = createOrderWithId(instrumentId1_, IdT(1, 1), BUY_SIDE, 5.0);
+    stop->ordType_ = STOPLIMIT_ORDERTYPE;
+    stop->stopPx_ = 6.0;
+    EXPECT_FALSE(orderBook_->holdsStops(instrumentId1_));
+
+    orderBook_->addStop(*stop);
+    EXPECT_TRUE(orderBook_->holdsStops(instrumentId1_));
+    EXPECT_FALSE(orderBook_->holdsStops(instrumentId2_));
+    EXPECT_FALSE(orderBook_->getTop(instrumentId1_, BUY_SIDE).isValid());
+    TestOrderFunctor functor(instrumentId1_, BUY_SIDE, true);
+    EXPECT_FALSE(orderBook_->find(functor).isValid());
+
+    orderBook_->removeStop(*stop);
+    EXPECT_FALSE(orderBook_->holdsStops(instrumentId1_));
+}
+
+TEST_F(OrderBookTest, ATradeReachesBuyStopsAtOrBelowItAndSellStopsAtOrAboveIt)
+{
+    // In the order a moving price would reach them: buy stops from the lowest, sell stops from the highest, and stops at
+    // one price in the order they were added
+    const struct
+    {
+        u64 id_;
+        Side side_;
+        PriceT stopPx_;
+    } stops[] = { { 1, BUY_SIDE, 6.0 },  { 2, BUY_SIDE, 5.0 },  { 3, BUY_SIDE, 7.0 }, { 4, SELL_SIDE, 6.0 },
+                  { 5, SELL_SIDE, 7.0 }, { 6, SELL_SIDE, 5.0 }, { 7, BUY_SIDE, 6.0 } };
+    for (const auto &s : stops)
+    {
+        auto stop = createOrderWithId(instrumentId1_, IdT(s.id_, 1), s.side_, 1.0);
+        stop->ordType_ = STOP_ORDERTYPE;
+        stop->stopPx_ = s.stopPx_;
+        orderBook_->addStop(*stop);
+    }
+
+    OrderBookImpl::OrdersT reached;
+    orderBook_->triggeredStops(instrumentId1_, 6.0, &reached);
+    EXPECT_EQ((OrderBookImpl::OrdersT{ IdT(2, 1), IdT(1, 1), IdT(7, 1), IdT(5, 1), IdT(4, 1) }), reached);
+
+    // They stay held: the release takes each out
+    reached.clear();
+    orderBook_->triggeredStops(instrumentId1_, 6.0, &reached);
+    EXPECT_EQ(5u, reached.size());
+    reached.clear();
+    orderBook_->triggeredStops(instrumentId2_, 6.0, &reached);
+    EXPECT_TRUE(reached.empty());
+}
+
+TEST_F(OrderBookTest, RemovingAStopTakesOnlyThatOne)
+{
+    auto first = createOrderWithId(instrumentId1_, IdT(1, 1), SELL_SIDE, 1.0);
+    first->ordType_ = STOP_ORDERTYPE;
+    first->stopPx_ = 5.0;
+    auto second = createOrderWithId(instrumentId1_, IdT(2, 1), SELL_SIDE, 1.0);
+    second->ordType_ = STOP_ORDERTYPE;
+    second->stopPx_ = 5.0;
+    orderBook_->addStop(*first);
+    orderBook_->addStop(*second);
+
+    orderBook_->removeStop(*first);
+    EXPECT_TRUE(orderBook_->holdsStops(instrumentId1_));
+    OrderBookImpl::OrdersT reached;
+    orderBook_->triggeredStops(instrumentId1_, 5.0, &reached);
+    EXPECT_EQ(OrderBookImpl::OrdersT{ IdT(2, 1) }, reached);
+
+    // An order the book doesn't hold is refused, and changes nothing
+    EXPECT_THROW(orderBook_->removeStop(*first), std::exception);
+    EXPECT_TRUE(orderBook_->holdsStops(instrumentId1_));
+    orderBook_->removeStop(*second);
+    EXPECT_FALSE(orderBook_->holdsStops(instrumentId1_));
+}
+
+TEST_F(OrderBookTest, AStopOfAnInstrumentTheBookDoesNotTradeIsRefused)
+{
+    const SourceIdT other = test::addInstrument("ccc");
+    auto stop = createOrderWithId(other, IdT(1, 1), BUY_SIDE, 1.0);
+    stop->ordType_ = STOP_ORDERTYPE;
+    stop->stopPx_ = 5.0;
+    EXPECT_THROW(orderBook_->addStop(*stop), std::exception);
+    EXPECT_THROW(orderBook_->removeStop(*stop), std::exception);
+    EXPECT_FALSE(orderBook_->holdsStops(other));
+    OrderBookImpl::OrdersT reached;
+    orderBook_->triggeredStops(other, 5.0, &reached);
+    EXPECT_TRUE(reached.empty());
+}
+
 } // namespace
