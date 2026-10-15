@@ -179,6 +179,7 @@ services:
     volumes: !override
       - oms-data:/data
       - $WORK/fix-credentials:/etc/orderprocessor/fix-credentials:ro,z
+      - $WORK/certs:/etc/orderprocessor/tls:ro,z
   oms-frontend:
     ports: !reset []
     volumes: !override
@@ -353,6 +354,19 @@ report="$(podman run --rm --network "$network" -v "$WORK/certs:/certs:ro,z" -e N
     || fail "the order got no execution report: $report"
 [[ "$report" == "execution_report NEW" ]] || fail "the order got '$report', not an execution report with status NEW"
 echo "$report"
+
+step "the FIX acceptor, over TLS (#228)"
+# A client on the stack's network checks the acceptor's certificate against the run's own, by the name it carries
+fix_client='
+const tls = require("tls"), fs = require("fs");
+const timer = setTimeout(() => { console.log("no TLS handshake within 10 s"); process.exit(1); }, 10000);
+const socket = tls.connect({ host: "oms-server", port: 5001, servername: "localhost", ca: fs.readFileSync("/certs/tls.crt") },
+    () => { console.log(socket.getProtocol()); clearTimeout(timer); socket.end(); });
+socket.on("error", (e) => { console.log("no TLS handshake: " + e.message); process.exit(1); });'
+protocol="$(podman run --rm --network "$network" -v "$WORK/certs:/certs:ro,z" "$node_image" node -e "$fix_client" 2>&1)" \
+    || fail "the FIX acceptor didn't complete a TLS handshake: $protocol"
+[[ "$protocol" == TLSv1.[23] ]] || fail "the FIX acceptor served '$protocol', not TLS 1.2 or 1.3"
+echo "FIX on 5001: $protocol, with the stack's certificate"
 
 step "the order in Postgres"
 # Written behind LMDB, on the server's own thread, so it may take a moment (#151)

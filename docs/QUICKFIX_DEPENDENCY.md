@@ -52,8 +52,14 @@ uses 22.
 
 FIX 4.4 only:
 
-- **Transport and sessions:** `ThreadedSocketAcceptor`, `Session`, `SessionSettings`, `SessionID`,
-  `FileStore`, `FileLog`, `Application`.
+- **Transport and sessions:** `ThreadedSocketAcceptor`, or `ThreadedSSLSocketAcceptor` with `--fix-tls-cert` and
+  `--fix-tls-key` (#228), `Session`, `SessionSettings`, `SessionID`, `FileStore`, `FileLog`, `Application`.
+- **TLS (#228):** the SSL acceptor exists only in a build with `HAVE_SSL`. The pinned release's install defines it in
+  `QuickFIXBuildConfig.h`, which `ThreadedSSLSocketAcceptor.h` includes, so the gateway needs no define of its own;
+  `scripts/build-quickfix.sh` builds with `-DHAVE_SSL=ON`. The server puts `ServerCertificateFile`,
+  `ServerCertificateKeyFile` and, unless `config/fix.cfg` sets one, `SSLProtocol=-all +TLSv1_2 +TLSv1_3` into the
+  settings' `[DEFAULT]`, the only place QuickFIX's SSL code reads them (`app/FixTls.h`). QuickFIX's own default,
+  `all -SSLv2`, would allow SSLv3, TLS 1.0 and TLS 1.1.
 - **Messages:** `NewOrderSingle`, `NewOrderMultileg` (FX swaps, with the `NoLegs` group),
   `OrderCancelRequest`, `OrderCancelReplaceRequest`, `ExecutionReport`, `OrderCancelReject`,
   `BusinessMessageReject`, `News`.

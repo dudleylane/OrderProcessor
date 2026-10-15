@@ -246,6 +246,11 @@ if(BUILD_APP)
                      COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixRefusalTest.py
                              $<TARGET_FILE:orderProcessorServer> $<TARGET_FILE:seedData>
                              ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec/FIX44.xml)
+            # With --fix-tls-cert and --fix-tls-key, FIX serves TLS only; without them it warns (#228)
+            add_test(NAME FixServesTlsOnly
+                     COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixTlsTest.py
+                             $<TARGET_FILE:orderProcessorServer> $<TARGET_FILE:seedData>
+                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec/FIX44.xml)
         endif()
     endif()
 endif()

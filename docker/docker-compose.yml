@@ -71,7 +71,8 @@ services:
     # The image's CMD, repeated: an entrypoint set here clears it. On this branch that includes the FIX gateway's config
     # and its credentials (#147), without which the server refuses --fix-cfg and exits 2.
     command: ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/fix.cfg",
-              "--fix-credentials", "/etc/orderprocessor/fix-credentials"]
+              "--fix-credentials", "/etc/orderprocessor/fix-credentials",
+              "--fix-tls-cert", "/etc/orderprocessor/tls/tls.crt", "--fix-tls-key", "/etc/orderprocessor/tls/tls.key"]
     restart: unless-stopped
     # A small init runs as PID 1 and starts the server (#203). As PID 1 itself, the server ignored SIGTERM until its
     # handler was set, after the data directory's restore, and an abort became a SIGSEGV.
@@ -105,6 +106,9 @@ services:
       # says how to make. It holds only password hashes, so it may be readable by others, as it must be here: the server
       # runs as oms, and rootless podman shows a file only its owner may read as root's. z relabels it for SELinux (#201).
       - ./fix-credentials:/etc/orderprocessor/fix-credentials:ro,z
+      # The certificate and key FIX serves TLS with (#228): the stack's, the ones nginx serves (#226). The server runs as
+      # oms, which is in group 0 as nginx is, so the same key, readable by group 0, serves both.
+      - ./certs:/etc/orderprocessor/tls:ro,z
     # The server logs to standard output (EXCHANGE_LOG=- in its image, #156); keep at most 3 files of 10 MB
     logging:
       driver: json-file

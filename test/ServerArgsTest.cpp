@@ -230,9 +230,10 @@ TEST(ServerArgsTest, TheUsageNamesEveryOption)
 
 TEST(ServerArgsTest, TheFixGatewaysSettingsNeedAFixBuild)
 {
-    // On this branch --fix-cfg starts the FIX gateway, --fix-credentials says who may log on to it (#147), and
-    // --hash-fix-password makes a password's hash for that file. A build without the gateway refuses all three rather
-    // than run without the gateway it was asked for, as the server refuses any value it can't use (#173).
+    // On this branch --fix-cfg starts the FIX gateway, --fix-credentials says who may log on to it (#147),
+    // --hash-fix-password makes a password's hash for that file, and --fix-tls-cert and --fix-tls-key serve it over TLS
+    // (#228). A build without the gateway refuses them all rather than run without the gateway it was asked for, as the
+    // server refuses any value it can't use (#173).
     std::string error;
 #ifdef BUILD_FIX
     const std::optional<ServerArgs> parsed =
@@ -243,7 +244,8 @@ TEST(ServerArgsTest, TheFixGatewaysSettingsNeedAFixBuild)
     const std::optional<ServerArgs> hash = parse({ "--hash-fix-password" }, &error);
     ASSERT_TRUE(hash) << error;
     EXPECT_TRUE(hash->hashFixPassword);
-    for (const char *option : { " --fix-cfg ", " --fix-credentials ", " --hash-fix-password " })
+    for (const char *option :
+         { " --fix-cfg ", " --fix-credentials ", " --hash-fix-password ", " --fix-tls-cert ", " --fix-tls-key " })
     {
         EXPECT_NE(std::string::npos, serverUsage().find(option)) << option << "isn't in the usage";
     }
@@ -254,6 +256,20 @@ TEST(ServerArgsTest, TheFixGatewaysSettingsNeedAFixBuild)
               "trade any account (#147)",
               error);
     EXPECT_TRUE(parse({ "--hash-fix-password", "--fix-cfg", "config/fix.cfg" }, &error)) << error;
+    // FIX over TLS (#228): a certificate and its key, both or neither, and only with the gateway
+    const std::vector<std::string> fix = { "--fix-cfg", "config/fix.cfg", "--fix-credentials", "fix-credentials" };
+    std::vector<std::string> withTls = fix;
+    withTls.insert(withTls.end(), { "--fix-tls-cert", "tls.crt", "--fix-tls-key", "tls.key" });
+    const std::optional<ServerArgs> tls = parse(withTls, &error);
+    ASSERT_TRUE(tls) << error;
+    EXPECT_EQ("tls.crt", tls->fixTlsCert);
+    EXPECT_EQ("tls.key", tls->fixTlsKey);
+    std::vector<std::string> certOnly = fix;
+    certOnly.insert(certOnly.end(), { "--fix-tls-cert", "tls.crt" });
+    EXPECT_FALSE(parse(certOnly, &error));
+    EXPECT_EQ("--fix-tls-cert and --fix-tls-key go together: a certificate, and its key (#228)", error);
+    EXPECT_FALSE(parse({ "--fix-tls-cert", "tls.crt", "--fix-tls-key", "tls.key" }, &error));
+    EXPECT_EQ("--fix-tls-cert and --fix-tls-key need --fix-cfg: they serve FIX over TLS (#228)", error);
 #else
     EXPECT_FALSE(parse({ "--fix-cfg", "config/fix.cfg" }, &error));
     EXPECT_EQ("--fix-cfg needs a server built with BUILD_FIX=ON", error);
@@ -261,7 +277,12 @@ TEST(ServerArgsTest, TheFixGatewaysSettingsNeedAFixBuild)
     EXPECT_EQ("--fix-credentials needs a server built with BUILD_FIX=ON", error);
     EXPECT_FALSE(parse({ "--hash-fix-password" }, &error));
     EXPECT_EQ("--hash-fix-password needs a server built with BUILD_FIX=ON", error);
-    for (const char *option : { "--fix-cfg", "--fix-credentials", "--hash-fix-password" })
+    EXPECT_FALSE(parse({ "--fix-tls-cert", "tls.crt" }, &error));
+    EXPECT_EQ("--fix-tls-cert needs a server built with BUILD_FIX=ON", error);
+    EXPECT_FALSE(parse({ "--fix-tls-key", "tls.key" }, &error));
+    EXPECT_EQ("--fix-tls-key needs a server built with BUILD_FIX=ON", error);
+    for (const char *option :
+         { "--fix-cfg", "--fix-credentials", "--hash-fix-password", "--fix-tls-cert", "--fix-tls-key" })
     {
         EXPECT_EQ(std::string::npos, serverUsage().find(option))
             << "the usage offers " << option << ", which this build refuses";
