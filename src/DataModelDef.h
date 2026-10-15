@@ -521,6 +521,16 @@ public:
     virtual void beginGroup() {}
     virtual void commitGroup() {}
     virtual void abortGroup() noexcept {}
+    /// Persists an instrument's last trade, its price and its execution id, as a new version of the instrument's
+    /// last-trade record, and returns that version (#237). A held stop that a trade reached is released in a transaction
+    /// of its own, after the trade's: a crash between the two leaves the stop held, and the restart releases it from
+    /// this record. A saver that keeps none writes nothing.
+    virtual u32 saveLastTrade(const SourceIdT & /*instrument*/, PriceT /*lastPx*/, const IdT & /*execId*/)
+    {
+        return 0;
+    }
+    /// Erases one version of it, undoing a saveLastTrade()
+    virtual void eraseLastTrade(const SourceIdT & /*instrument*/, u32 /*version*/) {}
 };
 
 } // namespace COP

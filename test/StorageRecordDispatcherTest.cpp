@@ -1895,6 +1895,10 @@ const char *const GOLDEN_ORDER_RECORD_V3 = "06000300952835013a65000000000000002e
                                            "2d434c2d302e0108000000434c49454e542d312e0108000000496e7465726e61"
                                            "6c";
 const char *const GOLDEN_ID_LIMIT_RECORD = "09000000cb04fb711f010000";
+/// The golden instrument's last trade (#237): 101.25, made when id 4242 was drawn, keyed (101, 2)
+const IdT GOLDEN_TRADE_ID(4242, 1792000000);
+const IdT GOLDEN_LAST_TRADE_KEY(101, 2);
+const char *const GOLDEN_LAST_TRADE_RECORD = "0a0000006500000000000000952835010000000000505940921000000000000000c0cf6a";
 
 } // namespace
 
@@ -1912,6 +1916,7 @@ TEST_F(StorageRecordDispatcherTest, WritesTheGoldenRecords)
     const std::unique_ptr<OrderEntry> order = goldenOrder();
     dispatcher_->save(*order);
     dispatcher_->saveIdLimit(GOLDEN_ID_LIMIT);
+    dispatcher_->saveLastTrade(GOLDEN_INSTRUMENT_ID, 101.25, GOLDEN_TRADE_ID);
 
     const auto written = [this](const IdT &id) -> std::string
     {
@@ -1925,6 +1930,7 @@ TEST_F(StorageRecordDispatcherTest, WritesTheGoldenRecords)
     expectGolden("GOLDEN_RAWDATA_RECORD", written(GOLDEN_RAWDATA_ID), GOLDEN_RAWDATA_RECORD);
     expectGolden("GOLDEN_ORDER_RECORD_V3", written(GOLDEN_ORDER_ID), GOLDEN_ORDER_RECORD_V3);
     expectGolden("GOLDEN_ID_LIMIT_RECORD", written(IdT(0, 1)), GOLDEN_ID_LIMIT_RECORD);
+    expectGolden("GOLDEN_LAST_TRADE_RECORD", written(GOLDEN_LAST_TRADE_KEY), GOLDEN_LAST_TRADE_RECORD);
 }
 
 namespace
@@ -2181,11 +2187,28 @@ const std::vector<std::pair<IdT, const char *>> &goldenLoadedRecords()
     static const std::vector<std::pair<IdT, const char *>> records = {
         { GOLDEN_INSTRUMENT_ID, GOLDEN_INSTRUMENT_RECORD }, { GOLDEN_STRING_ID, GOLDEN_STRING_RECORD },
         { GOLDEN_ACCOUNT_ID, GOLDEN_ACCOUNT_RECORD },       { GOLDEN_CLEARING_ID, GOLDEN_CLEARING_RECORD },
-        { GOLDEN_RAWDATA_ID, GOLDEN_RAWDATA_RECORD },       { IdT(0, 1), GOLDEN_ID_LIMIT_RECORD }
+        { GOLDEN_RAWDATA_ID, GOLDEN_RAWDATA_RECORD },       { IdT(0, 1), GOLDEN_ID_LIMIT_RECORD },
+        { GOLDEN_LAST_TRADE_KEY, GOLDEN_LAST_TRADE_RECORD }
     };
     return records;
 }
 } // namespace
+
+TEST_F(StorageRecordDispatcherTest, ALastTradeRecordLongerThanItsFieldsOrKeyedForAnotherInstrumentIsRefused)
+{
+    // The record names its instrument, and its key must be that instrument's (#237): a record under another key would be
+    // pruned with the wrong record's versions (#148)
+    restoreGoldenInstrument();
+    dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+    const std::string golden = fromHex(GOLDEN_LAST_TRADE_RECORD);
+    EXPECT_NO_THROW(dispatcher_->onRecordLoaded(GOLDEN_LAST_TRADE_KEY, 0, golden.data(), golden.size()));
+    const std::string longer = golden + std::string(1, '\0');
+    EXPECT_THROW(dispatcher_->onRecordLoaded(GOLDEN_LAST_TRADE_KEY, 1, longer.data(), longer.size()),
+                 std::runtime_error);
+    EXPECT_THROW(dispatcher_->onRecordLoaded(IdT(102, 2), 1, golden.data(), golden.size()), std::runtime_error);
+    EXPECT_THROW(dispatcher_->onRecordLoaded(GOLDEN_INSTRUMENT_ID, 1, golden.data(), golden.size()), std::runtime_error)
+        << "under the instrument's own key";
+}
 
 TEST_F(StorageRecordDispatcherTest, EveryRecordCutShortIsRejected)
 {

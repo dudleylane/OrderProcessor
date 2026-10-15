@@ -293,8 +293,10 @@ bool TransactionScope::executeTransaction(const Context &cnxt)
     // trade fills, their records go to storage as one write, committed before the first operation that publishes: a
     // crash leaves all of this transaction's orders durable, or none of them (#163). Each used to commit on its own, and
     // a crash between two commits left half a trade.
+    // A trade's transaction also persists its instrument's last trade there (#237).
     size_t persists = 0;
-    while ((persists < operations_.size()) && (PERSIST_ORDER_TROPERATION == operations_[persists]->type()))
+    while ((persists < operations_.size()) && ((PERSIST_ORDER_TROPERATION == operations_[persists]->type()) ||
+                                               (PERSIST_LASTTRADE_TROPERATION == operations_[persists]->type())))
     {
         ++persists;
     }

@@ -351,10 +351,10 @@ int main(int argc, char *argv[])
     // the order restored without its fills: Phase 2 left each such order out of the book, which it would cross (#207).
     // Match them now, in the order they arrived and before any client can send an order, as their bookings did. Their
     // fills persist and report through the transaction workers. One that can't be matched is no reason not to start.
+    auto *restoreProcessor = static_cast<Proc::Processor *>(evntProcessors[0]);
     const std::vector<OrderEntry *> &ordersToMatch = dispatcher->ordersToMatch();
     if (!ordersToMatch.empty())
     {
-        auto *restoreProcessor = static_cast<Proc::Processor *>(evntProcessors[0]);
         size_t matched = 0;
         for (OrderEntry *order : ordersToMatch)
         {
@@ -379,6 +379,38 @@ int main(int argc, char *argv[])
         aux::ExchLogger::instance()->warn(std::to_string(ordersToMatch.size()) +
                                           " restored order(s) had lost their fills; matched " +
                                           std::to_string(matched) + " of them before taking orders");
+    }
+
+    // 9c. A crash after a trade's transaction committed, and before the release of a held stop it reached did, leaves the
+    // stop held, and only a trade releases one (#237). The trade's transaction persisted its instrument's last trade, and
+    // the load found the stops it reached that were held when it was made. Release them now, after the orders above,
+    // whose lost trades came before the lost releases, and before any client can send an order.
+    const std::vector<OrderEntry *> &stopsReached = dispatcher->stopsReached();
+    if (!stopsReached.empty())
+    {
+        size_t released = 0;
+        for (OrderEntry *stop : stopsReached)
+        {
+            try
+            {
+                restoreProcessor->releaseRestored(stop);
+                ++released;
+            }
+            catch (const std::exception &ex)
+            {
+                aux::ExchLogger::instance()->error(
+                    "Restored stop " + std::to_string(stop->orderId_.id_) +
+                    " that its instrument's last trade reached could not be released: " + ex.what());
+            }
+            // Each release matches on a transaction worker, and the next one must see its trades
+            while (0 != transactMgr->pendingTransactions())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        aux::ExchLogger::instance()->warn(std::to_string(stopsReached.size()) +
+                                          " restored stop(s) had lost their release; released " +
+                                          std::to_string(released) + " before taking orders");
     }
 
     // 10. Create Beast io_context and WsServer

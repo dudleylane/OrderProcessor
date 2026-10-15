@@ -53,7 +53,8 @@ static_assert(
         (StorageRecordDispatcher::STRING_RECORDTYPE == 2) && (StorageRecordDispatcher::ACCOUNT_RECORDTYPE == 3) &&
         (StorageRecordDispatcher::CLEARING_RECORDTYPE == 4) && (StorageRecordDispatcher::RAWDATA_RECORDTYPE == 5) &&
         (StorageRecordDispatcher::ORDER_RECORDTYPE == 6) && (StorageRecordDispatcher::EXECUTION_RECORDTYPE == 7) &&
-        (StorageRecordDispatcher::EXECUTIONS_RECORDTYPE == 8) && (StorageRecordDispatcher::IDLIMIT_RECORDTYPE == 9),
+        (StorageRecordDispatcher::EXECUTIONS_RECORDTYPE == 8) && (StorageRecordDispatcher::IDLIMIT_RECORDTYPE == 9) &&
+        (StorageRecordDispatcher::LASTTRADE_RECORDTYPE == 10),
     "RecordType values are persisted");
 
 std::string recordWord(StorageRecordDispatcher::RecordType type, u32 formatVersion)
@@ -75,6 +76,30 @@ void expectFormat(const char *record, u32 formatVersion, u32 newestReadable)
 /// The id limit record's key (#81). The generators never issue id 0, and the only record an earlier build keyed with
 /// id 0 is the empty execution list at (0,0), so (0,1) belongs to no other record.
 const IdT ID_LIMIT_RECORD_ID(0, 1);
+/// The last-trade record's layout (#237): the instrument's id, the price, a double, and the trade's id. An id is its u64
+/// number, then its u32 date.
+const u32 LAST_TRADE_FORMAT_VERSION = 0;
+const size_t LAST_TRADE_RECORD_SIZE = sizeof(u32) + 2 * (sizeof(u64) + sizeof(u32)) + sizeof(PriceT);
+void appendId(string *buffer, const IdT &id)
+{
+    buffer->append(reinterpret_cast<const char *>(&id.id_), sizeof(id.id_));
+    buffer->append(reinterpret_cast<const char *>(&id.date_), sizeof(id.date_));
+}
+const char *readId(const char *p, IdT *id)
+{
+    memcpy(&id->id_, p, sizeof(id->id_));
+    p += sizeof(id->id_);
+    memcpy(&id->date_, p, sizeof(id->date_));
+    return p + sizeof(id->date_);
+}
+/// Its key: the instrument's number, with date 2. Reference data is keyed with dates 0 and 1, and an order with the Unix
+/// second its id was drawn in, so no other record has it. The instrument's own key must not be used: a new version prunes
+/// every older version of its key (#148), and the instrument's record would go.
+const u32 LAST_TRADE_KEY_DATE = 2;
+IdT lastTradeKey(const SourceIdT &instrument)
+{
+    return IdT(instrument.id_, LAST_TRADE_KEY_DATE);
+}
 } // namespace
 
 StorageRecordDispatcher::StorageRecordDispatcher(void)
@@ -181,6 +206,30 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
             restoredIdLimit_ = limit;
         }
         idLimitVersions_.push_back(version);
+    }
+    break;
+    case LASTTRADE_RECORDTYPE:
+    {
+        expectFormat("Last trade", formatVersion, LAST_TRADE_FORMAT_VERSION);
+        if (LAST_TRADE_RECORD_SIZE != size)
+        {
+            throw std::runtime_error("Last trade record is not 36 bytes, record could not be restored!");
+        }
+        SourceIdT instrument;
+        LastTrade trade{ version, 0.0, IdT() };
+        const char *p = readId(buf + sizeof(word), &instrument);
+        memcpy(&trade.lastPx_, p, sizeof(trade.lastPx_));
+        readId(p + sizeof(trade.lastPx_), &trade.tradeId_);
+        if (lastTradeKey(instrument) != id)
+        {
+            throw std::runtime_error("Last trade record keyed for another instrument, record could not be restored!");
+        }
+        // The newest version is the last trade: the transactions that write it run one after another (#237)
+        std::map<IdT, LastTrade>::iterator it = lastTrades_.find(instrument);
+        if ((lastTrades_.end() == it) || (version >= it->second.version_))
+        {
+            lastTrades_[instrument] = trade;
+        }
     }
     break;
     case ORDER_RECORDTYPE:
@@ -320,6 +369,32 @@ void StorageRecordDispatcher::finishLoad()
         }
     }
     pendingOrders_.clear();
+
+    // The held stops each instrument's last trade reached (#237). A trade's release is a transaction of its own, after
+    // the trade's, so a crash between the two leaves a stop held that the trade reached. Only a stop that was held when
+    // the trade was made: one that arrived after it waits for the next trade, as it would have.
+    stopsReached_.clear();
+    if (nullptr != orderBook_)
+    {
+        for (const auto &[instrument, trade] : lastTrades_)
+        {
+            if (!orderBook_->holdsStops(instrument))
+            {
+                continue;
+            }
+            OrderBook::OrdersT reached;
+            orderBook_->triggeredStops(instrument, trade.lastPx_, &reached);
+            for (const IdT &stopId : reached)
+            {
+                OrderEntry *stop = (nullptr != orderStorage_) ? orderStorage_->locateByOrderId(stopId) : nullptr;
+                if ((nullptr != stop) && (stop->orderId_.id_ < trade.tradeId_.id_))
+                {
+                    stopsReached_.push_back(stop);
+                }
+            }
+        }
+    }
+    lastTrades_.clear();
 }
 
 void StorageRecordDispatcher::save(const InstrumentEntry &val)
@@ -533,6 +608,24 @@ void StorageRecordDispatcher::abortGroup() noexcept
     {
         fileStorage_->abortGroup();
     }
+}
+
+u32 StorageRecordDispatcher::saveLastTrade(const SourceIdT &instrument, PriceT lastPx, const IdT &tradeId)
+{
+    assert(nullptr != fileStorage_);
+    string buffer = recordWord(LASTTRADE_RECORDTYPE, LAST_TRADE_FORMAT_VERSION);
+    appendId(&buffer, instrument);
+    buffer.append(reinterpret_cast<const char *>(&lastPx), sizeof(lastPx));
+    appendId(&buffer, tradeId);
+    assert(LAST_TRADE_RECORD_SIZE == buffer.size());
+    // A new version, which erases all but the newest older one (#148), as an order's does
+    return fileStorage_->update(lastTradeKey(instrument), buffer.data(), buffer.size());
+}
+
+void StorageRecordDispatcher::eraseLastTrade(const SourceIdT &instrument, u32 version)
+{
+    assert(nullptr != fileStorage_);
+    fileStorage_->erase(lastTradeKey(instrument), version);
 }
 
 void StorageRecordDispatcher::saveIdLimit(u64 limit)

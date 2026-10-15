@@ -261,6 +261,25 @@ void OrderDataStorage::unpersist(const IdT &orderId, u32 version)
     }
 }
 
+bool OrderDataStorage::persistLastTrade(const SourceIdT &instrument, PriceT lastPx, const IdT &execId, u32 *version)
+{
+    assert(nullptr != version);
+    if (nullptr == saver_)
+    {
+        return false;
+    }
+    *version = saver_->saveLastTrade(instrument, lastPx, execId);
+    return true;
+}
+
+void OrderDataStorage::unpersistLastTrade(const SourceIdT &instrument, u32 version)
+{
+    if (nullptr != saver_)
+    {
+        saver_->eraseLastTrade(instrument, version);
+    }
+}
+
 void OrderDataStorage::beginPersistGroup()
 {
     if (nullptr != saver_)

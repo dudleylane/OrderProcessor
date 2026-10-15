@@ -478,6 +478,34 @@ void PersistOrderTrOperation::rollback(const Context &cnxt)
     }
 }
 
+PersistLastTradeTrOperation::PersistLastTradeTrOperation(const SourceIdT &instrument, PriceT lastPx, const IdT &tradeId)
+    : Operation(PERSIST_LASTTRADE_TROPERATION, lastTradeObject(instrument)), instrument_(instrument), lastPx_(lastPx),
+      tradeId_(tradeId)
+{
+}
+
+IdT PersistLastTradeTrOperation::lastTradeObject(const SourceIdT &instrument)
+{
+    // Reference data has dates 0 and 1, and an order the Unix second its id was drawn in, so nothing else has date 2
+    return IdT(instrument.id_, 2);
+}
+
+void PersistLastTradeTrOperation::execute(const Context &cnxt)
+{
+    assert(nullptr != cnxt.orderStorage_);
+    written_ = cnxt.orderStorage_->persistLastTrade(instrument_, lastPx_, tradeId_, &version_);
+}
+
+void PersistLastTradeTrOperation::rollback(const Context &cnxt)
+{
+    assert(nullptr != cnxt.orderStorage_);
+    if (written_)
+    {
+        cnxt.orderStorage_->unpersistLastTrade(instrument_, version_);
+        written_ = false;
+    }
+}
+
 RemoveFromOrderBookTrOperation::RemoveFromOrderBookTrOperation(const OrderEntry &order, const IdT &instrId)
     : Operation(REMOVE_ORDERBOOK_TROPERATION, order.orderId_, instrId), order_(order)
 {
