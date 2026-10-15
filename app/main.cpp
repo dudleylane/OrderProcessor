@@ -131,6 +131,24 @@ int main(int argc, char *argv[])
         std::cout << App::serverUsage();
         return 0;
     }
+    // The hash a credentials file needs for the token on standard input's first line (#225)
+    if (parsed->hashWsToken)
+    {
+        std::string token;
+        std::getline(std::cin, token);
+        while (!token.empty() && (('\r' == token.back()) || (' ' == token.back()) || ('\t' == token.back())))
+        {
+            token.pop_back();
+        }
+        if (!App::isValidWsToken(token))
+        {
+            std::cerr << "orderProcessorServer: a token needs at least " << App::WS_MIN_TOKEN_LENGTH
+                      << " letters, digits, '.', '_' or '-' (`openssl rand -hex 32` makes one)\n";
+            return 2;
+        }
+        std::cout << App::WsCredentials::hashToken(token) << "\n";
+        return 0;
+    }
     App::ServerArgs cfg = *parsed;
     // Who may open a WebSocket session (#146). A token that can't be used is a usage error too.
     App::WsAuth wsAuth;
@@ -202,6 +220,16 @@ int main(int argc, char *argv[])
     std::unique_ptr<OrderBookImpl> orderBook = std::move(data.orderBook);
     const SourceIdT defaultClearingId = data.defaultClearingId;
     const SourceIdT defaultAccountId = data.defaultAccountId;
+    // 5a. The WebSocket identities' accounts, now that the directory's are known (#225). An account the directory lacks
+    // throws, and the server doesn't start (#203): an identity that could trade nothing is a mistake to say at once.
+    if (wsAuth.credentials)
+    {
+        wsAuth.credentials->resolveAccounts(
+            [](const std::string &name)
+            {
+                return Store::WideDataStorage::instance()->findAccountByName(name);
+            });
+    }
 
     // 5b. Postgres, a copy of what LMDB holds, written behind it (#151). It gets everything the directory holds first,
     // which LMDB's load restored without saving, then whatever the server saves from here on, the restored orders'
@@ -308,7 +336,17 @@ int main(int argc, char *argv[])
         Store::WideDataStorage::instance(), Store::OrderStorage::instance(), inQueues.get(), IdTGenerator::instance(),
         orderBook.get(), defaultClearingId, defaultAccountId, cfg.wsLimits, wsAuth);
     server->run();
-    if (wsAuth.token.empty())
+    if (wsAuth.credentials)
+    {
+        aux::ExchLogger::instance()->note(
+            "WebSocket clients offer an identity's token, from --ws-credentials: " +
+            std::to_string(wsAuth.credentials->size()) +
+            " identities, each seeing and trading only its own accounts, and coming from " +
+            (wsAuth.allowedOrigins.empty() ? std::string("any Origin")
+                                           : std::to_string(wsAuth.allowedOrigins.size()) + " allowed Origin(s)") +
+            " (#225)");
+    }
+    else if (wsAuth.token.empty())
     {
         aux::ExchLogger::instance()->warn(
             "No WebSocket access token is set (OMS_WS_TOKEN or --ws-token-file): any client that reaches " +

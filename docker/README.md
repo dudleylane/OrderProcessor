@@ -84,7 +84,22 @@ The server refuses a WebSocket client that doesn't offer the access token, `OMS_
 
 The server answers an upgrade without the right token with 401, one from an Origin off the list with 403, and a request that isn't a WebSocket upgrade with 426, then closes the connection.
 
-What this doesn't do yet: **authorization** (#225). Everyone with the token sees every account and order, and can trade on any account.
+Everyone with the shared token sees every account and order, and can trade on any account. For less, give each client an identity instead.
+
+#### Identities
+
+With `--ws-credentials` (#225), each client has a token of its own, and its session sees and trades only its identity's accounts: their orders, in the snapshot and in every report after, and its new orders on them alone. Book depth, which shows no account, still goes to every subscriber. README's [Configuration](../README.md#configuration) gives the file's format. To use it with this stack:
+
+1. Make a token per identity with `openssl rand -hex 32`, and its hash with the server's `--hash-ws-token`: `printf '%s' "$TOKEN" | orderProcessorServer --hash-ws-token`, from any build of the server.
+2. Write `docker/ws-credentials`, a line per identity: its name, its token's hash, and its accounts. The file holds only hashes, so `chmod 0644` is fine, and the server's user in the image (uid 10001) can read it.
+3. In `docker-compose.yml`, give `oms-server` the file and the flag, and take `OMS_WS_TOKEN` out of its environment: the server refuses the two together.
+   ```yaml
+   command: ["--port", "8080", "--data-dir", "/data", "--ws-credentials", "/etc/orderprocessor/ws-credentials"]
+   volumes:
+     - ./ws-credentials:/etc/orderprocessor/ws-credentials:ro,z
+   ```
+
+Each client then gives the app its own token where it gave the shared one.
 
 ### TLS
 
@@ -128,6 +143,7 @@ oms-server:
 | `--port` | 8080 | WebSocket listen port |
 | `--bind` | `0.0.0.0` | Address to listen on: an IP address, such as `127.0.0.1` for this host only (#146) |
 | `--ws-token-file` | none | A file whose first line is the access token. `OMS_WS_TOKEN` gives it too, but not both; with neither, any client may connect, and the server warns (#146) |
+| `--ws-credentials` | none | Identities instead of the shared token, each with its token's hash and its accounts (#225); see [Identities](#identities) |
 | `--allowed-origin` | any | An Origin a browser page may connect from; repeat it for more. `OMS_ALLOWED_ORIGINS` adds a comma-separated list (#146) |
 | `--data-dir` | `./data` | LMDB persistence directory. The image's command gives `/data`, its volume |
 | `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs |

@@ -40,6 +40,9 @@ struct ServerArgs
     // The token may come from OMS_WS_TOKEN instead, and the Origins from OMS_ALLOWED_ORIGINS, which main() reads.
     std::string wsTokenFile;
     std::vector<std::string> allowedOrigins;
+    // Identities instead of the shared token (#225): the file with each one's token hash and accounts
+    std::string wsCredentialsFile;
+    bool hashWsToken = false; // --hash-ws-token: read a token from standard input, print its hash and exit
     // The Postgres the server mirrors its orders to (#151): a libpq connection string. It may come from
     // OMS_PG_CONNECTION instead, which main() reads. Empty: LMDB only.
     std::string pgConnection;
@@ -75,6 +78,9 @@ inline std::string serverUsage()
            ")\n"
            "  --ws-token-file FILE      the access token every WebSocket client must offer, from FILE; or set\n"
            "                            OMS_WS_TOKEN. Without one, any client that reaches the port may trade\n"
+           "  --ws-credentials FILE     identities instead of the shared token: each a token hash and the\n"
+           "                            accounts it may see and trade, a line each in FILE\n"
+           "  --hash-ws-token           read a token from standard input, print the hash FILE needs, and exit\n"
            "  --allowed-origin ORIGIN   a browser Origin that may connect; repeat for more, or set\n"
            "                            OMS_ALLOWED_ORIGINS, comma-separated (default: any)\n"
            "  --pg-connection STRING    mirror orders and reference data to this Postgres, a libpq connection\n"
@@ -125,12 +131,17 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
             parsed.debug = true;
             continue;
         }
+        if ("--hash-ws-token" == arg)
+        {
+            parsed.hashWsToken = true;
+            continue;
+        }
         static const std::vector<std::string> withValues = {
-            "--port",         "--data-dir",        "--workers",
-            "--cpu-affinity", "--clearing-firm",   "--default-account",
-            "--lmdb-map-mb",  "--max-connections", "--max-session-queue-mb",
-            "--bind",         "--ws-token-file",   "--allowed-origin",
-            "--pg-connection"
+            "--port",          "--data-dir",        "--workers",
+            "--cpu-affinity",  "--clearing-firm",   "--default-account",
+            "--lmdb-map-mb",   "--max-connections", "--max-session-queue-mb",
+            "--bind",          "--ws-token-file",   "--allowed-origin",
+            "--pg-connection", "--ws-credentials"
         };
         bool takesValue = false;
         for (const std::string &option : withValues)
@@ -213,6 +224,10 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
         {
             parsed.allowedOrigins.push_back(value);
         }
+        else if ("--ws-credentials" == arg)
+        {
+            parsed.wsCredentialsFile = value;
+        }
         else if ("--pg-connection" == arg)
         {
             parsed.pgConnection = value;
@@ -266,9 +281,11 @@ inline bool resolvePgConnection(const ServerArgs &args, const char *env, std::st
 }
 
 /// Who may open a WebSocket session (#146), from the arguments and the environment: the access token from
-/// --ws-token-file or OMS_WS_TOKEN, not both, and the Origins from --allowed-origin and OMS_ALLOWED_ORIGINS,
-/// comma-separated. Returns false, with the reason in *error, for a token file it can't read, two tokens, or a token
-/// isValidWsToken() refuses: a usage error, as a flag it can't read is.
+/// --ws-token-file or OMS_WS_TOKEN, not both, or identities from --ws-credentials (#225), and the Origins from
+/// --allowed-origin and OMS_ALLOWED_ORIGINS, comma-separated. Returns false, with the reason in *error, for a token file
+/// it can't read, two tokens, a token isValidWsToken() refuses, a credentials file it can't read or use, or credentials
+/// with a token: a usage error, as a flag it can't read is. The identities' accounts are resolved later, once the data
+/// directory is loaded (WsCredentials::resolveAccounts()).
 inline bool resolveWsAuth(const ServerArgs &args, const char *envToken, const char *envOrigins, WsAuth *auth,
                           std::string *error)
 {
@@ -314,6 +331,29 @@ inline bool resolveWsAuth(const ServerArgs &args, const char *envToken, const ch
         *error = "the WebSocket token needs at least " + std::to_string(WS_MIN_TOKEN_LENGTH) +
                  " letters, digits, '.', '_' or '-' (`openssl rand -hex 32` makes one)";
         return false;
+    }
+    if (!args.wsCredentialsFile.empty())
+    {
+        // Each identity's own token, or the one everybody shares: both would leave it unclear what a session may see
+        if (!resolved.token.empty())
+        {
+            *error = "--ws-credentials and a shared token (--ws-token-file or OMS_WS_TOKEN) can't both be given";
+            return false;
+        }
+        try
+        {
+            resolved.credentials = std::make_shared<WsCredentials>(WsCredentials::load(args.wsCredentialsFile));
+        }
+        catch (const std::exception &ex)
+        {
+            *error = ex.what();
+            return false;
+        }
+        if (0 == resolved.credentials->size())
+        {
+            *error = "the WebSocket credentials file " + args.wsCredentialsFile + " names no identity";
+            return false;
+        }
     }
     // An Origin is scheme://host[:port], which a browser sends without a trailing '/': one written with it would match
     // no page
