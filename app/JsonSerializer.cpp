@@ -151,7 +151,7 @@ std::string App::serializeInstrumentList(const Store::WideParamsDataStorage *wds
     return j.dump();
 }
 
-std::string App::serializeAccountList(const Store::WideParamsDataStorage *wds)
+std::string App::serializeAccountList(const Store::WideParamsDataStorage *wds, const AccountFilter &maySee)
 {
     json j;
     j["type"] = "account_list";
@@ -159,6 +159,10 @@ std::string App::serializeAccountList(const Store::WideParamsDataStorage *wds)
     wds->forEachAccount(
         [&](const SourceIdT &id, const AccountEntry &acct)
         {
+            if (maySee && !maySee(id))
+            {
+                return;
+            }
             json item;
             item["id"] = id.id_;
             item["account"] = acct.account_;
@@ -169,7 +173,7 @@ std::string App::serializeAccountList(const Store::WideParamsDataStorage *wds)
     return j.dump();
 }
 
-std::string App::serializeOrderSnapshot(const Store::OrderDataStorage *storage)
+std::string App::serializeOrderSnapshot(const Store::OrderDataStorage *storage, const AccountFilter &maySee)
 {
     json j;
     j["type"] = "order_snapshot";
@@ -177,6 +181,10 @@ std::string App::serializeOrderSnapshot(const Store::OrderDataStorage *storage)
     storage->forEachOrder(
         [&](const IdT & /*id*/, const OrderEntry &order)
         {
+            if (maySee && !maySee(order.account_.getId()))
+            {
+                return;
+            }
             j["data"].push_back(orderToJson(order));
         });
     return j.dump();

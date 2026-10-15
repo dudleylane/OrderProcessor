@@ -2,21 +2,28 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "WsCredentials.h"
 
 namespace COP
 {
 namespace App
 {
 
-/// Who may open a WebSocket session (#146). Left empty, anyone who reaches the port may, as before #146.
+/// Who may open a WebSocket session (#146), and what it may see and trade (#225). Left empty, anyone who reaches the
+/// port may, as before #146.
 struct WsAuth
 {
     /// The shared token a client must offer, as the subprotocol WS_TOKEN_PREFIX + token beside WS_SUBPROTOCOL. Empty:
-    /// no token is asked for.
+    /// no token is asked for, unless credentials are given.
     std::string token;
+    /// Identities, each with a token of its own and the accounts it may see and trade (#225). When set, a client
+    /// offers its identity's token where it would offer the shared one, and token is empty: one or the other.
+    std::shared_ptr<WsCredentials> credentials;
     /// The Origins a browser may connect from. Empty: any. A client that sends no Origin isn't a browser, and the token
     /// authenticates it.
     std::vector<std::string> allowedOrigins;
@@ -114,13 +121,41 @@ inline bool offersSubprotocol(std::string_view subprotocols)
 }
 
 /// Whether an upgrade request may open a session. subprotocols is its Sec-WebSocket-Protocol header, comma-separated,
-/// and origin its Origin header, empty when it sent none (#146).
-inline WsUpgrade decideUpgrade(const WsAuth &auth, std::string_view subprotocols, std::string_view origin)
+/// and origin its Origin header, empty when it sent none (#146). With credentials, an accepted request's identity goes
+/// to identity (#225); without, identity is left as it is.
+inline WsUpgrade decideUpgrade(const WsAuth &auth, std::string_view subprotocols, std::string_view origin,
+                               std::shared_ptr<const WsIdentity> *identity = nullptr)
 {
     if (!origin.empty() && !auth.allowedOrigins.empty() &&
         (auth.allowedOrigins.end() == std::find(auth.allowedOrigins.begin(), auth.allowedOrigins.end(), origin)))
     {
         return WsUpgrade::ForbiddenOrigin;
+    }
+    if (auth.credentials)
+    {
+        bool offered = false;
+        std::shared_ptr<const WsIdentity> found;
+        detail::forEachEntry(subprotocols,
+                             [&](std::string_view entry)
+                             {
+                                 if (0 == entry.compare(0, WS_TOKEN_PREFIX.size(), WS_TOKEN_PREFIX))
+                                 {
+                                     offered = true;
+                                     if (!found)
+                                     {
+                                         found = auth.credentials->find(entry.substr(WS_TOKEN_PREFIX.size()));
+                                     }
+                                 }
+                             });
+        if (!found)
+        {
+            return offered ? WsUpgrade::WrongToken : WsUpgrade::MissingToken;
+        }
+        if (nullptr != identity)
+        {
+            *identity = std::move(found);
+        }
+        return WsUpgrade::Accept;
     }
     if (auth.token.empty())
     {
