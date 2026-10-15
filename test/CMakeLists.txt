@@ -74,6 +74,11 @@ target_sources(orderProcessorTest
         SeedDataArgsTest.cpp
         ServerArgsTest.cpp
         WsAuthTest.cpp
+        # Identities: each sees and trades only its own accounts (#225)
+        WsCredentialsTest.cpp
+        WsAuthorizationTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/WsCredentials.cpp
+        ${CMAKE_SOURCE_DIR}/app/WsOutQueues.cpp
 
         # The server's load of its data directory (#165)
         ServerDataTest.cpp

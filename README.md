@@ -124,6 +124,8 @@ Server options:
 | `--bind` | `0.0.0.0` | Address to listen on: an IP address, such as `127.0.0.1` for this host only (#146) |
 | `--ws-token-file` | none | A file whose first line is the access token a WebSocket client must offer (#146). `OMS_WS_TOKEN` gives it too, but not both |
 | `--allowed-origin` | any | An Origin a browser page may connect from; repeat it for more. `OMS_ALLOWED_ORIGINS` adds a comma-separated list (#146) |
+| `--ws-credentials` | none | A file of identities, each with a token of its own and the accounts it may see and trade (#225); instead of the shared token, not beside it. See below |
+| `--hash-ws-token` | | Reads a token from standard input, prints the hash `--ws-credentials` needs for it, and exits |
 | `--pg-connection` | none | The Postgres to mirror to, a libpq connection string (#151). `OMS_PG_CONNECTION` gives it too, but not both: prefer it, since every user on the host can see a flag in the process list. Needs `BUILD_PG=ON` |
 | `--data-dir` | `./data` | LMDB persistence directory |
 | `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs |
@@ -137,6 +139,18 @@ Server options:
 | `--max-session-queue-mb` | <!-- DOC_CHECK:ws_max_session_queue_mb -->16<!-- /DOC_CHECK --> | What may wait to be sent to one client, in MiB. A client that doesn't read is dropped once more waits, and gets the current state again when it reconnects |
 
 Without `--ws-token-file` or `OMS_WS_TOKEN`, any client that reaches the server may connect, and the server warns once at startup (#146). A token has at least <!-- DOC_CHECK:ws_min_token_length -->16<!-- /DOC_CHECK --> letters, digits, `.`, `_` or `-` (`openssl rand -hex 32` makes one); see [Connecting](#connecting) for how a client offers it. A token file with nothing on its first line, or `OMS_WS_TOKEN` set but empty, is refused rather than taken as no token.
+
+Everyone with the shared token sees every account's orders and may trade, cancel and replace on any of them. To give clients less, give the server `--ws-credentials FILE` instead (#225). Each line names an identity, its token's hash, and the accounts it may see and trade:
+
+```
+# Identity  TokenHash                                                                Accounts
+desk-a      sha256$0f2c...<64 lowercase hex digits>                                  TRADING-1,TRADING-2
+```
+
+- **Tokens:** make one per identity with `openssl rand -hex 32`, and its hash with `printf '%s' "$TOKEN" | orderProcessorServer --hash-ws-token`. The file holds only hashes, a SHA-256 each: the token is random and long, and a client offers only its token, so the server finds the identity by the token's hash.
+- **Accounts:** a session gets only its identity's accounts in `account_list`, and only their orders, in `order_snapshot` and in every report and update after. Two identities that share an account both see its orders. Book depth shows no account, so every session that subscribes gets it.
+- **Orders:** `new_order` may name only one of the identity's accounts; naming none trades the first the file lists, not `--default-account`. An order outside the identity's accounts is one its session can't name: a cancel of it is answered as for an order that doesn't exist, and a replace gets the same `error` as one. Each order records the identity that sent it, where every WebSocket order said `WebSocket`.
+- **Startup:** the server exits 2 for a file it can't read, a line it can't use (it says which), a file that names no identity, or the file beside a shared token. It exits 1 when an identity names an account the data directory lacks.
 
 An option the server doesn't know, an option without its value, or a number outside the option's range is a usage error: the server prints why and its usage on standard error, and exits with status 2 (#173). `--help` prints the usage.
 
@@ -352,7 +366,7 @@ The server communicates with clients via JSON messages over WebSocket. All messa
 
 ### Connecting
 
-A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through the Docker stack, nginx serves `/ws` over TLS only, so the client opens `wss://<host>:3000/ws` (#226). When the server has an access token (#146), the client offers it too, as a second subprotocol, `oms-token.<token>`: a browser can't set a WebSocket's headers, but it can name subprotocols. The server names `oms-v1` in its answer when the client offered it, never the token's. It refuses an upgrade without the right token with 401, one whose `Origin` isn't among `--allowed-origin` and `OMS_ALLOWED_ORIGINS` (when either is set) with 403, and a request that isn't a WebSocket upgrade with 426. Anyone with the token may still do everything the protocol allows, on any account: authorization is #225.
+A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through the Docker stack, nginx serves `/ws` over TLS only, so the client opens `wss://<host>:3000/ws` (#226). When the server has an access token (#146), the client offers it too, as a second subprotocol, `oms-token.<token>`: a browser can't set a WebSocket's headers, but it can name subprotocols. The server names `oms-v1` in its answer when the client offered it, never the token's. It refuses an upgrade without the right token with 401, one whose `Origin` isn't among `--allowed-origin` and `OMS_ALLOWED_ORIGINS` (when either is set) with 403, and a request that isn't a WebSocket upgrade with 426. Anyone with a shared token may do everything the protocol allows, on any account. With `--ws-credentials` (#225), the client offers its identity's token the same way, and its session sees and trades only the identity's accounts.
 
 ### Server → Client
 
@@ -389,7 +403,7 @@ A `STOP` or `STOPLIMIT` order is held until a trade in its instrument reaches it
 - **Restarts:** only a trade reaches a stop, and no trade price survives a restart, so a held stop then waits for the next trade (#237).
 - **Reports:** the release sends none (#236). A released `STOP` is reported when it trades or is canceled. A `STOPLIMIT` released with nothing to trade shows `stopTriggered` only with its next report or in `order_snapshot`.
 
-Every order clears through the server's clearing firm (`--clearing-firm`), and an order with no `account` goes to the server's default account (`--default-account`). `seedData` seeds both. If either is missing from the data directory, the server logs a warning at startup and answers each order that needs it with an `error` message.
+Every order clears through the server's clearing firm (`--clearing-firm`), and an order with no `account` goes to the server's default account (`--default-account`), or, under an identity (#225), to the identity's first account. `seedData` seeds both. If either is missing from the data directory, the server logs a warning at startup and answers each order that needs it with an `error` message.
 
 ### Key Data Types
 
@@ -471,6 +485,7 @@ OrderProcessor/
 │   ├── WsServer.cpp/h      # Boost Beast WebSocket server
 │   ├── WsSession.cpp/h     # Per-client session with strand
 │   ├── WsAuth.h            # Who may open a session: access token and Origins (#146)
+│   ├── WsCredentials.cpp/h # Identities: each one's token hash and accounts (#225)
 │   ├── JsonSerializer.cpp/h # JSON encoding/decoding
 │   ├── MetricsPublisher.cpp/h # Periodic system metrics broadcast
 │   ├── SessionManager.cpp/h # Thread-safe session registry + broadcast

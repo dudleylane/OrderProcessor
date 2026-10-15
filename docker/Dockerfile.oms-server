@@ -10,7 +10,7 @@ RUN dnf install -y epel-release 'dnf-command(config-manager)' \
     && dnf config-manager --set-enabled crb \
     && dnf install -y \
         cmake gcc-toolset-15-gcc-c++ git \
-        tbb-devel spdlog-devel boost-devel lmdb-devel numactl-devel \
+        tbb-devel spdlog-devel boost-devel lmdb-devel numactl-devel openssl-devel \
     && dnf clean all
 
 # The engine needs GCC 15 (C++23's <flat_map>, among others), and the system gcc-c++ is GCC 14,
@@ -49,7 +49,7 @@ FROM quay.io/centos/centos:stream10
 # build, as the image check's --pull=newer intends (#135), so it gets their fixes. A pin would freeze them.
 # hadolint ignore=DL3041
 RUN dnf install -y epel-release \
-    && dnf install -y tbb lmdb-libs spdlog numactl-libs libpq \
+    && dnf install -y tbb lmdb-libs spdlog numactl-libs libpq openssl-libs \
     && dnf clean all
 
 COPY --from=builder /build/out/orderProcessorServer /usr/local/bin/

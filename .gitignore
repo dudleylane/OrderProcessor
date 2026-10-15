@@ -50,4 +50,6 @@ dist/
 # Docker environment secrets, and the stack's TLS certificate and key (#226)
 docker/.env
 docker/certs/
+# WebSocket identities (#225): per deployment, like the certificate
+docker/ws-credentials
 build-*/

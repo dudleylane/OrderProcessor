@@ -110,7 +110,7 @@ void WsSession::onRequest(beast::error_code ec, std::size_t /*bytesTransferred*/
     {
         subprotocols.append(subprotocols.empty() ? "" : ",").append(field->value());
     }
-    switch (decideUpgrade(auth_, subprotocols, upgradeRequest_[http::field::origin]))
+    switch (decideUpgrade(auth_, subprotocols, upgradeRequest_[http::field::origin], &identity_))
     {
     case WsUpgrade::ForbiddenOrigin:
         refuse(http::status::forbidden, "This server doesn't accept WebSocket connections from that Origin.");
@@ -170,10 +170,15 @@ void WsSession::onAccept(beast::error_code ec)
     // server (#36): contain it, tell the client, and keep the session open.
     try
     {
+        // Under an identity, only its own accounts and their orders (#225)
+        const AccountFilter maySeeAccount = [this](const SourceIdT &account)
+        {
+            return maySee(account);
+        };
         send(serializeConnected());
         send(serializeInstrumentList(wideData_));
-        send(serializeAccountList(wideData_));
-        send(serializeOrderSnapshot(orderStorage_));
+        send(serializeAccountList(wideData_, maySeeAccount));
+        send(serializeOrderSnapshot(orderStorage_, maySeeAccount));
     }
     catch (const std::exception &ex)
     {
@@ -278,9 +283,20 @@ void WsSession::handleMessage(const std::string &msgStr)
             return;
         }
 
-        // Look up the account; an order that names none goes to the server's default account (#34)
+        // Look up the account. Under an identity it must be one of the identity's, and an order that names none trades
+        // the first (#225), as a FIX counterparty's does (#147). The refusal doesn't say whether the account exists.
         SourceIdT acctId = defaultAccountId_;
-        if (!no.account.empty())
+        if (identity_)
+        {
+            acctId = no.account.empty() ? identity_->defaultAccount : wideData_->findAccountByName(no.account);
+            if (!acctId.isValid() || !identity_->mayUse(acctId))
+            {
+                send(serializeError("Order refused: account " + no.account + " isn't one this connection may trade"));
+                return;
+            }
+        }
+        // Otherwise an order that names none goes to the server's default account (#34)
+        else if (!no.account.empty())
         {
             acctId = wideData_->findAccountByName(no.account);
             if (!acctId.isValid())
@@ -311,8 +327,8 @@ void WsSession::handleMessage(const std::string &msgStr)
         auto *execList = new ExecutionsT();
         SourceIdT execListId = Store::WideDataStorage::instance()->add(execList);
 
-        // Create source string
-        std::string srcStr = "WebSocket";
+        // The source: the identity that sent it, or "WebSocket" without one (#225)
+        const std::string srcStr = source();
         auto *srcStrPtr = new StringT(srcStr);
         SourceIdT srcId = Store::WideDataStorage::instance()->add(srcStrPtr);
 
@@ -338,7 +354,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         order->lastUpdateTime_ = order->creationTime_;
 
         Queues::OrderEvent evt(order);
-        inQueues_->push("WebSocket", evt);
+        inQueues_->push(srcStr, evt);
     }
     else if (msg.type == "cancel_order")
     {
@@ -352,7 +368,7 @@ void WsSession::handleMessage(const std::string &msgStr)
             return;
         }
         Queues::OrderCancelEvent evt((nullptr != order) ? order->orderId_ : IdT(number, 0), "Canceled by user");
-        inQueues_->push("WebSocket", evt);
+        inQueues_->push(source(), evt);
     }
     else if (msg.type == "replace_order")
     {
@@ -407,7 +423,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         replacement->lastUpdateTime_ = nowMillis();
 
         Queues::OrderReplaceEvent evt(original->orderId_, replacement.release());
-        inQueues_->push("WebSocket", evt);
+        inQueues_->push(source(), evt);
     }
     else if (msg.type == "subscribe_book")
     {
@@ -481,13 +497,30 @@ void WsSession::drop()
     beast::get_lowest_layer(ws_).close();
 }
 
+std::string WsSession::source() const
+{
+    return identity_ ? identity_->name : std::string(ANONYMOUS_SOURCE);
+}
+
+bool WsSession::maySee(const SourceIdT &account) const
+{
+    return !identity_ || identity_->mayUse(account);
+}
+
 OrderEntry *WsSession::findOrder(u64 number, const std::string &clOrdId, bool *answered)
 {
     *answered = false;
+    // Another identity's order is one this session can't name (#225): as if there were none, so the client learns
+    // nothing of it, and a cancel of it reaches the engine as an unknown order. Its account never changes, so it is read
+    // without the order's lock.
+    const auto visible = [this](OrderEntry *order)
+    {
+        return ((nullptr != order) && maySee(order->account_.getId())) ? order : nullptr;
+    };
     if (!clOrdId.empty())
     {
         RawDataEntry key(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size()));
-        OrderEntry *order = orderStorage_->locateByClOrderId(key);
+        OrderEntry *order = visible(orderStorage_->locateByClOrderId(key));
         if ((nullptr != order) && (number != order->orderId_.id_))
         {
             send(serializeError("Order " + std::to_string(number) + " does not have ClOrdID " + clOrdId));
@@ -504,7 +537,7 @@ OrderEntry *WsSession::findOrder(u64 number, const std::string &clOrdId, bool *a
                             ": name it by clOrderId as well"));
         *answered = true;
     }
-    return order;
+    return visible(order);
 }
 
 void WsSession::doWrite()
