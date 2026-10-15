@@ -64,6 +64,48 @@ private:
     OrderDataStorage *orderStorage_;
 };
 
+/// Walks the orders findContra() would take, in its order, adding up what they have left, and finds the one that makes
+/// it enough to fill the order (#240)
+class FindFillAtOnce : public OrderFunctor
+{
+public:
+    FindFillAtOnce(OrderEntry *order, OrderDataStorage *orderStorage)
+        : order_(order), orderStorage_(orderStorage), needed_(order->leavesQty_)
+    {
+        side_ = (BUY_SIDE == order_->side_) ? SELL_SIDE : BUY_SIDE;
+    }
+    SourceIdT instrument() const override
+    {
+        return order_->instrument_.getId();
+    }
+    bool match(const IdT &order, bool *stop) const override
+    {
+        OrderEntry *contrOrd = orderStorage_->locateByOrderId(order);
+        if (nullptr == contrOrd)
+        {
+            return false;
+        }
+        oneapi::tbb::spin_rw_mutex::scoped_lock contrLock(contrOrd->entryMutex_, false);
+        if (0 == contrOrd->leavesQty_)
+        {
+            return false;
+        }
+        if (!OrderMatcher::tradesWith(*order_, *contrOrd))
+        {
+            *stop = true; // sorted by price: no order further on trades with it either
+            return false;
+        }
+        found_ += contrOrd->leavesQty_;
+        return found_ >= needed_;
+    }
+
+private:
+    OrderEntry *order_;
+    OrderDataStorage *orderStorage_;
+    const u64 needed_;
+    mutable u64 found_ = 0;
+};
+
 SourceIdT FindOpositeOrder::instrument() const
 {
     return order_->instrument_.getId();
@@ -202,6 +244,29 @@ IdT OrderMatcher::findContra(OrderEntry *order, const OrderBook &book, OrderData
     return book.find(FindOpositeOrder(order, storage));
 }
 
+bool OrderMatcher::canFillAtOnce(OrderEntry *order, const OrderBook &book, OrderDataStorage *storage)
+{
+    assert(nullptr != order);
+    return (0 < order->leavesQty_) && book.find(FindFillAtOnce(order, storage)).isValid();
+}
+
+void OrderMatcher::matchNew(OrderEntry *order, const Context &ctxt)
+{
+    assert(nullptr != order);
+    assert(nullptr != ctxt.orderBook_);
+    // Fill or kill (#240): in full at once, or not at all. The book can't change between this and the sweep: they run in
+    // one transaction, and every transaction that books, cancels or matches on the instrument relates to it.
+    if ((FOK_TIF == order->tif_) && !canFillAtOnce(order, *ctxt.orderBook_, ctxt.orderStorage_))
+    {
+        std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
+        defEvnt->cancelReason_ = "Fill or kill: the book can't fill the order at once";
+        defEvnt->order_ = order;
+        defered_->addDeferedEvent(defEvnt.release());
+        return;
+    }
+    match(order, ctxt);
+}
+
 OrderMatcher::OrderMatcher(void) : defered_(nullptr)
 {
     aux::ExchLogger::instance()->note("OrderMatcher created.");
@@ -238,13 +303,21 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
     IdT id = findContra(order, *ctxt.orderBook_, ctxt.orderStorage_);
     if (!id.isValid())
     {
-        // A STOP its stop released is cancelled with what is left, as a market order is (#223)
+        // A STOP its stop released is cancelled with what is left, as a market order is (#223), and so is an IOC or FOK
+        // order, which never rests (#240)
         if (order->marketLike())
         {
             /// if market not available - market order should be canceled
             aux::ExchLogger::instance()->error("Unable to find oposite order for Market order during order matching.");
             std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
             defEvnt->cancelReason_ = "Unable to find oposite order for Market order during order matching.";
+            defEvnt->order_ = order;
+            defered_->addDeferedEvent(defEvnt.release());
+        }
+        else if (order->cancelsWhatIsLeft())
+        {
+            std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
+            defEvnt->cancelReason_ = "Immediate or cancel: what the order couldn't trade at once is canceled";
             defEvnt->order_ = order;
             defered_->addDeferedEvent(defEvnt.release());
         }

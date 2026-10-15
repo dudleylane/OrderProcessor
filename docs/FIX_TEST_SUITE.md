@@ -123,6 +123,8 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ReplaceRequest_StopPxMovesAStopOrdersStop` | A stop limit's replace with StopPx (99) → the replacement's new stop; one without StopPx keeps the original's (#238) |
 | `ReplaceRequest_StopPxForAnOrderThatIsntAStopOrder_IsNotQueued` | StopPx on a limit order's replace → refused by the gateway (102=99), nothing pushed (#238) |
 | `ReplaceRequest_StopPxNoOrderTradesAt_IsNotQueued` | A replace's StopPx no order trades at → refused by the gateway (102=99), nothing pushed (#238) |
+| `ReplaceRequest_ExpireTimeFollowsReplaceOrdersRules` | A GTD replacement keeps the original's ExpireTime or takes the request's; a replace to GTC drops it (#240) |
+| `ReplaceRequest_AnExpireTimeTheRulesRefuse_IsNotQueued` | To GTD without ExpireTime, with one that has passed, or ExpireTime for a Day order → refused (102=99), nothing pushed (#240) |
 | `NewOrderSingle_StoresTheClOrdIdUnderItsSession` | The order's ClOrdID is stored as `FIX:<SenderCompID>-><TargetCompID>\|<ClOrdID>` (#71) |
 | `NewOrderMultileg_StoresTheClOrdIdUnderItsSession` | The same for an FX swap (#71) |
 | `CancelRequest_ForAnotherSessionsOrder_IsNotQueued` | Cancel naming another session's ClOrdID → answered as unknown by the gateway, nothing pushed (#71) |
@@ -134,6 +136,9 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ASwapWithADateThatIsntOneIsNotQueued` | `-5`, a non-number, 21 digits or a day that doesn't exist, in 64, 6501 or a leg's 588 → refused before anything is stored, nothing pushed (#190) |
 | `NewOrderSingle_StopOrdersCarryTheirStopPx` | A STOP's and a STOP_LIMIT's StopPx (99) → the order's stop price; a STOP_LIMIT's Price (44) is its limit (#223) |
 | `NewOrderSingle_StopOrderWithoutAStopPxNoOrderTradesAt_IsNotQueued` | A stop order without StopPx, or with one no order trades at → refused before anything is stored, nothing pushed (#223) |
+| `NewOrderSingle_AGtdOrderCarriesItsExpireTime` | TimeInForce GTD (59=6) with ExpireTime (126) → the order's expiry (#240) |
+| `NewOrderSingle_AnExpireTimeTheRulesRefuse_IsNotQueued` | A GTD order without ExpireTime, with ExpireDate (432) alone or with one that has passed, and ExpireTime on a Day order → refused, nothing pushed (#240) |
+| `NewOrderMultileg_AGtdSwapCarriesItsExpireTime` | The same for an FX swap (#240) |
 | `ExecutionReport_ASwapsLegsCarryTheirSideDateAndPrice` | Each leg's report carries its side, its LegSettlDate as `YYYYMMDD` (#198), its price, and a TradeLinkID (#153): the fill's link, the same on both legs even when their transact times differ (#199) |
 | `NewOrderMultileg_NonSwapOrdType_Rejected` | Non-FXSWAP OrdType in multileg → no push; refused to the sender, 103=11 (#189) |
 | `NewOrderMultileg_TooFewLegs_Rejected` | Single leg multileg → no push; refused to the sender, 103=11 (#189) |
@@ -155,6 +160,7 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ExecutionReport_TradeCarriesLastQtyAndLastPx` | Trade → 150=F, LastQty (32), LastPx (31) |
 | `ExecutionReport_CorrectionIsTradeCorrect` | Correction → 150=G, not NEW |
 | `ExecutionReport_AStopsReleaseIsTriggeredAndNew` | A stop's release → 150=L, 39=0, its ClOrdID, no 103 or LastQty (#236) |
+| `ExecutionReport_AGtdOrdersReportCarriesItsExpireTime` | A GTD order's report → ExpireTime (126) to the millisecond; a Day order's has none (#240) |
 | `ExecutionReport_ReplaceNamesTheReplacedOrder` | Replacement's REPLACE report → 150=5, its status, OrigClOrdID (41) |
 | `ExecutionReport_CarriesTheClientsOwnClOrdIds` | ClOrdIDs stored under the session's key go out as the client sent them, in 11 and 41 (#71) |
 | `ExecutionReport_OnlyTheReplacementsReplaceReportGoesOverFix` | The replaced order's own REPLACE report is not sent over FIX |
@@ -347,6 +353,17 @@ Runs `orderProcessorServer` with a certificate made for the run, and checks, on 
 - a plain TCP client gets no answer, and the server closes the connection;
 - with the settings' own `SSLProtocol` at TLS 1.3 only, a TLS 1.2 client fails the handshake and a TLS 1.3 one logs on;
 - without the flags FIX runs over plain TCP, and the server warns so, once (#228).
+
+---
+
+## 18. FixSessionTimeTest — The Session's Day
+
+**File:** `test/FixGatewayTest.cpp`
+**Requires:** `BUILD_FIX=ON`
+
+| Test | Description |
+|------|-------------|
+| `ASessionsDayEndsAt1700NewYork` | `config/fix.cfg`'s StartTime and EndTime, read as QuickFIX's SessionFactory reads them with UseLocalTime, in the zone `useBusinessDayLocalTime()` gives the process: a session rolls at 17:00 New York, 21:00 UTC in daylight time and 22:00 UTC in standard time, and not at New York's midnight or 00:00 UTC (#240) |
 
 ---
 

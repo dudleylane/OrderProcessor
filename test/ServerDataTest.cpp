@@ -10,15 +10,19 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "TestAux.h"
 
 #include "ServerData.h"
+#include "ExpiryScheduler.h"
+#include "MockQueues.h"
 #include "WideDataStorage.h"
 #include "IdTGenerator.h"
 #include "OrderStorage.h"
@@ -174,6 +178,62 @@ TEST_F(ServerDataTest, ARestingOrderIsRestoredIntoTheBook)
     App::ServerData data = load();
     EXPECT_EQ(resting, data.orderBook->getTop(instrument, BUY_SIDE));
     EXPECT_EQ(7u, data.lastOrderNumber);
+}
+
+TEST_F(ServerDataTest, RestoredDayAndGtdOrdersThatAreLiveGetTheirTimersBack)
+{
+    // A restart lost every timer, and nothing set them again (#240). One whose time passed while the server was down
+    // fires as soon as the timers start.
+    const DateTimeT now = 1792022400000ULL + 9ULL * 60 * 60 * 1000; // 2026-10-15 09:00 UTC, 05:00 in New York
+    const DateTimeT hour = 60ULL * 60 * 1000;
+    SourceIdT instrument;
+    {
+        LMDBStorage lmdb(MAP_SIZE);
+        StorageRecordDispatcher writer;
+        writer.init(WideDataStorage::instance(), nullptr, &lmdb, OrderStorage::instance());
+        lmdb.load(dir_, &writer);
+        WideDataStorage::instance()->bindStorage(&writer);
+        instrument = test::addInstrument("TIMERS");
+        const auto save = [&](u64 number, TimeInForce tif, OrderStatus status, DateTimeT created, DateTimeT expires)
+        {
+            std::unique_ptr<OrderEntry> val = order(instrument, number, status, (FILLED_ORDSTATUS == status) ? 0 : 100);
+            val->tif_ = tif;
+            val->creationTime_ = created;
+            val->expireTime_ = expires;
+            writer.save(*val);
+        };
+        save(1, GTD_TIF, NEW_ORDSTATUS, now - hour, now + hour);        // later
+        save(2, GTD_TIF, NEW_ORDSTATUS, now - 2 * hour, now - hour);    // passed while down
+        save(3, DAY_TIF, NEW_ORDSTATUS, now - 24 * hour, 0);            // yesterday's: ended at 21:00 UTC
+        save(4, DAY_TIF, NEW_ORDSTATUS, now - hour, 0);                 // today's: ends at 21:00 UTC
+        save(5, GTD_TIF, FILLED_ORDSTATUS, now - 2 * hour, now - hour); // done: no timer
+        save(6, GTC_TIF, NEW_ORDSTATUS, now - hour, 0);                 // no end
+    }
+    restart();
+    App::ServerData data = load();
+
+    ::testing::NiceMock<test::MockInQueues> queues;
+    std::vector<IdT> fired;
+    ON_CALL(queues, push(::testing::_, ::testing::An<const Queues::TimerEvent &>()))
+        .WillByDefault(
+            [&fired](const std::string &, const Queues::TimerEvent &evnt)
+            {
+                fired.push_back(evnt.id_);
+            });
+    Proc::ExpiryScheduler expiry(&queues,
+                                 [now]
+                                 {
+                                     return now;
+                                 });
+    EXPECT_EQ(4u, App::scheduleRestoredExpiries(*OrderStorage::instance(), &expiry));
+    EXPECT_EQ(2u, expiry.fireDue());
+    std::sort(fired.begin(), fired.end(),
+              [](const IdT &a, const IdT &b)
+              {
+                  return a.id_ < b.id_;
+              });
+    EXPECT_EQ((std::vector<IdT>{ IdT(2, 20261014), IdT(3, 20261014) }), fired);
+    EXPECT_EQ(2u, expiry.pending());
 }
 
 TEST_F(ServerDataTest, ARecordOfATypeThisBuildDoesNotKnowStopsTheLoad)

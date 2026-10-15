@@ -34,6 +34,12 @@ public:
 
     void init(DeferedEventContainer *cont);
     void match(OrderEntry *order, const ACID::Context &ctxt);
+    /// The first match of an order, as its booking or its release runs it (#240): a FOK order the book can't fill at
+    /// once is canceled with nothing traded; any other is matched. A sweep continues with match().
+    void matchNew(OrderEntry *order, const ACID::Context &ctxt);
+    /// Whether the book holds enough, on the other side of order's instrument, of what order trades with to fill it at
+    /// once: the orders findContra() would take, in the order it takes them.
+    static bool canFillAtOnce(OrderEntry *order, const OrderBook &book, Store::OrderDataStorage *storage);
 
     /// The order the matcher trades order with first: the best one on the other side of its instrument's book that it
     /// trades with, or an invalid id when there is none. match() starts from it, and a restore uses it to find the

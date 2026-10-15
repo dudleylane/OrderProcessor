@@ -18,7 +18,10 @@
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
 #include <quickfix/FieldConvertors.h>
+#include <quickfix/SessionSettings.h>
+#include <quickfix/TimeRange.h>
 #include "FixGateway.h"
+#include "FixServer.h"
 #include "MultiOutQueues.h"
 
 #include <gtest/gtest.h>
@@ -29,7 +32,11 @@
 #include "MockQueues.h"
 #include "MockStorage.h"
 
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <ctime>
+#include <filesystem>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -1213,6 +1220,197 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_StopPxNoOrderTradesAt_IsNotQueued)
     }
 }
 
+/// An ExpireTime (126) an hour ahead, to the second, in milliseconds since the epoch
+DateTimeT anHourAhead()
+{
+    const auto now =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch());
+    return static_cast<DateTimeT>(now.count() + 60 * 60) * 1000;
+}
+
+/// A replace request for this session's limit order origClOrdId, a buy of "aaa"
+FIX44::OrderCancelReplaceRequest makeLimitReplace(const std::string &origClOrdId, const std::string &clOrdId)
+{
+    FIX44::OrderCancelReplaceRequest msg;
+    msg.set(FIX::OrigClOrdID(origClOrdId));
+    msg.set(FIX::ClOrdID(clOrdId));
+    msg.set(FIX::Side(FIX::Side_BUY));
+    msg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    msg.set(FIX::OrdType(FIX::OrdType_LIMIT));
+    msg.set(FIX::Symbol("aaa"));
+    msg.set(FIX::Price(15.50));
+    msg.set(FIX::OrderQty(200));
+    return msg;
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_AGtdOrderCarriesItsExpireTime)
+{
+    // TimeInForce GTD (59=6) expires at ExpireTime (126) (#240). The gateway never read it, and the engine refuses a GTD
+    // order without an expiry, so every FIX GTD order was rejected.
+    OrderEntry *captured = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                captured = evt.order_;
+            }));
+    const DateTimeT expiry = anHourAhead();
+    auto msg = makeNewOrderSingle("GTD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100,
+                                  FIX::TimeInForce_GOOD_TILL_DATE);
+    msg.set(FIX::ExpireTime(FixGateway::toUtcTimeStamp(expiry)));
+    gateway_->onMessage(msg, TEST_SID);
+    ASSERT_NE(nullptr, captured);
+    EXPECT_EQ(GTD_TIF, captured->tif_);
+    EXPECT_EQ(expiry, captured->expireTime_);
+    delete captured;
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_AnExpireTimeTheRulesRefuse_IsNotQueued)
+{
+    // As on WebSocket (#240): a GTD order without ExpireTime, with ExpireDate (432) alone, or with one that has passed, and
+    // an ExpireTime on an order that isn't GTD. Each is refused to its sender before anything is stored.
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    const char gtd = FIX::TimeInForce_GOOD_TILL_DATE;
+    gateway_->onMessage(makeNewOrderSingle("GTD-NONE", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100, gtd),
+                        TEST_SID);
+    auto date = makeNewOrderSingle("GTD-DATE", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100, gtd);
+    date.set(FIX::ExpireDate("20991231"));
+    gateway_->onMessage(date, TEST_SID);
+    auto passed = makeNewOrderSingle("GTD-PAST", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100, gtd);
+    passed.set(FIX::ExpireTime(FixGateway::toUtcTimeStamp(anHourAhead() - 2ULL * 60 * 60 * 1000)));
+    gateway_->onMessage(passed, TEST_SID);
+    auto day = makeNewOrderSingle("DAY-EXPIRY", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100);
+    day.set(FIX::ExpireTime(FixGateway::toUtcTimeStamp(anHourAhead())));
+    gateway_->onMessage(day, TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderMultileg_AGtdSwapCarriesItsExpireTime)
+{
+    OrderEntry *captured = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                captured = evt.order_;
+            }));
+    const DateTimeT expiry = anHourAhead();
+    auto msg = makeFxSwap("SWAP-GTD");
+    msg.setField(FIX::TimeInForce(FIX::TimeInForce_GOOD_TILL_DATE));
+    msg.setField(FIX::ExpireTime(FixGateway::toUtcTimeStamp(expiry)));
+    gateway_->onMessage(msg, TEST_SID);
+    ASSERT_NE(nullptr, captured);
+    EXPECT_EQ(GTD_TIF, captured->tif_);
+    EXPECT_EQ(expiry, captured->expireTime_);
+    delete captured;
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_ExpireTimeFollowsReplaceOrdersRules)
+{
+    // A GTD replacement expires at the request's ExpireTime (126), or else at the original's, and a replace to another
+    // time in force drops it (#240), as replace_order does
+    OrderEntry *saved = saveOrderOf(TEST_SID, "ORD-GTD");
+    ASSERT_NE(nullptr, saved);
+    const DateTimeT kept = anHourAhead();
+    saved->tif_ = GTD_TIF;
+    saved->expireTime_ = kept;
+    std::vector<OrderEntry *> captured;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .Times(3)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                captured.push_back(evt.replacementOrder_);
+            }));
+
+    gateway_->onMessage(makeLimitReplace("ORD-GTD", "RPL-KEEP"), TEST_SID);
+    auto moved = makeLimitReplace("ORD-GTD", "RPL-MOVE");
+    moved.set(FIX::ExpireTime(FixGateway::toUtcTimeStamp(kept + 60ULL * 60 * 1000)));
+    gateway_->onMessage(moved, TEST_SID);
+    auto gtc = makeLimitReplace("ORD-GTD", "RPL-GTC");
+    gtc.set(FIX::TimeInForce(FIX::TimeInForce_GOOD_TILL_CANCEL));
+    gateway_->onMessage(gtc, TEST_SID);
+
+    ASSERT_EQ(3u, captured.size());
+    EXPECT_EQ(kept, captured[0]->expireTime_) << "not the original's";
+    EXPECT_EQ(kept + 60ULL * 60 * 1000, captured[1]->expireTime_);
+    EXPECT_EQ(GTC_TIF, captured[2]->tif_);
+    EXPECT_EQ(0u, captured[2]->expireTime_) << "a GTC replacement kept an expiry";
+    for (OrderEntry *order : captured)
+    {
+        delete order; // the mock queue owns nothing
+    }
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_AnExpireTimeTheRulesRefuse_IsNotQueued)
+{
+    // Refused to the sender with an OrderCancelReject (102=99): a replace of a DAY order to GTD without ExpireTime, one
+    // whose ExpireTime has passed, and an ExpireTime for an order that stays DAY (#240)
+    ASSERT_NE(nullptr, saveOrderOf(TEST_SID, "ORD-DAY"));
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    auto toGtd = makeLimitReplace("ORD-DAY", "RPL-1");
+    toGtd.set(FIX::TimeInForce(FIX::TimeInForce_GOOD_TILL_DATE));
+    gateway_->onMessage(toGtd, TEST_SID);
+    auto passed = makeLimitReplace("ORD-DAY", "RPL-2");
+    passed.set(FIX::TimeInForce(FIX::TimeInForce_GOOD_TILL_DATE));
+    passed.set(FIX::ExpireTime(FixGateway::toUtcTimeStamp(anHourAhead() - 2ULL * 60 * 60 * 1000)));
+    gateway_->onMessage(passed, TEST_SID);
+    auto day = makeLimitReplace("ORD-DAY", "RPL-3");
+    day.set(FIX::ExpireTime(FixGateway::toUtcTimeStamp(anHourAhead())));
+    gateway_->onMessage(day, TEST_SID);
+}
+
+/// The repository's config/fix.cfg, found by walking up from where the test runs, as DocConsistencyTest finds README
+std::filesystem::path fixConfig()
+{
+    for (auto dir = std::filesystem::current_path();; dir = dir.parent_path())
+    {
+        const std::filesystem::path cfg = dir / "config" / "fix.cfg";
+        if (std::filesystem::exists(cfg))
+        {
+            return cfg;
+        }
+        if (dir == dir.parent_path())
+        {
+            return {};
+        }
+    }
+}
+
+TEST(FixSessionTimeTest, ASessionsDayEndsAt1700NewYork)
+{
+    // config/fix.cfg's sessions roll where the engine's business day ends, 17:00 New York (#240, ruled 2026-10-16), and
+    // rolled at 00:00 UTC (#160). QuickFIX reads StartTime and EndTime in local time (UseLocalTime), which the server keeps
+    // New York's; the start must come after the end, as a session whose times are equal rolls at local midnight. The
+    // range is the one QuickFIX's SessionFactory makes from them.
+    // UTC first, whatever the machine's zone is (this one's is New York's): the server's function must set the zone
+    ::setenv("TZ", "UTC", 1);
+    ::tzset();
+    App::useBusinessDayLocalTime();
+    const std::filesystem::path cfg = fixConfig();
+    ASSERT_FALSE(cfg.empty()) << "config/fix.cfg not found";
+    const FIX::SessionSettings settings(cfg.string());
+    const FIX::Dictionary &defaults = settings.get();
+    ASSERT_TRUE(defaults.has("UseLocalTime") && defaults.getBool("UseLocalTime"));
+    const FIX::UtcTimeOnly start = FIX::UtcTimeOnlyConvertor::convert(defaults.getString("StartTime"));
+    const FIX::UtcTimeOnly end = FIX::UtcTimeOnlyConvertor::convert(defaults.getString("EndTime"));
+    FIX::TimeRange range(FIX::LocalTimeOnly(start.getHour(), start.getMinute(), start.getSecond()),
+                         FIX::LocalTimeOnly(end.getHour(), end.getMinute(), end.getSecond()));
+    // Asked as QuickFIX's Session asks it, the later time first: now, then when the session began. Daylight time: 17:00
+    // EDT is 21:00 UTC, and New York's midnight is no boundary. (QuickFIX's arithmetic puts the session's last second,
+    // 16:59:59, in the next one, so the checks keep off it.)
+    EXPECT_FALSE(
+        range.isInSameRange(FIX::UtcTimeStamp(21, 0, 1, 15, 10, 2026), FIX::UtcTimeStamp(20, 59, 58, 15, 10, 2026)));
+    EXPECT_TRUE(
+        range.isInSameRange(FIX::UtcTimeStamp(20, 59, 0, 16, 10, 2026), FIX::UtcTimeStamp(21, 0, 1, 15, 10, 2026)));
+    EXPECT_TRUE(
+        range.isInSameRange(FIX::UtcTimeStamp(4, 1, 0, 16, 10, 2026), FIX::UtcTimeStamp(3, 59, 0, 16, 10, 2026)));
+    // Standard time: 17:00 EST is 22:00 UTC, and 00:00 UTC is no boundary
+    EXPECT_FALSE(
+        range.isInSameRange(FIX::UtcTimeStamp(22, 0, 1, 15, 12, 2026), FIX::UtcTimeStamp(21, 59, 58, 15, 12, 2026)));
+    EXPECT_TRUE(
+        range.isInSameRange(FIX::UtcTimeStamp(0, 30, 0, 16, 12, 2026), FIX::UtcTimeStamp(23, 30, 0, 15, 12, 2026)));
+}
+
 TEST(FixQuantityTest, OrderQtyIsAWholeNumberTheEngineCanHold)
 {
     EXPECT_EQ(std::optional<QuantityT>(1u), FixGateway::toQuantity(1.0));
@@ -1440,6 +1638,21 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_AStopsReleaseIsTriggeredAndNew)
     EXPECT_TRUE(report.isSetField(FIX::FIELD::ClOrdID));
     EXPECT_FALSE(report.isSetField(FIX::FIELD::OrdRejReason));
     EXPECT_FALSE(report.isSetField(FIX::FIELD::LastQty));
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_AGtdOrdersReportCarriesItsExpireTime)
+{
+    // ExpireTime (126), to the millisecond, on a GTD order's reports, and on no other's (#240)
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    order->tif_ = GTD_TIF;
+    order->expireTime_ = 1792098000250ULL; // 2026-10-15 21:00:00.250 UTC
+    auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order);
+    ASSERT_TRUE(report.isSetField(FIX::FIELD::ExpireTime));
+    EXPECT_EQ("20261015-21:00:00.250", report.getField(FIX::FIELD::ExpireTime));
+    order->tif_ = DAY_TIF;
+    EXPECT_FALSE(FixGateway::buildExecutionReport(&ack, *order).isSetField(FIX::FIELD::ExpireTime));
 }
 
 TEST_F(FixGatewayInboundTest, ExecutionReport_CancelAckNamesTheCancelRequest)

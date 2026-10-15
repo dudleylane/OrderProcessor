@@ -28,6 +28,8 @@ export function OrderEntryPanel({
   const [orderQty, setOrderQty] = useState('');
   const [minQty, setMinQty] = useState('');
   const [tif, setTif] = useState<TimeInForce>(TimeInForce.DAY);
+  // A GTD order expires at this local date and time (#240)
+  const [expireAt, setExpireAt] = useState('');
   const [account, setAccount] = useState('');
   const [currency, setCurrency] = useState<Currency>(Currency.USD);
   const [capacity, setCapacity] = useState<Capacity>(Capacity.AGENCY);
@@ -61,6 +63,11 @@ export function OrderEntryPanel({
       if (!settlDate || !farSettlDate) return 'A swap needs both settlement dates';
       if (toEpochMs(farSettlDate) <= toEpochMs(settlDate)) return 'The far settlement date must be after the near one';
     }
+    if (tif === TimeInForce.GTD) {
+      const at = Date.parse(expireAt);
+      if (Number.isNaN(at)) return 'A GTD order needs an expiry';
+      if (at <= Date.now()) return 'The expiry has passed';
+    }
     return null;
   };
 
@@ -84,6 +91,7 @@ export function OrderEntryPanel({
         currency,
         capacity,
       };
+      if (tif === TimeInForce.GTD) swap.expireTime = Date.parse(expireAt);
       if (account) swap.account = account;
       sendSwapOrder(swap);
       setLastResult('Swap submitted');
@@ -102,6 +110,7 @@ export function OrderEntryPanel({
 
     if (needsPrice) req.price = parseFloat(price);
     if (needsStopPx) req.stopPx = parseFloat(stopPx);
+    if (tif === TimeInForce.GTD) req.expireTime = Date.parse(expireAt);
     if (minQty) req.minQty = parseInt(minQty);
     if (account) req.account = account;
 
@@ -289,6 +298,15 @@ export function OrderEntryPanel({
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
+            {tif === TimeInForce.GTD && (
+              <input
+                type="datetime-local"
+                aria-label="Expires at"
+                value={expireAt}
+                onChange={e => setExpireAt(e.target.value)}
+                className="w-full mt-1 bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm"
+              />
+            )}
           </div>
           <div className="flex-1">
             <label className="block text-xs text-gray-500 mb-1">Account</label>

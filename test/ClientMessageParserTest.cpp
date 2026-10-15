@@ -83,6 +83,52 @@ TEST(ClientMessageParserTest, ReplaceOrderReportsWhichFieldsArePresent)
     EXPECT_DOUBLE_EQ(10.5, msg.replaceOrder.price);
 }
 
+TEST(ClientMessageParserTest, AGtdSwapNeedsAnExpireTimeAndNoOtherSwapHasOne)
+{
+    // As for new_order (#240): new_swap_order took no expireTime, and a GTD swap reached the engine without one
+    const std::string base = R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,)"
+                             R"("farPrice":1.087,"settlDate":1000,"farSettlDate":2000,"orderQty":5,"currency":"USD",)"
+                             R"("capacity":"AGENCY",)";
+    auto msg = parse(base + R"("tif":"GTD","expireTime":1792108800000}})");
+    EXPECT_EQ("new_swap_order", msg.type) << msg.error;
+    EXPECT_EQ(1792108800000ULL, msg.swapOrder.expireTime);
+
+    msg = parse(base + R"("tif":"GTD"}})");
+    EXPECT_EQ("error", msg.type);
+    EXPECT_EQ("invalid expireTime: a GTD order needs one", msg.error);
+
+    msg = parse(base + R"("expireTime":1792108800000}})"); // GTC, as a swap is unless it says
+    EXPECT_EQ("error", msg.type);
+    EXPECT_EQ("invalid expireTime: only a GTD order has one", msg.error);
+}
+
+TEST(ClientMessageParserTest, AGtdOrderNeedsAnExpireTimeAndNoOtherOrderHasOne)
+{
+    // A GTD order expires at its expireTime, in milliseconds since the epoch (#240)
+    const std::string base = R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","price":10,)"
+                             R"("orderQty":5,"currency":"USD","capacity":"AGENCY",)";
+    auto msg = parse(base + R"("tif":"GTD","expireTime":1792108800000}})");
+    EXPECT_EQ("new_order", msg.type) << msg.error;
+    EXPECT_EQ(1792108800000ULL, msg.newOrder.expireTime);
+
+    msg = parse(base + R"("tif":"GTD"}})");
+    EXPECT_EQ("error", msg.type);
+    EXPECT_EQ("invalid expireTime: a GTD order needs one", msg.error);
+
+    msg = parse(base + R"("tif":"DAY","expireTime":1792108800000}})");
+    EXPECT_EQ("error", msg.type);
+    EXPECT_EQ("invalid expireTime: only a GTD order has one", msg.error);
+
+    msg = parse(base + R"("tif":"GTD","expireTime":-5}})");
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("expireTime")) << msg.error;
+
+    msg = parse(R"({"type":"replace_order","data":{"orderId":7,"expireTime":1792108800000}})");
+    EXPECT_EQ("replace_order", msg.type) << msg.error;
+    EXPECT_TRUE(msg.replaceOrder.hasExpireTime);
+    EXPECT_EQ(1792108800000ULL, msg.replaceOrder.expireTime);
+}
+
 TEST(ClientMessageParserTest, ReplaceOrderTakesAStopPxAboveZero)
 {
     // A replace moves a stop order's stop (#238), as a new order gives it one: above 0

@@ -2,8 +2,11 @@
 
 #ifdef BUILD_FIX
 
+#include <cstdlib>
+#include <ctime>
 #include <memory>
 #include <string>
+#include "ExpiryScheduler.h"
 #include "QueuesDef.h"
 #include "DataModelDef.h"
 
@@ -31,6 +34,17 @@ struct FixTlsFiles
         return !certificate.empty() || !key.empty();
     }
 };
+
+/// Keeps the process's local time New York's (#240). QuickFIX 22.1 reads a session's StartTime and EndTime in local
+/// time when UseLocalTime is set, and has no zone setting of its own, so config/fix.cfg's sessions roll at 17:00 New
+/// York, where the engine's business day ends, only in a process whose zone is New York's. Call it before any thread
+/// starts: setenv() and tzset() aren't thread-safe. The server's own clocks are UTC, and don't change. Inline, as
+/// FixTls.h's functions are, so the tests need no FixServer.cpp.
+inline void useBusinessDayLocalTime()
+{
+    ::setenv("TZ", Proc::ExpiryScheduler::DAY_ZONE, 1);
+    ::tzset();
+}
 
 /// Opaque wrapper around FixGateway + ThreadedSocketAcceptor, or ThreadedSSLSocketAcceptor with TLS.
 /// No QuickFIX headers leak into callers — isolates the boost::flat_map

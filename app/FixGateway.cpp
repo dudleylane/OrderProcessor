@@ -1,6 +1,7 @@
 #ifdef BUILD_FIX
 
 #include "FixGateway.h"
+#include "ExchUtils.h"
 #include "WideDataStorage.h"
 #include "OrderStorage.h"
 #include "IdTGenerator.h"
@@ -500,6 +501,15 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
         return;
     }
 
+    // A GTD order's ExpireTime (126) (#240), read before anything is stored, as the prices and dates are
+    DateTimeT expireTimeVal = 0;
+    if (const std::optional<std::string> refusal =
+            expiryRefusal(msg, toTif(tifVal), aux::currentDateTime(), &expireTimeVal))
+    {
+        refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION, "Order refused: " + *refusal);
+        return;
+    }
+
     // The ClOrdID is stored under the session's key, since FIX scopes it to the client that sent it (#71)
     std::string sourceStr = makeSourceString(sid);
     std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
@@ -528,6 +538,7 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
     order->orderQty_ = *qty;
     order->leavesQty_ = order->orderQty_;
     order->tif_ = toTif(tifVal);
+    order->expireTime_ = expireTimeVal;
     order->currency_ = toCurrency(ccyStr);
     order->capacity_ = AGENCY_CAPACITY;
     order->settlType_ = _2_SETTLTYPE;
@@ -729,6 +740,15 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
         tifVal = tif.getValue();
     }
 
+    // As for NewOrderSingle: a GTD swap's ExpireTime (126) (#240)
+    DateTimeT expireTimeVal = 0;
+    if (const std::optional<std::string> refusal =
+            expiryRefusal(msg, toTif(tifVal), aux::currentDateTime(), &expireTimeVal))
+    {
+        refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION, "Order refused: " + *refusal);
+        return;
+    }
+
     // Build OrderEntry — same pattern as NewOrderSingle, with the ClOrdID under the session's key (#71)
     std::string sourceStr = makeSourceString(sid);
     std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
@@ -758,6 +778,7 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
     order->orderQty_ = *qty;
     order->leavesQty_ = order->orderQty_;
     order->tif_ = toTif(tifVal);
+    order->expireTime_ = expireTimeVal;
     order->currency_ = toCurrency(ccyStr);
     order->capacity_ = AGENCY_CAPACITY;
     order->settlType_ = _2_SETTLTYPE;
@@ -937,6 +958,37 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
         replacement->orderQty_ = *qty;
     }
 
+    // A GTD replacement expires at its ExpireTime (126), the original's or a new one ahead of it, and only a GTD order
+    // has one (#240), as for replace_order. The time in force is the request's, if it gives one.
+    TimeInForce tifAfter = replacement->tif_;
+    {
+        FIX::TimeInForce requested;
+        if (msg.isSet(requested))
+        {
+            msg.get(requested);
+            tifAfter = toTif(requested.getValue());
+        }
+    }
+    DateTimeT expireTimeVal = replacement->expireTime_;
+    std::optional<std::string> expiryProblem;
+    if ((GTD_TIF == tifAfter) && !msg.isSetField(FIX::FIELD::ExpireTime))
+    {
+        if (GTD_TIF != replacement->tif_)
+        {
+            expiryProblem = "a GTD order needs ExpireTime (126)"; // the original had none to keep
+        }
+    }
+    else
+    {
+        expiryProblem = expiryRefusal(msg, tifAfter, aux::currentDateTime(), &expireTimeVal);
+    }
+    if (expiryProblem)
+    {
+        refuse("Replace refused: " + *expiryProblem);
+        return;
+    }
+    replacement->expireTime_ = (GTD_TIF == tifAfter) ? expireTimeVal : 0;
+
     replacement->orderId_ = IdT();
     replacement->origClOrderId_ = replacement->clOrderId_;
     const std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
@@ -1085,6 +1137,11 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
 
     report.set(FIX::Symbol(order.instrument_.get().symbol_));
     report.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    // A GTD order's expiry (#240)
+    if ((GTD_TIF == order.tif_) && (0 != order.expireTime_))
+    {
+        report.set(FIX::ExpireTime(toUtcTimeStamp(order.expireTime_), 3));
+    }
 
     // Extra fields follow the report's class, as in the JSON serializer; reports are full copies since #56
     if (auto *trade = dynamic_cast<const TradeExecEntry *>(exec))
@@ -1512,6 +1569,50 @@ std::optional<DateTimeT> FixGateway::fromLocalMktDate(std::string_view text)
     }
     const auto sinceEpoch = std::chrono::sys_days(day).time_since_epoch();
     return static_cast<DateTimeT>(std::chrono::duration_cast<std::chrono::milliseconds>(sinceEpoch).count());
+}
+
+std::optional<std::string> FixGateway::expiryRefusal(const FIX::FieldMap &msg, TimeInForce tif, DateTimeT now,
+                                                     DateTimeT *expireTime)
+{
+    assert(nullptr != expireTime);
+    if (!msg.isSetField(FIX::FIELD::ExpireTime))
+    {
+        if (GTD_TIF != tif)
+        {
+            return std::nullopt;
+        }
+        return std::string(msg.isSetField(FIX::FIELD::ExpireDate)
+                               ? "a GTD order needs ExpireTime (126); the server doesn't read ExpireDate (432)"
+                               : "a GTD order needs ExpireTime (126)");
+    }
+    if (GTD_TIF != tif)
+    {
+        return std::string("ExpireTime (126) is only for a GTD order");
+    }
+    DateTimeT when = 0;
+    try
+    {
+        const FIX::UtcTimeStamp value = FIX::UtcTimeStampConvertor::convert(msg.getField(FIX::FIELD::ExpireTime));
+        const time_t seconds = value.getTimeT();
+        when = (0 <= seconds)
+                   ? (static_cast<DateTimeT>(seconds) * 1000 + static_cast<DateTimeT>(value.getMillisecond()))
+                   : 0;
+    }
+    catch (const FIX::FieldConvertError &)
+    {
+        return std::string("ExpireTime (126) must be a UTCTimestamp, YYYYMMDD-HH:MM:SS");
+    }
+    if (when <= now)
+    {
+        return std::string("ExpireTime (126) has passed");
+    }
+    *expireTime = when;
+    return std::nullopt;
+}
+
+FIX::UtcTimeStamp FixGateway::toUtcTimeStamp(DateTimeT when)
+{
+    return FIX::UtcTimeStamp(static_cast<time_t>(when / 1000), static_cast<int>(when % 1000));
 }
 
 std::string FixGateway::toLocalMktDate(DateTimeT date)
