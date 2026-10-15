@@ -11,18 +11,29 @@ RUN npm run build
 
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-# A template: the image's entrypoint renders it into conf.d, filling in the container's own DNS resolver (#158)
+# A template: the image's entrypoint renders it into conf.d, filling in the container's own DNS resolver (#158) and
+# OMS_HSTS (#226). OMS_HSTS is set, empty, because the entrypoint fills in only variables that are set, and nginx refuses
+# the one it would leave.
 COPY docker/nginx.conf /etc/nginx/templates/default.conf.template
-ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
-# Not root (#158): nginx keeps its pid in /tmp, and the user nginx owns what nginx and its entrypoint write
-RUN sed -i -e '/^user /d' -e 's,^pid .*,pid /tmp/nginx.pid;,' /etc/nginx/nginx.conf \
+ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 \
+    OMS_HSTS=""
+# Run by the entrypoint before nginx: without a certificate and key it can read, the container stops, saying how to make
+# them (#226)
+COPY --chmod=755 docker/nginx-tls-check.sh /docker-entrypoint.d/05-oms-tls-check.sh
+# Not root (#158): nginx keeps its pid in /tmp, and the user nginx owns what nginx and its entrypoint write. nginx is
+# also in group 0 (#226), so it can read a key mounted with mode 0640: under rootless podman or Docker, the host user's
+# own group is group 0 in the container.
+RUN addgroup nginx root \
+    && sed -i -e '/^user /d' -e 's,^pid .*,pid /tmp/nginx.pid;,' /etc/nginx/nginx.conf \
     && rm -f /etc/nginx/conf.d/default.conf \
     && chown -R nginx:nginx /var/cache/nginx /etc/nginx/conf.d
 # nginx, the base image's own user, whom the frontend image check names (hadolint's DL3066)
 # hadolint ignore=DL3066
 USER nginx
 EXPOSE 3000
-# Healthy once nginx serves the UI (#158). docker-compose.yml repeats this, because podman's OCI images don't keep it.
+# Healthy once nginx serves the UI (#158), over TLS (#226): plain HTTP gets a redirect, which curl -f counts as a pass.
+# -k, since the certificate needn't name 127.0.0.1. docker-compose.yml repeats this, because podman's OCI images don't
+# keep it.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
-    CMD ["curl", "-fs", "-o", "/dev/null", "--max-time", "2", "http://127.0.0.1:3000/"]
+    CMD ["curl", "-fsk", "-o", "/dev/null", "--max-time", "2", "https://127.0.0.1:3000/"]
 CMD ["nginx", "-g", "daemon off;"]

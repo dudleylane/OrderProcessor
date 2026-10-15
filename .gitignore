@@ -47,10 +47,11 @@ CLAUDE.md
 node_modules/
 dist/
 
-# Docker environment secrets
+# Docker environment secrets, and the stack's TLS certificate and key (#226)
 docker/.env
 # The FIX credentials a deployment mounts (#147)
 docker/fix-credentials
+docker/certs/
 build-*/
 
 # Python bytecode, should a script import a module without sys.dont_write_bytecode

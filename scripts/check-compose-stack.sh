@@ -9,9 +9,11 @@
 # podman-compose under a project name of its own, with an override file that publishes
 # no host port (this machine runs PostgreSQL on 5432, and development servers use 3000
 # and 8080) and gives oms-db .env.example's settings, with an access token made for the
-# run and an Origin list, so it neither reads nor writes a docker/.env. On this branch it
-# also mounts a FIX credentials file made for the run, as docker/README.md's quick start
-# makes one (#147), in place of a docker/fix-credentials it never reads or writes. Then:
+# run and an Origin list, so it neither reads nor writes a docker/.env. It mounts a
+# throwaway certificate where docker/certs would be, so it doesn't read that either
+# (#226). On this branch it also mounts a FIX credentials file made for the run, as
+# docker/README.md's quick start makes one (#147), in place of a docker/fix-credentials
+# it never reads or writes. Then:
 #   0. Before it builds anything: compose refuses .env.example as it is, which sets no
 #      access token, and docker-compose.yml publishes only the frontend's port (#146)
 #      and, on this branch, the FIX acceptor's 5001.
@@ -22,15 +24,15 @@
 #      relabels it for good, and a relabelled copy would hide a mount without :z (#201).
 #   2. Postgres created every table docker/init-db/*.sql creates.
 #   3. oms-server seeded its new volume before it started (#161).
-#   4. Through nginx, inside the frontend's container: GET / is the app, and /ws answers
-#      a WebSocket upgrade that offers the token with the server's 101 and its
-#      subprotocol, one without the token with 401, and one from a page off the Origin
-#      list with 403 (#146).
-#   5. A client on the stack's network sends a new order to the frontend's /ws, offering
-#      the token as the app does, and gets an execution report with status NEW: a
-#      browser's order's path, through nginx, to a seeded engine. Then the order reaches
-#      Postgres, as NEW, and so does the seeded reference data the server mirrored at
-#      startup (#151).
+#   4. Through nginx, inside the frontend's container, over https with the certificate
+#      verified (#226): GET / is the app, and /ws answers a WebSocket upgrade that offers
+#      the token with the server's 101 and its subprotocol, one without the token with
+#      401, and one from a page off the Origin list with 403 (#146).
+#   5. A client on the stack's network sends a new order to the frontend's /ws, over wss
+#      with the certificate verified, offering the token as the app does, and gets an
+#      execution report with status NEW: a browser's order's path, through nginx, to a
+#      seeded engine. Then the order reaches Postgres, as NEW, and so does the seeded
+#      reference data the server mirrored at startup (#151).
 #   6. Stopping the stack ends every container with exit code 0, and the server's log
 #      has no errors.
 # The containers, pod, network, volumes and images it makes are removed when it exits,
@@ -39,9 +41,9 @@
 # CI runs this when what it covers changes, and weekly (.github/workflows/compose.yml).
 # Run it the same way before changing anything compose runs:
 #   scripts/check-compose-stack.sh
-# It needs podman, podman-compose and network access (quay.io, docker.io, dnf mirrors,
-# github.com and the npm registry), and takes about five minutes, because both images
-# are built from scratch.
+# It needs podman, podman-compose, openssl and network access (quay.io, docker.io, dnf
+# mirrors, github.com and the npm registry), and takes about five minutes, because both
+# images are built from scratch.
 #
 # Environment:
 #   CHECK_NAME     the compose project's name, which names everything it makes
@@ -58,7 +60,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAME="${CHECK_NAME:-orderprocessor-check-$$}"
 START_TIMEOUT="${START_TIMEOUT:-300}"
 SERVICES=(oms-db oms-server oms-frontend) # in their depends_on order
-FRONTEND_PORT=3000                        # the port docker/nginx.conf listens on
+FRONTEND_PORT=3000                        # the port docker/nginx.conf listens on, TLS only (#226)
+CERTS=/etc/nginx/certs                    # where docker/nginx.conf reads its certificate and key
 # What docker-compose.yml may publish on the host, as "service published:container" (#146)
 PUBLISHED=("oms-frontend 3000:3000" "oms-server 5001:5001")
 
@@ -78,6 +81,7 @@ esac
 [[ "$START_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || usage_error "START_TIMEOUT '$START_TIMEOUT' isn't a positive number"
 command -v podman >/dev/null 2>&1 || usage_error "podman is not installed"
 command -v podman-compose >/dev/null 2>&1 || usage_error "podman-compose is not installed"
+command -v openssl >/dev/null 2>&1 || usage_error "openssl is not installed"
 WORK="$(mktemp -d)"
 
 step() {
@@ -151,12 +155,21 @@ DB_NAME="$(setting POSTGRES_DB)"
 grep -q '^OMS_WS_TOKEN=' "$WORK/env" || fail "docker/.env.example has no OMS_WS_TOKEN line"
 grep -q '^OMS_ALLOWED_ORIGINS=' "$WORK/env" || fail "docker/.env.example has no OMS_ALLOWED_ORIGINS line"
 TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-ORIGIN="http://localhost:$FRONTEND_PORT"
+ORIGIN="https://localhost:$FRONTEND_PORT"
+# This run's certificate (#226), named for each way the checks reach nginx: 127.0.0.1 inside its container, and
+# oms-frontend on the stack's network. Its key is mode 0640, as docker/README.md's Quick Start makes it.
+mkdir "$WORK/certs"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost,DNS:oms-frontend,IP:127.0.0.1" \
+    -keyout "$WORK/certs/tls.key" -out "$WORK/certs/tls.crt" 2>/dev/null || fail "openssl couldn't make a certificate"
+chmod 0640 "$WORK/certs/tls.key"
+chmod 0644 "$WORK/certs/tls.crt"
 sed -i -e "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$TOKEN/" -e "s|^OMS_ALLOWED_ORIGINS=.*|OMS_ALLOWED_ORIGINS=$ORIGIN|" "$WORK/env"
 # Resets only the ports PUBLISHED names, which the step below checks are all there are: podman-compose 1.5.0 fails on a
 # !reset of a key the file doesn't have
 cat > "$WORK/override.yml" <<EOF
-# check-compose-stack.sh's changes to docker/docker-compose.yml: no host ports, and .env.example for oms-db
+# check-compose-stack.sh's changes to docker/docker-compose.yml: no host ports, .env.example for oms-db, and this run's
+# certificate for nginx
 services:
   oms-db:
     env_file: !override
@@ -168,6 +181,8 @@ services:
       - $WORK/fix-credentials:/etc/orderprocessor/fix-credentials:ro,z
   oms-frontend:
     ports: !reset []
+    volumes: !override
+      - $WORK/certs:$CERTS:ro,z
 EOF
 # The FIX credentials compose's server needs (#147), as docker/README.md's quick start makes them: a counterparty
 # trading a seeded account, with a PBKDF2 hash. Only the hash is in the file, so it may be readable by others.
@@ -239,6 +254,11 @@ done
 db="$(container oms-db)"
 server="$(container oms-server)"
 frontend="$(container oms-frontend)"
+# docker-compose.yml's copy of the frontend's health check asks over https too (#226): plain HTTP gets a redirect, which
+# curl -f counts as a pass, so it would pass with TLS broken
+check="$(podman inspect --format '{{json .Config.Healthcheck.Test}}' "$frontend")"
+[[ "$check" == *"https://127.0.0.1:$FRONTEND_PORT/"* ]] \
+    || fail "oms-frontend's health check doesn't ask over https://127.0.0.1:$FRONTEND_PORT/: $check"
 
 step "the schema"
 mapfile -t want < <(sed -n 's/^CREATE TABLE \([a-z_]*\).*/\1/p' docker/init-db/*.sql | sort -u)
@@ -277,17 +297,18 @@ while :; do
 done
 echo "oms-server listens on ${ports[*]%/tcp}"
 
-step "through nginx"
-page="$(podman exec "$frontend" curl -s --max-time 5 -w '\n%{http_code}' "http://127.0.0.1:$FRONTEND_PORT/")" || true
+step "through nginx, over https"
+page="$(podman exec "$frontend" curl -s --max-time 5 --cacert "$CERTS/tls.crt" -w '\n%{http_code}' \
+    "https://127.0.0.1:$FRONTEND_PORT/")" || true
 [[ "${page##*$'\n'}" == 200 ]] || fail "GET / answered '${page##*$'\n'}', not 200"
 grep -q '<div id="root"></div>' <<< "$page" || fail "GET / isn't the app's index.html: it has no <div id=\"root\">"
 echo "GET / is the app's index.html"
 # Prints the answer's head to a WebSocket upgrade on /ws with the headers given. An upgraded connection stays open, so
 # curl ends at --max-time; the head is what counts.
 upgrade() {
-    podman exec "$frontend" curl -s -i -N --max-time 3 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
-        -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$@" \
-        "http://127.0.0.1:$FRONTEND_PORT/ws" | tr -d '\r' | sed '/^$/q' || true
+    podman exec "$frontend" curl -s -i -N --max-time 3 --cacert "$CERTS/tls.crt" -H 'Connection: Upgrade' \
+        -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$@" \
+        "https://127.0.0.1:$FRONTEND_PORT/ws" | tr -d '\r' | sed '/^$/q' || true
 }
 OFFER="Sec-WebSocket-Protocol: oms-v1, oms-token.$TOKEN"
 answer="$(upgrade -H "$OFFER" -H "Origin: $ORIGIN")"
@@ -326,8 +347,10 @@ ws.onmessage = (event) => {
         process.exit(0);
     }
 };'
-report="$(podman run --rm --network "$network" "$node_image" node -e "$client" \
-    "ws://oms-frontend:$FRONTEND_PORT/ws" "$TOKEN" 2>&1)" || fail "the order got no execution report: $report"
+# Over wss, trusting this run's certificate and nothing else it would not trust anyway (#226)
+report="$(podman run --rm --network "$network" -v "$WORK/certs:/certs:ro,z" -e NODE_EXTRA_CA_CERTS=/certs/tls.crt \
+    "$node_image" node -e "$client" "wss://oms-frontend:$FRONTEND_PORT/ws" "$TOKEN" 2>&1)" \
+    || fail "the order got no execution report: $report"
 [[ "$report" == "execution_report NEW" ]] || fail "the order got '$report', not an execution report with status NEW"
 echo "$report"
 
