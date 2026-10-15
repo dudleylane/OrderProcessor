@@ -164,6 +164,35 @@ void execute(pqxx::work &txn, const DeleteOrderWrite &w)
              pqxx::params{ static_cast<int64_t>(w.orderId), static_cast<int64_t>(w.orderDate) });
 }
 
+/// The row a request writes, or deletes (#231): an order's row is its (order_id, order_date), the table's key
+std::string rowOf(const PGWriteRequest &request)
+{
+    struct Row
+    {
+        std::string operator()(const InstrumentWrite &w) const
+        {
+            return "instrument " + w.symbol;
+        }
+        std::string operator()(const AccountWrite &w) const
+        {
+            return "account " + w.account;
+        }
+        std::string operator()(const ClearingWrite &w) const
+        {
+            return "clearing " + w.firm;
+        }
+        std::string operator()(const OrderWrite &w) const
+        {
+            return "order " + std::to_string(w.orderId) + ' ' + std::to_string(w.orderDate);
+        }
+        std::string operator()(const DeleteOrderWrite &w) const
+        {
+            return "order " + std::to_string(w.orderId) + ' ' + std::to_string(w.orderDate);
+        }
+    };
+    return std::visit(Row{}, request);
+}
+
 /// Writes requests [first, last) in one transaction
 void writeAll(pqxx::connection &conn, std::vector<PGWriteRequest>::const_iterator first,
               std::vector<PGWriteRequest>::const_iterator last)
@@ -210,12 +239,41 @@ PGWriteBehind::~PGWriteBehind()
 
 void PGWriteBehind::enqueue(PGWriteRequest &&req)
 {
+    std::string row = rowOf(req);
+    bool replaced = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        queue_.push_back(std::move(req));
+        const auto queued = rows_.find(row);
+        if (rows_.end() != queued)
+        {
+            queue_[queued->second - front_].request = std::move(req);
+            replaced = true;
+        }
+        else
+        {
+            rows_.emplace(row, front_ + queue_.size());
+            queue_.push_back(Queued{ std::move(row), std::move(req) });
+        }
     }
     totalEnqueued_.fetch_add(1, std::memory_order_relaxed);
+    if (replaced)
+    {
+        totalCoalesced_.fetch_add(1, std::memory_order_relaxed);
+        return; // the writer already has that row to write
+    }
     wake_.notify_one();
+}
+
+std::vector<std::string> PGWriteBehind::queuedRows() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<std::string> rows;
+    rows.reserve(queue_.size());
+    for (const Queued &queued : queue_)
+    {
+        rows.push_back(queued.row);
+    }
+    return rows;
 }
 
 void PGWriteBehind::shutdown()
@@ -253,7 +311,9 @@ void PGWriteBehind::run()
         if (stopping_)
         {
             const u64 dropped = batch.size() + queue_.size();
+            front_ += queue_.size();
             queue_.clear();
+            rows_.clear();
             batch.clear();
             totalDropped_.fetch_add(dropped, std::memory_order_relaxed);
             log->error("PGWriteBehind: " + std::to_string(dropped) +
@@ -296,9 +356,15 @@ void PGWriteBehind::run()
             {
                 break; // stopping, and everything is written
             }
+            // Taken rows leave rows_: a later request for one is queued again, and written after this batch
             const std::size_t n = std::min(queue_.size(), BATCH_SIZE);
-            batch.assign(std::make_move_iterator(queue_.begin()), std::make_move_iterator(queue_.begin() + n));
-            queue_.erase(queue_.begin(), queue_.begin() + n);
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                rows_.erase(queue_.front().row);
+                batch.push_back(std::move(queue_.front().request));
+                queue_.pop_front();
+                ++front_;
+            }
         }
 
         if (!conn)
@@ -377,7 +443,8 @@ void PGWriteBehind::run()
     }
 
     log->note("PGWriteBehind: stopped, " + std::to_string(totalWritten_.load()) + " written, " +
-              std::to_string(totalErrors_.load()) + " refused, " + std::to_string(totalDropped_.load()) + " dropped");
+              std::to_string(totalErrors_.load()) + " refused, " + std::to_string(totalDropped_.load()) + " dropped, " +
+              std::to_string(totalCoalesced_.load()) + " replaced by a later write of their row while queued");
 }
 
 } // namespace COP::PG
