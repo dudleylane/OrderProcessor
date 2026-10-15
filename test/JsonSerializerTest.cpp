@@ -79,6 +79,23 @@ TEST_F(JsonSerializerTest, CancelReportCarriesNoTradeCancelFields)
     EXPECT_FALSE(msg["data"].contains("execRefId"));
 }
 
+TEST_F(JsonSerializerTest, TriggeredReportIsAPlainReport)
+{
+    // A stop's release (#236): a plain ExecutionEntry, the order NEW, and no trade fields
+    std::unique_ptr<ExecutionEntry> report(new ExecutionEntry());
+    report->type_ = TRIGGERED_EXECTYPE;
+    report->orderStatus_ = NEW_ORDSTATUS;
+    report->orderId_ = IdT(7, 1);
+    report->execId_ = IdT(8, 1);
+    report->market_ = INTERNAL_EXECUTION;
+
+    nlohmann::json msg = nlohmann::json::parse(App::serializeExecReport(report.get()));
+    EXPECT_EQ("TRIGGERED", msg["data"].value("type", ""));
+    EXPECT_EQ("NEW", msg["data"].value("orderStatus", ""));
+    EXPECT_EQ(7u, msg["data"].value("orderId", 0u));
+    EXPECT_FALSE(msg["data"].contains("lastQty"));
+}
+
 TEST_F(JsonSerializerTest, RejectedReplaceReportCarriesItsReason)
 {
     // A rejected replace is a RejectExecEntry with type REPLACE. Read as a ReplaceExecEntry, its reason's bytes became

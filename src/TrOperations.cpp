@@ -713,6 +713,37 @@ void ReleaseStopTrOperation::rollback(const Context &cnxt)
     cnxt.orderBook_->addStop(*order_);
 }
 
+ReportReleaseTrOperation::ReportReleaseTrOperation(const ReleaseStopTrOperation &release, const OrderEntry &order)
+    : Operation(REPORT_RELEASE_TROPERATION, order.orderId_), release_(release)
+{
+}
+
+void ReportReleaseTrOperation::execute(const Context &cnxt)
+{
+    if (!release_.released())
+    {
+        return;
+    }
+    assert(nullptr != cnxt.orderStorage_);
+    const OrderEntry *order = cnxt.orderStorage_->locateByOrderId(getObjectId());
+    assert(nullptr != order);
+
+    ExecutionEntry execReport;
+    execReport.orderId_ = getObjectId();
+    execReport.type_ = TRIGGERED_EXECTYPE;
+    execReport.transactTime_ = aux::currentDateTime();
+    execReport.execId_ = IdT(); /// will be assigned when saved into the storage
+    {
+        // NEW: a held stop has no fills, and the release's own trades are applied after this transaction's operations
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
+        execReport.orderStatus_ = order->status_;
+    }
+    execReport.market_ = INTERNAL_EXECUTION;
+    processEvent_GenerateExecution(cnxt, getObjectId(), execReport);
+}
+
+void ReportReleaseTrOperation::rollback(const Context &) {}
+
 void MatchOrderTrOperation::execute(const Context &cnxt)
 {
     assert(nullptr != order_);

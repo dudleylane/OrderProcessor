@@ -91,7 +91,10 @@ enum ExecType
     STATUS_EXECTYPE,
     RESTATED_EXECTYPE,
     PEND_CANCEL_EXECTYPE,
-    PEND_REPLACE_EXECTYPE
+    PEND_REPLACE_EXECTYPE,
+    // A stop order's stop was reached and the order released (#223, #236): FIX's ExecType L (Triggered or Activated by
+    // System). Last, so the values above keep theirs.
+    TRIGGERED_EXECTYPE
 };
 
 enum Currency
