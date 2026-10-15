@@ -33,11 +33,15 @@ void ReleaseStopDeferedEvent::execute(DeferedEventFunctor * /*func*/, const Cont
     // stop, so it waits for the mark, as any such transaction must, and draws a higher id (#83).
     order_->waitUntilBookingEnqueued();
     // The release decides when its transaction runs, after every earlier one on the order and its instrument (#223)
-    std::unique_ptr<Operation> release(new ReleaseStopTrOperation(order_));
+    std::unique_ptr<ReleaseStopTrOperation> releaseOp(new ReleaseStopTrOperation(order_));
+    const ReleaseStopTrOperation &decided = *releaseOp;
+    std::unique_ptr<Operation> release(releaseOp.release());
     scope->addOperation(release);
     // After the release, not first as Processor::persistOrder() puts it: the release marks the order released when it
-    // executes, and the codec reads the order when this executes. The release publishes nothing itself, so nothing
-    // reaches a client before the order is durable (#28).
+    // executes, and the codec reads the order when this executes. The release publishes nothing itself.
     std::unique_ptr<Operation> persist(new PersistOrderTrOperation(*order_));
     scope->addOperation(persist);
+    // Then the TRIGGERED report, once the order is durable (#28, #236)
+    std::unique_ptr<Operation> report(new ReportReleaseTrOperation(decided, *order_));
+    scope->addOperation(report);
 }

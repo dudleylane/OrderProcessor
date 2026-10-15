@@ -108,7 +108,8 @@ enum OperationType
     CHANGE_ORDER_STATE_TROPERATION,        // hands a state change to the processor once it is the order's turn
     ADD_STOPBOOK_TROPERATION,              // holds a stop order in its instrument's stop book (#223)
     REMOVE_STOPBOOK_TROPERATION,           // takes a held stop order out of the stop book (#223)
-    RELEASE_STOP_TROPERATION               // releases a held stop order a trade reached, and matches it (#223)
+    RELEASE_STOP_TROPERATION,              // releases a held stop order a trade reached, and matches it (#223)
+    REPORT_RELEASE_TROPERATION             // reports a stop's release, if it released the order (#236)
 };
 
 struct Context

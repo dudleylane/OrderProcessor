@@ -58,6 +58,8 @@ export enum ExecType {
   RESTATED = 'RESTATED',
   PEND_CANCEL = 'PEND_CANCEL',
   PEND_REPLACE = 'PEND_REPLACE',
+  /** A stop order's stop was reached and the order released: FIX's ExecType L (#236) */
+  TRIGGERED = 'TRIGGERED',
 }
 
 export enum Currency {

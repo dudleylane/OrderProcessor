@@ -132,6 +132,8 @@ TEST_F(FixEnumTest, ExecTypeConversion)
     EXPECT_EQ(FIX::ExecType_EXPIRED, FixGateway::fromExecType(EXPIRED_EXECTYPE));
     EXPECT_EQ(FIX::ExecType_PENDING_CANCEL, FixGateway::fromExecType(PEND_CANCEL_EXECTYPE));
     EXPECT_EQ(FIX::ExecType_TRADE_CORRECT, FixGateway::fromExecType(CORRECT_EXECTYPE));
+    // A stop's release (#236): not NEW (0), which an execution type the gateway didn't know became
+    EXPECT_EQ(FIX::ExecType_TRIGGERED_OR_ACTIVATED_BY_SYSTEM, FixGateway::fromExecType(TRIGGERED_EXECTYPE));
 }
 
 // =============================================================================
@@ -1334,6 +1336,28 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_AcknowledgementCarriesNoRejectFiel
     EXPECT_EQ(FIX::OrdStatus_NEW, ordStatus.getValue());
     EXPECT_FALSE(report.isSetField(FIX::FIELD::OrdRejReason));
     EXPECT_FALSE(report.isSetField(FIX::FIELD::Text));
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_AStopsReleaseIsTriggeredAndNew)
+{
+    // A held stop released by a trade at its stop price (#223) is reported with FIX 4.4's ExecType L, triggered or
+    // activated by system, and the order NEW (#236). The gateway sent ExecType NEW (0) for an execution type it
+    // didn't know
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    auto release = makeReport<ExecutionEntry>(TRIGGERED_EXECTYPE, NEW_ORDSTATUS);
+
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&release, *order);
+
+    FIX::ExecType execType;
+    report.get(execType);
+    EXPECT_EQ(FIX::ExecType_TRIGGERED_OR_ACTIVATED_BY_SYSTEM, execType.getValue());
+    FIX::OrdStatus ordStatus;
+    report.get(ordStatus);
+    EXPECT_EQ(FIX::OrdStatus_NEW, ordStatus.getValue());
+    EXPECT_TRUE(report.isSetField(FIX::FIELD::ClOrdID));
+    EXPECT_FALSE(report.isSetField(FIX::FIELD::OrdRejReason));
+    EXPECT_FALSE(report.isSetField(FIX::FIELD::LastQty));
 }
 
 TEST_F(FixGatewayInboundTest, ExecutionReport_CancelAckNamesTheCancelRequest)

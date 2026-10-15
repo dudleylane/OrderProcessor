@@ -62,6 +62,7 @@ struct OrderWrite
     double stopPx;
     double avgPx;
     double dayAvgPx;
+    bool stopTriggered = false; // a stop order's stop was reached, and the order released (#236)
 
     unsigned int minQty;
     unsigned int orderQty;

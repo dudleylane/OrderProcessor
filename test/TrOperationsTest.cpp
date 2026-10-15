@@ -856,6 +856,48 @@ TEST_F(MatchOrderOperationTest, ReleaseStop_DoesNothingToAStopNoLongerHeldOrWork
     }
 }
 
+TEST_F(MatchOrderOperationTest, ReportRelease_ReportsTheReleaseToTheOrdersSource)
+{
+    // The TRIGGERED report, FIX's ExecType L (#236): the order is NEW, and its trades are reported after
+    orderBook_->add(*sellOrder_);
+    holdAsStopLimit(buyOrder_, orderBook_.get());
+    RecordingOutQueues out;
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, &out, matcher_.get(), IdTGenerator::instance(),
+                &deferedContainer_);
+    ReleaseStopTrOperation release(buyOrder_);
+    ReportReleaseTrOperation report(release, *buyOrder_);
+    EXPECT_EQ(buyOrder_->orderId_, report.getObjectId());
+
+    release.execute(ctx);
+    report.execute(ctx);
+
+    ASSERT_EQ(1u, out.reports_.size());
+    const ExecutionEntry *exec = out.reports_[0].first.exec_;
+    ASSERT_NE(nullptr, exec);
+    EXPECT_EQ(TRIGGERED_EXECTYPE, exec->type_);
+    EXPECT_EQ(NEW_ORDSTATUS, exec->orderStatus_);
+    EXPECT_EQ(buyOrder_->orderId_, exec->orderId_);
+    EXPECT_EQ(std::string(buyOrder_->source_.get()), out.reports_[0].second);
+}
+
+TEST_F(MatchOrderOperationTest, ReportRelease_ReportsNothingForAReleaseThatReleasedNothing)
+{
+    // The release found the stop canceled first, as a cancel enqueued before it would leave it
+    orderBook_->add(*sellOrder_);
+    holdAsStopLimit(buyOrder_, orderBook_.get());
+    buyOrder_->status_ = CANCELED_ORDSTATUS;
+    RecordingOutQueues out;
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, &out, matcher_.get(), IdTGenerator::instance(),
+                &deferedContainer_);
+    ReleaseStopTrOperation release(buyOrder_);
+    ReportReleaseTrOperation report(release, *buyOrder_);
+
+    release.execute(ctx);
+    report.execute(ctx);
+
+    EXPECT_TRUE(out.reports_.empty());
+}
+
 // =============================================================================
 // A transaction's persists, written as one (#163)
 // =============================================================================
