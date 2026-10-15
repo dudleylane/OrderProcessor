@@ -16,6 +16,7 @@
 
 #include "TestFixtures.h"
 #include "TestAux.h"
+#include "MockStorage.h"
 #include "WideDataStorage.h"
 
 using namespace COP;
@@ -234,6 +235,30 @@ TEST_F(WideDataStorageTest, AddAndGetRawData)
 // =============================================================================
 // Executions Tests
 // =============================================================================
+
+TEST_F(WideDataStorageTest, AnOrdersStringsAreStoredButNotSaved)
+{
+    // An order's ClOrdID, source and destination go into its record, not records of their own (#192): addUnsaved()
+    // stores them, under the ids add() would give, and writes nothing, while add() still writes
+    testing::StrictMock<test::MockDataSaver> saver;
+    storage()->bindStorage(&saver);
+    const SourceIdT clOrdId = storage()->addUnsaved(new RawDataEntry(STRING_RAWDATATYPE, "CL-1", 4));
+    const SourceIdT source = storage()->addUnsaved(new StringT("desk-a"));
+
+    RawDataEntry raw;
+    ASSERT_TRUE(storage()->find(clOrdId, &raw));
+    EXPECT_EQ("CL-1", std::string(raw.data_, raw.length_));
+    EXPECT_EQ(clOrdId, raw.id_);
+    StringT str;
+    ASSERT_TRUE(storage()->find(source, &str));
+    EXPECT_EQ("desk-a", str);
+    // find() answers for an id it doesn't have, where get() throws
+    EXPECT_FALSE(storage()->find(SourceIdT(999999, 0), &str));
+    EXPECT_FALSE(storage()->find(SourceIdT(999999, 1), &raw));
+
+    EXPECT_CALL(saver, save(testing::_, testing::An<const StringT &>())).Times(1);
+    storage()->add(new StringT("reference data"));
+}
 
 TEST_F(WideDataStorageTest, AddAndGetExecutions)
 {

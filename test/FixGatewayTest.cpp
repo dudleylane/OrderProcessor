@@ -910,6 +910,60 @@ TEST_F(FixGatewayInboundTest, NewOrderSingle_LimitPriceNoOrderTradesAt_IsNotQueu
     }
 }
 
+/// A saver that outlives the test's teardown, where the singletons go
+class FixGatewayStringsTest : public FixGatewayInboundTest
+{
+protected:
+    testing::NiceMock<test::MockDataSaver> saver_;
+};
+
+TEST_F(FixGatewayStringsTest, NewOrdersAndAReplaceWriteNoStringRecords)
+{
+    // Each FIX order's ClOrdID, source and destination, and a replace's new ClOrdID, were written to storage as they came
+    // in, a commit each; the order's record carries them now (#192)
+    ASSERT_NE(nullptr, saveOrderOf(TEST_SID, "ORD-STR"));
+    EXPECT_CALL(saver_, save(testing::An<const RawDataEntry &>())).Times(0);
+    EXPECT_CALL(saver_, save(testing::_, testing::An<const StringT &>())).Times(0);
+    WideDataStorage::instance()->bindStorage(&saver_);
+
+    std::vector<OrderEntry *> orders;
+    OrderEntry *replacement = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .Times(2)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                orders.push_back(evt.order_);
+            }));
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                replacement = evt.replacementOrder_;
+            }));
+
+    gateway_->onMessage(makeNewOrderSingle("STR-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100), TEST_SID);
+    gateway_->onMessage(makeFxSwap("STR-SWAP"), TEST_SID);
+    FIX44::OrderCancelReplaceRequest replaceMsg;
+    replaceMsg.set(FIX::OrigClOrdID("ORD-STR"));
+    replaceMsg.set(FIX::ClOrdID("STR-REPLACE"));
+    replaceMsg.set(FIX::Side(FIX::Side_BUY));
+    replaceMsg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    replaceMsg.set(FIX::OrdType(FIX::OrdType_LIMIT));
+    replaceMsg.set(FIX::Symbol("aaa"));
+    replaceMsg.set(FIX::Price(15.50));
+    replaceMsg.set(FIX::OrderQty(200));
+    gateway_->onMessage(replaceMsg, TEST_SID);
+
+    EXPECT_EQ(2u, orders.size());
+    EXPECT_NE(nullptr, replacement);
+    for (OrderEntry *order : orders)
+    {
+        delete order;
+    }
+    delete replacement;
+}
+
 TEST_F(FixGatewayInboundTest, NewOrderSingle_StopOrdersCarryTheirStopPx)
 {
     // A stop order's StopPx (99) is its stop price (#223), for a STOP and for a STOP_LIMIT, whose Price (44) is its limit
@@ -1201,17 +1255,22 @@ TEST_F(FixGatewayInboundTest, FromApp_UnsupportedTypeStillReachesQuickFix)
 TEST_F(FixGatewayInboundTest, FromApp_HandlerExceptionIsContained)
 {
     // The bug this covers: an exception from a handler left fromApp() into QuickFIX's session thread,
-    // which handles only FIX::Exception, and terminated the server (#36). Storage failing on the order's
-    // first write stands in for any such exception. No session is logged on here, so the reject cannot be
-    // sent; that is logged, not thrown.
-    testing::NiceMock<MockDataSaver> saver;
-    ON_CALL(saver, save(testing::An<const RawDataEntry &>()))
-        .WillByDefault(testing::Throw(std::runtime_error("injected storage failure")));
-    WideDataStorage::instance()->bindStorage(&saver);
-    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    // which handles only FIX::Exception, and terminated the server (#36). The incoming queue failing stands in for any
+    // such exception; storage failing on the order's first write did, which an order no longer makes (#192). No session
+    // is logged on here, so the reject cannot be sent; that is logged, not thrown.
+    OrderEntry *refused = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                refused = evt.order_; // the queue never took it, so the test frees it
+                throw std::runtime_error("injected queue failure");
+            }));
 
     const FIX::Message generic(makeNewOrderSingle("ORD-EXC", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100));
     EXPECT_NO_THROW(gateway_->fromApp(generic, TEST_SID));
+    ASSERT_NE(nullptr, refused) << "the handler never reached the queue";
+    delete refused;
 }
 
 // =============================================================================

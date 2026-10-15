@@ -504,7 +504,8 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
     std::string sourceStr = makeSourceString(sid);
     std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
     auto *clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
-    SourceIdT clOrdSrcId = WideDataStorage::instance()->add(clOrdRaw);
+    // The order's strings go in its own record (#192): adding each wrote a record, a commit of its own
+    SourceIdT clOrdSrcId = WideDataStorage::instance()->addUnsaved(clOrdRaw);
 
     SourceIdT emptyId;
 
@@ -514,10 +515,10 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
     SourceIdT execListId = WideDataStorage::instance()->add(execList);
 
     auto *srcStrPtr = new StringT(sourceStr);
-    SourceIdT srcId = WideDataStorage::instance()->add(srcStrPtr);
+    SourceIdT srcId = WideDataStorage::instance()->addUnsaved(srcStrPtr);
 
     auto *destStr = new StringT("Internal");
-    SourceIdT destId = WideDataStorage::instance()->add(destStr);
+    SourceIdT destId = WideDataStorage::instance()->addUnsaved(destStr);
 
     auto *order = new OrderEntry(srcId, destId, clOrdSrcId, emptyId, instrId, acctId, clearingId, execListId);
     order->side_ = toSide(side.getValue());
@@ -732,7 +733,8 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
     std::string sourceStr = makeSourceString(sid);
     std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
     auto *clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
-    SourceIdT clOrdSrcId = WideDataStorage::instance()->add(clOrdRaw);
+    // The order's strings go in its own record (#192): adding each wrote a record, a commit of its own
+    SourceIdT clOrdSrcId = WideDataStorage::instance()->addUnsaved(clOrdRaw);
 
     SourceIdT emptyId;
     SourceIdT clearingId = defaultClearingId_;
@@ -741,10 +743,10 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
     SourceIdT execListId = WideDataStorage::instance()->add(execList);
 
     auto *srcStrPtr = new StringT(sourceStr);
-    SourceIdT srcId = WideDataStorage::instance()->add(srcStrPtr);
+    SourceIdT srcId = WideDataStorage::instance()->addUnsaved(srcStrPtr);
 
     auto *destStr = new StringT("Internal");
-    SourceIdT destId = WideDataStorage::instance()->add(destStr);
+    SourceIdT destId = WideDataStorage::instance()->addUnsaved(destStr);
 
     auto *order = new OrderEntry(srcId, destId, clOrdSrcId, emptyId, instrId, acctId, clearingId, execListId);
     order->side_ = toSide(side.getValue());
@@ -918,7 +920,8 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
     replacement->orderId_ = IdT();
     replacement->origClOrderId_ = replacement->clOrderId_;
     const std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
-    replacement->clOrderId_ = WideDataStorage::instance()->add(
+    // In the replacement's own record, as WsSession's replace does (#192)
+    replacement->clOrderId_ = WideDataStorage::instance()->addUnsaved(
         new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size())));
 
     FIX::TimeInForce tif;

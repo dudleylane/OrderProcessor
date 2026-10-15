@@ -49,6 +49,14 @@ public:
     SourceIdT add(InstrumentEntry *val);
     SourceIdT add(StringT *val);
     SourceIdT add(RawDataEntry *val);
+    /// An order's own ClOrdID, source and destination, stored as add() stores them but not written to the storage it is
+    /// bound to: the order's record carries them (#192). Each was written at once, in a commit of its own, on the
+    /// thread that took the order.
+    SourceIdT addUnsaved(StringT *val);
+    SourceIdT addUnsaved(RawDataEntry *val);
+    /// The entry with this id, when the storage has it: get() throws for one it doesn't (#192)
+    bool find(const SourceIdT &id, StringT *val) const override;
+    bool find(const SourceIdT &id, RawDataEntry *val) const override;
     SourceIdT add(AccountEntry *val);
     SourceIdT add(ClearingEntry *val);
     SourceIdT add(ExecutionsT *val);
