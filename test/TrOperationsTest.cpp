@@ -1038,6 +1038,47 @@ TEST_F(MatchOrderOperationTest, ATradesPersistsAreCommittedTogetherBeforeItPubli
     EXPECT_TRUE(ranAfterCommit) << "the report went out before the orders were durable";
 }
 
+TEST_F(MatchOrderOperationTest, ATradesLastTradeIsCommittedWithItsOrders)
+{
+    // The instrument's last trade joins the orders' write (#237): its price is durable with the fills it comes from
+    ::testing::StrictMock<MockOrderSaver> saver;
+    OrderStorage::instance()->attach(&saver);
+    const IdT tradeId(4242, 1792000000);
+    {
+        ::testing::InSequence order;
+        EXPECT_CALL(saver, beginGroup());
+        EXPECT_CALL(saver, saveLastTrade(instrumentId_, 100.0, tradeId)).WillOnce(::testing::Return(0u));
+        EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_))).WillOnce(::testing::Return(3u));
+        EXPECT_CALL(saver, save(::testing::Ref(*sellOrder_))).WillOnce(::testing::Return(5u));
+        EXPECT_CALL(saver, commitGroup());
+    }
+    TransactionScope scope;
+    buildTrade(&scope, *buyOrder_, *sellOrder_, nullptr);
+    std::unique_ptr<Operation> lastTrade = std::make_unique<PersistLastTradeTrOperation>(instrumentId_, 100.0, tradeId);
+    scope.addOperationFirst(lastTrade);
+
+    EXPECT_TRUE(scope.executeTransaction(createContext()));
+}
+
+TEST_F(MatchOrderOperationTest, PersistLastTrade_RelatesToTheInstrumentsLastTradeAndRollbackErasesItsVersion)
+{
+    // Its object is the instrument's last trade, so the transactions that write it run one after another, as #148's
+    // pruning needs, and not the instrument, whose bookings, cancels and releases a trade's fills don't wait for
+    MockOrderSaver saver;
+    OrderStorage::instance()->attach(&saver);
+    Context ctx = createContext();
+    const IdT tradeId(4242, 1792000000);
+    PersistLastTradeTrOperation op(instrumentId_, 101.25, tradeId);
+    EXPECT_EQ(IdT(instrumentId_.id_, 2), op.getObjectId());
+    EXPECT_NE(instrumentId_, op.getObjectId());
+    EXPECT_FALSE(op.getRelatedId().isValid());
+
+    EXPECT_CALL(saver, saveLastTrade(instrumentId_, 101.25, tradeId)).WillOnce(::testing::Return(7u));
+    op.execute(ctx);
+    EXPECT_CALL(saver, eraseLastTrade(instrumentId_, 7u)).Times(1);
+    op.rollback(ctx);
+}
+
 TEST_F(MatchOrderOperationTest, ATradeWhosePersistsFailToCommitPublishesNothing)
 {
     ::testing::NiceMock<MockOrderSaver> saver;
