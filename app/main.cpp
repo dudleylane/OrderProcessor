@@ -287,6 +287,13 @@ int main(int argc, char *argv[])
                 aux::ExchLogger::instance()->error("Restored order " + std::to_string(order->orderId_.id_) +
                                                    " lost its fills and could not be matched: " + ex.what());
             }
+            // A trade here can release a held stop, and the release matches it in a transaction of its own, on a
+            // transaction worker (#223). The next order is matched on this thread, outside the manager, so it waits for
+            // every transaction to finish: matched at once, the two could trade with the same resting order.
+            while (0 != transactMgr->pendingTransactions())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
         }
         aux::ExchLogger::instance()->warn(std::to_string(ordersToMatch.size()) +
                                           " restored order(s) had lost their fills; matched " +

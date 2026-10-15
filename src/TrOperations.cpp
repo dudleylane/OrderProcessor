@@ -619,6 +619,100 @@ MatchOrderTrOperation::MatchOrderTrOperation(OrderEntry *order)
 
 MatchOrderTrOperation::~MatchOrderTrOperation() {}
 
+AddToStopBookTrOperation::AddToStopBookTrOperation(const OrderEntry &order, const IdT &instrId)
+    : Operation(ADD_STOPBOOK_TROPERATION, order.orderId_, instrId), order_(order)
+{
+}
+
+void AddToStopBookTrOperation::execute(const Context &cnxt)
+{
+    assert(nullptr != cnxt.orderBook_);
+    cnxt.orderBook_->addStop(order_);
+}
+
+void AddToStopBookTrOperation::rollback(const Context &cnxt)
+{
+    assert(nullptr != cnxt.orderBook_);
+    cnxt.orderBook_->removeStop(order_);
+}
+
+RemoveFromStopBookTrOperation::RemoveFromStopBookTrOperation(const OrderEntry &order, const IdT &instrId)
+    : Operation(REMOVE_STOPBOOK_TROPERATION, order.orderId_, instrId), order_(order)
+{
+}
+
+void RemoveFromStopBookTrOperation::execute(const Context &cnxt)
+{
+    assert(nullptr != cnxt.orderBook_);
+    cnxt.orderBook_->removeStop(order_);
+}
+
+void RemoveFromStopBookTrOperation::rollback(const Context &cnxt)
+{
+    assert(nullptr != cnxt.orderBook_);
+    cnxt.orderBook_->addStop(order_);
+}
+
+// Related to the instrument, as a match is: the release matches the order against the instrument's book (#209)
+ReleaseStopTrOperation::ReleaseStopTrOperation(OrderEntry *order)
+    : Operation(RELEASE_STOP_TROPERATION, order->orderId_, order->instrument_.getId()), order_(order)
+{
+}
+
+void ReleaseStopTrOperation::execute(const Context &cnxt)
+{
+    assert(nullptr != order_);
+    assert(nullptr != cnxt.orderBook_);
+    released_ = false;
+    booked_ = false;
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(order_->entryMutex_, true);
+        const bool working =
+            ((NEW_ORDSTATUS == order_->status_) || (PARTFILL_ORDSTATUS == order_->status_)) && (0 < order_->leavesQty_);
+        if (!order_->heldStop() || !working)
+        {
+            return; // cancelled, replaced or finished first, or released by an earlier trade's release
+        }
+        // ReleaseStopDeferedEvent enqueued the release only once the stop's booking was enqueued (#83)
+        assert(!order_->bookingPending_.load());
+        cnxt.orderBook_->removeStop(*order_);
+        order_->stopTriggered_ = true;
+        released_ = true;
+    }
+    if (nullptr != cnxt.deferedEvents_)
+    {
+        eventCountBefore_ = cnxt.deferedEvents_->deferedEventCount();
+    }
+    cnxt.orderMatch_->match(order_, cnxt);
+    // A STOPLIMIT rests with what is left, as a limit order does: booked even if its fills will take all of it, which
+    // remove it again (processFill). A STOP is matched once, as a market order is.
+    if (OrderParams::Book::PRICE == order_->book())
+    {
+        cnxt.orderBook_->add(*order_);
+        booked_ = true;
+    }
+}
+
+void ReleaseStopTrOperation::rollback(const Context &cnxt)
+{
+    if (!released_)
+    {
+        return;
+    }
+    assert(nullptr != cnxt.orderBook_);
+    if (booked_)
+    {
+        cnxt.orderBook_->remove(*order_);
+    }
+    if (nullptr != cnxt.deferedEvents_)
+    {
+        cnxt.deferedEvents_->removeDeferedEventsFrom(eventCountBefore_);
+    }
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(order_->entryMutex_, true);
+    order_->stopTriggered_ = false;
+    cnxt.orderBook_->addStop(*order_);
+}
+
 void MatchOrderTrOperation::execute(const Context &cnxt)
 {
     assert(nullptr != order_);

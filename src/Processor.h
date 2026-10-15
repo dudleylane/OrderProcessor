@@ -86,6 +86,7 @@ public:
     virtual void addDeferedEvent(DeferedEventBase *evnt);
     virtual size_t deferedEventCount() const;
     virtual void removeDeferedEventsFrom(size_t startIndex);
+    virtual bool claimStopRelease(const IdT &order);
 
     const ACID::TransactionScopePool *scopePool() const noexcept
     {

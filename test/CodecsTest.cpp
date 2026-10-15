@@ -373,7 +373,9 @@ TEST_F(OrderCodecTest, BothEncodersWriteTheSameRecord)
     val.price_ = 22.22;
     val.status_ = NEW_ORDSTATUS;
     val.side_ = SELL_SIDE;
-    val.ordType_ = LIMIT_ORDERTYPE;
+    val.ordType_ = STOPLIMIT_ORDERTYPE;
+    val.stopPx_ = 22.0;
+    val.stopTriggered_ = true; // set, so that an encoder that drops it writes a different record (#223)
     val.orderQty_ = 100;
     val.leavesQty_ = 100;
     val.stateMachinePersistance_.stateZone1Id_ = 2;

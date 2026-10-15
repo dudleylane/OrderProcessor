@@ -347,11 +347,19 @@ COP (Concurrent Order Processor)
 │   remove(order)    → Remove from price level                    │
 │   find(criteria)   → Locate matching orders                     │
 │   restore(order)   → Recovery from persistence                  │
+│ Stop book (#223), per instrument:                               │
+│   addStop/removeStop → hold a stop order, or stop holding it    │
+│   holdsStops         → whether the instrument holds any         │
+│   triggeredStops(px) → the held stops a trade at px reaches     │
 ├─────────────────────────────────────────────────────────────────┤
 │ Data Structure:                                                  │
 │   std::multimap<Price, OrderEntry*, PriceComparator>            │
 │   • Buy side: Greater-than comparator (best price first)        │
 │   • Sell side: Less-than comparator (best price first)          │
+│   • Stop book: buy stops by stop price, lowest first, sell      │
+│     stops highest first, each price in arrival order, under     │
+│     stopLock_; a count lets a trade skip the lock when the      │
+│     instrument holds none                                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -387,7 +395,8 @@ COP (Concurrent Order Processor)
 │  │   ┌─────────────────────────────────────────────┐         │  │
 │  │   │ 2. Check price compatibility                │         │  │
 │  │   │    BUY price >= SELL price (for limit)      │         │  │
-│  │   │    Market orders: always match              │         │  │
+│  │   │    Market orders, released STOPs: always    │         │  │
+│  │   │    match                                    │         │  │
 │  │   └─────────────────────────────────────────────┘         │  │
 │  │         │                                                  │  │
 │  │         ▼                                                  │  │
@@ -404,7 +413,13 @@ COP (Concurrent Order Processor)
 │  │         │                                                  │  │
 │  │         ▼                                                  │  │
 │  │   ┌─────────────────────────────────────────────┐         │  │
-│  │   │ 5. Continue matching if qty remaining       │         │  │
+│  │   │ 5. For each held stop the trade reaches,    │         │  │
+│  │   │    queue a ReleaseStopDeferedEvent (#223)   │         │  │
+│  │   └─────────────────────────────────────────────┘         │  │
+│  │         │                                                  │  │
+│  │         ▼                                                  │  │
+│  │   ┌─────────────────────────────────────────────┐         │  │
+│  │   │ 6. Continue matching if qty remaining       │         │  │
 │  │   └─────────────────────────────────────────────┘         │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                  │
@@ -650,6 +665,8 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │                  RemoveFromOrderBook, leavesQty = 0, REPLACE report      │
 │   • Replacement: onReplace: RCVD_NEW → NEW (PARTFILL with fills),        │
 │                  MatchOrder, AddToOrderBook, REPLACE report              │
+│   • A held stop's replacement is held at its own stop; a released        │
+│     one's stays released if it is still a stop order (#223)              │
 │   • A refusal → RefuseReplaceTrOperation (OrderRejectEvent)              │
 └──────────────────────────────────────────────────────────────────────────┘
          │
@@ -663,6 +680,67 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │     both naming the original in origOrderId; or the refusal              │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+### 4.5 Stop Order Flow (#223)
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ STOP or STOPLIMIT received (stopPx above 0, or refused)                  │
+│   • processReceive: NEW, then AddToStopBookTrOperation instead of        │
+│     MatchOrder and AddToOrderBook: held in its instrument's stop book,   │
+│     in neither side of the price book                                    │
+└──────────────────────────────────────────────────────────────────────────┘
+       │  ... later, any trade in the instrument ...
+       ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ OrderMatcher.match()                               (transaction worker)  │
+│   • Queue the trade's ExecutionDeferedEvent                              │
+│   • holdsStops(instrument)? Then triggeredStops(lastPx): buy stops at or │
+│     below it, lowest first; sell stops at or above it, highest first;    │
+│     each price in arrival order. Queue a ReleaseStopDeferedEvent for     │
+│     each, once per chain of events (claimStopRelease)                    │
+│   • Queued after the trade: a match rolled back, or a fill that throws,  │
+│     drops them with it                                                   │
+└──────────────────────────────────────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ ReleaseStopDeferedEvent.execute()                         (same worker)  │
+│   • Wait until the stop's booking is enqueued (#83)                      │
+│   • Transaction: ReleaseStopTrOperation, then PersistOrderTrOperation,   │
+│     related to the stop and its instrument                               │
+└──────────────────────────────────────────────────────────────────────────┘
+       │  runs after every earlier transaction on the stop or the
+       │  instrument: after the whole sweep whose trade reached it, since
+       │  a sweep continues within its own transaction's deferred events
+       ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ ReleaseStopTrOperation.execute()                   (transaction worker)  │
+│   • Still held and working? If not (canceled, replaced, suspended, or    │
+│     released by an earlier trade's release), do nothing                  │
+│   • removeStop; stopTriggered_ = true; match: a STOP as a market order   │
+│     (no contra: canceled), a STOPLIMIT as a limit order, then booked     │
+│     with what is left                                                    │
+│   • Rollback: undo the booking, drop its deferred events, clear the      │
+│     flag, hold the stop again                                            │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Records:** `stopTriggered_` is persisted (`OrderCodec` format version 2). Version 0 and 1 records decode as held.
+- **Restore:** a working held stop goes back into the stop book. A released STOP is left to match, as an open market order is, and a released STOPLIMIT is booked as a limit order. `app/main.cpp` waits for the transaction manager to hold nothing (`pendingTransactions()`) between the restored orders it matches, since a release matches on a transaction worker.
+- **Not yet:** the release sends no report (#236), no trade price survives a restart (#237), and `replace_order` can't move `stopPx` (#238).
+
+**Associated Test Cases:**
+
+| Test File | Test Case | Description |
+|-----------|-----------|-------------|
+| `ProcessorTest.cpp` | `ProcessorTest.*Stop*` | Hold, release, order of release, cascade, cancel/replace/suspend, races with the release, restarts |
+| `OrderBookTest.cpp` | `OrderBookTest.*Stop*` | The stop book's order and bounds |
+| `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReleaseStop_*` | The release's execute, rollback and no-ops |
+| `IntegrationTest.cpp` | `IntegrationTest.Stops*` | A sweep that reaches a stop, on the real manager with four transaction workers |
+| `StorageRecordDispatcherTest.cpp` | `OnlyAWorkingOrderIsBookedOrLeftToMatch`, golden records | Restore placement, format version 2 |
 
 ---
 
@@ -1252,9 +1330,9 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 
 **Orders a crash left without their fills (#207).** An order's booking and its fills are separate transactions, each persisted when it commits. The booking writes the order as accepted, and its match only starts the fills, which a later transaction writes. A crash between the two leaves the order on disk as booked, though it had traded. `finishLoad()` restores orders in id order, which is the order they arrived in. It books an open order only if it wouldn't have traded with one that arrived before it: one the matcher's own search finds among the orders booked so far (`OrderMatcher::findContra()`), or one already left out (`OrderMatcher::tradesWith()`). An open market order is always left out, since its own transaction trades or cancels it. `ordersToMatch()` lists those left out, in that order, and the server matches each (`Processor::matchRestored()`) before it takes orders, with the operations its booking ran. So each trades as it did, with the earlier order and at its price, and its fills persist and report like any others. If they don't reach disk either, the next restart finds the same orders and matches them again.
 
-**Record format (#149).** A record's first 4 bytes hold its type in the low 16 bits and, in the high 16, the version of the layout its codec wrote (`FORMAT_VERSION`). The order codec's is 1 since #172, which added an order's execution instructions; every other codec's is 0, so their records' first bytes are the type alone, as they always were. The dispatcher refuses a version newer than the codec reads, by name. Each decoder checks that the record holds every field it reads and that it has read the whole record, so a record cut short or with bytes after its last field is refused rather than misread. `static_assert`s pin the size of every field stored as its in-memory bytes.
+**Record format (#149).** A record's first 4 bytes hold its type in the low 16 bits and, in the high 16, the version of the layout its codec wrote (`FORMAT_VERSION`). The order codec's is 2: version 1 added an order's execution instructions (#172) and 2 whether a stop order's stop was reached (#223). Every other codec's is 0, so their records' first bytes are the type alone, as they always were. The dispatcher refuses a version newer than the codec reads, by name. Each decoder checks that the record holds every field it reads and that it has read the whole record, so a record cut short or with bytes after its last field is refused rather than misread. `static_assert`s pin the size of every field stored as its in-memory bytes.
 
-`StorageRecordDispatcherTest` holds golden records: the bytes each record type was written as before #149, and an order's in format version 1 (#172). The build must write the newest of each and read every field back from all of them, and every prefix of them, and every one with a byte more, must be refused. To change a layout on purpose, bump that codec's `FORMAT_VERSION`, keep decoding the old version, and add golden records for the new one; running the suite with `GOLDEN_PRINT=1` prints what the build writes.
+`StorageRecordDispatcherTest` holds golden records: the bytes each record type was written as before #149, and an order's in every format version since. The build must write the newest of each and read every field back from all of them, and every prefix of them, and every one with a byte more, must be refused. To change a layout on purpose, bump that codec's `FORMAT_VERSION`, keep decoding the old version, and add golden records for the new one; running the suite with `GOLDEN_PRINT=1` prints what the build writes.
 
 **Associated Test Cases:**
 
@@ -1330,7 +1408,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Concurrency** | `TaskManager.h/cpp`, `AllocateCache.h/cpp` |
 | **Low-Latency** | `TransactionScopePool.h`, `CacheAlignedAtomic.h`, `CpuAffinity.h`, `HugePages.h`, `NumaAllocator.h` |
 | **Subscriptions** | `SubscrManager.h/cpp`, `SubscriptionLayerImpl.h/cpp`, `SubscriptionLayerDef.h`, `SubscriptionDef.h`, `FilterImpl.h/cpp`, `EntryFilter.h/cpp`, `OrderFilter.h/cpp` |
-| **Events** | `EventManager.h/cpp`, `DeferedEvents.h`, `CancelOrderDeferedEvent.cpp`, `ExecutionDeferedEvent.cpp`, `MatchOrderDeferedEvent.cpp`, `ReplaceRequestDeferedEvent.cpp`, `StateChangeDeferedEvent.cpp` |
+| **Events** | `EventManager.h/cpp`, `DeferedEvents.h`, `CancelOrderDeferedEvent.cpp`, `ExecutionDeferedEvent.cpp`, `MatchOrderDeferedEvent.cpp`, `ReleaseStopDeferedEvent.cpp`, `ReplaceRequestDeferedEvent.cpp`, `StateChangeDeferedEvent.cpp` |
 | **PostgreSQL** | `PGWriteBehind.h/cpp`, `PGRequestBuilder.h/cpp`, `PGWriteRequest.h`, `PGEnumStrings.h` (optional) |
 | **Utilities** | `Logger.h/cpp`, `IdTGenerator.h/cpp`, `ExchUtils.h/cpp`, `Singleton.h`, `WideDataStorage.h/cpp`, `WideDataLazyRef.h` |
 
@@ -1367,6 +1445,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | 1.1 | January 2026 | Generated | Added ultra low-latency optimizations: TransactionScopePool, CacheAlignedAtomic, CpuAffinity, HugePages |
 | 1.2 | February 2026 | Generated | Updated file counts (101 src, 45 test, 7 bench), added LMDBStorage, NumaAllocator, PG write-behind, expanded namespace listing, updated test/benchmark appendix |
 | 1.3 | October 2026 | dudleylane, Claude | Corrected against the code (#171): state and transition counts (now checked by DocConsistencyTest), the new order flow, execution records, the test sections and the appendix's file lists |
+| 1.4 | October 2026 | dudleylane, Claude | Stop orders (#223): the stop book, the matcher's trigger, the stop order flow |
 
 ---
 

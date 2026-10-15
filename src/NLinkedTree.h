@@ -110,6 +110,8 @@ public:
     void clear();
     /// appends the value of every key still in the tree; values are not owned by the tree
     void values(std::vector<V> *vals) const;
+    /// how many keys are in the tree: added and not yet removed
+    size_t size() const;
 
     void dumpTree();
 

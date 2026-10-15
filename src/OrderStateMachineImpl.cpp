@@ -53,6 +53,51 @@ private:
     OrderEntry *orderData_;
 };
 
+/// The operations that put a working order where it rests (#223): a held stop goes into its instrument's stop book, and
+/// anything else is matched, then booked unless it trades as a market order, which is matched once
+void addBooking(OrderEntry *order, Scope *transaction)
+{
+    assert(nullptr != order);
+    assert(nullptr != transaction);
+    if (order->heldStop())
+    {
+        std::unique_ptr<Operation> hold(new AddToStopBookTrOperation(*order, order->instrument_.getId()));
+        transaction->addOperation(hold);
+        return;
+    }
+    std::unique_ptr<Operation> match(new MatchOrderTrOperation(order));
+    transaction->addOperation(match);
+    if (OrderParams::Book::PRICE == order->book())
+    {
+        std::unique_ptr<Operation> book(new AddToOrderBookTrOperation(*order, order->instrument_.getId()));
+        transaction->addOperation(book);
+    }
+}
+
+/// The operation that takes a working order out of where it rests: the stop book, the price book, or nowhere, for an
+/// order matched as a market order (#223)
+void addUnbooking(const OrderEntry &order, Scope *transaction)
+{
+    assert(nullptr != transaction);
+    switch (order.book())
+    {
+    case OrderParams::Book::STOP:
+    {
+        std::unique_ptr<Operation> op(new RemoveFromStopBookTrOperation(order, order.instrument_.getId()));
+        transaction->addOperation(op);
+        break;
+    }
+    case OrderParams::Book::PRICE:
+    {
+        std::unique_ptr<Operation> op(new RemoveFromOrderBookTrOperation(order, order.instrument_.getId()));
+        transaction->addOperation(op);
+        break;
+    }
+    case OrderParams::Book::NONE:
+        break;
+    }
+}
+
 /// Whether a reject was handed the copy of the order that its event's receive had already stored. A receive can refuse
 /// an order after storing it, as it does a market order with nothing to trade with. The machine then passes the stored
 /// copy, not the incoming order, and the reject keeps it rather than storing the order a second time (#68).
@@ -147,7 +192,7 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
     *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
     (*orderData)->status_ = NEW_ORDSTATUS;
 
-    if (MARKET_ORDERTYPE == (*orderData)->ordType_)
+    if ((*orderData)->marketLike())
     {
         assert(nullptr != evnt.orderBook_);
         if (!evnt.orderBook_->find(FindAnyOpositeOrder((*orderData))).isValid())
@@ -156,15 +201,9 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
         }
     }
 
-    std::unique_ptr<Operation> op(new MatchOrderTrOperation((*orderData)));
-    evnt.transaction_->addOperation(op);
-
-    /// market order should be matched once - no need to put it into OrderBook
-    if (MARKET_ORDERTYPE != (*orderData)->ordType_)
-    {
-        std::unique_ptr<Operation> op2(new AddToOrderBookTrOperation(*(*orderData), (*orderData)->instrument_.getId()));
-        evnt.transaction_->addOperation(op2);
-    }
+    // A stop order is held until a trade reaches its stop (#223); a market order is matched once, and anything else is
+    // matched, then booked with what is left
+    addBooking(*orderData, evnt.transaction_);
 }
 
 void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onRplOrderReceived const &evnt)
@@ -257,7 +296,7 @@ void OrdStateImpl::processAccept(OrderEntry **orderData, OrdState::onExternalOrd
         throw std::runtime_error(reason.c_str());
     }
 
-    if (MARKET_ORDERTYPE == (*orderData)->ordType_)
+    if ((*orderData)->marketLike())
     {
         assert(nullptr != evnt.orderBook_);
         if (!evnt.orderBook_->find(FindAnyOpositeOrder(*orderData)).isValid())
@@ -270,15 +309,7 @@ void OrdStateImpl::processAccept(OrderEntry **orderData, OrdState::onExternalOrd
     assert(nullptr != evnt.orderStorage_);
     *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
 
-    std::unique_ptr<Operation> op(new MatchOrderTrOperation(evnt.order_));
-    evnt.transaction_->addOperation(op);
-
-    /// market order should be matched once - no need to put it into OrderBook
-    if (MARKET_ORDERTYPE != (*orderData)->ordType_)
-    {
-        std::unique_ptr<Operation> op2(new AddToOrderBookTrOperation(*evnt.order_, (*orderData)->instrument_.getId()));
-        evnt.transaction_->addOperation(op2);
-    }
+    addBooking(evnt.order_, evnt.transaction_);
 }
 
 void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onExternalOrderRejected const &evnt)
@@ -321,15 +352,8 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onReplace cons
         throw std::runtime_error(reason.c_str());
     }
 
-    std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
-    evnt.transaction_->addOperation(op);
-
-    /// market order should be matched once - no need to put it into OrderBook
-    if (MARKET_ORDERTYPE != orderData->ordType_)
-    {
-        std::unique_ptr<Operation> addOp(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-        evnt.transaction_->addOperation(addOp);
-    }
+    // A held stop's replacement is held too, and a released one's is matched as its type trades (#223)
+    addBooking(orderData, evnt.transaction_);
 }
 
 void OrdStateImpl::processReject(OrderEntry *orderData, OrdState::onRplOrderRejected const &evnt)
@@ -411,8 +435,9 @@ void OrdStateImpl::processFill(OrderEntry *orderData, OrdState::onTradeExecution
     if (0 == orderData->leavesQty_)
     {
         // A market order is never booked (processReceive). Removing one threw, the state machine swallowed it, and the
-        // order never reached Filled: it stayed NEW with nothing left, and its trade went unreported (#211).
-        if (MARKET_ORDERTYPE != orderData->ordType_)
+        // order never reached Filled: it stayed NEW with nothing left, and its trade went unreported (#211). Nor is a
+        // STOP its stop released, which trades as one (#223).
+        if (OrderParams::Book::PRICE == orderData->book())
         {
             assert(nullptr != evnt.orderBook_);
             evnt.orderBook_->remove(*orderData);
@@ -448,15 +473,7 @@ void OrdStateImpl::processCorrected(OrderEntry *orderData, OrdState::onTradeCrct
     // if order was filled and gone to partiallyFill after correct - restore it in orderBook
     if ((0 == orderData->leavesQty_) && (0 < crct->leavesQty_))
     {
-        std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
-        evnt.transaction_->addOperation(op);
-
-        /// market order should be matched once - no need to put it into OrderBook
-        if (MARKET_ORDERTYPE != orderData->ordType_)
-        {
-            std::unique_ptr<Operation> op1(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-            evnt.transaction_->addOperation(op1);
-        }
+        addBooking(orderData, evnt.transaction_);
     }
     //update order according corrected trade
     orderData->leavesQty_ = crct->leavesQty_;
@@ -482,11 +499,7 @@ void OrdStateImpl::processRejectNew(OrderEntry *orderData, OrdState::onOrderReje
 {
     assert(nullptr != orderData);
 
-    if (MARKET_ORDERTYPE != orderData->ordType_)
-    {
-        std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-        evnt.transaction_->addOperation(op1);
-    }
+    addUnbooking(*orderData, evnt.transaction_);
 }
 
 bool OrdStateImpl::processNotExecuted(OrderEntry *, OrdState::onTradeExecution const &)
@@ -499,22 +512,18 @@ void OrdStateImpl::processExpire(OrderEntry *orderData, OrdState::onExpired cons
     // Pend_New->Expired: nothing to do
     assert(nullptr != orderData);
 
-    if ((MARKET_ORDERTYPE != orderData->ordType_) &&
-        ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_)))
+    if ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_))
     {
-        std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-        evnt.transaction_->addOperation(op1);
+        addUnbooking(*orderData, evnt.transaction_);
     }
 }
 
 void OrdStateImpl::processFinished(OrderEntry *orderData, OrdState::onFinished const &evnt)
 {
     assert(nullptr != orderData);
-    if ((MARKET_ORDERTYPE != orderData->ordType_) &&
-        ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_)))
+    if ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_))
     {
-        std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-        evnt.transaction_->addOperation(op1);
+        addUnbooking(*orderData, evnt.transaction_);
     }
 }
 
@@ -533,12 +542,9 @@ void OrdStateImpl::processRestored(OrderEntry *orderData, OrdState::onNewDay con
     assert(nullptr != orderData);
     if (0 < orderData->leavesQty_)
     {
-        std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
-        evnt.transaction_->addOperation(op);
-
-        assert(MARKET_ORDERTYPE != orderData->ordType_);
-        std::unique_ptr<Operation> op1(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-        evnt.transaction_->addOperation(op1);
+        // Only a resting order is done for the day, never one matched as a market order
+        assert(OrderParams::Book::NONE != orderData->book());
+        addBooking(orderData, evnt.transaction_);
     }
 }
 
@@ -546,11 +552,9 @@ void OrdStateImpl::processSuspended(OrderEntry *orderData, OrdState::onSuspended
 {
     assert(nullptr != orderData);
 
-    if ((MARKET_ORDERTYPE != orderData->ordType_) &&
-        ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_)))
+    if ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_))
     {
-        std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-        evnt.transaction_->addOperation(op1);
+        addUnbooking(*orderData, evnt.transaction_);
     }
 }
 
@@ -560,15 +564,7 @@ void OrdStateImpl::processContinued(OrderEntry *orderData, OrdState::onContinue 
 
     if (0 < orderData->leavesQty_)
     {
-        std::unique_ptr<Operation> op(new MatchOrderTrOperation(orderData));
-        evnt.transaction_->addOperation(op);
-
-        /// market order should be matched once - no need to put it into OrderBook
-        if (MARKET_ORDERTYPE != orderData->ordType_)
-        {
-            std::unique_ptr<Operation> op1(new AddToOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-            evnt.transaction_->addOperation(op1);
-        }
+        addBooking(orderData, evnt.transaction_);
     }
 }
 
@@ -577,11 +573,9 @@ void OrdStateImpl::processCanceled(OrderEntry *orderData, OrdState::onExecCancel
 {
     assert(nullptr != orderData);
 
-    if ((MARKET_ORDERTYPE != orderData->ordType_) &&
-        ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_)))
+    if ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_))
     {
-        std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-        evnt.transaction_->addOperation(op1);
+        addUnbooking(*orderData, evnt.transaction_);
     }
     // Nothing is left to fill. Set here rather than when the removal above runs, because the order stays in the book
     // until then: the matcher skips an order with no leaves, and a trade already matched against it is refused,
@@ -593,11 +587,9 @@ void OrdStateImpl::processCanceled(OrderEntry *orderData, OrdState::onInternalCa
 {
     assert(nullptr != orderData);
 
-    if ((MARKET_ORDERTYPE != orderData->ordType_) &&
-        ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_)))
+    if ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_))
     {
-        std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-        evnt.transaction_->addOperation(op1);
+        addUnbooking(*orderData, evnt.transaction_);
     }
 }
 
@@ -605,11 +597,9 @@ void OrdStateImpl::processReplaced(OrderEntry *orderData, OrdState::onExecReplac
 {
     assert(nullptr != orderData);
 
-    if ((MARKET_ORDERTYPE != orderData->ordType_) &&
-        ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_)))
+    if ((NEW_ORDSTATUS == orderData->status_) || (PARTFILL_ORDSTATUS == orderData->status_))
     {
-        std::unique_ptr<Operation> op1(new RemoveFromOrderBookTrOperation(*orderData, orderData->instrument_.getId()));
-        evnt.transaction_->addOperation(op1);
+        addUnbooking(*orderData, evnt.transaction_);
     }
     // Its quantity lives on in the replacement. Zero now, as for a cancel (#73): until the removal above runs, the
     // matcher skips an order with no leaves, and a trade matched against it earlier is refused (#74).

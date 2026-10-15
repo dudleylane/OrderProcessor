@@ -59,6 +59,13 @@ public:
         return IdT();
     }
     void restore(const OrderEntry &) override {}
+    void addStop(const OrderEntry &) override {}
+    void removeStop(const OrderEntry &) override {}
+    bool holdsStops(const SourceIdT &) const override
+    {
+        return false;
+    }
+    void triggeredStops(const SourceIdT &, PriceT, OrdersT *) const override {}
 };
 
 std::unique_ptr<OrderEntry> createCorrectOrder()

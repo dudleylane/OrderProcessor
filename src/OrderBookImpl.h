@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <vector>
 #include <oneapi/tbb/mutex.h>
@@ -60,6 +61,11 @@ public:
 
     virtual void restore(const OrderEntry &order);
 
+    virtual void addStop(const OrderEntry &order);
+    virtual void removeStop(const OrderEntry &order);
+    virtual bool holdsStops(const SourceIdT &instrument) const;
+    virtual void triggeredStops(const SourceIdT &instrument, PriceT lastPx, OrdersT *result) const;
+
     BookSnapshot getSnapshot(const SourceIdT &instrument, const Store::OrderDataStorage *storage) const;
 
 private:
@@ -72,6 +78,15 @@ private:
 
         mutable oneapi::tbb::mutex sellLock_;
         OrdersByPriceAscT sellOrder_;
+
+        /// Held stop orders, by stop price (#223): buy stops from the lowest, which a rising trade reaches first, and
+        /// sell stops from the highest. Orders at one stop price keep the order they arrived in.
+        mutable oneapi::tbb::mutex stopLock_;
+        OrdersByPriceAscT buyStops_;
+        OrdersByPriceDescT sellStops_;
+        /// How many stops are held, read without the lock: transactions on the instrument run one at a time, and the
+        /// lock comes in only when there is a stop to find
+        std::atomic<u32> stopCount_{ 0 };
     };
 
     typedef std::map<IdT, OrdersGroup *> OrderGroupsByInstrumentT;

@@ -12,7 +12,9 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
 #include <thread>
 #include <memory>
@@ -174,6 +176,30 @@ public:
     int transactionCount() const
     {
         return transactionCount_;
+    }
+
+    /// Runs the transactions kept, first kept first, at most count of them. With keepNested_, one a transaction adds
+    /// is kept behind the others, so they run as the manager runs transactions that share an object: each after the
+    /// ones enqueued before it are done, deferred events and all (#223).
+    void runKept(size_t count = SIZE_MAX)
+    {
+        for (; (0 < count) && !kept_.empty(); --count)
+        {
+            std::unique_ptr<Transaction> tr = std::move(kept_.front());
+            kept_.erase(kept_.begin());
+            ++running_;
+            try
+            {
+                proc_->process(tr->transactionId(), tr.get());
+            }
+            catch (...)
+            {
+                --running_;
+                throw;
+            }
+            --running_;
+            ++transactionCount_;
+        }
     }
 
     Processor *proc_;
@@ -1513,5 +1539,521 @@ TEST_F(ProcessorTest, ASuspendedOrderStaysOutOfTheBookAfterARestartAndIsBookedOn
     ASSERT_EQ(1u, book.bids.size());
     EXPECT_EQ(1u, book.bids[0].orderCount) << "the resumed order is booked twice";
     EXPECT_EQ(100u, book.bids[0].totalQty);
+    std::filesystem::remove_all(dir);
+}
+
+// =============================================================================
+// Stop orders (#223)
+// =============================================================================
+
+namespace
+{
+/// The fixture's storage and book, with a processor whose trades are recorded and whose transactions run as the manager
+/// runs them here, where each relates to the instrument: one after another, in the order they were enqueued. So a
+/// stop's release, which the transaction of the trade that reaches it enqueues, runs once that transaction is done,
+/// with every fill of its sweep.
+class StopEngine
+{
+public:
+    StopEngine(OrderBookImpl *book, IncomingQueues *inQueues, TestTransactionManager *transactions)
+        : inQueues_(inQueues), transactions_(transactions)
+    {
+        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), book, inQueues, &reports_, inQueues,
+                               transactions);
+        processor_.init(params);
+        transactions_->proc_ = &processor_;
+        transactions_->keepNested_ = true;
+    }
+    ~StopEngine()
+    {
+        transactions_->proc_ = nullptr;
+    }
+
+    /// Processes the order and every transaction that follows from it, and returns the stored order
+    OrderEntry *submit(std::unique_ptr<OrderEntry> order)
+    {
+        const RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        processor_.process();
+        transactions_->runKept();
+        OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(clOrdId);
+        EXPECT_NE(nullptr, stored);
+        return stored;
+    }
+
+    /// Processes the request and every transaction that follows from it
+    template <typename EventT> void request(const EventT &evnt)
+    {
+        inQueues_->push("test", evnt);
+        processor_.process();
+        transactions_->runKept();
+    }
+
+    TradeRecorder reports_;
+    Processor processor_;
+
+private:
+    IncomingQueues *inQueues_;
+    TestTransactionManager *transactions_;
+};
+
+/// The order, made a stop order of the type: released at stopPx, a STOP at the market and a STOPLIMIT at its price
+std::unique_ptr<OrderEntry> asStop(std::unique_ptr<OrderEntry> order, OrderType type, PriceT stopPx)
+{
+    order->ordType_ = type;
+    order->stopPx_ = stopPx;
+    return order;
+}
+
+/// The stops the instrument holds, in the order a trade reaching all of them would release them: the buy stops a trade
+/// at the highest price reaches, then the sell stops one at 0 reaches
+OrderBook::OrdersT heldStops(const OrderBook &book, const SourceIdT &instrument)
+{
+    OrderBook::OrdersT held;
+    book.triggeredStops(instrument, std::numeric_limits<PriceT>::max(), &held);
+    book.triggeredStops(instrument, 0.0, &held);
+    return held;
+}
+} // namespace
+
+TEST_F(ProcessorTest, AStopSellIsHeldUntilATradeReachesItsStopThenSellsAsAMarketOrder)
+{
+    // A stop sell protects a position: it sells only once the price falls to its stop. It sold as it arrived, at 0
+    // against every bid, as a market sell does (#223).
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *bid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 50), STOP_ORDERTYPE, 9.5));
+    ASSERT_NE(nullptr, stop);
+    EXPECT_EQ(NEW_ORDSTATUS, stop->status_);
+    EXPECT_FALSE(stop->stopTriggered_);
+    EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty()) << "the stop traded as it arrived";
+    EXPECT_EQ(OrderBook::OrdersT{ stop->orderId_ }, heldStops(*orderBook_, instrId1_));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, SELL_SIDE).isValid()) << "a held stop rests in the price book";
+
+    // A trade above the stop doesn't reach it
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 10));
+    EXPECT_FALSE(stop->stopTriggered_);
+    EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty());
+
+    // A sell takes the rest of the bid at 10, then trades at 9, which reaches the stop: it sells at the market
+    const OrderEntry *lowerBid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 9.0, 100));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 9.0, 100));
+    EXPECT_EQ(FILLED_ORDSTATUS, bid->status_);
+    EXPECT_TRUE(stop->stopTriggered_);
+    EXPECT_EQ(std::vector<std::string>{ "50@9" }, engine.reports_.tradesOf(stop->orderId_));
+    EXPECT_EQ(FILLED_ORDSTATUS, stop->status_);
+    EXPECT_EQ(40u, lowerBid->leavesQty_);
+    EXPECT_FALSE(orderBook_->holdsStops(instrId1_));
+}
+
+TEST_F(ProcessorTest, AStopReachedDuringASweepIsReleasedOnceTheSweepIsDone)
+{
+    // A buy sweeps three levels, and its first trade reaches a buy stop. The sweep arrived first and takes every level it
+    // can; the stop's release runs after it, finds nothing left to buy, and the stop is canceled, as a market order is.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 10));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 10));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 12.0, 10));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+    const OrderEntry *sweep = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 12.0, 30));
+
+    EXPECT_EQ((std::vector<std::string>{ "10@10", "10@11", "10@12" }), engine.reports_.tradesOf(sweep->orderId_));
+    EXPECT_EQ(FILLED_ORDSTATUS, sweep->status_);
+    EXPECT_TRUE(stop->stopTriggered_);
+    EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty())
+        << "the stop traded ahead of the sweep that reached it";
+    EXPECT_EQ(CANCELED_ORDSTATUS, stop->status_);
+    EXPECT_FALSE(orderBook_->holdsStops(instrId1_));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "a released STOP rests in the price book";
+}
+
+TEST_F(ProcessorTest, AStopLimitIsReleasedAsALimitOrderAndRestsWithWhatIsLeft)
+{
+    // It traded at its limit as it arrived, whatever its stop (#223)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 20));
+    const OrderEntry *ask = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 10.5, 50), STOPLIMIT_ORDERTYPE, 10.0));
+    EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty()) << "the stop limit traded at its limit as it arrived";
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "a held stop limit rests in the price book";
+
+    // A trade at 10 reaches the stop. Released, the order buys what is left at 10, and rests at its limit of 10.5.
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
+    EXPECT_TRUE(stop->stopTriggered_);
+    EXPECT_EQ(std::vector<std::string>{ "15@10" }, engine.reports_.tradesOf(stop->orderId_));
+    EXPECT_EQ(PARTFILL_ORDSTATUS, stop->status_);
+    EXPECT_EQ(35u, stop->leavesQty_);
+    EXPECT_EQ(stop->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
+    EXPECT_EQ(100u, ask->leavesQty_) << "the stop limit bought above its limit";
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
+}
+
+TEST_F(ProcessorTest, StopsAreReleasedLowestBuyStopFirstAndAtOneStopInTheOrderTheyArrived)
+{
+    // A trade at 10 reaches buy stops at 10 and at 9.5. A rising price reaches 9.5 first, so that stop is released
+    // first, and stops at one price go in the order they arrived. Only the first released finds something to buy.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 15));
+    OrderEntry *first =
+        engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 10.0, 10), STOPLIMIT_ORDERTYPE, 10.0));
+    OrderEntry *lower = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 10.0, 10), STOPLIMIT_ORDERTYPE, 9.5));
+    OrderEntry *second =
+        engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 10.0, 10), STOPLIMIT_ORDERTYPE, 10.0));
+    EXPECT_EQ((OrderBook::OrdersT{ lower->orderId_, first->orderId_, second->orderId_ }),
+              heldStops(*orderBook_, instrId1_));
+
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
+
+    EXPECT_TRUE(lower->stopTriggered_ && first->stopTriggered_ && second->stopTriggered_);
+    EXPECT_EQ(std::vector<std::string>{ "10@10" }, engine.reports_.tradesOf(lower->orderId_));
+    EXPECT_TRUE(engine.reports_.tradesOf(first->orderId_).empty());
+    EXPECT_TRUE(engine.reports_.tradesOf(second->orderId_).empty());
+    EXPECT_EQ(first->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE)) << "the stops at 10 were released out of order";
+}
+
+TEST_F(ProcessorTest, AReleasedStopsTradeReleasesTheStopsItReaches)
+{
+    // The trade at 10 releases the stop at 10 and not the one at 11. That stop buys at 11, which releases the other.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5));
+    const OrderEntry *ask = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 50));
+    OrderEntry *atTen = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+    OrderEntry *atEleven = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 0.0, 10), STOP_ORDERTYPE, 11.0));
+
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
+
+    EXPECT_EQ(std::vector<std::string>{ "10@11" }, engine.reports_.tradesOf(atTen->orderId_));
+    EXPECT_EQ(std::vector<std::string>{ "10@11" }, engine.reports_.tradesOf(atEleven->orderId_));
+    EXPECT_EQ(FILLED_ORDSTATUS, atTen->status_);
+    EXPECT_EQ(FILLED_ORDSTATUS, atEleven->status_);
+    EXPECT_EQ(30u, ask->leavesQty_);
+    EXPECT_FALSE(orderBook_->holdsStops(instrId1_));
+}
+
+TEST_F(ProcessorTest, ACanceledStopLeavesTheStopBookAndIsNotReleased)
+{
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+    engine.request(OrderCancelEvent(stop->orderId_));
+    EXPECT_EQ(CANCELED_ORDSTATUS, stop->status_);
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
+
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5));
+    EXPECT_FALSE(stop->stopTriggered_);
+    EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty());
+}
+
+TEST_F(ProcessorTest, ACancelEnqueuedBeforeAStopsReleaseWins)
+{
+    // A trade reaches the stop, and a cancel of the stop is enqueued before the trade's transaction enqueues the
+    // release. The release is decided when it runs, after the cancel, and finds the stop canceled. Decided as the trade
+    // was, it would have released an order that the cancel had already taken.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *bid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+
+    transMgr_->keep_ = true; // the sell's booking and the cancel are enqueued, in that order, before either runs
+    inQueues_->push("test", OrderEvent(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5).release()));
+    engine.processor_.process();
+    inQueues_->push("test", OrderCancelEvent(stop->orderId_));
+    engine.processor_.process();
+    transMgr_->keep_ = false;
+    ASSERT_EQ(2u, transMgr_->kept_.size());
+    transMgr_->runKept();
+
+    EXPECT_EQ(CANCELED_ORDSTATUS, stop->status_);
+    EXPECT_FALSE(stop->stopTriggered_);
+    EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty());
+    EXPECT_EQ(95u, bid->leavesQty_);
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
+}
+
+TEST_F(ProcessorTest, AStopSuspendedBeforeItsReleaseRunsIsReleasedByATradeOnceResumed)
+{
+    // The release finds the stop suspended and does nothing, and the suspend takes it out of the stop book. Resumed, it
+    // is held again, and the next trade that reaches it releases it.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *bid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+
+    transMgr_->keep_ = true; // the sell's booking and the suspend are enqueued, in that order, before either runs
+    inQueues_->push("test", OrderEvent(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5).release()));
+    engine.processor_.process();
+    inQueues_->push("test", OrderChangeStateEvent(stop->orderId_, OrderChangeStateEvent::SUSPEND));
+    engine.processor_.process();
+    transMgr_->keep_ = false;
+    ASSERT_EQ(2u, transMgr_->kept_.size());
+    transMgr_->runKept();
+    ASSERT_EQ(SUSPENDED_ORDSTATUS, stop->status_);
+    EXPECT_FALSE(stop->stopTriggered_);
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
+
+    engine.request(OrderChangeStateEvent(stop->orderId_, OrderChangeStateEvent::RESUME));
+    EXPECT_EQ(OrderBook::OrdersT{ stop->orderId_ }, heldStops(*orderBook_, instrId1_));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5));
+    EXPECT_EQ(std::vector<std::string>{ "10@10" }, engine.reports_.tradesOf(stop->orderId_));
+    EXPECT_EQ(80u, bid->leavesQty_);
+}
+
+TEST_F(ProcessorTest, AStopsReleaseWaitsForTheTransactionThatBooksTheStop)
+{
+    // A stop is in the stop book once the transaction that books it has run, which can be before its creator marks that
+    // transaction enqueued: the manager may run it on another worker at once. A trade can reach the stop in that gap,
+    // and the release must still be enqueued after the booking, as any transaction about an order must (#83). Here the
+    // stop is stored and held, and its creator marks the booking enqueued 100 ms later.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
+    auto order = asStop(createTestOrder(instrId1_, BUY_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0);
+    COP::Store::PublishGuard guard;
+    OrderEntry *stop = OrderStorage::instance()->save(*order, IdTGenerator::instance(), &guard);
+    ASSERT_NE(nullptr, stop);
+    stop->status_ = NEW_ORDSTATUS;
+    guard.release(); // initialised: only the mark is left
+    orderBook_->addStop(*stop);
+
+    std::vector<bool> marks;
+    transMgr_->onAdd_ = [&]()
+    {
+        marks.push_back(stop->bookingPending_.load());
+    };
+    std::thread creator(
+        [&guard]()
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            guard.bookingEnqueued();
+        });
+    inQueues_->push("test", OrderEvent(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5).release()));
+    engine.processor_.process(); // the buy's booking runs, and its trade reaches the stop
+    creator.join();
+    transMgr_->onAdd_ = nullptr;
+
+    ASSERT_EQ(3u, marks.size()) << "the buy's booking, its trade's transaction and the stop's release";
+    EXPECT_FALSE(marks.back()) << "the release was enqueued before the transaction that books the stop";
+    transMgr_->kept_.clear(); // the stop's state machine was never set up here, so its trade isn't run
+}
+
+TEST_F(ProcessorTest, AStopTwoTradesReachBeforeItsReleaseRunsIsReleasedOnce)
+{
+    // Each trade's transaction enqueues a release, and both are enqueued before either runs. The first releases the stop
+    // limit, which rests below the ask; the second finds it released and does nothing.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *ask = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 9.5, 10), STOPLIMIT_ORDERTYPE, 10.0));
+
+    transMgr_->keep_ = true;
+    for (int i = 0; i < 2; ++i)
+    {
+        inQueues_->push("test", OrderEvent(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5).release()));
+        engine.processor_.process();
+    }
+    transMgr_->keep_ = false;
+    transMgr_->runKept();
+
+    EXPECT_EQ(90u, ask->leavesQty_);
+    EXPECT_TRUE(stop->stopTriggered_);
+    EXPECT_EQ(NEW_ORDSTATUS, stop->status_);
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
+    const BookSnapshot book = orderBook_->getSnapshot(instrId1_, OrderStorage::instance());
+    ASSERT_EQ(1u, book.bids.size());
+    EXPECT_EQ(1u, book.bids[0].orderCount) << "the stop limit was booked twice";
+    EXPECT_EQ(10u, book.bids[0].totalQty);
+}
+
+TEST_F(ProcessorTest, AReplacedStopIsHeldAtItsNewStopPrice)
+{
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 9.0));
+
+    OrderEntry *replacement = stop->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = stop->clOrderId_;
+    replacement->stopPx_ = 10.0;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+    engine.request(OrderReplaceEvent(stop->orderId_, replacement));
+
+    EXPECT_EQ(REPLACED_ORDSTATUS, stop->status_);
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    EXPECT_EQ(NEW_ORDSTATUS, live->status_);
+    EXPECT_FALSE(live->stopTriggered_);
+    EXPECT_EQ(OrderBook::OrdersT{ live->orderId_ }, heldStops(*orderBook_, instrId1_))
+        << "the original is still held, or the replacement isn't";
+
+    // A trade at 10 reaches the replacement's stop, which the original's, at 9, didn't
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5));
+    EXPECT_TRUE(live->stopTriggered_);
+    EXPECT_EQ(std::vector<std::string>{ "10@10" }, engine.reports_.tradesOf(live->orderId_));
+    EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty());
+}
+
+TEST_F(ProcessorTest, AReleasedStopLimitsReplacementStaysReleased)
+{
+    // Its stop was reached, so a replacement that is still a stop limit rests at its own limit; it isn't held again
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 9.5, 20), STOPLIMIT_ORDERTYPE, 10.0));
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
+    ASSERT_TRUE(stop->stopTriggered_);
+    ASSERT_EQ(stop->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
+
+    OrderEntry *replacement = stop->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = stop->clOrderId_;
+    replacement->price_ = 9.6;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    replacement->stopTriggered_ = false; // as a client's replacement has it: the engine decides
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+    engine.request(OrderReplaceEvent(stop->orderId_, replacement));
+
+    EXPECT_EQ(REPLACED_ORDSTATUS, stop->status_);
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    EXPECT_EQ(NEW_ORDSTATUS, live->status_);
+    EXPECT_TRUE(live->stopTriggered_);
+    EXPECT_EQ(live->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty()) << "the replacement is held again";
+}
+
+TEST_F(ProcessorTest, ASuspendedStopIsNotReleasedAndIsHeldAgainWhenResumed)
+{
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+    engine.request(OrderChangeStateEvent(stop->orderId_, OrderChangeStateEvent::SUSPEND));
+    ASSERT_EQ(SUSPENDED_ORDSTATUS, stop->status_);
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty()) << "the suspended stop is still held";
+
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5));
+    EXPECT_FALSE(stop->stopTriggered_) << "a trade released the suspended stop";
+
+    engine.request(OrderChangeStateEvent(stop->orderId_, OrderChangeStateEvent::RESUME));
+    EXPECT_EQ(NEW_ORDSTATUS, stop->status_);
+    EXPECT_EQ(OrderBook::OrdersT{ stop->orderId_ }, heldStops(*orderBook_, instrId1_));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, SELL_SIDE).isValid()) << "the resumed stop rests in the price book";
+
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5));
+    EXPECT_EQ(std::vector<std::string>{ "10@10" }, engine.reports_.tradesOf(stop->orderId_));
+}
+
+TEST_F(ProcessorTest, AHeldStopIsHeldAgainAfterARestart)
+{
+    // No trade price survives a restart, so a held stop waits again for a trade that reaches it
+    const std::string dir = test::uniqueTestPath("stop-held-restart");
+    std::filesystem::remove_all(dir);
+    IdT id;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory before(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 9.5);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        id = before.process(clOrdId)->orderId_;
+    }
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    const OrderEntry *restored = restarted.storage_.locateByOrderId(id);
+    ASSERT_NE(nullptr, restored);
+    EXPECT_EQ(NEW_ORDSTATUS, restored->status_);
+    EXPECT_FALSE(restored->stopTriggered_);
+    EXPECT_EQ(OrderBook::OrdersT{ id }, heldStops(restarted.book_, instrId1_));
+    EXPECT_FALSE(restarted.book_.getTop(instrId1_, SELL_SIDE).isValid());
+    EXPECT_TRUE(restarted.dispatcher_.ordersToMatch().empty());
+
+    auto bid = createTestOrder(instrId1_, BUY_SIDE, 9.0, 50);
+    RawDataEntry clOrdId = bid->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(bid.release()));
+    restarted.process(clOrdId);
+    auto sell = createTestOrder(instrId1_, SELL_SIDE, 9.0, 10);
+    clOrdId = sell->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(sell.release()));
+    restarted.process(clOrdId);
+    EXPECT_EQ(std::vector<std::string>{ "10@9" }, reports.tradesOf(id)) << "the trade at 9 didn't release the stop";
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AReleasedStopLimitRestsAgainAfterARestart)
+{
+    const std::string dir = test::uniqueTestPath("stop-released-restart");
+    std::filesystem::remove_all(dir);
+    IdT id;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory before(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 5);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        before.process(clOrdId);
+        order = asStop(createTestOrder(instrId1_, BUY_SIDE, 10.5, 20), STOPLIMIT_ORDERTYPE, 10.0);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        id = before.process(clOrdId)->orderId_;
+        order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        before.process(clOrdId);
+        ASSERT_EQ(id, before.book_.getTop(instrId1_, BUY_SIDE)) << "released with nothing to buy, the stop limit rests";
+    }
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    const OrderEntry *restored = restarted.storage_.locateByOrderId(id);
+    ASSERT_NE(nullptr, restored);
+    EXPECT_EQ(NEW_ORDSTATUS, restored->status_);
+    EXPECT_TRUE(restored->stopTriggered_);
+    EXPECT_EQ(id, restarted.book_.getTop(instrId1_, BUY_SIDE));
+    EXPECT_TRUE(heldStops(restarted.book_, instrId1_).empty()) << "the released stop limit is held again";
+    EXPECT_TRUE(restarted.dispatcher_.ordersToMatch().empty());
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AReleasedStopACrashLeftOpenTradesAsAMarketOrderOnceRestarted)
+{
+    // The release committed, which marked the stop released, and a crash lost the trade it started (#207, for a market
+    // order). Restored, the stop trades as a market order again; held, it would wait for another trade.
+    const std::string dir = test::uniqueTestPath("stop-crash-restart");
+    std::filesystem::remove_all(dir);
+    IdT id;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        order = asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        id = crashed.process(clOrdId)->orderId_;
+
+        crashed.transactions_.keepNested_ = true;
+        order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        ASSERT_EQ(2u, crashed.transactions_.kept_.size()) << "the trade's transaction and the stop's release";
+        crashed.transactions_.runKept(2);
+        ASSERT_TRUE(crashed.storage_.locateByOrderId(id)->stopTriggered_);
+        ASSERT_EQ(1u, crashed.transactions_.kept_.size()) << "the trade the release started is lost";
+    }
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    OrderEntry *restored = restarted.storage_.locateByOrderId(id);
+    ASSERT_NE(nullptr, restored);
+    ASSERT_EQ(NEW_ORDSTATUS, restored->status_);
+    ASSERT_TRUE(restored->stopTriggered_);
+    EXPECT_TRUE(heldStops(restarted.book_, instrId1_).empty());
+    ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+    EXPECT_EQ(id, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+
+    restarted.processor_.matchRestored(restored);
+    EXPECT_EQ(std::vector<std::string>{ "10@10" }, reports.tradesOf(id));
+    EXPECT_EQ(FILLED_ORDSTATUS, restored->status_);
     std::filesystem::remove_all(dir);
 }

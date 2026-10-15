@@ -12,6 +12,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **ACID Transactions:** Full transaction support with operation-level rollback on failure
 - **State Machine:** <!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> order states and <!-- DOC_CHECK:transition_count -->47<!-- /DOC_CHECK --> transitions, managed via Boost Meta State Machine (MSM)
 - **Order Matching:** Price-time priority matching engine with per-instrument order books
+- **Stop Orders:** `STOP` and `STOPLIMIT` orders wait in a per-instrument stop book until a trade reaches their stop price, then trade as market or limit orders
 - **Deferred Event Chaining:** Trade executions trigger cascading events (e.g., settlement)
 - **Subscription Filtering:** Selective event delivery per client via SubscrManager
 
@@ -314,7 +315,7 @@ For the queue, order book, state machine, arena, pool, NUMA and field-layout mic
 | **Processor** | Central event handler and coordinator |
 | **OrderStateMachine** | Boost MSM-based order lifecycle (14 states, 47+ transitions) |
 | **OrderMatcher** | Price-time priority matching engine |
-| **OrderBook** | Price-sorted buy/sell order sides per instrument |
+| **OrderBook** | Price-sorted buy/sell order sides per instrument, and its held stop orders |
 | **TransactionManager** | ACID transaction coordination with dependency tree |
 | **TransactionScopePool** | Lock-free CAS object pool for zero-allocation hot path |
 | **TaskManager** | oneTBB-based parallel task scheduling with CPU pinning |
@@ -373,7 +374,7 @@ A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through
 
 | Type | Payload | Description |
 |------|---------|-------------|
-| `new_order` | `NewOrderRequest` | Submit a new order. `side`, `ordType`, `tif`, `currency` and `capacity` are required, and must be values the server knows: an order without one gets an `error`, and nothing is stored (#166). `orderQty` is required too, a whole number from 1 (#187), and a `LIMIT` or `STOPLIMIT` order's `price` above 0 (#188) |
+| `new_order` | `NewOrderRequest` | Submit a new order. `side`, `ordType`, `tif`, `currency` and `capacity` are required, and must be values the server knows: an order without one gets an `error`, and nothing is stored (#166). `orderQty` is required too, a whole number from 1 (#187), a `LIMIT` or `STOPLIMIT` order's `price` above 0 (#188), and a `STOP` or `STOPLIMIT` order's `stopPx` above 0 (#223) |
 | `cancel_order` | `{orderId, clOrderId?}` | Cancel an existing order: answered with a `CANCELED` execution report, or a `cancel_reject`. With `clOrderId`, that names the order and `orderId` must match it. Without, `orderId` does; a number more than one order has (possible only in a data directory written before order numbers continued across restarts) gets an `error` asking for `clOrderId` |
 | `replace_order` | `{orderId, clOrderId?, price?, orderQty?, tif?}` | Replace an existing order with one that has the given changes (an `orderQty` given must be from 1, #187, and a `price` above 0, #188): answered with two `REPLACE` execution reports, the original's (`REPLACED`) and the replacement's (`NEW`, or `PARTIAL_FILL` when the original has fills), whose new `orderId` names the original in `origOrderId`. A refused replace gets a `REJECT` report with `orderId` 0 saying why. `clOrderId` names the order as for `cancel_order`; a replace that changes nothing, or gives a `tif` the server doesn't know, gets an `error` |
 | `subscribe_book` | `{symbol}` | Subscribe to order book updates for a symbol the server trades. Another symbol gets an `error` |
@@ -381,11 +382,18 @@ A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through
 
 A client's message may be at most <!-- DOC_CHECK:ws_max_client_message_kib -->64<!-- /DOC_CHECK --> KiB; a larger one ends its session. What the server holds for clients is bounded too: `--max-connections` clients, and up to `--max-session-queue-mb` waiting for each.
 
+A `STOP` or `STOPLIMIT` order is held until a trade in its instrument reaches its `stopPx`: a trade at or above it for a buy, at or below it for a sell (#223).
+- **While held,** the order is `NEW`, and it is in neither side of the book, so `book_update` doesn't show it. A cancel, replace or suspend works on it as on any order.
+- **Released,** a `STOP` trades as a market order, and what it can't trade is canceled. A `STOPLIMIT` trades at its `price` and rests with what is left. Either way the order's `stopTriggered` becomes true.
+- **Order:** an order's whole sweep comes first. The stops its trades reach are released after it: buy stops from the lowest `stopPx`, sell stops from the highest, and stops at one `stopPx` in the order they arrived. A released order's own trades can release more.
+- **Restarts:** only a trade reaches a stop, and no trade price survives a restart, so a held stop then waits for the next trade (#237).
+- **Reports:** the release sends none (#236). A released `STOP` is reported when it trades or is canceled. A `STOPLIMIT` released with nothing to trade shows `stopTriggered` only with its next report or in `order_snapshot`.
+
 Every order clears through the server's clearing firm (`--clearing-firm`), and an order with no `account` goes to the server's default account (`--default-account`). `seedData` seeds both. If either is missing from the data directory, the server logs a warning at startup and answers each order that needs it with an `error` message.
 
 ### Key Data Types
 
-**Order** — 20+ fields including: `orderId`, `clOrderId`, `symbol`, `side`, `ordType`, `price`, `stopPx`, `avgPx`, `orderQty`, `cumQty`, `leavesQty`, `status`, `tif`, `capacity`, `currency`, `account`, `creationTime`, `lastUpdateTime`.
+**Order** — 20+ fields including: `orderId`, `clOrderId`, `symbol`, `side`, `ordType`, `price`, `stopPx`, `stopTriggered`, `avgPx`, `orderQty`, `cumQty`, `leavesQty`, `status`, `tif`, `capacity`, `currency`, `account`, `creationTime`, `lastUpdateTime`.
 
 **ExecutionReport** — Base fields: `execId`, `orderId`, `type`, `orderStatus`, `market`, `transactTime`. Type-specific fields: `lastQty`/`lastPx` (trade), `rejectReason` (reject, and a rejected replace), `origOrderId` (replace/correct), `execRefId` (trade cancel/correct). An order cancel carries only the base fields. A report with `orderId` 0 is for an order the server refused without storing it, such as one whose ClOrdID is already in use; `rejectReason` says why.
 

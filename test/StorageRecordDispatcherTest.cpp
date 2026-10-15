@@ -174,7 +174,20 @@ public:
         orders_.push_back(&order); // Just for testing
     }
 
+    // A held stop goes here at restore, not into orders_ (#223)
+    void addStop(const OrderEntry &order) override
+    {
+        stops_.push_back(&order);
+    }
+    void removeStop(const OrderEntry & /*order*/) override {}
+    bool holdsStops(const SourceIdT & /*instrument*/) const override
+    {
+        return !stops_.empty();
+    }
+    void triggeredStops(const SourceIdT & /*instrument*/, PriceT /*lastPx*/, OrdersT * /*result*/) const override {}
+
     std::deque<const OrderEntry *> orders_;
+    std::deque<const OrderEntry *> stops_;
 };
 
 // =============================================================================
@@ -1733,6 +1746,7 @@ std::unique_ptr<OrderEntry> goldenOrder()
     val->stateMachinePersistance_.stateZone1Id_ = 3;
     val->stateMachinePersistance_.stateZone2Id_ = 2;
     val->execInstruct_ = { STAY_ON_OFFER_SIDE_INSTRUCTION, NOT_HELD_INSTRUCTION };
+    val->stopTriggered_ = true; // a STOPLIMIT its stop released (#223)
     return val;
 }
 
@@ -1764,6 +1778,17 @@ const char *const GOLDEN_ORDER_RECORD_V1 = "06000100952835013a65000000000000002e
                                            "2e00000000004459402e060000002e020000002e040000002e030000002e0400"
                                            "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
                                            "2ee90300002e910100002e030000003a020000002e06000000";
+// The order as OrderCodec has written it since #223, in format version 2: version 1's fields, then '.' and whether a
+// stop order's stop was reached, a byte
+const char *const GOLDEN_ORDER_RECORD_V2 = "06000200952835013a65000000000000002e060000003a10000000000000002e"
+                                           "070000003a11000000000000002e020000003a0c000000000000002e03000000"
+                                           "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
+                                           "00000000002e080000003a12000000000000002e942835013a5b110000000000"
+                                           "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
+                                           "35a10100002e00000000005059402e00000000002059402e0000000000485940"
+                                           "2e00000000004459402e060000002e020000002e040000002e030000002e0400"
+                                           "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
+                                           "2ee90300002e910100002e030000003a020000002e060000002e01";
 const char *const GOLDEN_ID_LIMIT_RECORD = "09000000cb04fb711f010000";
 
 } // namespace
@@ -1792,7 +1817,7 @@ TEST_F(StorageRecordDispatcherTest, WritesTheGoldenRecords)
     expectGolden("GOLDEN_ACCOUNT_RECORD", written(GOLDEN_ACCOUNT_ID), GOLDEN_ACCOUNT_RECORD);
     expectGolden("GOLDEN_CLEARING_RECORD", written(GOLDEN_CLEARING_ID), GOLDEN_CLEARING_RECORD);
     expectGolden("GOLDEN_RAWDATA_RECORD", written(GOLDEN_RAWDATA_ID), GOLDEN_RAWDATA_RECORD);
-    expectGolden("GOLDEN_ORDER_RECORD_V1", written(GOLDEN_ORDER_ID), GOLDEN_ORDER_RECORD_V1);
+    expectGolden("GOLDEN_ORDER_RECORD_V2", written(GOLDEN_ORDER_ID), GOLDEN_ORDER_RECORD_V2);
     expectGolden("GOLDEN_ID_LIMIT_RECORD", written(IdT(0, 1)), GOLDEN_ID_LIMIT_RECORD);
 }
 
@@ -1800,7 +1825,8 @@ namespace
 {
 /// Decodes a golden order record in the version its record word names, and expects every field of the golden order,
 /// with the execution instructions given: a version 0 record has none
-void expectEveryFieldOfTheGoldenOrder(const char *golden, u32 formatVersion, const InstructionSetT &instructions)
+void expectEveryFieldOfTheGoldenOrder(const char *golden, u32 formatVersion, const InstructionSetT &instructions,
+                                      bool stopTriggered)
 {
     SCOPED_TRACE("order record in format version " + std::to_string(formatVersion));
     const std::string record = fromHex(golden);
@@ -1847,13 +1873,16 @@ void expectEveryFieldOfTheGoldenOrder(const char *golden, u32 formatVersion, con
     EXPECT_EQ(expected->stateMachinePersistance_.stateZone1Id_, order->stateMachinePersistance_.stateZone1Id_);
     EXPECT_EQ(expected->stateMachinePersistance_.stateZone2Id_, order->stateMachinePersistance_.stateZone2Id_);
     EXPECT_EQ(instructions, order->execInstruct_);
+    // Format version 2 says whether the stop was reached; an older record's stop order is held (#223)
+    EXPECT_EQ(stopTriggered, order->stopTriggered_) << "format version " << formatVersion;
 }
 
 /// The golden order records, each with the format version it was written in
 const std::vector<std::pair<const char *, u32>> &goldenOrderRecords()
 {
     static const std::vector<std::pair<const char *, u32>> records = { { GOLDEN_ORDER_RECORD_V0, 0 },
-                                                                       { GOLDEN_ORDER_RECORD_V1, 1 } };
+                                                                       { GOLDEN_ORDER_RECORD_V1, 1 },
+                                                                       { GOLDEN_ORDER_RECORD_V2, 2 } };
     return records;
 }
 } // namespace
@@ -1909,8 +1938,9 @@ TEST_F(StorageRecordDispatcherTest, ReadsEveryFieldOfTheGoldenRecords)
 
     // The order's codec, by itself: restoring an order looks its ClOrdID up in WideDataStorage, which the golden
     // record's ids don't name. Every version this build has written is still read (#172).
-    expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V1, 1, goldenOrder()->execInstruct_);
-    expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V0, 0, InstructionSetT());
+    expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V2, 2, goldenOrder()->execInstruct_, true);
+    expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V1, 1, goldenOrder()->execInstruct_, false);
+    expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V0, 0, InstructionSetT(), false);
 }
 
 namespace
@@ -2015,7 +2045,7 @@ TEST_F(StorageRecordDispatcherTest, ARecordInANewerFormatIsRejected)
         }
     }
     // The order codec is at a version of its own (#172): one past it is refused the same way
-    std::string order = fromHex(GOLDEN_ORDER_RECORD_V1);
+    std::string order = fromHex(GOLDEN_ORDER_RECORD_V2);
     order[2] = static_cast<char>(OrderCodec::FORMAT_VERSION + 1);
     try
     {
@@ -2117,11 +2147,14 @@ TEST_F(StorageRecordDispatcherTest, OnlyAWorkingOrderIsBookedOrLeftToMatch)
     // booked every status but a list of terminal ones, SUSPENDED included, though suspending takes an order out of the
     // book (#215). A market order is never booked: an open one is left to match (#207). PENDINGNEW is never set and
     // INVALID never on an order, and RECEIVEDNEW is an order before acceptance, so none of the three should come back.
+    // A working stop order whose stop hasn't been reached is held, in the stop book; once released, a STOP is matched as
+    // a market order and a STOPLIMIT booked as a limit order (#223).
     enum Outcome
     {
         NEITHER,
         BOOKED,
-        TO_MATCH
+        TO_MATCH,
+        HELD
     };
     struct Case
     {
@@ -2139,13 +2172,24 @@ TEST_F(StorageRecordDispatcherTest, OnlyAWorkingOrderIsBookedOrLeftToMatch)
         { CANCELED_ORDSTATUS, NEITHER, NEITHER },
     };
     static_assert(std::size(cases) == CANCELED_ORDSTATUS + 1, "a case for every status");
-    const char *const names[] = { "neither", "booked", "left to match" };
+    const char *const names[] = { "neither", "booked", "left to match", "held" };
+    const struct
+    {
+        OrderType type_;
+        bool stopTriggered_;
+        const char *name_;
+    } kinds[] = { { LIMIT_ORDERTYPE, false, "limit" },
+                  { MARKET_ORDERTYPE, false, "market" },
+                  { STOPLIMIT_ORDERTYPE, false, "held stop limit" },
+                  { STOP_ORDERTYPE, false, "held stop" },
+                  { STOPLIMIT_ORDERTYPE, true, "released stop limit" },
+                  { STOP_ORDERTYPE, true, "released stop" } };
 
     const SourceIdT instrument = test::addInstrument("STATUSES");
     u64 number = 100;
     for (const Case &c : cases)
     {
-        for (const OrderType type : { LIMIT_ORDERTYPE, MARKET_ORDERTYPE })
+        for (const auto &kind : kinds)
         {
             for (const QuantityT leaves : { QuantityT(100), QuantityT(0) })
             {
@@ -2160,18 +2204,23 @@ TEST_F(StorageRecordDispatcherTest, OnlyAWorkingOrderIsBookedOrLeftToMatch)
                 dispatcher.startLoad();
                 std::unique_ptr<OrderEntry> order = bookedOrder(instrument, ++number, BUY_SIDE, 10.0, 100);
                 order->status_ = c.status_;
-                order->ordType_ = type;
+                order->ordType_ = kind.type_;
+                order->stopPx_ = 9.0;
+                order->stopTriggered_ = kind.stopTriggered_;
                 order->leavesQty_ = leaves;
                 loadOrderRecord(dispatcher, *order);
                 dispatcher.finishLoad();
 
-                const Outcome expected = (0 == leaves) ? NEITHER : (LIMIT_ORDERTYPE == type) ? c.limit_ : c.market_;
+                const Outcome expected = (0 == leaves)       ? NEITHER
+                                         : order->heldStop() ? ((BOOKED == c.limit_) ? HELD : NEITHER)
+                                         : (OrderParams::Book::PRICE == order->book()) ? c.limit_
+                                                                                       : c.market_;
                 const Outcome actual = book.getTop(instrument, BUY_SIDE).isValid() ? BOOKED
-                                       : dispatcher.ordersToMatch().empty()        ? NEITHER
-                                                                                   : TO_MATCH;
+                                       : !dispatcher.ordersToMatch().empty()       ? TO_MATCH
+                                       : book.holdsStops(instrument)               ? HELD
+                                                                                   : NEITHER;
                 EXPECT_EQ(std::string(names[expected]), std::string(names[actual]))
-                    << "status " << c.status_ << ", " << ((LIMIT_ORDERTYPE == type) ? "limit" : "market") << ", "
-                    << leaves << " left";
+                    << "status " << c.status_ << ", " << kind.name_ << ", " << leaves << " left";
             }
         }
     }

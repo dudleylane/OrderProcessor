@@ -200,6 +200,29 @@ TEST_F(TransactionMgrTest, AddMultipleTransactions)
     SUCCEED();
 }
 
+TEST_F(TransactionMgrTest, PendingTransactionsCountsEachUntilItIsRemoved)
+{
+    // What app/main.cpp waits on between the restored orders it matches (#223): a transaction counts from when it is
+    // added until it is removed, taken to run or not
+    EXPECT_EQ(0u, transMgr_->pendingTransactions());
+    for (int i = 0; i < 2; ++i)
+    {
+        std::unique_ptr<Transaction> txn = std::make_unique<TestTransaction>();
+        transMgr_->addTransaction(txn);
+    }
+    EXPECT_EQ(2u, transMgr_->pendingTransactions());
+
+    TransactionId id;
+    Transaction *taken = nullptr;
+    ASSERT_TRUE(transMgr_->next(&id, &taken));
+    EXPECT_EQ(2u, transMgr_->pendingTransactions()) << "a transaction taken to run is no longer counted";
+    transMgr_->removeTransaction(id, taken);
+    EXPECT_EQ(1u, transMgr_->pendingTransactions());
+    ASSERT_TRUE(transMgr_->next(&id, &taken));
+    transMgr_->removeTransaction(id, taken);
+    EXPECT_EQ(0u, transMgr_->pendingTransactions());
+}
+
 // =============================================================================
 // Remove Transaction Tests
 // =============================================================================

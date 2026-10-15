@@ -733,3 +733,94 @@ TEST_F(IntegrationTest, QueueProcessesMultipleOrders)
 
     transMgr.stop();
 }
+
+// =============================================================================
+// Stop orders on the real manager (#223)
+// =============================================================================
+
+TEST_F(IntegrationTest, StopsASweepReachesAreReleasedAfterItOnFourTransactionWorkers)
+{
+    // A buy sweeps 10, 11 and 12, and each trade reaches a buy STOP at 10. The STOP's release relates to the
+    // instrument, and the sweep runs to its end within its own transaction's deferred events, so on any worker the
+    // release runs after the whole sweep: the STOP buys at 13, not at 11. Its trade at 13 releases a STOPLIMIT at 12.5.
+    aux::ExchLogger::instance()->setDebugOn(false);
+    aux::ExchLogger::instance()->setNoteOn(false);
+
+    DummyOrderSaver saver;
+    IncomingQueues inQueues;
+    OutgoingQueues outQueues;
+
+    OrderBookImpl books;
+    OrderBookImpl::InstrumentsT instr;
+    SourceIdT instrId = addInstrument("stop_test");
+    instr.insert(instrId);
+    books.init(instr);
+
+    TransactionMgrParams transParams(IdTGenerator::instance());
+    TransactionMgr transMgr;
+    transMgr.init(transParams);
+
+    TaskManagerParams tmparams;
+    {
+        ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), &books, &inQueues, &outQueues,
+                               &inQueues, &transMgr);
+        std::unique_ptr<Processor> proc(new Processor());
+        proc->init(params);
+        tmparams.evntProcessors_.push_back(proc.release());
+        for (int i = 0; i < 4; ++i)
+        {
+            std::unique_ptr<Processor> transactProc(new Processor());
+            transactProc->init(params);
+            tmparams.transactProcessors_.push_back(transactProc.release());
+        }
+        tmparams.transactMgr_ = &transMgr;
+        tmparams.inQueues_ = &inQueues;
+    }
+    TaskManager manager(tmparams);
+
+    auto submit = [&](Side side, OrderType type, PriceT price, PriceT stopPx, QuantityT qty)
+    {
+        std::unique_ptr<OrderEntry> ord(createCorrectOrder(instrId));
+        assignClOrderId(ord.get());
+        ord->side_ = side;
+        ord->ordType_ = type;
+        ord->price_ = price;
+        ord->stopPx_ = stopPx;
+        ord->orderQty_ = qty;
+        ord->leavesQty_ = qty;
+        RawDataEntry clOrdId = ord->clOrderId_.get();
+        inQueues.push("test", OrderEvent(ord.release()));
+        return clOrdId;
+    };
+    for (const PriceT price : { 10.0, 11.0, 12.0 })
+    {
+        submit(SELL_SIDE, LIMIT_ORDERTYPE, price, 0.0, 10);
+    }
+    const RawDataEntry askId = submit(SELL_SIDE, LIMIT_ORDERTYPE, 13.0, 0.0, 50);
+    const RawDataEntry stopId = submit(BUY_SIDE, STOP_ORDERTYPE, 0.0, 10.0, 10);
+    const RawDataEntry stopLimitId = submit(BUY_SIDE, STOPLIMIT_ORDERTYPE, 13.0, 12.5, 5);
+    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(books.holdsStops(instrId));
+
+    const RawDataEntry sweepId = submit(BUY_SIDE, LIMIT_ORDERTYPE, 12.0, 0.0, 30);
+    manager.waitUntilTransactionsFinished(5);
+
+    const OrderEntry *sweep = OrderStorage::instance()->locateByClOrderId(sweepId);
+    const OrderEntry *stop = OrderStorage::instance()->locateByClOrderId(stopId);
+    const OrderEntry *stopLimit = OrderStorage::instance()->locateByClOrderId(stopLimitId);
+    const OrderEntry *ask = OrderStorage::instance()->locateByClOrderId(askId);
+    ASSERT_NE(nullptr, sweep);
+    ASSERT_NE(nullptr, stop);
+    ASSERT_NE(nullptr, stopLimit);
+    ASSERT_NE(nullptr, ask);
+    // The sweep took all of 10, 11 and 12, so the stops' 15 came from the ask at 13. (avgPx_ would say so directly, but
+    // nothing computes it: #239.)
+    EXPECT_EQ(FILLED_ORDSTATUS, sweep->status_);
+    EXPECT_EQ(30u, sweep->cumQty_) << "a stop traded inside the sweep that released it";
+    EXPECT_EQ(FILLED_ORDSTATUS, stop->status_);
+    EXPECT_EQ(FILLED_ORDSTATUS, stopLimit->status_);
+    EXPECT_EQ(35u, ask->leavesQty_);
+    EXPECT_FALSE(books.holdsStops(instrId));
+
+    transMgr.stop();
+}
