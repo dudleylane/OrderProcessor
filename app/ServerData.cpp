@@ -11,11 +11,13 @@
 #include "ServerData.h"
 
 #include <algorithm>
+#include <cassert>
 
 #include "Logger.h"
 #include "WideDataStorage.h"
 #include "IdTGenerator.h"
 #include "OrderStorage.h"
+#include "ExpiryScheduler.h"
 
 using namespace COP;
 
@@ -90,4 +92,24 @@ App::ServerData App::loadServerData(const std::string &dataDir, size_t lmdbMapSi
     Store::WideDataStorage::instance()->bindStorage(data.dispatcher.get());
     Store::OrderStorage::instance()->attach(data.dispatcher.get());
     return data;
+}
+
+size_t App::scheduleRestoredExpiries(const Store::OrderDataStorage &storage, Proc::ExpiryScheduler *expiry)
+{
+    assert(nullptr != expiry);
+    size_t timers = 0;
+    storage.forEachOrder(
+        [&](const IdT &, const OrderEntry &order)
+        {
+            DateTimeT when = 0;
+            Queues::TimerEvent::TimerType type = Queues::TimerEvent::INVALID_TIMER;
+            const bool live = (NEW_ORDSTATUS == order.status_) || (PARTFILL_ORDSTATUS == order.status_) ||
+                              (SUSPENDED_ORDSTATUS == order.status_);
+            if (live && Proc::ExpiryScheduler::expiryOf(order, &when, &type))
+            {
+                expiry->schedule(order.orderId_, when, type);
+                ++timers;
+            }
+        });
+    return timers;
 }

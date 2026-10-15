@@ -711,9 +711,10 @@ void ReleaseStopTrOperation::execute(const Context &cnxt)
     {
         eventCountBefore_ = cnxt.deferedEvents_->deferedEventCount();
     }
-    cnxt.orderMatch_->match(order_, cnxt);
+    // Its first match: an IOC or FOK order's time in force applies now, when it is released, not when it arrived (#240)
+    cnxt.orderMatch_->matchNew(order_, cnxt);
     // A STOPLIMIT rests with what is left, as a limit order does: booked even if its fills will take all of it, which
-    // remove it again (processFill). A STOP is matched once, as a market order is.
+    // remove it again (processFill). A STOP is matched once, as a market order is, and so is an IOC or FOK order.
     if (OrderParams::Book::PRICE == order_->book())
     {
         cnxt.orderBook_->add(*order_);
@@ -782,7 +783,8 @@ void MatchOrderTrOperation::execute(const Context &cnxt)
         eventCountBefore_ = cnxt.deferedEvents_->deferedEventCount();
     }
 
-    cnxt.orderMatch_->match(order_, cnxt);
+    // The order's first match, as its booking runs it: a FOK order's check comes first (#240)
+    cnxt.orderMatch_->matchNew(order_, cnxt);
 }
 
 void MatchOrderTrOperation::rollback(const Context &cnxt)
