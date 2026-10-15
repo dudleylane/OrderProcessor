@@ -252,8 +252,9 @@ void StorageRecordDispatcher::finishLoad()
     for (PendingOrdersT::iterator it = pendingOrders_.begin(); it != pendingOrders_.end(); ++it)
     {
         const std::string &record = it->second.record_;
+        Codec::OrderStrings carried;
         std::unique_ptr<OrderEntry> order(
-            Codec::OrderCodec::decode(it->first, it->second.formatVersion_, record.data(), record.size()));
+            Codec::OrderCodec::decode(it->first, it->second.formatVersion_, record.data(), record.size(), &carried));
         assert(nullptr != orderStorage_);
         // app/main.cpp loads twice, once without an order book and once with it, so an order can
         // already be in storage from the first pass. Restore it once, and book it on the pass that
@@ -261,6 +262,27 @@ void StorageRecordDispatcher::finishLoad()
         OrderEntry *restored = orderStorage_->locateByOrderId(it->first);
         if (nullptr == restored)
         {
+            // The strings its record carries (#192), under the ids its fields name, before the order: storing it
+            // indexes its ClOrdID. A replacement carries its original's ClOrdID, which the original's own record, or
+            // an older directory's separate record, may have restored first; the store keeps the first and frees the
+            // copy (#61), and both hold the one entry's value.
+            assert(nullptr != storage_);
+            if (carried.clOrderId)
+            {
+                storage_->restore(new RawDataEntry(std::move(*carried.clOrderId)));
+            }
+            if (carried.origClOrderId)
+            {
+                storage_->restore(new RawDataEntry(std::move(*carried.origClOrderId)));
+            }
+            if (carried.source)
+            {
+                storage_->restore(order->source_.getId(), new StringT(std::move(*carried.source)));
+            }
+            if (carried.destination)
+            {
+                storage_->restore(order->destination_.getId(), new StringT(std::move(*carried.destination)));
+            }
             orderStorage_->restore(order.get());
             restored = order.release();
             // Execution lists are not persisted (#33), so register an empty one under the id the order's
@@ -361,12 +383,45 @@ void StorageRecordDispatcher::save(const ClearingEntry &val)
 #endif
 }
 
+namespace
+{
+/// The strings an order's record carries (#192): the entries its fields name, each when the store has it. They used to
+/// be records of their own, each written in its own commit, on the thread that took the order.
+Codec::OrderStrings orderStringsOf(const OrderEntry &val, const DataStorageRestore *store)
+{
+    Codec::OrderStrings strings;
+    if (nullptr == store)
+    {
+        return strings;
+    }
+    RawDataEntry raw;
+    if (Codec::namesEntry(val.clOrderId_.getId()) && store->find(val.clOrderId_.getId(), &raw))
+    {
+        strings.clOrderId = raw;
+    }
+    if (Codec::namesEntry(val.origClOrderId_.getId()) && store->find(val.origClOrderId_.getId(), &raw))
+    {
+        strings.origClOrderId = raw;
+    }
+    StringT str;
+    if (Codec::namesEntry(val.source_.getId()) && store->find(val.source_.getId(), &str))
+    {
+        strings.source = str;
+    }
+    if (Codec::namesEntry(val.destination_.getId()) && store->find(val.destination_.getId(), &str))
+    {
+        strings.destination = str;
+    }
+    return strings;
+}
+} // namespace
+
 u32 StorageRecordDispatcher::save(const OrderEntry &val)
 {
     string buffer = recordWord(ORDER_RECORDTYPE, Codec::OrderCodec::FORMAT_VERSION);
     IdT id;
     u32 version;
-    Codec::OrderCodec::encode(val, &buffer, &id, &version);
+    Codec::OrderCodec::encode(val, &buffer, &id, &version, orderStringsOf(val, storage_));
     // update() appends a new version and returns it; for an order written for the first time that
     // version is 0. save() would reject the second write of an order that changed (issue #20).
     const u32 written = fileStorage_->update(id, buffer.c_str(), buffer.size());

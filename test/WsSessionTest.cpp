@@ -72,10 +72,10 @@ protected:
             {
                 if (!ec)
                 {
-                    std::make_shared<App::WsSession>(std::move(socket), &sessionMgr_, WideDataStorage::instance(),
-                                                     OrderStorage::instance(), &inQueues_, IdTGenerator::instance(),
-                                                     nullptr, useDefaultClearing_ ? clearingId_ : SourceIdT(),
-                                                     useDefaultAccount_ ? accountId_ : SourceIdT())
+                    std::make_shared<App::WsSession>(
+                        std::move(socket), &sessionMgr_, WideDataStorage::instance(), OrderStorage::instance(),
+                        sessionQueues_.load(), IdTGenerator::instance(), nullptr,
+                        useDefaultClearing_ ? clearingId_ : SourceIdT(), useDefaultAccount_ ? accountId_ : SourceIdT())
                         ->run();
                 }
             });
@@ -266,7 +266,10 @@ protected:
     SourceIdT accountId_;
     SourceIdT otherAccountId_;
     SourceIdT clearingId_;
-    // What the next session gets as the server's defaults. Set before connecting; read on the server thread.
+    // What the next session gets as the server's defaults, and the queue it sends requests to. Set before connecting;
+    // read on the server thread.
+    std::atomic<Queues::InQueues *> sessionQueues_{ &inQueues_ };
+    testing::NiceMock<test::MockInQueues> failingQueues_;
     std::atomic<bool> useDefaultClearing_{ true };
     std::atomic<bool> useDefaultAccount_{ true };
 
@@ -277,17 +280,18 @@ protected:
 TEST_F(WsSessionTest, RequestThatThrowsIsAnsweredAndTheSessionKeepsReading)
 {
     // The bug this covers: an exception while handling one message left io_context::run() and terminated
-    // the server (#36). Storage failing on the order's first write stands in for any such exception.
-    ON_CALL(saver_, save(testing::An<const RawDataEntry &>()))
-        .WillByDefault(testing::Throw(std::runtime_error("injected storage failure")));
-    WideDataStorage::instance()->bindStorage(&saver_);
+    // the server (#36). The queue failing to take a cancel stands in for any such exception. It was storage failing on
+    // a new order's first write, its ClOrdID's, until the order's record carried its strings (#192); a cancel's event
+    // owns nothing, so the failure leaks nothing.
+    ON_CALL(failingQueues_, push(testing::_, testing::An<const Queues::OrderCancelEvent &>()))
+        .WillByDefault(testing::Throw(std::runtime_error("injected queue failure")));
+    sessionQueues_ = &failingQueues_;
 
     Client client;
     connect(client);
     ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
 
-    send(client, R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
-                 R"("price":150.25,"orderQty":100,"tif":"DAY","currency":"USD","capacity":"AGENCY"}})");
+    send(client, R"({"type":"cancel_order","data":{"orderId":1}})");
     auto reply = readUntil(client, "error");
     ASSERT_TRUE(reply.has_value()) << "no error reply; escaped: " << escaped();
     EXPECT_EQ("Internal error: request not processed", reply->value("message", ""));
@@ -397,6 +401,28 @@ TEST_F(WsSessionTest, OrderThatNamesNoAccountIsRefusedWhenTheServerHasNoDefaultA
     ASSERT_TRUE(reply.has_value()) << "no error reply; escaped: " << escaped();
     EXPECT_EQ("Order refused: it names no account, and the server has no default account", reply->value("message", ""));
     EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0)));
+}
+
+TEST_F(WsSessionTest, AnOrderAndAReplaceWriteNoStringRecords)
+{
+    // An order's ClOrdID, source and destination were each written to storage as the order came in, in a commit of its
+    // own on the server's only IO thread. The order's record carries them now, and a replace's new ClOrdID the
+    // replacement's (#192).
+    OrderEntry *original = restoreOrder(IdT(7, 20261015), "CL-7");
+    EXPECT_CALL(saver_, save(testing::An<const RawDataEntry &>())).Times(0);
+    EXPECT_CALL(saver_, save(testing::_, testing::An<const StringT &>())).Times(0);
+    WideDataStorage::instance()->bindStorage(&saver_);
+
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    send(client, R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
+                 R"("price":150.25,"orderQty":100,"tif":"DAY","currency":"USD","capacity":"AGENCY"}})");
+    ASSERT_NE(nullptr, takeQueuedOrder());
+    send(client, R"({"type":"replace_order","data":{"orderId":7,"price":151.0}})");
+    const auto replace = takeQueuedReplace();
+    ASSERT_TRUE(replace.has_value());
+    EXPECT_EQ(original->orderId_, replace->first);
 }
 
 TEST_F(WsSessionTest, ClOrdIdsCarryASequenceNumber)

@@ -204,12 +204,7 @@ SourceIdT WideParamsDataStorage::add(InstrumentEntry *val)
 
 SourceIdT WideParamsDataStorage::add(StringT *val)
 {
-    SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 0);
-    {
-        // Exclusive write lock
-        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
-        strings_.insert(StringsT::value_type(id, val));
-    }
+    const SourceIdT id = addUnsaved(val);
     if (nullptr != storage_)
     {
         storage_->save(id, *val);
@@ -217,7 +212,28 @@ SourceIdT WideParamsDataStorage::add(StringT *val)
     return id;
 }
 
+SourceIdT WideParamsDataStorage::addUnsaved(StringT *val)
+{
+    SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 0);
+    {
+        // Exclusive write lock
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);
+        strings_.insert(StringsT::value_type(id, val));
+    }
+    return id;
+}
+
 SourceIdT WideParamsDataStorage::add(RawDataEntry *val)
+{
+    const SourceIdT id = addUnsaved(val);
+    if (nullptr != storage_)
+    {
+        storage_->save(*val);
+    }
+    return id;
+}
+
+SourceIdT WideParamsDataStorage::addUnsaved(RawDataEntry *val)
 {
     SourceIdT id(subscrCounter_.fetch_add(1, std::memory_order_relaxed), 1);
     {
@@ -226,11 +242,31 @@ SourceIdT WideParamsDataStorage::add(RawDataEntry *val)
         rawDatas_.insert(RawDataT::value_type(id, val));
         val->id_ = id;
     }
-    if (nullptr != storage_)
-    {
-        storage_->save(*val);
-    }
     return id;
+}
+
+bool WideParamsDataStorage::find(const SourceIdT &id, StringT *val) const
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    const StringsT::const_iterator it = strings_.find(id);
+    if (strings_.end() == it)
+    {
+        return false;
+    }
+    *val = *it->second;
+    return true;
+}
+
+bool WideParamsDataStorage::find(const SourceIdT &id, RawDataEntry *val) const
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    const RawDataT::const_iterator it = rawDatas_.find(id);
+    if (rawDatas_.end() == it)
+    {
+        return false;
+    }
+    *val = *it->second;
+    return true;
 }
 
 SourceIdT WideParamsDataStorage::add(AccountEntry *val)

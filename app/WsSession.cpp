@@ -31,7 +31,8 @@ std::atomic<u64> containedExceptions{ 0 };
 std::atomic<u64> clOrderSequence{ 0 };
 
 /// A ClOrdID for an order or replacement the server makes up. The client did not choose it, so it must not collide
-/// with one already in use, which is refused (#67).
+/// with one already in use, which is refused (#67). Like the order's source and destination, it is written with the
+/// order's record, not as a record of its own on this thread, the server's only IO thread (#192).
 SourceIdT newClOrderId()
 {
     std::string clOrdStr = "WS-" +
@@ -40,7 +41,7 @@ SourceIdT newClOrderId()
                                               .count()) +
                            "-" + std::to_string(clOrderSequence.fetch_add(1, std::memory_order_relaxed) + 1);
     auto *clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
-    return Store::WideDataStorage::instance()->add(clOrdRaw);
+    return Store::WideDataStorage::instance()->addUnsaved(clOrdRaw);
 }
 
 DateTimeT nowMillis()
@@ -327,14 +328,15 @@ void WsSession::handleMessage(const std::string &msgStr)
         auto *execList = new ExecutionsT();
         SourceIdT execListId = Store::WideDataStorage::instance()->add(execList);
 
-        // The source: the identity that sent it, or "WebSocket" without one (#225)
+        // The source: the identity that sent it, or "WebSocket" without one (#225). It and the destination are written
+        // with the order's record (#192), so an order refused before it is stored leaves nothing on disk.
         const std::string srcStr = source();
         auto *srcStrPtr = new StringT(srcStr);
-        SourceIdT srcId = Store::WideDataStorage::instance()->add(srcStrPtr);
+        SourceIdT srcId = Store::WideDataStorage::instance()->addUnsaved(srcStrPtr);
 
         // Create destination string
         auto *destStr = new StringT("Internal");
-        SourceIdT destId = Store::WideDataStorage::instance()->add(destStr);
+        SourceIdT destId = Store::WideDataStorage::instance()->addUnsaved(destStr);
 
         auto *order = new OrderEntry(srcId, destId, clOrdId, emptyId, instrId, acctId, defaultClearingId_, execListId);
         order->side_ = no.side;
