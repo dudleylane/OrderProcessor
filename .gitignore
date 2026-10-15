@@ -47,6 +47,7 @@ CLAUDE.md
 node_modules/
 dist/
 
-# Docker environment secrets
+# Docker environment secrets, and the stack's TLS certificate and key (#226)
 docker/.env
+docker/certs/
 build-*/

@@ -7,6 +7,7 @@ This directory contains everything needed to run the full OrderProcessor OMS sta
 - Docker or Podman with `docker compose` (or `podman-compose`)
 - About 3 GB of disk to build the stack: the base images take about 780 MB, the server's build stage about 1.5 GB (the build cache keeps it), and the server's image about 210 MB
 - Port 3000 available: the stack publishes only the frontend's (#146)
+- openssl, for the Quick Start's access token and TLS certificate
 
 ## Quick Start
 
@@ -14,10 +15,15 @@ This directory contains everything needed to run the full OrderProcessor OMS sta
 cd docker
 cp .env.example .env          # Set PostgreSQL credentials
 sed -i "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$(openssl rand -hex 32)/" .env   # The access token
+mkdir -p certs && openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -keyout certs/tls.key -out certs/tls.crt \
+    && chmod 0640 certs/tls.key   # A self-signed TLS certificate (see TLS)
 docker compose up --build -d   # Build and start all services
 ```
 
-Open **http://localhost:3000** to access the OMS frontend. It asks for the access token first, the `OMS_WS_TOKEN` in `.env` (`grep OMS_WS_TOKEN .env` shows it), and keeps it until the tab closes (see [Access](#access)). The first `up` seeds the new data volume with test instruments, accounts and the clearing firm, so the stack takes orders at once (see [Seed Test Data](#seed-test-data)).
+Under Docker running as root, also run `sudo chgrp 0 certs/tls.key` before `up`: see [TLS](#tls).
+
+Open **https://localhost:3000** to access the OMS frontend. The browser warns about the certificate, since the Quick Start's is self-signed: accepting it for the page covers the app's WebSocket too. The app asks for the access token first, the `OMS_WS_TOKEN` in `.env` (`grep OMS_WS_TOKEN .env` shows it), and keeps it until the tab closes (see [Access](#access)). The first `up` seeds the new data volume with test instruments, accounts and the clearing firm, so the stack takes orders at once (see [Seed Test Data](#seed-test-data)).
 
 The first build takes several minutes (C++ compilation inside the container). Subsequent starts use the Docker layer cache and are fast.
 
@@ -27,31 +33,31 @@ The first build takes several minutes (C++ compilation inside the container). Su
 |---------|-----------|-------|-------------|
 | `oms-db` | none (5432 in the stack) | `postgres:16-alpine` | PostgreSQL database with OMS schema |
 | `oms-server` | none (8080 in the stack) | `Dockerfile.oms-server` | C++ OrderProcessor WebSocket server |
-| `oms-frontend` | 3000 | `Dockerfile.oms-frontend` | React UI served by nginx |
+| `oms-frontend` | 3000 | `Dockerfile.oms-frontend` | React UI served by nginx, over TLS (#226) |
 
 ### Startup Order
 
 1. **oms-db** starts first, initializes schema from `init-db/001_schema.sql`
 2. **oms-server** waits for `oms-db` to be healthy (`pg_isready` check), seeds the data volume if it has no instrument yet, then starts the C++ engine on port 8080
-3. **oms-frontend** waits for `oms-server` to be healthy (it answers HTTP on 8080, which it does only after restoring its data), then serves the React app on port 3000
+3. **oms-frontend** waits for `oms-server` to be healthy (it answers HTTP on 8080, which it does only after restoring its data), then serves the React app over TLS on port 3000
 
 All three restart unless stopped (`restart: unless-stopped`), and each has a health check, a memory limit and a process limit in `docker-compose.yml`. The server's and the frontend's health checks are also in their images; compose repeats them because podman builds OCI images by default, and those don't keep a `HEALTHCHECK`. The server's 2 GB is a starting point: raise it for a large book or a large LMDB map. The server answers only after restoring its data directory, and its health check allows two minutes for that: raise `start_period` for a larger directory, or Docker Compose will find the server unhealthy and won't start the frontend.
 
 On a host with SELinux enforcing, as el10 is by default, compose relabels `init-db/` so the database container can read it (the `z` on its mount, #201). Without that, Postgres can't read its init scripts and never starts.
 
-CI brings this stack up with `scripts/check-compose-stack.sh` (#140), when `docker/` changes and weekly. The script checks that compose refuses to start without an access token and publishes only the frontend's port, that every service becomes healthy, that Postgres loaded the schema, that the server seeded its volume, that `/ws` refuses an upgrade without the token or from another Origin, that a new order sent to the frontend's `/ws` with the token gets its execution report, and that the order and the seeded reference data reach Postgres (#151). Run it before changing `docker-compose.yml`, `nginx.conf`, `.env.example` or `init-db/`. It takes about three minutes, and it publishes no host port, so it can run beside a stack that is already up.
+CI brings this stack up with `scripts/check-compose-stack.sh` (#140), when `docker/` changes and weekly. The script checks that compose refuses to start without an access token and publishes only the frontend's port, that every service becomes healthy, that Postgres loaded the schema, that the server seeded its volume, that `/ws` refuses an upgrade without the token or from another Origin, that a new order sent to the frontend's `/ws` with the token gets its execution report, and that the order and the seeded reference data reach Postgres (#151). It reaches nginx over `https` and `wss` with a certificate made for the run, verifying it (#226). Run it before changing `docker-compose.yml`, `nginx.conf`, `.env.example` or `init-db/`. It takes about three minutes, and it publishes no host port, so it can run beside a stack that is already up.
 
 The server runs as the user `oms`, which owns `/data`, and nginx as the user `nginx`; neither container runs as root. nginx looks the server up through the container's own DNS resolver when a request needs it, so it starts while the server is still down, and it finds a re-created server container at its new address.
 
 ### Networking
 
 ```
-Browser :3000 ──→ nginx (oms-frontend)
-                    ├── /        → serves React SPA static files
-                    └── /ws      → proxy_pass to oms-server:8080 (WebSocket upgrade)
+Browser :3000 (https, wss) ──→ nginx (oms-frontend), TLS
+                                 ├── /        → serves React SPA static files
+                                 └── /ws      → proxy_pass to oms-server:8080 (WebSocket upgrade, plain)
 ```
 
-The nginx config (`nginx.conf`) handles WebSocket upgrade headers so the frontend connects to `ws://localhost:3000/ws`, which is proxied internally to the C++ server.
+The nginx config (`nginx.conf`) terminates TLS and handles WebSocket upgrade headers, so the frontend connects to `wss://localhost:3000/ws`, which is proxied internally to the C++ server.
 
 Only the frontend's port is published (#146). The server and Postgres listen only on the stack's network, so a browser reaches the server through nginx's `/ws`, and `docker compose exec` reaches Postgres. To reach either from the host, publish its port on the loopback address in an override file, such as `127.0.0.1:8080:8080`.
 
@@ -67,19 +73,39 @@ POSTGRES_PASSWORD=changeme     # PostgreSQL password (change this! The server's 
 POSTGRES_DB=oms                # Database name
 OMS_WS_TOKEN=                  # WebSocket access token, required: openssl rand -hex 32 makes one (#146)
 OMS_ALLOWED_ORIGINS=           # Pages a browser may connect from, comma-separated; empty allows any (#146)
+OMS_HSTS=                      # Strict-Transport-Security, such as max-age=31536000, once certs/ holds a certificate browsers trust (#226)
 ```
 
 ### Access
 
 The server refuses a WebSocket client that doesn't offer the access token, `OMS_WS_TOKEN` in `.env`, and compose won't start without one (#146). A browser can't set a WebSocket's headers, so a client offers the token as a subprotocol, `oms-token.<token>`, beside the protocol's own, `oms-v1`; the server names only `oms-v1` in its answer. The app asks for the token when a tab opens it, and **Change token** in its header asks again. A token has at least <!-- DOC_CHECK:ws_min_token_length -->16<!-- /DOC_CHECK --> letters, digits, `.`, `_` or `-`.
 
-`OMS_ALLOWED_ORIGINS`, comma-separated, such as `http://oms.example.com:3000`, limits the pages a browser may connect from: a page from another Origin is refused, even with the token. Empty, as in `.env.example`, allows a page from anywhere that has the token. A client that sends no Origin isn't a browser, and the token alone decides.
+`OMS_ALLOWED_ORIGINS`, comma-separated, such as `https://oms.example.com:3000`, limits the pages a browser may connect from: a page from another Origin is refused, even with the token. Empty, as in `.env.example`, allows a page from anywhere that has the token. A client that sends no Origin isn't a browser, and the token alone decides.
 
 The server answers an upgrade without the right token with 401, one from an Origin off the list with 403, and a request that isn't a WebSocket upgrade with 426, then closes the connection.
 
-What this doesn't do yet:
-- **Authorization** (#225): everyone with the token sees every account and order, and can trade on any account.
-- **TLS** (#226): the stack serves plain HTTP, so the token crosses the network in the clear. When the network between the browser and the host isn't trusted, put a TLS-terminating proxy in front of port 3000; the app opens `wss:` when its page comes over `https:`.
+What this doesn't do yet: **authorization** (#225). Everyone with the token sees every account and order, and can trade on any account.
+
+### TLS
+
+nginx serves the app and `/ws` over TLS only, on port 3000 (#226). It redirects a plain HTTP request to the same URL over `https`, and the app opens `wss:` because its page came over `https:`. So the access token, the orders and the accounts cross the network encrypted. nginx passes `/ws` on to the server unencrypted, over the stack's own network.
+
+nginx reads its certificate from `certs/tls.crt` and its key from `certs/tls.key`, which compose mounts read-only; the Quick Start makes a self-signed pair. Without them, or without a key it can read, the frontend's container stops at startup, and `docker compose logs oms-frontend` says why. nginx runs as the user `nginx`, which is in group 0, so the key must be readable by group 0 in the container:
+- **Rootless podman or rootless Docker:** your own files belong to user and group 0 in the container, so `chmod 0640 certs/tls.key` is enough.
+- **Docker running as root:** also run `sudo chgrp 0 certs/tls.key`.
+
+openssl writes a key that only its owner may read (0600), and nginx can't read that in either case.
+
+A certificate must name the host the browser uses. The Quick Start's names `localhost` and `127.0.0.1`. To reach the stack from another machine, add that machine's name to `subjectAltName`, as `DNS:oms.example.com`.
+
+A browser doesn't trust a self-signed certificate. It warns about the page, and accepting the certificate there covers the app's WebSocket too, which uses the same host and port. A browser that hasn't accepted it refuses the WebSocket without asking, and the app says "Not connected".
+
+To use a real certificate:
+1. Put it in `certs/tls.crt`, followed by its intermediate certificates, and its key in `certs/tls.key`, readable by group 0 as above.
+2. Run `docker compose restart oms-frontend`.
+3. Set `OMS_HSTS=max-age=31536000` in `.env` and run `docker compose up -d`, so that browsers keep to `https` for a year.
+
+Don't set `OMS_HSTS` before that: a browser that has seen it refuses the site over a certificate it doesn't trust, such as the self-signed one, with no way to accept it.
 
 ### Server Options
 
@@ -219,11 +245,11 @@ CI builds and runs this image for every pull request (`.github/workflows/docker.
 | Stage | Base Image | Purpose |
 |-------|-----------|---------|
 | Builder | `node:24-slim` | Runs `npm ci` and `npm run build` (TypeScript + Vite) |
-| Runtime | `nginx:alpine` | Serves the built SPA; uses custom `nginx.conf` for WebSocket proxying |
+| Runtime | `nginx:alpine` | Serves the built SPA over TLS; uses custom `nginx.conf` for TLS and WebSocket proxying |
 
 The frontend connects to `/ws` on whatever host and port served the page, and nginx passes that on to the server. So it works from another machine and behind a remapped port, such as `"3001:3000"`.
 
-CI builds and runs this image as well, with `scripts/check-frontend-image.sh` (#139). The build runs `npm ci` and `npm run build`, so a TypeScript error fails it: nothing else in CI compiles the frontend. The script then checks that nginx runs as `nginx`, starts before anything called `oms-server` exists, serves the app and its script, passes its health check, and passes `/ws` with its WebSocket headers to a stand-in for the server. Run it before changing the frontend, this Dockerfile or `nginx.conf`; it takes under a minute.
+CI builds and runs this image as well, with `scripts/check-frontend-image.sh` (#139). The build runs `npm ci` and `npm run build`, so a TypeScript error fails it: nothing else in CI compiles the frontend. The script then checks that the image refuses to start without a certificate, saying why. With a throwaway certificate (#226), it checks that nginx runs as `nginx`, starts before anything called `oms-server` exists, serves the app and its script over `https`, redirects plain HTTP to `https`, sends `Strict-Transport-Security` only when `OMS_HSTS` sets it, passes its health check, and passes `/ws` with its WebSocket headers to a stand-in for the server. Run it before changing the frontend, this Dockerfile or `nginx.conf`; it takes under a minute.
 
 ## Database Schema
 
@@ -297,15 +323,20 @@ docker compose logs oms-server
 # - Other LMDB errors → corrupt data (docker compose down -v starts again, and deletes it)
 ```
 
+### Frontend won't start
+
+`docker compose logs oms-frontend` saying "can't read /etc/nginx/certs/tls.crt" (or `tls.key`) means `certs/` has no certificate or key, or a key nginx may not read: make them as the [Quick Start](#quick-start) does, and see [TLS](#tls) for the key's permissions (#226).
+
 ### Frontend shows "Disconnected" or "Not connected"
 
 "Not connected: the server is down, or refused the access token" means no connection has opened since the token was entered: a browser doesn't tell the app why a WebSocket failed (#146).
 
-1. Check the token: `grep OMS_WS_TOKEN .env`, then **Change token** in the app's header
-2. Check that `oms-server` is running: `docker compose ps`
-3. Check server logs: `docker compose logs oms-server`
-4. Verify nginx proxy: `curl -i http://localhost:3000/ws` should get the server's `426 Upgrade Required` (not 404 or 502)
-5. Check browser console for WebSocket connection errors: a 401 is the token, a 403 the page's Origin (`OMS_ALLOWED_ORIGINS`)
+1. Check that the browser accepted the certificate: one that hasn't refuses the WebSocket without asking. Open `https://localhost:3000` itself and accept it, then reload (see [TLS](#tls))
+2. Check the token: `grep OMS_WS_TOKEN .env`, then **Change token** in the app's header
+3. Check that `oms-server` is running: `docker compose ps`
+4. Check server logs: `docker compose logs oms-server`
+5. Verify nginx proxy: `curl -ik https://localhost:3000/ws` should get the server's `426 Upgrade Required` (not 404 or 502)
+6. Check browser console for WebSocket connection errors: a 401 is the token, a 403 the page's Origin (`OMS_ALLOWED_ORIGINS`)
 
 ### Reset everything
 

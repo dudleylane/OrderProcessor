@@ -31,14 +31,22 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.oms-frontend
     restart: unless-stopped
-    # The stack's only published port (#146): the app, and /ws, which nginx passes on to the server
+    # The stack's only published port (#146): the app, and /ws, which nginx passes on to the server. TLS only (#226).
     ports:
       - "3000:3000"
+    # The certificate and key nginx serves (#226): docker/certs/tls.crt and tls.key, which docker/README.md's Quick Start
+    # makes. The key must be readable by group 0 in the container. z: on an SELinux host, relabel them so the container
+    # may read them (#201).
+    volumes:
+      - ./certs:/etc/nginx/certs:ro,z
+    environment:
+      # Strict-Transport-Security, such as max-age=31536000, once the certificate is one browsers trust (#226)
+      OMS_HSTS: "${OMS_HSTS:-}"
     mem_limit: 128m
     pids_limit: 64
     # The image's health check, repeated: podman builds OCI images by default, and they don't keep one (#158)
     healthcheck:
-      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "--max-time", "2", "http://127.0.0.1:3000/"]
+      test: ["CMD", "curl", "-fsk", "-o", "/dev/null", "--max-time", "2", "https://127.0.0.1:3000/"]
       interval: 10s
       timeout: 3s
       retries: 3

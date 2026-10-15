@@ -147,6 +147,9 @@ The log goes to `exchange.log` in the working directory. The environment variabl
 cd docker
 cp .env.example .env        # Set PostgreSQL credentials
 sed -i "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$(openssl rand -hex 32)/" .env   # The access token (#146)
+mkdir -p certs && openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -keyout certs/tls.key -out certs/tls.crt \
+    && chmod 0640 certs/tls.key   # A self-signed TLS certificate (#226)
 docker compose up --build -d
 ```
 
@@ -158,9 +161,9 @@ This starts 3 services:
 |---------|-----------|-------------|
 | `oms-db` | none (5432 in the stack) | PostgreSQL 16 (Alpine) with schema initialization |
 | `oms-server` | none (8080 in the stack) | C++ OrderProcessor WebSocket server |
-| `oms-frontend` | 3000 | React UI served by nginx, proxies `/ws` to server |
+| `oms-frontend` | 3000 | React UI served by nginx over TLS, proxies `/ws` to server |
 
-Open **http://localhost:3000** to access the OMS frontend. It asks for the access token, the `OMS_WS_TOKEN` in `docker/.env`. The stack serves plain HTTP, so the token crosses the network in the clear: TLS is #226. [docker/README.md](docker/README.md#access) has the details.
+Open **https://localhost:3000** to access the OMS frontend, and accept the self-signed certificate the browser warns about. The app asks for the access token, the `OMS_WS_TOKEN` in `docker/.env`. nginx serves the app and its WebSocket over TLS only (#226). [docker/README.md](docker/README.md#tls) says how to use a real certificate, and how Docker running as root needs the key's group set.
 
 ```bash
 docker compose logs -f              # Follow all logs
@@ -341,7 +344,7 @@ The server communicates with clients via JSON messages over WebSocket. All messa
 
 ### Connecting
 
-A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. When the server has an access token (#146), the client offers it too, as a second subprotocol, `oms-token.<token>`: a browser can't set a WebSocket's headers, but it can name subprotocols. The server names `oms-v1` in its answer when the client offered it, never the token's. It refuses an upgrade without the right token with 401, one whose `Origin` isn't among `--allowed-origin` and `OMS_ALLOWED_ORIGINS` (when either is set) with 403, and a request that isn't a WebSocket upgrade with 426. Anyone with the token may still do everything the protocol allows, on any account: authorization is #225.
+A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through the Docker stack, nginx serves `/ws` over TLS only, so the client opens `wss://<host>:3000/ws` (#226). When the server has an access token (#146), the client offers it too, as a second subprotocol, `oms-token.<token>`: a browser can't set a WebSocket's headers, but it can name subprotocols. The server names `oms-v1` in its answer when the client offered it, never the token's. It refuses an upgrade without the right token with 401, one whose `Origin` isn't among `--allowed-origin` and `OMS_ALLOWED_ORIGINS` (when either is set) with 403, and a request that isn't a WebSocket upgrade with 426. Anyone with the token may still do everything the protocol allows, on any account: authorization is #225.
 
 ### Server → Client
 
