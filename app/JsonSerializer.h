@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <nlohmann/json.hpp>
 #include "DataModelDef.h"
@@ -21,8 +22,12 @@ namespace App
 
 std::string serializeConnected();
 std::string serializeInstrumentList(const Store::WideParamsDataStorage *wds);
-std::string serializeAccountList(const Store::WideParamsDataStorage *wds);
-std::string serializeOrderSnapshot(const Store::OrderDataStorage *storage);
+/// Which accounts a session may see (#225); empty, every account
+using AccountFilter = std::function<bool(const SourceIdT &account)>;
+std::string serializeAccountList(const Store::WideParamsDataStorage *wds,
+                                 const AccountFilter &maySee = AccountFilter());
+std::string serializeOrderSnapshot(const Store::OrderDataStorage *storage,
+                                   const AccountFilter &maySee = AccountFilter());
 std::string serializeOrderUpdate(const OrderEntry &order);
 std::string serializeExecReport(const ExecutionEntry *exec);
 std::string serializeBookUpdate(const std::string &symbol, const BookSnapshot &snap);

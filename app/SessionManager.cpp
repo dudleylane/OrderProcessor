@@ -63,6 +63,52 @@ void SessionManager::broadcast(const std::string &json)
     }
 }
 
+void SessionManager::broadcastToAccount(const SourceIdT &account, const std::string &json)
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    std::shared_ptr<const std::string> msg; // made for the first session that gets it, and shared (#159)
+    for (auto &session : sessions_)
+    {
+        const WsIdentity *identity = session->identity();
+        if ((nullptr != identity) && !identity->mayUse(account))
+        {
+            continue;
+        }
+        if (!msg)
+        {
+            msg = std::make_shared<const std::string>(json);
+        }
+        boost::asio::post(session->executor(),
+                          [session, msg]()
+                          {
+                              session->send(msg);
+                          });
+    }
+}
+
+void SessionManager::sendToSource(const std::string &source, const std::string &json)
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    std::shared_ptr<const std::string> msg;
+    for (auto &session : sessions_)
+    {
+        const WsIdentity *identity = session->identity();
+        if ((nullptr != identity) && (identity->name != source))
+        {
+            continue;
+        }
+        if (!msg)
+        {
+            msg = std::make_shared<const std::string>(json);
+        }
+        boost::asio::post(session->executor(),
+                          [session, msg]()
+                          {
+                              session->send(msg);
+                          });
+    }
+}
+
 size_t SessionManager::sessionCount() const
 {
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);

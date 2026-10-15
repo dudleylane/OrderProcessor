@@ -73,6 +73,10 @@ find_package(spdlog REQUIRED)
 find_package(Boost 1.70 REQUIRED CONFIG)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LMDB REQUIRED IMPORTED_TARGET lmdb)
+# SHA-256 from OpenSSL's libcrypto, for the WebSocket server's token hashes (#225)
+if(BUILD_APP OR BUILD_TESTS OR BUILD_BENCHMARKS)
+    find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+endif()
 
 option(BUILD_PG "Build with PostgreSQL write-behind (requires libpqxx)" OFF)
 if(BUILD_PG)
@@ -141,6 +145,7 @@ if(BUILD_TESTS)
             GTest::gtest
             GTest::gmock
             nlohmann_json::nlohmann_json
+            OpenSSL::Crypto
     )
 
     if(BUILD_FIX)
@@ -186,6 +191,7 @@ if(BUILD_BENCHMARKS)
             benchmark::benchmark
             benchmark::benchmark_main
             nlohmann_json::nlohmann_json
+            OpenSSL::Crypto
     )
 
     if(BUILD_FIX)
@@ -199,7 +205,7 @@ if(BUILD_APP)
     add_subdirectory(app)
     op_warnings(orderProcessorServer)
     target_link_libraries(orderProcessorServer PRIVATE
-        orderEngine nlohmann_json::nlohmann_json pthread)
+        orderEngine nlohmann_json::nlohmann_json OpenSSL::Crypto pthread)
 
     if(BUILD_FIX)
         target_link_libraries(orderProcessorServer PRIVATE quickfix::quickfix OpenSSL::Crypto)

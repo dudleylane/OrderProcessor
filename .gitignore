@@ -52,6 +52,8 @@ docker/.env
 # The FIX credentials a deployment mounts (#147)
 docker/fix-credentials
 docker/certs/
+# WebSocket identities (#225): per deployment, like the certificate
+docker/ws-credentials
 build-*/
 
 # Python bytecode, should a script import a module without sys.dont_write_bytecode
