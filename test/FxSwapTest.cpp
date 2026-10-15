@@ -392,7 +392,8 @@ TEST_F(FxSwapTest, SwapCodecReadsTheFarLegWhateverTheVersion)
 {
     // Every format version has a swap's far leg, and decode reads it by content. Records were once stored under the
     // storage's own version, 0 on an order's first write, and decode read the far leg only from version 1 on, so a swap
-    // written once lost it (#144). Since #172 the far leg follows the execution instructions, in format version 1.
+    // written once lost it (#144). Since #172 the far leg follows the execution instructions, in format version 1, and
+    // since #223 the stop's mark too, in version 2.
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
@@ -409,13 +410,17 @@ TEST_F(FxSwapTest, SwapCodecReadsTheFarLegWhateverTheVersion)
     COP::Codec::OrderCodec codec;
     codec.encode(*saved, &buf, &id, &version);
 
-    // Format version 1, as encode() writes it; and version 0, the same record without the execution instructions ('.'
-    // and their 4-byte mask), which come before the far leg ('.', farPrice_, '.', farSettlDate_)
+    // Format version 2, as encode() writes it; version 1, the same record without the stop's mark ('.' and a byte,
+    // #223); and version 0, without the execution instructions either ('.' and their 4-byte mask). All come before
+    // the far leg ('.', farPrice_, '.', farSettlDate_).
     const size_t farLeg = 2 + sizeof(saved->farPrice_) + sizeof(saved->farSettlDate_);
+    const size_t stopMark = 2;
     const size_t instructions = 1 + sizeof(u32);
-    ASSERT_LT(farLeg + instructions, buf.size());
-    const std::string v0 = buf.substr(0, buf.size() - farLeg - instructions) + buf.substr(buf.size() - farLeg);
-    const std::pair<u32, std::string> records[] = { { 1u, buf }, { 0u, v0 } };
+    ASSERT_LT(farLeg + stopMark + instructions, buf.size());
+    const std::string farTail = buf.substr(buf.size() - farLeg);
+    const std::string v1 = buf.substr(0, buf.size() - farLeg - stopMark) + farTail;
+    const std::string v0 = buf.substr(0, buf.size() - farLeg - stopMark - instructions) + farTail;
+    const std::pair<u32, std::string> records[] = { { 2u, buf }, { 1u, v1 }, { 0u, v0 } };
     for (const auto &[formatVersion, record] : records)
     {
         std::unique_ptr<OrderEntry> decoded(codec.decode(id, formatVersion, record.data(), record.size()));

@@ -20,6 +20,7 @@ target_sources(orderEngine
         Logger.cpp
         MatchOrderDeferedEvent.cpp
         MatchSwapOrderDeferedEvent.cpp
+        ReleaseStopDeferedEvent.cpp
         NLinkedTree.cpp
         OrderBookImpl.cpp
         OrderCodec.cpp

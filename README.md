@@ -12,6 +12,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **ACID Transactions:** Full transaction support with operation-level rollback on failure
 - **State Machine:** <!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> order states and <!-- DOC_CHECK:transition_count -->47<!-- /DOC_CHECK --> transitions, managed via Boost Meta State Machine (MSM)
 - **Order Matching:** Price-time priority matching engine with per-instrument order books
+- **Stop Orders:** `STOP` and `STOPLIMIT` orders wait in a per-instrument stop book until a trade reaches their stop price, then trade as market or limit orders
 - **Deferred Event Chaining:** Trade executions trigger cascading events (e.g., settlement)
 - **Subscription Filtering:** Selective event delivery per client via SubscrManager
 
@@ -42,6 +43,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **QuickFIX/C++ Engine:** ThreadedSocketAcceptor with thread-per-session isolation
 - **Inbound:** NewOrderSingle (35=D), OrderCancelRequest (35=F), OrderCancelReplaceRequest (35=G), and NewOrderMultileg (35=AB) for FX swaps
 - **FX Swaps:** a NewOrderSingle with OrdType G carries the near leg's SettlDate (64), and the far leg's price (6500) and settlement date (6501); a NewOrderMultileg carries both legs, each with its LegSettlDate (588). Each date is a LocalMktDate, `YYYYMMDD`, which the server takes as midnight UTC of that day, as the frontend sends a WebSocket swap's dates, and a swap's ExecutionReports give each leg's LegSettlDate the same way (#198). A side's two reports for one fill, its near leg's and its far leg's, carry the same TradeLinkID (820), drawn for that fill and that side, so a client can pair them (#199). A date that isn't one, such as `-5` or one with no such day, is refused before anything is stored, with an ExecutionReport (150=8, 39=8, 103=0) whose Text (58) names the field (#190). The gateway used to read and write these dates as the engine's milliseconds
+- **Stop Orders (#223):** a NewOrderSingle with OrdType 3 (stop) or 4 (stop limit) carries its stop price in StopPx (99), and a stop limit's limit in Price (44). One without a StopPx, or with one no order trades at, is refused before anything is stored, with an ExecutionReport (150=8, 39=8, 103=0) whose Text (58) says why. The engine holds a stop order until a trade reaches its stop price
 - **Outbound:** ExecutionReport (35=8), OrderCancelReject (35=9). A rejected order's ExecutionReport (150=8, 39=8) carries OrdRejReason 103=0 (broker / exchange option) and the engine's reason in Text (58)
 - **Gateway Refusals:** an order the gateway refuses before the engine sees it is answered to its sender alone, with such an ExecutionReport. OrdRejReason is 1 for an unknown symbol, 11 for a NewOrderMultileg that isn't a two-leg FX swap (#189), 13 for a quantity (#145), and 15 for an account the session may not trade (#147). Before #189 an unknown symbol on a NewOrderSingle got no answer, and a NewOrderMultileg's refusals went to every session logged on, as BusinessMessageRejects naming no order
 - **ClOrdIDs per Session:** a ClOrdID belongs to the FIX session that sent it, as FIX scopes it. Two sessions may use the same ClOrdID, and a cancel or replace finds only the requesting session's own orders: one that names another session's ClOrdID is answered as an unknown order (102=1). The server stores a FIX order's ClOrdID with its session, as `FIX:<SenderCompID>-><TargetCompID>|<ClOrdID>`, and that is the `clOrderId` WebSocket clients see and send back; FIX messages carry the client's own. Orders stored before this keep their ClOrdID alone, and their own session can still cancel or replace them
@@ -336,7 +338,7 @@ reaches LMDB.
 | **Processor** | Central event handler and coordinator |
 | **OrderStateMachine** | Boost MSM-based order lifecycle (14 states, 47+ transitions) |
 | **OrderMatcher** | Price-time priority matching engine |
-| **OrderBook** | Price-sorted buy/sell order sides per instrument |
+| **OrderBook** | Price-sorted buy/sell order sides per instrument, and its held stop orders |
 | **TransactionManager** | ACID transaction coordination with dependency tree |
 | **TransactionScopePool** | Lock-free CAS object pool for zero-allocation hot path |
 | **TaskManager** | oneTBB-based parallel task scheduling with CPU pinning |
@@ -395,7 +397,7 @@ A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through
 
 | Type | Payload | Description |
 |------|---------|-------------|
-| `new_order` | `NewOrderRequest` | Submit a new order. `side`, `ordType`, `tif`, `currency` and `capacity` are required, and must be values the server knows: an order without one gets an `error`, and nothing is stored (#166). `orderQty` is required too, a whole number from 1 (#187), and a `LIMIT` or `STOPLIMIT` order's `price` above 0 (#188) |
+| `new_order` | `NewOrderRequest` | Submit a new order. `side`, `ordType`, `tif`, `currency` and `capacity` are required, and must be values the server knows: an order without one gets an `error`, and nothing is stored (#166). `orderQty` is required too, a whole number from 1 (#187), a `LIMIT` or `STOPLIMIT` order's `price` above 0 (#188), and a `STOP` or `STOPLIMIT` order's `stopPx` above 0 (#223) |
 | `new_swap_order` | `NewSwapOrderRequest` | Submit an FX swap: `symbol`, `side`, `orderQty`, `nearPrice`, `farPrice`, and `settlDate` and `farSettlDate` in ms since the epoch, the far one after the near one; `account`, `currency`, `capacity` and `tif` (GTC unless given) as for a new order. `side`, `currency` and `capacity` are required, and they and a `tif` must be values the server knows: a swap without one gets an `error`, and nothing is stored (#166). `orderQty` is required too, a whole number from 1 (#187) |
 | `cancel_order` | `{orderId, clOrderId?}` | Cancel an existing order: answered with a `CANCELED` execution report, or a `cancel_reject`. With `clOrderId`, that names the order and `orderId` must match it. Without, `orderId` does; a number more than one order has (possible only in a data directory written before order numbers continued across restarts) gets an `error` asking for `clOrderId` |
 | `replace_order` | `{orderId, clOrderId?, price?, orderQty?, tif?}` | Replace an existing order with one that has the given changes (an `orderQty` given must be from 1, #187, and a `price` above 0, #188): answered with two `REPLACE` execution reports, the original's (`REPLACED`) and the replacement's (`NEW`, or `PARTIAL_FILL` when the original has fills), whose new `orderId` names the original in `origOrderId`. A refused replace gets a `REJECT` report with `orderId` 0 saying why. `clOrderId` names the order as for `cancel_order`; a replace that changes nothing, or gives a `tif` the server doesn't know, gets an `error` |
@@ -404,11 +406,19 @@ A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through
 
 A client's message may be at most <!-- DOC_CHECK:ws_max_client_message_kib -->64<!-- /DOC_CHECK --> KiB; a larger one ends its session. What the server holds for clients is bounded too: `--max-connections` clients, and up to `--max-session-queue-mb` waiting for each.
 
+A `STOP` or `STOPLIMIT` order is held until a trade in its instrument reaches its `stopPx`: a trade at or above it for a buy, at or below it for a sell (#223).
+- **While held,** the order is `NEW`, and it is in neither side of the book, so `book_update` doesn't show it. A cancel, replace or suspend works on it as on any order.
+- **Released,** a `STOP` trades as a market order, and what it can't trade is canceled. A `STOPLIMIT` trades at its `price` and rests with what is left. Either way the order's `stopTriggered` becomes true.
+- **Swaps:** a swap's trades release no stop. A swap trades only with a swap (#212), at its own near and far prices, so its trades aren't the instrument's market.
+- **Order:** an order's whole sweep comes first. The stops its trades reach are released after it: buy stops from the lowest `stopPx`, sell stops from the highest, and stops at one `stopPx` in the order they arrived. A released order's own trades can release more.
+- **Restarts:** only a trade reaches a stop, and no trade price survives a restart, so a held stop then waits for the next trade (#237).
+- **Reports:** the release sends none (#236). A released `STOP` is reported when it trades or is canceled. A `STOPLIMIT` released with nothing to trade shows `stopTriggered` only with its next report or in `order_snapshot`.
+
 Every order clears through the server's clearing firm (`--clearing-firm`), and an order with no `account` goes to the server's default account (`--default-account`). `seedData` seeds both. If either is missing from the data directory, the server logs a warning at startup and answers each order that needs it with an `error` message.
 
 ### Key Data Types
 
-**Order** — 20+ fields including: `orderId`, `clOrderId`, `symbol`, `side`, `ordType`, `price`, `stopPx`, `avgPx`, `orderQty`, `cumQty`, `leavesQty`, `status`, `tif`, `capacity`, `currency`, `account`, `creationTime`, `lastUpdateTime`, and on an FX swap `settlDate`, `farPrice` and `farSettlDate`.
+**Order** — 20+ fields including: `orderId`, `clOrderId`, `symbol`, `side`, `ordType`, `price`, `stopPx`, `stopTriggered`, `avgPx`, `orderQty`, `cumQty`, `leavesQty`, `status`, `tif`, `capacity`, `currency`, `account`, `creationTime`, `lastUpdateTime`, and on an FX swap `settlDate`, `farPrice` and `farSettlDate`.
 
 **ExecutionReport** — Base fields: `execId`, `orderId`, `type`, `orderStatus`, `market`, `transactTime`. Type-specific fields: `lastQty`/`lastPx` (trade), `rejectReason` (reject, and a rejected replace), `origOrderId` (replace/correct), `execRefId` (trade cancel/correct), and `execLegType` (`NEAR` or `FAR`) on an FX swap's fill, which is reported once per leg. An order cancel carries only the base fields. A report with `orderId` 0 is for an order the server refused without storing it, such as one whose ClOrdID is already in use; `rejectReason` says why.
 

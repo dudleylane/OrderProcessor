@@ -240,6 +240,22 @@ public:
     /// Set while the transaction that books a newly stored order or replacement is not yet enqueued, so that a cancel
     /// or replace of the order waits for it (#83). Store::PublishGuard sets and clears it; a copy starts clear.
     std::atomic<bool> bookingPending_{ false };
+    /// Waits until the transaction that books the order is enqueued, if it is not yet (#83). Anything that finds the
+    /// order and enqueues a transaction about it calls this first.
+    ///
+    /// A new order or replacement can be found from the moment it is stored, a little before its creator enqueues the
+    /// transaction that matches and books it. A transaction about the order enqueued in that gap would get the lower id
+    /// and run first: a cancel would be decided before the order was booked, and the booking transaction would then
+    /// match an order with nothing left. TransactionMgr::addTransaction() draws a transaction's id under its lock, and
+    /// the creator clears the mark (release) only after that call returns, so a caller that sees the mark clear
+    /// (acquire) and then enqueues draws a higher id. No caller waits here while holding a lock, and the creator never
+    /// waits for an event handler or a transaction, so this cannot deadlock. The wait is short: the gap holds no I/O,
+    /// only the rest of the creator's state machine run and the enqueue.
+    void waitUntilBookingEnqueued() const noexcept;
+    /// A stop order's stop was reached: a trade in its instrument reached its stop price, and the order was released,
+    /// a STOP to trade as a market order and a STOPLIMIT as a limit order (#223). Until then the order is held in its
+    /// instrument's stop book. Persisted (OrderCodec format version 2).
+    bool stopTriggered_ = false;
 
     // --- Warm fields (accessed during processing) ---
     PriceT stopPx_;
@@ -279,6 +295,28 @@ public:
 
     void applyTrade(const TradeExecEntry *trade);
     void addExecution(const IdT &execId);
+
+    /// Where a working order rests (#223): in its instrument's price book, in its stop book, or in neither
+    enum class Book
+    {
+        NONE,  // a market order, or a stop order released as one: matched once, never rested
+        PRICE, // a limit order, or a stop limit order released as one
+        STOP   // a stop or stop limit order whose stop hasn't been reached
+    };
+    /// A stop or stop limit order whose stop hasn't been reached, held until a trade reaches it (#223)
+    bool heldStop() const noexcept
+    {
+        return ((STOP_ORDERTYPE == ordType_) || (STOPLIMIT_ORDERTYPE == ordType_)) && !stopTriggered_;
+    }
+    /// Matched as a market order: a market order, or a stop order its stop released (#223)
+    bool marketLike() const noexcept
+    {
+        return (MARKET_ORDERTYPE == ordType_) || ((STOP_ORDERTYPE == ordType_) && stopTriggered_);
+    }
+    Book book() const noexcept
+    {
+        return heldStop() ? Book::STOP : (marketLike() ? Book::NONE : Book::PRICE);
+    }
 
 private:
     const OrderParams &operator=(const OrderParams &);
@@ -337,6 +375,17 @@ public:
     virtual IdT getTop(const SourceIdT &instrument, const Side &side) const = 0;
 
     virtual void restore(const OrderEntry &order) = 0;
+
+    /// The stop book (#223): stop and stop limit orders held until a trade in their instrument reaches their stop
+    /// price. A held order is in neither side of the price book, so it is neither matched nor shown.
+    virtual void addStop(const OrderEntry &order) = 0;
+    virtual void removeStop(const OrderEntry &order) = 0;
+    /// Whether the instrument holds a stop: a trade asks this first, and an instrument that holds none takes no lock
+    virtual bool holdsStops(const SourceIdT &instrument) const = 0;
+    /// The held stops a trade at lastPx in the instrument reaches, in the order they are to be released: buy stops whose
+    /// stop price is at or below lastPx, from the lowest, then sell stops at or above it, from the highest, each price's
+    /// in arrival order. They stay held: the release takes them out.
+    virtual void triggeredStops(const SourceIdT &instrument, PriceT lastPx, OrdersT *result) const = 0;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////

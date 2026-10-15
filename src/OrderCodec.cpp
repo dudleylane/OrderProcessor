@@ -238,8 +238,12 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
     const u32 instructions = instructionMask(val.execInstruct_);
     memcpy(typebuf, &instructions, sizeof(instructions));
     buf->append(typebuf, sizeof(instructions));
+    buf->append(1, '.');
 
-    // A swap's far leg (#144), after the execution instructions
+    // Format version 2 (#223)
+    buf->append(1, val.stopTriggered_ ? '\x01' : '\x00');
+
+    // A swap's far leg (#144), after the execution instructions and the stop's mark (#223)
     if (FXSWAP_ORDERTYPE == val.ordType_)
     {
         buf->append(1, '.');
@@ -412,8 +416,14 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     const u32 instructions = instructionMask(val.execInstruct_);
     memcpy(p, &instructions, sizeof(instructions));
     p += sizeof(instructions);
+    *p = '.';
+    ++p;
 
-    // A swap's far leg (#144), after the execution instructions
+    // Format version 2 (#223)
+    *p = val.stopTriggered_ ? '\x01' : '\x00';
+    ++p;
+
+    // A swap's far leg (#144), after the execution instructions and the stop's mark (#223)
     if (FXSWAP_ORDERTYPE == val.ordType_)
     {
         *p = '.';
@@ -672,13 +682,32 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
         p += sizeof(instructions);
         val->execInstruct_ = instructionsFromMask(instructions);
     }
+    // Format version 2 (#223): whether a stop order's stop was reached. Not reached from an older version, said here
+    // rather than left to the field's initialiser: a stop order from before #223 is held, where a released STOP would
+    // trade at once as a market order.
+    val->stopTriggered_ = false;
+    if (2 <= formatVersion)
+    {
+        p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after execInstruct_!");
+        if (end == p)
+        {
+            throw std::runtime_error(
+                "Invalid format of the encoded OrderEntry - size less than required, unable decode stopTriggered_!");
+        }
+        if ((0 != *p) && (1 != *p))
+        {
+            throw std::runtime_error("Invalid format of the encoded OrderEntry - stopTriggered_ is neither 0 nor 1!");
+        }
+        val->stopTriggered_ = (1 == *p);
+        ++p;
+    }
 
-    // A swap's far leg follows its own '.' marker, after the execution instructions in format version 1 (#172), and
-    // every other record ends here. Decide by content, not by version: every format version has the far leg, and when
-    // swaps came in, the dispatcher stored a record under the storage's own write counter, not the version encode()
-    // returned, so a swap written once came back as version 0 (#144). The content is the order's type: encode() has
-    // written the far leg for every swap and for nothing else since swaps came in (e297f98), so a swap's record
-    // without one is cut short, and is refused rather than restored with a far leg of 0 (#149).
+    // A swap's far leg follows its own '.' marker, after format version 1's execution instructions (#172) and version
+    // 2's stop mark (#223), and every other record ends here. Decide by content, not by version: every format version
+    // has the far leg, and when swaps came in, the dispatcher stored a record under the storage's own write counter,
+    // not the version encode() returned, so a swap written once came back as version 0 (#144). The content is the
+    // order's type: encode() has written the far leg for every swap and for nothing else since swaps came in (e297f98),
+    // so a swap's record without one is cut short, and is refused rather than restored with a far leg of 0 (#149).
     if (FXSWAP_ORDERTYPE == val->ordType_)
     {
         p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' before farPrice_!");

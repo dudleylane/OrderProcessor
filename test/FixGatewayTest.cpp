@@ -910,6 +910,55 @@ TEST_F(FixGatewayInboundTest, NewOrderSingle_LimitPriceNoOrderTradesAt_IsNotQueu
     }
 }
 
+TEST_F(FixGatewayInboundTest, NewOrderSingle_StopOrdersCarryTheirStopPx)
+{
+    // A stop order's StopPx (99) is its stop price (#223), for a STOP and for a STOP_LIMIT, whose Price (44) is its limit
+    std::vector<OrderEntry *> captured;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .Times(2)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                captured.push_back(evt.order_);
+            }));
+    auto stop = makeNewOrderSingle("STP-1", "aaa", FIX::Side_SELL, FIX::OrdType_STOP, 0.0, 100);
+    stop.removeField(FIX::FIELD::Price);
+    stop.set(FIX::StopPx(9.5));
+    gateway_->onMessage(stop, TEST_SID);
+    auto stopLimit = makeNewOrderSingle("STL-1", "aaa", FIX::Side_BUY, FIX::OrdType_STOP_LIMIT, 10.5, 100);
+    stopLimit.set(FIX::StopPx(10.0));
+    gateway_->onMessage(stopLimit, TEST_SID);
+
+    ASSERT_EQ(2u, captured.size());
+    EXPECT_EQ(STOP_ORDERTYPE, captured[0]->ordType_);
+    EXPECT_DOUBLE_EQ(9.5, captured[0]->stopPx_);
+    EXPECT_EQ(STOPLIMIT_ORDERTYPE, captured[1]->ordType_);
+    EXPECT_DOUBLE_EQ(10.0, captured[1]->stopPx_);
+    EXPECT_DOUBLE_EQ(10.5, captured[1]->price_);
+    for (OrderEntry *order : captured)
+    {
+        delete order;
+    }
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderSingle_StopOrderWithoutAStopPxNoOrderTradesAt_IsNotQueued)
+{
+    // The gateway never read StopPx before #223's pick, so a FIX stop order reached the engine without a stop price, which
+    // it now refuses. The gateway refuses it first, to its sender, as it does a Price (44) no order trades at (#145).
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    auto none = makeNewOrderSingle("STP-NONE", "aaa", FIX::Side_SELL, FIX::OrdType_STOP, 0.0, 100);
+    none.removeField(FIX::FIELD::Price);
+    gateway_->onMessage(none, TEST_SID);
+    int n = 0;
+    for (const std::string &stopPx : BAD_PRICES)
+    {
+        auto msg =
+            makeNewOrderSingle("STP-" + std::to_string(++n), "aaa", FIX::Side_SELL, FIX::OrdType_STOP_LIMIT, 9.0, 100);
+        msg.setField(FIX::FIELD::StopPx, stopPx);
+        gateway_->onMessage(msg, TEST_SID);
+    }
+}
+
 TEST_F(FixGatewayInboundTest, NewOrderSingle_MarketOrderWithPriceZero_IsQueued)
 {
     // A market order trades at no price of its own, so a Price (44) of 0 on one is still taken

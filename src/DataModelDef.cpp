@@ -12,6 +12,7 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <thread>
 #include "DataModelDef.h"
 #include "ExchUtils.h"
 
@@ -213,10 +214,11 @@ OrderParams::OrderParams(const SourceIdT &dest, const SourceIdT &instrument, con
 OrderParams::OrderParams(const OrderParams &ord)
     : entryMutex_(), orderId_(ord.orderId_), origOrderId_(ord.origOrderId_), price_(ord.price_), status_(ord.status_),
       side_(ord.side_), ordType_(ord.ordType_), leavesQty_(ord.leavesQty_), cumQty_(ord.cumQty_),
-      orderQty_(ord.orderQty_), tif_(ord.tif_), stopPx_(ord.stopPx_), avgPx_(ord.avgPx_), dayAvgPx_(ord.dayAvgPx_),
-      creationTime_(ord.creationTime_), lastUpdateTime_(ord.lastUpdateTime_), expireTime_(ord.expireTime_),
-      settlDate_(ord.settlDate_), settlType_(ord.settlType_), capacity_(ord.capacity_), currency_(ord.currency_),
-      minQty_(ord.minQty_), dayOrderQty_(ord.dayOrderQty_), dayCumQty_(ord.dayCumQty_), farPrice_(ord.farPrice_),
+      orderQty_(ord.orderQty_), tif_(ord.tif_), stopTriggered_(ord.stopTriggered_), stopPx_(ord.stopPx_),
+      avgPx_(ord.avgPx_), dayAvgPx_(ord.dayAvgPx_), creationTime_(ord.creationTime_),
+      lastUpdateTime_(ord.lastUpdateTime_), expireTime_(ord.expireTime_), settlDate_(ord.settlDate_),
+      settlType_(ord.settlType_), capacity_(ord.capacity_), currency_(ord.currency_), minQty_(ord.minQty_),
+      dayOrderQty_(ord.dayOrderQty_), dayCumQty_(ord.dayCumQty_), farPrice_(ord.farPrice_),
       farSettlDate_(ord.farSettlDate_), instrument_(ord.instrument_), account_(ord.account_), clearing_(ord.clearing_),
       destination_(ord.destination_), execInstruct_(ord.execInstruct_), clOrderId_(ord.clOrderId_),
       origClOrderId_(ord.origClOrderId_), source_(ord.source_), executions_(ord.executions_)
@@ -237,6 +239,14 @@ void OrderParams::applyTrade(const TradeExecEntry *trade)
     cumQty_ += trade->lastQty_;
 
     executions_.get()->push_back(EventData(trade->execId_));
+}
+
+void OrderParams::waitUntilBookingEnqueued() const noexcept
+{
+    while (bookingPending_.load(std::memory_order_acquire))
+    {
+        std::this_thread::yield();
+    }
 }
 
 void OrderParams::addExecution(const IdT &execId)
@@ -262,11 +272,11 @@ bool OrderEntry::compare(const OrderEntry &val) const
            (val.execInstruct_ == execInstruct_) && (val.creationTime_ == creationTime_) &&
            (val.lastUpdateTime_ == lastUpdateTime_) && (val.expireTime_ == expireTime_) &&
            (val.settlDate_ == settlDate_) && (val.price_ == price_) && (val.stopPx_ == stopPx_) &&
-           (val.avgPx_ == avgPx_) && (val.dayAvgPx_ == dayAvgPx_) && (val.status_ == status_) && (val.side_ == side_) &&
-           (val.ordType_ == ordType_) && (val.tif_ == tif_) && (val.settlType_ == settlType_) &&
-           (val.capacity_ == capacity_) && (val.currency_ == currency_) && (val.minQty_ == minQty_) &&
-           (val.orderQty_ == orderQty_) && (val.leavesQty_ == leavesQty_) && (val.cumQty_ == cumQty_) &&
-           (val.dayOrderQty_ == dayOrderQty_) && (val.dayCumQty_ == dayCumQty_) &&
+           (val.stopTriggered_ == stopTriggered_) && (val.avgPx_ == avgPx_) && (val.dayAvgPx_ == dayAvgPx_) &&
+           (val.status_ == status_) && (val.side_ == side_) && (val.ordType_ == ordType_) && (val.tif_ == tif_) &&
+           (val.settlType_ == settlType_) && (val.capacity_ == capacity_) && (val.currency_ == currency_) &&
+           (val.minQty_ == minQty_) && (val.orderQty_ == orderQty_) && (val.leavesQty_ == leavesQty_) &&
+           (val.cumQty_ == cumQty_) && (val.dayOrderQty_ == dayOrderQty_) && (val.dayCumQty_ == dayCumQty_) &&
            (val.clOrderId_.getId() == clOrderId_.getId()) && (val.origClOrderId_.getId() == origClOrderId_.getId()) &&
            (val.source_.getId() == source_.getId()) && (val.orderId_ == orderId_) &&
            (val.origOrderId_ == origOrderId_) && (val.executions_.getId() == executions_.getId()) &&
@@ -372,6 +382,13 @@ bool OrderEntry::isValid(std::string *invalid) const
         if (((LIMIT_ORDERTYPE == ordType_) || (STOPLIMIT_ORDERTYPE == ordType_)) && !(price_ > 0))
         {
             *invalid = "Invalid value of the order price!";
+            return false;
+        }
+        // A stop price above 0 (#223): it is what releases the order, and a buy stop at 0 was released by any trade.
+        // Written so that a NaN is refused as well.
+        if (((STOP_ORDERTYPE == ordType_) || (STOPLIMIT_ORDERTYPE == ordType_)) && !(stopPx_ > 0))
+        {
+            *invalid = "Invalid value of the order stop price!";
             return false;
         }
         if (FXSWAP_ORDERTYPE == ordType_)

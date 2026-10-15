@@ -12,6 +12,7 @@
 
 #include <stdexcept>
 #include <cassert>
+#include <set>
 #include <thread>
 #include <utility>
 #include "Processor.h"
@@ -60,6 +61,9 @@ struct ProcessorThreadState
     std::unique_ptr<OrdState::OrderState> stateMachine;
     OrdState::OrderStatePersistence initialSMState;
     std::vector<DeferedEventBase *> events;
+    /// The held stops whose release the chain of events being processed has queued (#223): a sweep's trades can all
+    /// reach one stop, and it is released once. Cleared when the chain ends, or is thrown away.
+    std::set<IdT> stopReleases;
     /// While a deferred event executes, the guard that a replacement it stores is saved under, which keeps the
     /// replacement marked until the transaction that books it is enqueued (#83). Set by onEvent(DeferedEventBase*).
     Store::PublishGuard *deferedPublishGuard = nullptr;
@@ -96,24 +100,6 @@ public:
 private:
     Store::PublishGuard *previous_;
 };
-
-/// Waits until the transaction that books the order is enqueued, if it is not yet (#83).
-///
-/// A new order or replacement can be found from the moment it is stored, a little before its creator enqueues the
-/// transaction that matches and books it. A transaction about the order enqueued in that gap would get the lower id
-/// and run first: a cancel would be decided before the order was booked, and the booking transaction would then match
-/// an order with nothing left. TransactionMgr::addTransaction() draws a transaction's id under its lock, and the
-/// creator clears the mark (release) only after that call returns, so a caller that sees the mark clear (acquire) and
-/// then enqueues draws a higher id. No caller waits here while holding a lock, and the creator never waits for an event
-/// handler, so this cannot deadlock. The wait is short: the gap holds no I/O, only the rest of the creator's state
-/// machine run and the enqueue.
-void waitUntilBookingEnqueued(const OrderEntry &order)
-{
-    while (order.bookingPending_.load(std::memory_order_acquire))
-    {
-        std::this_thread::yield();
-    }
-}
 } // namespace
 
 Processor::Processor(void)
@@ -243,7 +229,7 @@ void Processor::onEvent(const std::string &source, const OrderCancelEvent &evnt)
     }
     [[assume(ord != nullptr)]];
     // Enqueued before the transaction that books the order, the cancel would be decided before the order was booked
-    waitUntilBookingEnqueued(*ord);
+    ord->waitUntilBookingEnqueued();
 
     // The cancel is decided on the transaction worker, by process(onExecCancel) below, once every transaction before
     // this one on the order or its instrument has run, together with the fills it caused. Decided here, it could
@@ -286,7 +272,7 @@ void Processor::onEvent(const std::string &source, const OrderReplaceEvent &evnt
     }
     [[assume(original != nullptr)]];
     // Enqueued before the transaction that books the original, the replace would be decided before it was booked
-    waitUntilBookingEnqueued(*original);
+    original->waitUntilBookingEnqueued();
 
     // The queue frees the event's replacement after dispatch, so the operation keeps a copy
     PooledTransactionScope scope(scopePool_.get());
@@ -440,7 +426,7 @@ void Processor::enqueueStateChange(const IdT &id, OrderStateChange change, const
         throw std::runtime_error(std::string(caller) + ": unable to locate order!");
     }
     // Enqueued before the transaction that books the order, the change would be decided before the order was booked
-    waitUntilBookingEnqueued(*ord);
+    ord->waitUntilBookingEnqueued();
 
     // The change is decided on the transaction worker, by process(OrderStateChange) below, once every transaction
     // before this one on the order or its instrument has run, together with the fills it caused, as a cancel is (#73).
@@ -556,9 +542,11 @@ void Processor::processDeferedEvent()
             {
                 delete *it;
             }
+            threadState().stopReleases.clear();
             throw;
         }
     }
+    threadState().stopReleases.clear(); // the chain is done: its releases are queued (#223)
 }
 
 void Processor::process(onTradeExecution &evnt, OrderEntry *order, const ACID::Context & /*cnxt*/)
@@ -719,11 +707,16 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
         evnt.transaction_->addOperation(op);
     };
 
-    // A market replacement needs an order to trade with. Asked before the original's lock is taken: a matcher can hold
-    // the book's lock while it waits on the original (#74).
+    // A released stop's replacement, if it is a stop order too, stays released: its stop was reached (#223). Read
+    // without the original's lock: the release that sets it is a transaction on the original, and they run one at a
+    // time, so nothing changes it while this one runs.
+    replacement.stopTriggered_ = original->stopTriggered_ && ((STOP_ORDERTYPE == replacement.ordType_) ||
+                                                              (STOPLIMIT_ORDERTYPE == replacement.ordType_));
+    // A market replacement, or a released stop's, needs an order to trade with. Asked before the original's lock is
+    // taken: a matcher can hold the book's lock while it waits on the original (#74).
     const Side opposite = (BUY_SIDE == replacement.side_) ? SELL_SIDE : BUY_SIDE;
-    const bool noMarket = (MARKET_ORDERTYPE == replacement.ordType_) &&
-                          !orderBook_->getTop(replacement.instrument_.getId(), opposite).isValid();
+    const bool noMarket =
+        replacement.marketLike() && !orderBook_->getTop(replacement.instrument_.getId(), opposite).isValid();
 
     // write lock on the original for the decision and its state machine
     oneapi::tbb::spin_rw_mutex::scoped_lock origLock(original->entryMutex_, true);
@@ -879,16 +872,17 @@ void Processor::matchRestored(OrderEntry *order)
         throw std::runtime_error("Processor::matchRestored: events queue is not empty!");
     }
     // The operations OrdStateImpl::processReceive gave the transaction that booked the order, run here, on the caller's
-    // thread, as process() runs a transaction: the order is matched, then booked unless it is a market order. Not
+    // thread, as process() runs a transaction: the order is matched, then booked if it rests in the price book. Not
     // through the transaction manager, which orders a transaction only after those that share an object with it: a
     // market order's relates to no other order on its instrument (#209), and each order matched here must see the
-    // fills of the one before it.
+    // fills of the one before it. The release of a held stop that a trade here reaches is a transaction, matched on a
+    // transaction worker, so the caller waits for the manager to finish before it matches the next order (#223).
     TransactionScope scope;
     {
         ScopeArenaGuard arenaGuard(&scope);
         std::unique_ptr<Operation> match(new MatchOrderTrOperation(order));
         scope.addOperation(match);
-        if (MARKET_ORDERTYPE != order->ordType_)
+        if (OrderParams::Book::PRICE == order->book())
         {
             std::unique_ptr<Operation> book(new AddToOrderBookTrOperation(*order, order->instrument_.getId()));
             scope.addOperation(book);
@@ -920,6 +914,12 @@ void Processor::clearDeferedEvents()
         delete *it;
     }
     threadState().events.clear();
+    threadState().stopReleases.clear();
+}
+
+bool Processor::claimStopRelease(const IdT &order)
+{
+    return threadState().stopReleases.insert(order).second;
 }
 
 void Processor::rejectUnstoredOrder(const std::string &source, const OrderEntry &order, bool replacement)

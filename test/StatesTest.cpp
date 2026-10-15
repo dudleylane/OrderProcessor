@@ -326,6 +326,63 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_LimitPriceNotAboveZero)
     }
 }
 
+TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_StopPriceNotAboveZero)
+{
+    // A stop order's stop price releases it: at 0 a buy stop was released by any trade (#223)
+    for (const OrderType type : { STOP_ORDERTYPE, STOPLIMIT_ORDERTYPE })
+    {
+        for (const PriceT stopPx : { 0.0, -1.5 })
+        {
+            SCOPED_TRACE(std::to_string(type) + " " + std::to_string(stopPx));
+            TestTransactionContext trCntxt;
+            OrderStateWrapper p;
+            std::unique_ptr<OrderEntry> order(createCorrectOrder());
+            assignClOrderId(order.get());
+
+            p.start();
+            onOrderReceived recvevnt;
+            recvevnt.order_ = order.get();
+            recvevnt.generator_ = IdTGenerator::instance();
+            recvevnt.transaction_ = &trCntxt;
+            recvevnt.orderStorage_ = OrderStorage::instance();
+            recvevnt.order_->ordType_ = type;
+            recvevnt.order_->stopPx_ = stopPx;
+
+            p.processEvent(recvevnt);
+            p.checkStates("Rejected", "NoCnlReplace");
+            EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
+        }
+    }
+}
+
+TEST_F(StatesTest, RcvdNew2New_OnOrderReceived_AStopOrderIsHeld)
+{
+    // A stop order is held in its instrument's stop book, not matched and not booked (#223)
+    for (const OrderType type : { STOP_ORDERTYPE, STOPLIMIT_ORDERTYPE })
+    {
+        SCOPED_TRACE(std::to_string(type));
+        TestTransactionContext trCntxt;
+        OrderStateWrapper p;
+        std::unique_ptr<OrderEntry> order(createCorrectOrder());
+        assignClOrderId(order.get());
+
+        p.start();
+        onOrderReceived recvevnt;
+        recvevnt.order_ = order.get();
+        recvevnt.generator_ = IdTGenerator::instance();
+        recvevnt.transaction_ = &trCntxt;
+        recvevnt.orderStorage_ = OrderStorage::instance();
+        recvevnt.order_->ordType_ = type;
+        recvevnt.order_->stopPx_ = 9.5;
+
+        p.processEvent(recvevnt);
+        p.checkStates("New", "NoCnlReplace");
+        EXPECT_TRUE(trCntxt.isOperationEnqueued(ADD_STOPBOOK_TROPERATION));
+        EXPECT_FALSE(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
+        EXPECT_FALSE(trCntxt.isOperationEnqueued(ADD_ORDERBOOK_TROPERATION));
+    }
+}
+
 TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_InvalidSide)
 {
     TestTransactionContext trCntxt;

@@ -58,6 +58,11 @@ public:
     MOCK_METHOD(void, findAll, (const COP::OrderFunctor &functor, OrdersT *result), (const, override));
     MOCK_METHOD(IdT, getTop, (const SourceIdT &instrument, const COP::Side &side), (const, override));
     MOCK_METHOD(void, restore, (const COP::OrderEntry &order), (override));
+    MOCK_METHOD(void, addStop, (const COP::OrderEntry &order), (override));
+    MOCK_METHOD(void, removeStop, (const COP::OrderEntry &order), (override));
+    MOCK_METHOD(bool, holdsStops, (const SourceIdT &instrument), (const, override));
+    MOCK_METHOD(void, triggeredStops, (const SourceIdT &instrument, COP::PriceT lastPx, OrdersT *result),
+                (const, override));
 };
 
 /**

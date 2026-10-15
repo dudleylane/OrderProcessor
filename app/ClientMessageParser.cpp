@@ -120,6 +120,14 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
                 {
                     markInvalid(&msg, "invalid price: a LIMIT or STOPLIMIT order needs one above 0");
                 }
+                // A stop price is required, and above 0 (#223): it releases the order, and at 0 a buy stop was released
+                // by any trade
+                const bool stop =
+                    (STOP_ORDERTYPE == msg.newOrder.ordType) || (STOPLIMIT_ORDERTYPE == msg.newOrder.ordType);
+                if (stop && !(msg.newOrder.stopPx > 0))
+                {
+                    markInvalid(&msg, "invalid stopPx: a STOP or STOPLIMIT order needs one above 0");
+                }
             }
         }
         else if (msg.type == "new_swap_order")

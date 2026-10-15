@@ -176,6 +176,11 @@ void NLinkTree::clear()
     }
 }
 
+size_t NLinkTree::size() const
+{
+    return keys_.size();
+}
+
 void NLinkTree::values(std::vector<V> *vals) const
 {
     assert(nullptr != vals);
