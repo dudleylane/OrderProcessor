@@ -71,6 +71,11 @@ static_assert((INVALID_CURRENCY == 0) && (USD_CURRENCY == 1) && (EUR_CURRENCY ==
                   (JPY_CURRENCY == 4) && (CHF_CURRENCY == 5) && (AUD_CURRENCY == 6) && (CAD_CURRENCY == 7) &&
                   (NZD_CURRENCY == 8),
               "Currency values are persisted");
+// A carried ClOrdID's type, since format version 3 (#192), is stored as RawDataCodec stores it
+static_assert(sizeof(RawDataType) == 4, "a ClOrdID's type is stored as 4 bytes");
+static_assert((INVALID_RAWDATATYPE == 0) && (STRING_RAWDATATYPE == 1) && (MESSAGE_RAWDATATYPE == 2) &&
+                  (XML_RAWDATATYPE == 3) && (BINARY_RAWDATATYPE == 4),
+              "RawDataType values are persisted");
 
 /// The execution instructions as stored: bit n set for the instruction whose value is n (#172)
 u32 instructionMask(const InstructionSetT &instructions)
@@ -100,17 +105,173 @@ InstructionSetT instructionsFromMask(u32 mask)
     }
     return instructions;
 }
+
+/// A string given for a field whose id isn't set could never be restored (#192)
+void expectCarriedIds(const OrderEntry &val, const OrderStrings &strings)
+{
+    if ((strings.clOrderId && !namesEntry(val.clOrderId_.getId())) ||
+        (strings.origClOrderId && !namesEntry(val.origClOrderId_.getId())) ||
+        (strings.source && !namesEntry(val.source_.getId())) ||
+        (strings.destination && !namesEntry(val.destination_.getId())))
+    {
+        throw std::invalid_argument("OrderCodec::encode: a string is given for an order field whose id isn't set");
+    }
+}
+
+/// Format version 3 (#192): '.', then whether the record carries the value, a byte, and then the value
+void appendRaw(std::string *buf, const std::optional<RawDataEntry> &raw)
+{
+    buf->append(1, '.');
+    buf->append(1, raw ? '\x01' : '\x00');
+    if (raw)
+    {
+        buf->append(reinterpret_cast<const char *>(&raw->type_), sizeof(raw->type_));
+        buf->append(reinterpret_cast<const char *>(&raw->length_), sizeof(raw->length_));
+        if (0 < raw->length_)
+        {
+            buf->append(raw->data_, raw->length_);
+        }
+    }
+}
+
+void appendString(std::string *buf, const std::optional<StringT> &str)
+{
+    buf->append(1, '.');
+    buf->append(1, str ? '\x01' : '\x00');
+    if (str)
+    {
+        const u32 length = static_cast<u32>(str->size());
+        buf->append(reinterpret_cast<const char *>(&length), sizeof(length));
+        buf->append(*str);
+    }
+}
+
+char *writeRaw(char *p, const std::optional<RawDataEntry> &raw)
+{
+    *p++ = '.';
+    *p++ = raw ? '\x01' : '\x00';
+    if (raw)
+    {
+        memcpy(p, &raw->type_, sizeof(raw->type_));
+        p += sizeof(raw->type_);
+        memcpy(p, &raw->length_, sizeof(raw->length_));
+        p += sizeof(raw->length_);
+        if (0 < raw->length_)
+        {
+            memcpy(p, raw->data_, raw->length_);
+            p += raw->length_;
+        }
+    }
+    return p;
+}
+
+char *writeString(char *p, const std::optional<StringT> &str)
+{
+    *p++ = '.';
+    *p++ = str ? '\x01' : '\x00';
+    if (str)
+    {
+        const u32 length = static_cast<u32>(str->size());
+        memcpy(p, &length, sizeof(length));
+        p += sizeof(length);
+        memcpy(p, str->data(), length);
+        p += length;
+    }
+    return p;
+}
+
+/// Reads '.' and whether the record carries a field's value. One carried for a field whose id isn't set is refused:
+/// nothing could restore it.
+const char *readCarried(const char *p, const char *end, const SourceIdT &fieldId, const char *field, bool *carried)
+{
+    p = skipSeparator(
+        p, end,
+        (std::string("Invalid format of the encoded OrderEntry - missed '.' before ") + field + "'s value!").c_str());
+    if (end == p)
+    {
+        throw std::runtime_error(std::string("Invalid format of the encoded OrderEntry - size less than required, "
+                                             "unable decode whether it carries ") +
+                                 field + "!");
+    }
+    if ((0 != *p) && (1 != *p))
+    {
+        throw std::runtime_error(std::string("Invalid format of the encoded OrderEntry - whether it carries ") + field +
+                                 " is neither 0 nor 1!");
+    }
+    *carried = (1 == *p);
+    if (*carried && !namesEntry(fieldId))
+    {
+        throw std::runtime_error(std::string("Invalid format of the encoded OrderEntry - it carries ") + field +
+                                 " for an unset id!");
+    }
+    return p + 1;
+}
+
+/// Refuses a record with fewer than n bytes left, before anything is read or allocated for them
+void expectBytes(const char *p, const char *end, size_t n, const char *field)
+{
+    if (static_cast<size_t>(end - p) < n)
+    {
+        throw std::runtime_error(std::string("Invalid format of the encoded OrderEntry - size less than required, "
+                                             "unable decode ") +
+                                 field + "!");
+    }
+}
+
+/// Reads n bytes into out, refusing a record that ends first
+const char *readBytes(const char *p, const char *end, size_t n, void *out, const char *field)
+{
+    expectBytes(p, end, n, field);
+    memcpy(out, p, n);
+    return p + n;
+}
+
+const char *readRaw(const char *p, const char *end, const SourceIdT &fieldId, const char *field,
+                    std::optional<RawDataEntry> *raw)
+{
+    bool carried = false;
+    p = readCarried(p, end, fieldId, field, &carried);
+    if (!carried)
+    {
+        return p;
+    }
+    RawDataType type = INVALID_RAWDATATYPE;
+    u32 length = 0;
+    p = readBytes(p, end, sizeof(type), &type, field);
+    p = readBytes(p, end, sizeof(length), &length, field);
+    expectBytes(p, end, length, field);
+    raw->emplace(type, p, length);
+    (*raw)->id_ = fieldId;
+    return p + length;
+}
+
+const char *readString(const char *p, const char *end, const SourceIdT &fieldId, const char *field,
+                       std::optional<StringT> *str)
+{
+    bool carried = false;
+    p = readCarried(p, end, fieldId, field, &carried);
+    if (!carried)
+    {
+        return p;
+    }
+    u32 length = 0;
+    p = readBytes(p, end, sizeof(length), &length, field);
+    expectBytes(p, end, length, field);
+    str->emplace(p, length);
+    return p + length;
+}
 } // namespace
 
 OrderCodec::OrderCodec(void) {}
 
 OrderCodec::~OrderCodec(void) {}
 
-void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *version)
+void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *version, const OrderStrings &strings)
 {
     assert(nullptr != buf);
     assert(nullptr != id);
     assert(nullptr != version);
+    expectCarriedIds(val, strings);
 
     *id = val.orderId_;
     // Nothing stores this version: the dispatcher keys records with the storage's own, and decode() finds the far
@@ -243,7 +404,13 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
     // Format version 2 (#223)
     buf->append(1, val.stopTriggered_ ? '\x01' : '\x00');
 
-    // A swap's far leg (#144), after the execution instructions and the stop's mark (#223)
+    // Format version 3 (#192)
+    appendRaw(buf, strings.clOrderId);
+    appendRaw(buf, strings.origClOrderId);
+    appendString(buf, strings.source);
+    appendString(buf, strings.destination);
+
+    // A swap's far leg (#144), after the execution instructions, the stop's mark (#223) and the strings (#192)
     if (FXSWAP_ORDERTYPE == val.ordType_)
     {
         buf->append(1, '.');
@@ -255,11 +422,12 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
     }
 }
 
-char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version)
+char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version, const OrderStrings &strings)
 {
     assert(nullptr != buf);
     assert(nullptr != id);
     assert(nullptr != version);
+    expectCarriedIds(val, strings);
 
     *id = val.orderId_;
     // Nothing stores this version: the dispatcher keys records with the storage's own, and decode() finds the far
@@ -423,7 +591,13 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     *p = val.stopTriggered_ ? '\x01' : '\x00';
     ++p;
 
-    // A swap's far leg (#144), after the execution instructions and the stop's mark (#223)
+    // Format version 3 (#192)
+    p = writeRaw(p, strings.clOrderId);
+    p = writeRaw(p, strings.origClOrderId);
+    p = writeString(p, strings.source);
+    p = writeString(p, strings.destination);
+
+    // A swap's far leg (#144), after the execution instructions, the stop's mark (#223) and the strings (#192)
     if (FXSWAP_ORDERTYPE == val.ordType_)
     {
         *p = '.';
@@ -439,7 +613,7 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     return p;
 }
 
-OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf, size_t size)
+OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf, size_t size, OrderStrings *strings)
 {
     assert(nullptr != buf);
     expectNotEmpty(size, "OrderEntry");
@@ -701,13 +875,27 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
         val->stopTriggered_ = (1 == *p);
         ++p;
     }
+    // Format version 3 (#192): the strings the record carries, each under its field's id
+    if (3 <= formatVersion)
+    {
+        OrderStrings carried;
+        p = readRaw(p, end, val->clOrderId_.getId(), "clOrderId_", &carried.clOrderId);
+        p = readRaw(p, end, val->origClOrderId_.getId(), "origClOrderId_", &carried.origClOrderId);
+        p = readString(p, end, val->source_.getId(), "source_", &carried.source);
+        p = readString(p, end, val->destination_.getId(), "destination_", &carried.destination);
+        if (nullptr != strings)
+        {
+            *strings = std::move(carried);
+        }
+    }
 
-    // A swap's far leg follows its own '.' marker, after format version 1's execution instructions (#172) and version
-    // 2's stop mark (#223), and every other record ends here. Decide by content, not by version: every format version
-    // has the far leg, and when swaps came in, the dispatcher stored a record under the storage's own write counter,
-    // not the version encode() returned, so a swap written once came back as version 0 (#144). The content is the
-    // order's type: encode() has written the far leg for every swap and for nothing else since swaps came in (e297f98),
-    // so a swap's record without one is cut short, and is refused rather than restored with a far leg of 0 (#149).
+    // A swap's far leg follows its own '.' marker, after format version 1's execution instructions (#172), version 2's
+    // stop mark (#223) and version 3's strings (#192), and every other record ends here. Decide by content, not by
+    // version: every format version has the far leg, and when swaps came in, the dispatcher stored a record under the
+    // storage's own write counter, not the version encode() returned, so a swap written once came back as version 0
+    // (#144). The content is the order's type: encode() has written the far leg for every swap and for nothing else
+    // since swaps came in (e297f98), so a swap's record without one is cut short, and is refused rather than restored
+    // with a far leg of 0 (#149).
     if (FXSWAP_ORDERTYPE == val->ordType_)
     {
         p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' before farPrice_!");

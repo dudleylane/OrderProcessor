@@ -99,6 +99,17 @@ public:
     /// registers an execution list under the given id and takes ownership of it; deletes val if a list
     /// with that id is already registered
     virtual void restore(const IdT &id, ExecutionsT *val) = 0;
+
+    /// The entry with this id, for an order's record to carry (#192). A store that keeps none finds none, and an order
+    /// written through it carries no strings, as before #192.
+    virtual bool find(const SourceIdT & /*id*/, StringT * /*val*/) const
+    {
+        return false;
+    }
+    virtual bool find(const SourceIdT & /*id*/, RawDataEntry * /*val*/) const
+    {
+        return false;
+    }
 };
 
 /// saves entities into the storage

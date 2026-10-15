@@ -145,6 +145,7 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `FromApp_RoutesAGenericCancelRequest` | The same for a cancel request |
 | `FromApp_UnsupportedTypeStillReachesQuickFix` | A type the gateway doesn't handle still throws UnsupportedMessageType, which QuickFIX answers |
 | `FromApp_HandlerExceptionIsContained` | A handler's exception stays in `fromApp()` and is answered with a BusinessMessageReject, rather than ending the server (#36) |
+| `NewOrdersAndAReplaceWriteNoStringRecords` (FixGatewayStringsTest) | A NewOrderSingle, an FX swap's NewOrderMultileg and a replace write no string records: their ClOrdIDs, source and destination go in the order's own record (#192) |
 | `ExecutionReport_RejectCarriesOrdRejReasonAndText` | Reject → 150=8, 39=8, OrdRejReason 103=0, the reason in Text (58) |
 | `ExecutionReport_AcknowledgementCarriesNoRejectFields` | A new order's acknowledgement → 150=0, 39=0, no 103 |
 | `ExecutionReport_CancelAckNamesTheCancelRequest` | A cancel's acknowledgement → 11 the request's ClOrdID, 41 the order's; a cancel no request asked for keeps the order's in 11 (#98) |
