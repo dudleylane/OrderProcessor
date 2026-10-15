@@ -15,7 +15,9 @@
 #include "Processor.h"
 #include "TransactionDef.h"
 #include "DataModelDef.h"
+#include "IdTGenerator.h"
 #include "OrderStorage.h"
+#include "TrOperations.h"
 
 using namespace COP;
 using namespace COP::Proc;
@@ -59,6 +61,7 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
     baseOrderParam.order_ = baseOrder_;
     baseOrderParam.lastQty_ = 0;
     baseOrderParam.lastPx_ = 0.0;
+    PriceT lastPrint = 0.0;
     for (TradesT::const_iterator it = trades_.begin(); it != trades_.end(); ++it)
     {
         assert(nullptr != it->order_);
@@ -73,6 +76,7 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
         {
             baseOrderParam.lastQty_ += it->lastQty_;
             baseOrderParam.lastPx_ += it->lastQty_ * it->lastPx_;
+            lastPrint = it->lastPx_;
         }
     }
     if (0 < baseOrderParam.lastQty_)
@@ -80,5 +84,13 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
         baseOrderParam.lastPx_ /= baseOrderParam.lastQty_;
 
         execute(func, cnxt, scope, baseOrderParam);
+
+        // The instrument's last trade, durable with the fills (#237). The id is drawn now, from the generator every order
+        // id comes from, so a held stop that arrived before this trade has a smaller one: a restart releases the stops
+        // that this price reaches and that were held when it traded, if their releases were lost.
+        assert(nullptr != cnxt.idGenerator_);
+        std::unique_ptr<Operation> lastTrade(
+            new PersistLastTradeTrOperation(baseOrder_->instrument_.getId(), lastPrint, cnxt.idGenerator_->getId()));
+        scope->addOperationFirst(lastTrade);
     }
 }

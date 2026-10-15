@@ -105,6 +105,10 @@ public:
     /// are applied before this returns, so the next order matched sees them. Call it before the server takes orders,
     /// for each of StorageRecordDispatcher::ordersToMatch() in turn. Throws if the order can't be matched or booked.
     void matchRestored(OrderEntry *order);
+    /// Releases a restored held stop that its instrument's last trade reached (#237), as that trade's release would have:
+    /// in a transaction of its own, on a transaction worker. Call it for each of StorageRecordDispatcher::stopsReached()
+    /// in turn, once the orders matchRestored() matches are done, and wait for the manager between them.
+    void releaseRestored(OrderEntry *stop);
 
 private:
     /// Enqueues a state change of the order with id, to be decided on the transaction worker (#96). caller names the

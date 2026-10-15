@@ -76,6 +76,9 @@ public:
     MOCK_METHOD(void, beginGroup, (), (override));
     MOCK_METHOD(void, commitGroup, (), (override));
     MOCK_METHOD(void, abortGroup, (), (noexcept, override));
+    MOCK_METHOD(COP::u32, saveLastTrade,
+                (const COP::SourceIdT &instrument, COP::PriceT lastPx, const COP::IdT &tradeId), (override));
+    MOCK_METHOD(void, eraseLastTrade, (const COP::SourceIdT &instrument, COP::u32 version), (override));
 };
 
 /**

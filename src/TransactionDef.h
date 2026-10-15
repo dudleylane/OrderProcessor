@@ -109,7 +109,8 @@ enum OperationType
     ADD_STOPBOOK_TROPERATION,              // holds a stop order in its instrument's stop book (#223)
     REMOVE_STOPBOOK_TROPERATION,           // takes a held stop order out of the stop book (#223)
     RELEASE_STOP_TROPERATION,              // releases a held stop order a trade reached, and matches it (#223)
-    REPORT_RELEASE_TROPERATION             // reports a stop's release, if it released the order (#236)
+    REPORT_RELEASE_TROPERATION,            // reports a stop's release, if it released the order (#236)
+    PERSIST_LASTTRADE_TROPERATION          // writes a new persisted version of an instrument's last trade (#237)
 };
 
 struct Context
