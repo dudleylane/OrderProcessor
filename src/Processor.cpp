@@ -16,6 +16,7 @@
 #include <thread>
 #include <utility>
 #include "Processor.h"
+#include "ExpiryScheduler.h"
 #include "TransactionDef.h"
 #include "StateMachine.h"
 #include "TransactionScope.h"
@@ -120,6 +121,7 @@ void Processor::init(const ProcessorParams &params)
     outQueues_ = params.outQueues_;
     inQueue_ = params.inQueue_;
     transactMgr_ = params.transactMgr_;
+    expiry_ = params.expiry_;
 
     testStateMachine_ = params.testStateMachine_;
     testStateMachineCheckResult_ = params.testStateMachineCheckResult_;
@@ -199,6 +201,8 @@ void Processor::onEvent(const std::string &source, const OrderEvent &evnt)
     // Persist the order as part of this transaction (#20), ahead of the operations that publish
     // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(scope.get(), *smState.orderData_);
+    // Read while the guard still holds the new order locked
+    scheduleExpiry(*smState.orderData_);
     // The order is fully initialised: let other threads that located it proceed. Released before
     // addTransaction(), because the transaction and deferred events lock this entry themselves.
     publishGuard.release();
@@ -636,6 +640,26 @@ void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope 
     // write lock on the order for the decision and its state machine
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, true);
 
+    // A timer was set when the order was accepted (#240), and the order may have filled, been canceled, replaced or
+    // expired since: then it decides nothing. The state machine has no row for those, and its no_transition throws.
+    const OrderStatus status = order->status_;
+    const bool live = (NEW_ORDSTATUS == status) || (PARTFILL_ORDSTATUS == status) || (SUSPENDED_ORDSTATUS == status);
+    if ((OrderStateChange::EXPIRE == change) && !live)
+    {
+        return;
+    }
+    if (OrderStateChange::DAY_END == change)
+    {
+        if (live && (DAY_TIF == order->tif_))
+        {
+            change = OrderStateChange::EXPIRE; // a DAY order ends with its day
+        }
+        else if (DFD_ORDSTATUS != status)
+        {
+            return; // the day's end expires a DAY order, and starts a done-for-day one's next day; nothing else
+        }
+    }
+
     assert(nullptr != threadState().stateMachine);
     threadState().stateMachine->setPersistance(order->stateMachinePersistance());
     auto run = [&](auto evnt2Proc)
@@ -839,7 +863,21 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
     // Persist both as part of this transaction (#20), ahead of the operations that publish their reports (#28)
     persistOrder(evnt.transaction_, *stored);
     persistOrder(evnt.transaction_, *original);
+    // The replacement's own expiry: its time in force may differ from the original's, whose timer then finds it
+    // replaced (#240)
+    scheduleExpiry(*stored);
     publishGuard.release();
+}
+
+void Processor::scheduleExpiry(const OrderEntry &order) const
+{
+    DateTimeT when = 0;
+    TimerEvent::TimerType type = TimerEvent::INVALID_TIMER;
+    if ((nullptr != expiry_) && ((NEW_ORDSTATUS == order.status_) || (PARTFILL_ORDSTATUS == order.status_)) &&
+        ExpiryScheduler::expiryOf(order, &when, &type))
+    {
+        expiry_->schedule(order.orderId_, when, type);
+    }
 }
 
 void Processor::process([[maybe_unused]] const ACID::TransactionId &id, ACID::Transaction *tr)

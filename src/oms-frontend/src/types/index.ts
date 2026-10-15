@@ -164,6 +164,8 @@ export interface NewOrderRequest {
   orderQty: number;
   minQty?: number;
   tif: TimeInForce;
+  /** A GTD order's expiry, in milliseconds since the epoch, required for GTD and refused for any other (#240) */
+  expireTime?: number;
   account?: string;
   // Required by the server, which refuses an order without them (#166)
   currency: Currency;
@@ -186,6 +188,8 @@ export interface NewSwapOrderRequest {
   currency: Currency;
   capacity: Capacity;
   tif?: TimeInForce;
+  /** a GTD swap's expiry, ms since the epoch and ahead of it (#240); no other swap has one */
+  expireTime?: number;
 }
 
 export interface CancelOrderRequest {
@@ -201,6 +205,8 @@ export interface ReplaceOrderRequest {
   stopPx?: number;
   orderQty?: number;
   tif?: TimeInForce;
+  /** A GTD order's new expiry, in milliseconds since the epoch (#240) */
+  expireTime?: number;
 }
 
 /** Order book depth */

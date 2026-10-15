@@ -22,6 +22,7 @@ struct ParsedNewOrder
     unsigned int orderQty;
     unsigned int minQty;
     TimeInForce tif;
+    u64 expireTime; // when a GTD order expires, in milliseconds since the epoch (#240); 0 when not given
     std::string account;
     Currency currency;
     Capacity capacity;
@@ -40,6 +41,7 @@ struct ParsedSwapOrder
     Currency currency;
     Capacity capacity;
     TimeInForce tif;
+    u64 expireTime; // when a GTD swap expires, in milliseconds since the epoch (#240); 0 when not given
 };
 
 struct ParsedCancelOrder
@@ -56,10 +58,12 @@ struct ParsedReplaceOrder
     double stopPx; // moves a held stop order's stop (#238)
     unsigned int orderQty;
     TimeInForce tif;
+    u64 expireTime; // a GTD order's new expiry (#240)
     bool hasPrice;
     bool hasStopPx;
     bool hasQty;
     bool hasTif;
+    bool hasExpireTime;
 };
 
 struct ParsedClientMessage

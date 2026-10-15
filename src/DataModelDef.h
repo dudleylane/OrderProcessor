@@ -302,7 +302,7 @@ public:
     /// Where a working order rests (#223): in its instrument's price book, in its stop book, or in neither
     enum class Book
     {
-        NONE,  // a market order, or a stop order released as one: matched once, never rested
+        NONE,  // a market order, a stop order released as one, or an IOC or FOK order: matched once, never rested
         PRICE, // a limit order, or a stop limit order released as one
         STOP   // a stop or stop limit order whose stop hasn't been reached
     };
@@ -316,9 +316,15 @@ public:
     {
         return (MARKET_ORDERTYPE == ordType_) || ((STOP_ORDERTYPE == ordType_) && stopTriggered_);
     }
+    /// Matched once and never rested: a market order, a stop order released as one, or an IOC or FOK order, which keep
+    /// their limit (#240). What one doesn't trade when it is matched is canceled.
+    bool cancelsWhatIsLeft() const noexcept
+    {
+        return marketLike() || (IOC_TIF == tif_) || (FOK_TIF == tif_);
+    }
     Book book() const noexcept
     {
-        return heldStop() ? Book::STOP : (marketLike() ? Book::NONE : Book::PRICE);
+        return heldStop() ? Book::STOP : (cancelsWhatIsLeft() ? Book::NONE : Book::PRICE);
     }
 
 private:

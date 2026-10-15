@@ -26,6 +26,8 @@
 #include "TransactionMgr.h"
 #include "TransactionScope.h"
 #include "Processor.h"
+#include "ExpiryScheduler.h"
+#include "ExchUtils.h"
 #include "TaskManager.h"
 #include "LMDBStorage.h"
 #include "StorageRecordDispatcher.h"
@@ -175,6 +177,13 @@ int main(int argc, char *argv[])
         std::cout << App::FixCredentials::hashPassword(password) << "\n";
         return 0;
     }
+    // QuickFIX reads config/fix.cfg's session times in the process's local time, which is New York's here, so the FIX
+    // sessions roll where the business day ends (#240). Before any thread starts: setenv() and tzset() aren't
+    // thread-safe.
+    if (!cfg.fixCfg.empty())
+    {
+        App::useBusinessDayLocalTime();
+    }
 #endif
     // Who may open a WebSocket session (#146). A token that can't be used is a usage error too.
     App::WsAuth wsAuth;
@@ -320,11 +329,19 @@ int main(int argc, char *argv[])
         outQueuesPtr = multiOutQueues.get();
     }
 #endif
+    // Expires DAY and GTD orders at their time (#240). The processors set an order's timer when they accept it; its
+    // thread starts once the restore below has set the restored orders' timers.
+    auto expiry = std::make_unique<Proc::ExpiryScheduler>(inQueues.get(),
+                                                          []
+                                                          {
+                                                              return aux::currentDateTime();
+                                                          });
 
     for (int i = 0; i < numProcessors; ++i)
     {
         Proc::ProcessorParams params(IdTGenerator::instance(), Store::OrderStorage::instance(), orderBook.get(),
                                      inQueues.get(), outQueuesPtr, inQueues.get(), transactMgr.get());
+        params.expiry_ = expiry.get();
 
         auto *evtProc = new Proc::Processor();
         evtProc->init(params);
@@ -413,6 +430,13 @@ int main(int argc, char *argv[])
                                           std::to_string(released) + " before taking orders");
     }
 
+    // 9d. Restored DAY and GTD orders keep their times in force (#240): each gets its timer again, and one whose time
+    // passed while the server was down expires as soon as the timers start. Read with nothing else running: no
+    // client is connected yet, and the restore's transactions are done.
+    const size_t timers = App::scheduleRestoredExpiries(*Store::OrderStorage::instance(), expiry.get());
+    expiry->start();
+    aux::ExchLogger::instance()->note("Expiry timers set for " + std::to_string(timers) + " restored order(s)");
+
     // 10. Create Beast io_context and WsServer
     boost::asio::io_context ioc{ 1 };
 
@@ -490,6 +514,8 @@ int main(int argc, char *argv[])
     metricsPublisher->stop();
     metricsPublisher.reset();
     server.reset();
+    // No timer fires from now on. The scheduler itself outlives the processors, which set timers on it (#240).
+    expiry->stop();
 
     taskMgr->waitUntilTransactionsFinished(5);
 
@@ -499,6 +525,7 @@ int main(int argc, char *argv[])
 
     // TaskManager destructor owns and deletes all processors (uses logger), and waits for every task it started
     taskMgr.reset();
+    expiry.reset();
 
     // Only now stop the transaction manager: until ~TaskManager has waited for every task, an event still being
     // processed adds a transaction and a finishing one removes itself, and both require a started manager (#37).

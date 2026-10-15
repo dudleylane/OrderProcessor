@@ -30,6 +30,7 @@
 
 #include "DataModelDef.h"
 #include "Processor.h"
+#include "ExpiryScheduler.h"
 #include "TransactionScope.h"
 #include "IncomingQueues.h"
 #include "OutgoingQueues.h"
@@ -1753,11 +1754,13 @@ namespace
 class StopEngine
 {
 public:
-    StopEngine(OrderBookImpl *book, IncomingQueues *inQueues, TestTransactionManager *transactions)
+    StopEngine(OrderBookImpl *book, IncomingQueues *inQueues, TestTransactionManager *transactions,
+               ExpiryScheduler *expiry = nullptr)
         : inQueues_(inQueues), transactions_(transactions)
     {
         ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), book, inQueues, &reports_, inQueues,
                                transactions);
+        params.expiry_ = expiry;
         processor_.init(params);
         transactions_->proc_ = &processor_;
         transactions_->keepNested_ = true;
@@ -1784,6 +1787,16 @@ public:
     {
         inQueues_->push("test", evnt);
         processor_.process();
+        transactions_->runKept();
+    }
+
+    /// Processes what is queued already, a timer's events, and every transaction that follows from them
+    void processQueued(size_t events)
+    {
+        for (size_t i = 0; i < events; ++i)
+        {
+            processor_.process();
+        }
         transactions_->runKept();
     }
 
@@ -2612,4 +2625,349 @@ TEST_F(ProcessorTest, AStopThatArrivedAfterTheLastTradeWaitsForTheNextOneAfterAR
     EXPECT_TRUE(restarted.dispatcher_.stopsReached().empty()) << "a stop that arrived after the last trade is released";
     EXPECT_EQ(OrderBook::OrdersT{ id }, heldStops(restarted.book_, instrId1_));
     std::filesystem::remove_all(dir);
+}
+
+// =============================================================================
+// Time in force (#240)
+// =============================================================================
+
+namespace
+{
+/// The order, with the time in force
+std::unique_ptr<OrderEntry> withTif(std::unique_ptr<OrderEntry> order, TimeInForce tif)
+{
+    order->tif_ = tif;
+    return order;
+}
+} // namespace
+
+TEST_F(ProcessorTest, AnIocOrderTradesWhatItCanAtOnceAndTheRestIsCanceled)
+{
+    // It rested with what its sweep left, and could trade later at a price its sender no longer wanted (#240)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 10));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 10));
+    const OrderEntry *ioc = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 10.5, 30), IOC_TIF));
+
+    EXPECT_EQ(std::vector<std::string>{ "10@10" }, engine.reports_.tradesOf(ioc->orderId_));
+    EXPECT_EQ(CANCELED_ORDSTATUS, ioc->status_);
+    EXPECT_EQ(10u, ioc->cumQty_);
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "an IOC order rests in the book";
+}
+
+TEST_F(ProcessorTest, AnIocOrderWithNothingToTradeIsCanceledNotRejected)
+{
+    // The book has an ask, at a price the order doesn't trade at: canceled, as the rest of an IOC sweep is
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 10));
+    const OrderEntry *ioc = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), IOC_TIF));
+
+    EXPECT_TRUE(engine.reports_.tradesOf(ioc->orderId_).empty());
+    EXPECT_EQ(CANCELED_ORDSTATUS, ioc->status_);
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+}
+
+TEST_F(ProcessorTest, AFokOrderTheBookCanFillTradesInFullAcrossLevels)
+{
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 10));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 20));
+    const OrderEntry *fok = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 11.0, 30), FOK_TIF));
+
+    EXPECT_EQ((std::vector<std::string>{ "10@10", "20@11" }), engine.reports_.tradesOf(fok->orderId_));
+    EXPECT_EQ(FILLED_ORDSTATUS, fok->status_);
+}
+
+TEST_F(ProcessorTest, AFokOrderTheBookCantFillIsCanceledWithNothingTraded)
+{
+    // In full at once, or not at all (#240): 10 at 10 is all there is at 11 or better, and the 20 at 12 is too dear
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *atTen = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 10));
+    const OrderEntry *atTwelve = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 12.0, 20));
+    const OrderEntry *fok = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 11.0, 30), FOK_TIF));
+
+    EXPECT_TRUE(engine.reports_.tradesOf(fok->orderId_).empty()) << "a FOK order traded part of itself";
+    EXPECT_EQ(CANCELED_ORDSTATUS, fok->status_);
+    EXPECT_EQ(10u, atTen->leavesQty_);
+    EXPECT_EQ(20u, atTwelve->leavesQty_);
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+}
+
+TEST_F(ProcessorTest, AFokOrderExactlyTheBookCanFillTradesInFull)
+{
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 10));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.5, 20));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 12.0, 50));
+    const OrderEntry *fok = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 11.0, 30), FOK_TIF));
+
+    EXPECT_EQ(30u, fok->cumQty_);
+    EXPECT_EQ(FILLED_ORDSTATUS, fok->status_);
+}
+
+TEST_F(ProcessorTest, AnIocOrFokOrderIsNeverBooked)
+{
+    // Its rest is canceled by a transaction after the one that books it. Booked in between, it could trade with an order
+    // that came meanwhile (#240).
+    for (const TimeInForce tif : { IOC_TIF, FOK_TIF })
+    {
+        SCOPED_TRACE(tif);
+        StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+        engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 10));
+        inQueues_->push("test", OrderEvent(withTif(createTestOrder(instrId1_, BUY_SIDE, 10.5, 30), tif).release()));
+        engine.processor_.process(); // its booking runs; its fills and its cancel wait, kept
+        EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "the order was booked";
+        transMgr_->runKept();
+        EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+    }
+}
+
+TEST_F(ProcessorTest, AReleasedIocStopLimitCancelsWhatItCantTradeAtItsLimit)
+{
+    // A stop order's time in force applies when its stop releases it, not when it arrives (#240): held, it waits
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 20));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 100));
+    OrderEntry *stop = engine.submit(
+        withTif(asStop(createTestOrder(instrId1_, BUY_SIDE, 10.5, 50), STOPLIMIT_ORDERTYPE, 10.0), IOC_TIF));
+    EXPECT_EQ(NEW_ORDSTATUS, stop->status_) << "a held IOC stop was canceled as it arrived";
+
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
+    EXPECT_TRUE(stop->stopTriggered_);
+    EXPECT_EQ(std::vector<std::string>{ "15@10" }, engine.reports_.tradesOf(stop->orderId_));
+    EXPECT_EQ(CANCELED_ORDSTATUS, stop->status_);
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "a released IOC stop limit rests";
+}
+
+TEST_F(ProcessorTest, AReleasedFokStopTheBookCantFillIsCanceledWithNothingTraded)
+{
+    // Its release is its first match, and a FOK order's check comes first there too (#240)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 20));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 100));
+    OrderEntry *stop = engine.submit(
+        withTif(asStop(createTestOrder(instrId1_, BUY_SIDE, 10.5, 50), STOPLIMIT_ORDERTYPE, 10.0), FOK_TIF));
+
+    // A trade at 10 reaches the stop; 15 are left at 10, and 50 would take 11
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
+    EXPECT_TRUE(stop->stopTriggered_);
+    EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty()) << "a released FOK stop traded part of itself";
+    EXPECT_EQ(CANCELED_ORDSTATUS, stop->status_);
+}
+
+namespace
+{
+const DateTimeT OCT15 = 1792022400000ULL; // 2026-10-15 00:00 UTC
+const DateTimeT HOUR = 60ULL * 60 * 1000;
+
+/// A GTD order, created at 'now' and expiring at 'expireTime'
+std::unique_ptr<OrderEntry> asGtd(std::unique_ptr<OrderEntry> order, DateTimeT now, DateTimeT expireTime)
+{
+    order->tif_ = GTD_TIF;
+    order->creationTime_ = now;
+    order->expireTime_ = expireTime;
+    return order;
+}
+} // namespace
+
+TEST_F(ProcessorTest, AGtdOrderExpiresAtItsTimeAndLeavesTheBook)
+{
+    // Nothing produced a timer: a GTD order never expired (#240)
+    DateTimeT now = OCT15 + 9 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry);
+    OrderEntry *gtd = engine.submit(asGtd(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now, now + HOUR));
+    ASSERT_EQ(NEW_ORDSTATUS, gtd->status_);
+    ASSERT_EQ(1u, expiry.pending());
+
+    now += HOUR - 1;
+    EXPECT_EQ(0u, expiry.fireDue()) << "it expired before its time";
+    now += 1;
+    ASSERT_EQ(1u, expiry.fireDue());
+    engine.processQueued(1);
+    EXPECT_EQ(EXPIRED_ORDSTATUS, gtd->status_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, EXPIRED_EXECTYPE }), engine.reports_.reportTypesOf(gtd->orderId_));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+}
+
+TEST_F(ProcessorTest, ADayOrderExpiresAtTheEndOfItsDayAndAGtcOrderDoesNot)
+{
+    // 17:00 New York (#240, ruled 2026-10-16): 21:00 UTC, as New York keeps daylight time in October
+    DateTimeT now = OCT15 + 13 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry);
+    auto order = withTif(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), DAY_TIF);
+    order->creationTime_ = now;
+    OrderEntry *day = engine.submit(std::move(order));
+    order = withTif(createTestOrder(instrId1_, BUY_SIDE, 9.0, 30), GTC_TIF);
+    order->creationTime_ = now;
+    OrderEntry *gtc = engine.submit(std::move(order));
+    ASSERT_EQ(1u, expiry.pending()) << "a GTC order has a timer";
+
+    now = OCT15 + 21 * HOUR - 1;
+    EXPECT_EQ(0u, expiry.fireDue());
+    now += 1;
+    ASSERT_EQ(1u, expiry.fireDue());
+    engine.processQueued(1);
+    EXPECT_EQ(EXPIRED_ORDSTATUS, day->status_);
+    EXPECT_EQ(NEW_ORDSTATUS, gtc->status_);
+    EXPECT_EQ(gtc->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
+}
+
+TEST_F(ProcessorTest, ATimerOfAnOrderThatFilledDecidesNothing)
+{
+    // The order traded before its time: its timer finds it filled. The state machine has no expiry from there, and
+    // its no_transition throws, failing the timer's transaction.
+    DateTimeT now = OCT15 + 9 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry);
+    OrderEntry *gtd = engine.submit(asGtd(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now, now + HOUR));
+    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), GTC_TIF)); // no timer of its own
+    ASSERT_EQ(FILLED_ORDSTATUS, gtd->status_);
+
+    now += HOUR;
+    ASSERT_EQ(1u, expiry.fireDue());
+    EXPECT_NO_THROW(engine.processQueued(1));
+    EXPECT_EQ(FILLED_ORDSTATUS, gtd->status_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRADE_EXECTYPE }), engine.reports_.reportTypesOf(gtd->orderId_));
+}
+
+TEST_F(ProcessorTest, ADayReplacementExpiresAtTheEndOfTheDayItWasReplacedIn)
+{
+    // A replacement keeps its original's creationTime_: a GTC order from the day before, replaced by a DAY one,
+    // expired at once, its original's day long over. Its day is the replace's, its lastUpdateTime_ (#240).
+    DateTimeT now = OCT15 + 13 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry);
+    auto order = withTif(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), GTC_TIF);
+    order->creationTime_ = now;
+    order->lastUpdateTime_ = now;
+    OrderEntry *gtc = engine.submit(std::move(order));
+    const size_t before = expiry.pending();
+
+    now = OCT15 + 37 * HOUR; // the next day, 13:00 UTC
+    OrderEntry *replacement = gtc->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = gtc->clOrderId_;
+    replacement->tif_ = DAY_TIF;
+    replacement->lastUpdateTime_ = now; // as the gateways set it for a replace
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+    engine.request(OrderReplaceEvent(gtc->orderId_, replacement));
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    ASSERT_EQ(NEW_ORDSTATUS, live->status_);
+    ASSERT_EQ(before + 1, expiry.pending()) << "the replacement has no expiry";
+    for (size_t fired = expiry.fireDue(); 0 < fired; fired = expiry.fireDue())
+    {
+        engine.processQueued(fired);
+    }
+    EXPECT_EQ(NEW_ORDSTATUS, live->status_) << "the replacement expired with its original's day";
+
+    now = OCT15 + 45 * HOUR; // 17:00 EDT on the 16th
+    for (size_t fired = expiry.fireDue(); 0 < fired; fired = expiry.fireDue())
+    {
+        engine.processQueued(fired);
+    }
+    EXPECT_EQ(EXPIRED_ORDSTATUS, live->status_);
+}
+
+TEST_F(ProcessorTest, AnExpiryOfAnOrderNoLongerLiveDecidesNothing)
+{
+    // The state machine has no expiry from a filled order, and its no_transition throws: decided for one, the timer's
+    // transaction failed, and logged an error, every time an order filled before its time (#240)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *buy = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30));
+    ASSERT_EQ(FILLED_ORDSTATUS, buy->status_);
+    for (const OrderStateChange change : { OrderStateChange::EXPIRE, OrderStateChange::DAY_END })
+    {
+        TransactionScope scope;
+        Context cnxt(OrderStorage::instance(), orderBook_.get(), inQueues_.get(), &engine.reports_, nullptr,
+                     IdTGenerator::instance(), nullptr);
+        EXPECT_NO_THROW(engine.processor_.process(change, buy, &scope, cnxt));
+        EXPECT_EQ(0u, scope.operationCount());
+        EXPECT_EQ(FILLED_ORDSTATUS, buy->status_);
+    }
+}
+
+TEST_F(ProcessorTest, ADayEndDecidesNothingForAnOrderThatIsntADayOrder)
+{
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *gtc = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), GTC_TIF));
+    EXPECT_NO_THROW(engine.request(TimerEvent(gtc->orderId_, TimerEvent::DAY_END)));
+    EXPECT_EQ(NEW_ORDSTATUS, gtc->status_);
+    EXPECT_EQ(std::vector<ExecType>{ NEW_EXECTYPE }, engine.reports_.reportTypesOf(gtc->orderId_));
+}
+
+TEST_F(ProcessorTest, AHeldDayStopExpiresAndLeavesTheStopBook)
+{
+    DateTimeT now = OCT15 + 9 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry);
+    auto order = withTif(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 9.5), DAY_TIF);
+    order->creationTime_ = now;
+    OrderEntry *stop = engine.submit(std::move(order));
+    ASSERT_TRUE(orderBook_->holdsStops(instrId1_));
+
+    now = OCT15 + 24 * HOUR;
+    ASSERT_EQ(1u, expiry.fireDue());
+    engine.processQueued(1);
+    EXPECT_EQ(EXPIRED_ORDSTATUS, stop->status_);
+    EXPECT_FALSE(orderBook_->holdsStops(instrId1_)) << "an expired stop is still held";
+}
+
+TEST_F(ProcessorTest, AReplacementHasATimerOfItsOwnAndTheOriginalsFindsItReplaced)
+{
+    DateTimeT now = OCT15 + 9 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry);
+    OrderEntry *gtd = engine.submit(asGtd(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now, now + HOUR));
+
+    OrderEntry *replacement = gtd->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = gtd->clOrderId_;
+    replacement->expireTime_ = now + 2 * HOUR;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+    engine.request(OrderReplaceEvent(gtd->orderId_, replacement));
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    ASSERT_EQ(REPLACED_ORDSTATUS, gtd->status_);
+    ASSERT_EQ(2u, expiry.pending());
+
+    now += HOUR;
+    ASSERT_EQ(1u, expiry.fireDue());
+    EXPECT_NO_THROW(engine.processQueued(1));
+    EXPECT_EQ(NEW_ORDSTATUS, live->status_) << "the original's timer expired its replacement";
+    now += HOUR;
+    ASSERT_EQ(1u, expiry.fireDue());
+    engine.processQueued(1);
+    EXPECT_EQ(EXPIRED_ORDSTATUS, live->status_);
 }
