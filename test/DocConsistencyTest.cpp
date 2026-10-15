@@ -225,7 +225,7 @@ TEST_F(DocConsistencyTest, OrderStatusCount)
 
 TEST_F(DocConsistencyTest, ExecTypeCount)
 {
-    expectDocEq("exec_type_count", static_cast<int>(COP::PEND_REPLACE_EXECTYPE));
+    expectDocEq("exec_type_count", static_cast<int>(COP::TRIGGERED_EXECTYPE));
 }
 
 // What WebSocket clients may hold of the server (#159)

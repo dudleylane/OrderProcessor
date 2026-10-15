@@ -364,6 +364,10 @@ inline std::string_view toJsonString(ExecType t)
     {
         return "PEND_REPLACE";
     }
+    if (t == TRIGGERED_EXECTYPE)
+    {
+        return "TRIGGERED";
+    }
     return "INVALID";
 }
 

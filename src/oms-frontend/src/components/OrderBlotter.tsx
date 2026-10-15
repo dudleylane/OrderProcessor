@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { Order, ReplaceOrderRequest } from '../types';
+import { OrderType } from '../types/enums';
 import { ReplaceOrderForm } from './ReplaceOrderForm';
 import { formatQuantity, formatPrice, formatTime, formatId } from '../utils/format';
 import {
@@ -79,6 +80,19 @@ export function OrderBlotter({ orders, cancelOrder, replaceOrder }: OrderBlotter
                   </td>
                   <td className="p-3 text-gray-400">
                     {order.ordType}
+                    {/* A stop order is held until a trade reaches its stopPx, then released (#223, #236) */}
+                    {(order.ordType === OrderType.STOP || order.ordType === OrderType.STOPLIMIT) && (
+                      <span
+                        className={`ml-1 text-xs ${order.stopTriggered ? 'text-yellow-300' : 'text-gray-500'}`}
+                        title={
+                          order.stopTriggered
+                            ? `Released: a trade reached ${formatPrice(order.stopPx)}`
+                            : `Held until a trade reaches ${formatPrice(order.stopPx)}`
+                        }
+                      >
+                        {order.stopTriggered ? 'released' : 'held'}
+                      </span>
+                    )}
                   </td>
                   <td className="p-3 text-right font-mono">
                     {order.price > 0 ? formatPrice(order.price) : '--'}

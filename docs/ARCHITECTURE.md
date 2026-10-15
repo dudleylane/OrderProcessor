@@ -726,11 +726,20 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │   • Rollback: undo the booking, drop its deferred events, clear the      │
 │     flag, hold the stop again                                            │
 └──────────────────────────────────────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ PersistOrderTrOperation, then ReportReleaseTrOperation (#236)            │
+│   • The order's new version, with stopTriggered_, is written first       │
+│   • Then, if the release released the order, a TRIGGERED execution       │
+│     report (FIX's ExecType L), the order NEW. The trades the release     │
+│     led to are reported after it, by their own transactions              │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 - **Records:** `stopTriggered_` is persisted (`OrderCodec` format version 2). Version 0 and 1 records decode as held.
 - **Restore:** a working held stop goes back into the stop book. A released STOP is left to match, as an open market order is, and a released STOPLIMIT is booked as a limit order. `app/main.cpp` waits for the transaction manager to hold nothing (`pendingTransactions()`) between the restored orders it matches, since a release matches on a transaction worker.
-- **Not yet:** the release sends no report (#236), no trade price survives a restart (#237), and `replace_order` can't move `stopPx` (#238).
+- **Not yet:** no trade price survives a restart (#237), and `replace_order` can't move `stopPx` (#238).
 
 **Associated Test Cases:**
 
@@ -739,6 +748,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 | `ProcessorTest.cpp` | `ProcessorTest.*Stop*` | Hold, release, order of release, cascade, cancel/replace/suspend, races with the release, restarts |
 | `OrderBookTest.cpp` | `OrderBookTest.*Stop*` | The stop book's order and bounds |
 | `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReleaseStop_*` | The release's execute, rollback and no-ops |
+| `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReportRelease_*` | The TRIGGERED report, and none for a release that released nothing |
 | `IntegrationTest.cpp` | `IntegrationTest.Stops*` | A sweep that reaches a stop, on the real manager with four transaction workers |
 | `StorageRecordDispatcherTest.cpp` | `OnlyAWorkingOrderIsBookedOrLeftToMatch`, golden records | Restore placement, format version 2 |
 
@@ -1446,6 +1456,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | 1.2 | February 2026 | Generated | Updated file counts (101 src, 45 test, 7 bench), added LMDBStorage, NumaAllocator, PG write-behind, expanded namespace listing, updated test/benchmark appendix |
 | 1.3 | October 2026 | dudleylane, Claude | Corrected against the code (#171): state and transition counts (now checked by DocConsistencyTest), the new order flow, execution records, the test sections and the appendix's file lists |
 | 1.4 | October 2026 | dudleylane, Claude | Stop orders (#223): the stop book, the matcher's trigger, the stop order flow |
+| 1.5 | October 2026 | dudleylane, Claude | The stop's TRIGGERED report (#236) |
 
 ---
 

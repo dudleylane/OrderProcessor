@@ -36,7 +36,8 @@ CREATE TYPE exec_type AS ENUM (
     'STATUS',
     'RESTATED',
     'PEND_CANCEL',
-    'PEND_REPLACE'
+    'PEND_REPLACE',
+    'TRIGGERED'
 );
 
 CREATE TYPE currency AS ENUM (
@@ -206,6 +207,8 @@ CREATE TABLE orders (
     ord_type            order_type    NOT NULL,
     price               NUMERIC(18,8),
     stop_px             NUMERIC(18,8),
+    -- A STOP or STOPLIMIT order's stop was reached, and the order released (#223, #236)
+    stop_triggered      BOOLEAN       NOT NULL DEFAULT false,
     -- Quantities are BIGINT: the engine's are unsigned 32-bit, which INTEGER can't hold above 2147483647 (#151)
     order_qty           BIGINT        NOT NULL,
     min_qty             BIGINT        NOT NULL DEFAULT 0,

@@ -47,6 +47,7 @@ export const EXEC_TYPE_COLORS: Record<ExecType, string> = {
   [ExecType.RESTATED]: 'text-gray-400',
   [ExecType.PEND_CANCEL]: 'text-orange-300',
   [ExecType.PEND_REPLACE]: 'text-gray-400',
+  [ExecType.TRIGGERED]: 'text-yellow-300',
 };
 
 export const SIDE_LABELS: Record<Side, string> = {

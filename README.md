@@ -401,7 +401,7 @@ A `STOP` or `STOPLIMIT` order is held until a trade in its instrument reaches it
 - **Released,** a `STOP` trades as a market order, and what it can't trade is canceled. A `STOPLIMIT` trades at its `price` and rests with what is left. Either way the order's `stopTriggered` becomes true.
 - **Order:** an order's whole sweep comes first. The stops its trades reach are released after it: buy stops from the lowest `stopPx`, sell stops from the highest, and stops at one `stopPx` in the order they arrived. A released order's own trades can release more.
 - **Restarts:** only a trade reaches a stop, and no trade price survives a restart, so a held stop then waits for the next trade (#237).
-- **Reports:** the release sends none (#236). A released `STOP` is reported when it trades or is canceled. A `STOPLIMIT` released with nothing to trade shows `stopTriggered` only with its next report or in `order_snapshot`.
+- **Reports:** the release sends an `execution_report` of type `TRIGGERED`, FIX's ExecType L, with the order `NEW` and `stopTriggered` true (#236). It comes before the reports of the trades the release leads to, and only once the release is durable. A release that finds the stop already canceled, replaced or released sends nothing.
 
 Every order clears through the server's clearing firm (`--clearing-firm`), and an order with no `account` goes to the server's default account (`--default-account`), or, under an identity (#225), to the identity's first account. `seedData` seeds both. If either is missing from the data directory, the server logs a warning at startup and answers each order that needs it with an `error` message.
 
@@ -413,7 +413,7 @@ Every order clears through the server's clearing firm (`--clearing-firm`), and a
 
 **SystemMetrics** — 19 fields: event/transaction counters (created/processed/finished), processor availability, `queueDepth`, `poolSize`, `poolCacheMisses`, `poolArenaSize`, `activeSessions`, `activeOrders`, `storageMapSize` and `storageMapUsed` (LMDB's map and how much of it is in use, in bytes), `timestamp`.
 
-**Enums** — `Side` (BUY, SELL, BUY_MINUS, SELL_PLUS, SELL_SHORT, CROSS), `OrderType` (MARKET, LIMIT, STOP, STOPLIMIT), `TimeInForce` (DAY, GTD, GTC, FOK, IOC, OPG, ATCLOSE), `OrderStatus` (<!-- DOC_CHECK:order_status_count -->12<!-- /DOC_CHECK --> statuses), `ExecType` (<!-- DOC_CHECK:exec_type_count -->13<!-- /DOC_CHECK --> types), `Currency` (USD, EUR), `Capacity` (<!-- DOC_CHECK:capacity_count -->6<!-- /DOC_CHECK --> types).
+**Enums** — `Side` (BUY, SELL, BUY_MINUS, SELL_PLUS, SELL_SHORT, CROSS), `OrderType` (MARKET, LIMIT, STOP, STOPLIMIT), `TimeInForce` (DAY, GTD, GTC, FOK, IOC, OPG, ATCLOSE), `OrderStatus` (<!-- DOC_CHECK:order_status_count -->12<!-- /DOC_CHECK --> statuses), `ExecType` (<!-- DOC_CHECK:exec_type_count -->14<!-- /DOC_CHECK --> types), `Currency` (USD, EUR), `Capacity` (<!-- DOC_CHECK:capacity_count -->6<!-- /DOC_CHECK --> types).
 
 ---
 
