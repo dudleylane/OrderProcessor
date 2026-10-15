@@ -53,9 +53,11 @@ struct ParsedReplaceOrder
     u64 orderId;
     std::string clOrderId; // optional; names the order when given, as for a cancel (#58, #74)
     double price;
+    double stopPx; // moves a held stop order's stop (#238)
     unsigned int orderQty;
     TimeInForce tif;
     bool hasPrice;
+    bool hasStopPx;
     bool hasQty;
     bool hasTif;
 };

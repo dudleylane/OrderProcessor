@@ -77,9 +77,30 @@ TEST(ClientMessageParserTest, ReplaceOrderReportsWhichFieldsArePresent)
     EXPECT_EQ("replace_order", msg.type);
     EXPECT_EQ(7u, msg.replaceOrder.orderId);
     EXPECT_TRUE(msg.replaceOrder.hasPrice);
+    EXPECT_FALSE(msg.replaceOrder.hasStopPx);
     EXPECT_FALSE(msg.replaceOrder.hasQty);
     EXPECT_FALSE(msg.replaceOrder.hasTif);
     EXPECT_DOUBLE_EQ(10.5, msg.replaceOrder.price);
+}
+
+TEST(ClientMessageParserTest, ReplaceOrderTakesAStopPxAboveZero)
+{
+    // A replace moves a stop order's stop (#238), as a new order gives it one: above 0
+    auto msg = parse(R"({"type":"replace_order","data":{"orderId":7,"stopPx":9.75}})");
+    EXPECT_EQ("replace_order", msg.type);
+    EXPECT_TRUE(msg.replaceOrder.hasStopPx);
+    EXPECT_FALSE(msg.replaceOrder.hasPrice);
+    EXPECT_DOUBLE_EQ(9.75, msg.replaceOrder.stopPx);
+
+    for (const char *stopPx : { "0", "-1.5" })
+    {
+        msg = parse(std::string(R"({"type":"replace_order","data":{"orderId":7,"stopPx":)") + stopPx + "}}");
+        EXPECT_EQ("error", msg.type) << stopPx;
+        EXPECT_EQ("invalid stopPx: expected a number above 0", msg.error) << stopPx;
+    }
+    msg = parse(R"({"type":"replace_order","data":{"orderId":7,"stopPx":"9"}})");
+    EXPECT_EQ("error", msg.type);
+    EXPECT_NE(std::string::npos, msg.error.find("stopPx")) << msg.error;
 }
 
 TEST(ClientMessageParserTest, UnknownTypeIsPassedThroughForTheCaller)

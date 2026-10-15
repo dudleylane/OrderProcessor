@@ -759,7 +759,8 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │   • Replacement: onReplace: RCVD_NEW → NEW (PARTFILL with fills),        │
 │                  MatchOrder, AddToOrderBook, REPLACE report              │
 │   • A held stop's replacement is held at its own stop; a released        │
-│     one's stays released if it is still a stop order (#223)              │
+│     one's stays released if it is still a stop order (#223), and a       │
+│     new stopPx for it is refused (#238)                                  │
 │   • A refusal → RefuseReplaceTrOperation (OrderRejectEvent)              │
 └──────────────────────────────────────────────────────────────────────────┘
          │
@@ -832,7 +833,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 
 - **Records:** `stopTriggered_` is persisted (`OrderCodec` format version 2). Version 0 and 1 records decode as held.
 - **Restore:** a working held stop goes back into the stop book. A released STOP is left to match, as an open market order is, and a released STOPLIMIT is booked as a limit order. `app/main.cpp` waits for the transaction manager to hold nothing (`pendingTransactions()`) between the restored orders it matches, since a release matches on a transaction worker.
-- **Not yet:** no trade price survives a restart (#237), and `replace_order` can't move `stopPx` (#238).
+- **Not yet:** no trade price survives a restart (#237).
 
 **Associated Test Cases:**
 
@@ -1550,6 +1551,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | 1.3 | October 2026 | dudleylane, Claude | Corrected against the code (#171): state and transition counts (now checked by DocConsistencyTest), the new order flow, execution records, the test sections and the appendix's file lists |
 | 1.4 | October 2026 | dudleylane, Claude | Stop orders (#223): the stop book, the matcher's trigger, the stop order flow |
 | 1.5 | October 2026 | dudleylane, Claude | The stop's TRIGGERED report (#236) |
+| 1.6 | October 2026 | dudleylane, Claude | A replace's stopPx (#238) |
 
 ---
 

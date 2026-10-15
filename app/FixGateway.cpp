@@ -904,6 +904,26 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
         replacement->price_ = price.getValue();
     }
 
+    // StopPx (99) moves a stop order's stop (#238), checked as a new stop order's is (#223). The type is the original's,
+    // which a replace doesn't change. Whether the stop was already reached is the engine's to decide: a release can run
+    // before the replace does.
+    FIX::StopPx stopPx;
+    if (msg.isSet(stopPx))
+    {
+        msg.get(stopPx);
+        if ((STOP_ORDERTYPE != replacement->ordType_) && (STOPLIMIT_ORDERTYPE != replacement->ordType_))
+        {
+            refuse("Replace refused: StopPx (99) is only for a stop or stop limit order");
+            return;
+        }
+        if (!isTradablePrice(stopPx.getValue(), replacement->ordType_))
+        {
+            refuse("Replace refused: " + priceRefusal("StopPx (99)", replacement->ordType_));
+            return;
+        }
+        replacement->stopPx_ = stopPx.getValue();
+    }
+
     FIX::OrderQty orderQty;
     if (msg.isSet(orderQty))
     {

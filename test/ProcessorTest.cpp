@@ -2174,6 +2174,55 @@ TEST_F(ProcessorTest, AReleasedStopLimitsReplacementStaysReleased)
     EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty()) << "the replacement is held again";
 }
 
+TEST_F(ProcessorTest, AReleasedStopLimitsStopPxCantBeReplaced)
+{
+    // Its stop was reached, so a new stopPx would mean nothing: refused (#238), decided when the replace's turn comes
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 9.5, 20), STOPLIMIT_ORDERTYPE, 10.0));
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
+    ASSERT_TRUE(stop->stopTriggered_);
+
+    OrderEntry *replacement = stop->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = stop->clOrderId_;
+    replacement->stopPx_ = 10.5;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    replacement->stopTriggered_ = false; // as a client's replacement has it: the engine decides
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+    engine.request(OrderReplaceEvent(stop->orderId_, replacement));
+
+    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByClOrderId(replacementId)) << "the replacement was stored";
+    EXPECT_EQ(NEW_ORDSTATUS, stop->status_);
+    EXPECT_DOUBLE_EQ(10.0, stop->stopPx_);
+    EXPECT_EQ(stop->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
+}
+
+TEST_F(ProcessorTest, AHeldStopLimitsReplaceMovesItsLimitAndItsStop)
+{
+    // A held stop limit's replace may move both its limit and its stop (#238)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 9.5, 20), STOPLIMIT_ORDERTYPE, 10.0));
+
+    OrderEntry *replacement = stop->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = stop->clOrderId_;
+    replacement->price_ = 9.75;
+    replacement->stopPx_ = 10.25;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+    engine.request(OrderReplaceEvent(stop->orderId_, replacement));
+
+    EXPECT_EQ(REPLACED_ORDSTATUS, stop->status_);
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    EXPECT_DOUBLE_EQ(9.75, live->price_);
+    EXPECT_DOUBLE_EQ(10.25, live->stopPx_);
+    EXPECT_EQ(OrderBook::OrdersT{ live->orderId_ }, heldStops(*orderBook_, instrId1_));
+}
+
 TEST_F(ProcessorTest, ASuspendedStopIsNotReleasedAndIsHeldAgainWhenResumed)
 {
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());

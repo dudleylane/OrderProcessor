@@ -1131,6 +1131,88 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_PriceNoOrderTradesAt_IsNotQueued)
     }
 }
 
+/// A replace request for this session's order origClOrdId, of a buy of "aaa", as a stop limit
+FIX44::OrderCancelReplaceRequest makeStopReplace(const std::string &origClOrdId, const std::string &clOrdId)
+{
+    FIX44::OrderCancelReplaceRequest msg;
+    msg.set(FIX::OrigClOrdID(origClOrdId));
+    msg.set(FIX::ClOrdID(clOrdId));
+    msg.set(FIX::Side(FIX::Side_BUY));
+    msg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    msg.set(FIX::OrdType(FIX::OrdType_STOP_LIMIT));
+    msg.set(FIX::Symbol("aaa"));
+    msg.set(FIX::OrderQty(100));
+    return msg;
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_StopPxMovesAStopOrdersStop)
+{
+    // A replace's StopPx (99) moves a stop order's stop (#238), and one without it keeps the stop. The gateway didn't
+    // read it, so the replacement kept the original's stop, and the client was told nothing.
+    OrderEntry *saved = saveOrderOf(TEST_SID, "ORD-STP");
+    ASSERT_NE(nullptr, saved);
+    saved->ordType_ = STOPLIMIT_ORDERTYPE;
+    saved->price_ = 10.5;
+    saved->stopPx_ = 10.0;
+    std::vector<OrderEntry *> captured;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .Times(2)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                captured.push_back(evt.replacementOrder_);
+            }));
+
+    auto moved = makeStopReplace("ORD-STP", "REPLACE-STP-1");
+    moved.set(FIX::Price(10.0));
+    moved.set(FIX::StopPx(9.5));
+    gateway_->onMessage(moved, TEST_SID);
+    auto kept = makeStopReplace("ORD-STP", "REPLACE-STP-2");
+    kept.set(FIX::Price(10.25));
+    gateway_->onMessage(kept, TEST_SID);
+
+    ASSERT_EQ(2u, captured.size());
+    EXPECT_EQ(STOPLIMIT_ORDERTYPE, captured[0]->ordType_);
+    EXPECT_DOUBLE_EQ(9.5, captured[0]->stopPx_);
+    EXPECT_DOUBLE_EQ(10.0, captured[0]->price_);
+    EXPECT_DOUBLE_EQ(10.0, captured[1]->stopPx_);
+    EXPECT_DOUBLE_EQ(10.25, captured[1]->price_);
+    for (OrderEntry *order : captured)
+    {
+        delete order; // the mock queue owns nothing
+    }
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_StopPxForAnOrderThatIsntAStopOrder_IsNotQueued)
+{
+    // A replace keeps the original's type, and a limit order has no stop to move (#238). Refused by the gateway
+    // (102=99), as WebSocket's replace_order refuses a stopPx for one.
+    ASSERT_NE(nullptr, saveOrderOf(TEST_SID, "ORD-LMT"));
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    auto msg = makeStopReplace("ORD-LMT", "REPLACE-LMT-1");
+    msg.set(FIX::OrdType(FIX::OrdType_LIMIT));
+    msg.set(FIX::Price(15.50));
+    msg.set(FIX::StopPx(15.0));
+    gateway_->onMessage(msg, TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_StopPxNoOrderTradesAt_IsNotQueued)
+{
+    // Checked as a new stop order's StopPx is (#223), and refused to the sender with an OrderCancelReject (#238)
+    OrderEntry *saved = saveOrderOf(TEST_SID, "ORD-STP-PX");
+    ASSERT_NE(nullptr, saved);
+    saved->ordType_ = STOPLIMIT_ORDERTYPE;
+    saved->stopPx_ = 10.0;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    int n = 0;
+    for (const std::string &stopPx : BAD_PRICES)
+    {
+        auto msg = makeStopReplace("ORD-STP-PX", "REPLACE-STP-PX-" + std::to_string(++n));
+        msg.setField(FIX::FIELD::StopPx, stopPx);
+        gateway_->onMessage(msg, TEST_SID);
+    }
+}
+
 TEST(FixQuantityTest, OrderQtyIsAWholeNumberTheEngineCanHold)
 {
     EXPECT_EQ(std::optional<QuantityT>(1u), FixGateway::toQuantity(1.0));
