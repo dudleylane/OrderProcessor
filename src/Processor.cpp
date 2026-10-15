@@ -747,6 +747,14 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
         refuse(CancelRejectEvent::OTHER, "Replace refused: a replace cannot change the instrument or the side", false);
         return;
     }
+    // A released stop's stop was reached, so a new stopPx would mean nothing (#238). Decided here, when the replace's
+    // turn comes: the release may have run since the client sent it.
+    if (replacement.stopTriggered_ && (replacement.stopPx_ != original->stopPx_))
+    {
+        refuse(CancelRejectEvent::OTHER,
+               "Replace refused: the order's stop was already reached, so its stopPx can't change", false);
+        return;
+    }
     if (replacement.orderQty_ <= original->cumQty_)
     {
         refuse(CancelRejectEvent::OTHER,

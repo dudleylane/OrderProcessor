@@ -207,7 +207,8 @@ protected:
     /// Restores an order with this id and ClOrdID, as a load from persistence does. Its fields are set before it is
     /// stored, so the storage's lock orders them before the session reads them.
     static OrderEntry *restoreOrder(const IdT &id, const std::string &clOrdId, Side side = BUY_SIDE,
-                                    PriceT price = 150.0, QuantityT qty = 100)
+                                    PriceT price = 150.0, QuantityT qty = 100, OrderType ordType = INVALID_ORDERTYPE,
+                                    PriceT stopPx = 0.0)
     {
         SourceIdT clOrderId = WideDataStorage::instance()->add(
             new RawDataEntry(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size())));
@@ -216,7 +217,9 @@ protected:
                                      SourceIdT(), SourceIdT());
         order->orderId_ = id;
         order->side_ = side;
+        order->ordType_ = ordType;
         order->price_ = price;
+        order->stopPx_ = stopPx;
         order->orderQty_ = qty;
         order->leavesQty_ = qty;
         OrderStorage::instance()->restore(order);
@@ -679,6 +682,36 @@ TEST_F(WsSessionTest, OrdersWithAQuantityOutOfRangeAreRefused)
     EXPECT_EQ(0u, inQueues_.size());
 }
 
+TEST_F(WsSessionTest, ReplaceMovesAStopOrdersStop)
+{
+    // stopPx moves a stop order's stop (#238). Whether the stop was already reached is decided by the engine.
+    restoreOrder(IdT(7, 1790000100), "CL-7", SELL_SIDE, 0.0, 100, STOP_ORDERTYPE, 9.5);
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"replace_order","data":{"orderId":7,"stopPx":9.25}})");
+    auto replace = takeQueuedReplace();
+    ASSERT_TRUE(replace.has_value()) << "no replace queued; escaped: " << escaped();
+    ASSERT_NE(nullptr, replace->second);
+    EXPECT_DOUBLE_EQ(9.25, replace->second->stopPx_);
+    EXPECT_EQ(STOP_ORDERTYPE, replace->second->ordType_);
+}
+
+TEST_F(WsSessionTest, ReplaceWithAStopPxOfAnOrderThatIsntAStopOrderIsRefused)
+{
+    restoreOrder(IdT(7, 1790000100), "CL-7", BUY_SIDE, 150.0, 100, LIMIT_ORDERTYPE);
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"replace_order","data":{"orderId":7,"stopPx":149.0}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Replace refused: stopPx is only for a STOP or STOPLIMIT order", reply->value("message", ""));
+    EXPECT_EQ(0u, inQueues_.size());
+}
+
 TEST_F(WsSessionTest, OrderWithAFieldTheServerDoesNotKnowIsRefusedBeforeAnythingIsStored)
 {
     // An order whose side, type, time in force, currency or capacity was missing or unknown parsed to INVALID, went to the
@@ -794,7 +827,7 @@ TEST_F(WsSessionTest, ReplaceThatChangesNothingIsRefused)
     send(client, R"({"type":"replace_order","data":{"orderId":7}})");
     auto reply = readUntil(client, "error");
     ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
-    EXPECT_EQ("replace_order changes nothing: give price, orderQty or tif", reply->value("message", ""));
+    EXPECT_EQ("replace_order changes nothing: give price, stopPx, orderQty or tif", reply->value("message", ""));
     EXPECT_EQ(0u, inQueues_.size());
 }
 

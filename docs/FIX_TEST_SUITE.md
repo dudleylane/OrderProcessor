@@ -120,6 +120,9 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ReplaceRequest_CarriesTheRequestsSideAndSymbol` | Side and Symbol come from the request, so the engine refuses a change |
 | `ReplaceRequest_UnknownSymbol_IsNotQueued` | Unknown Symbol → refused by the gateway (102=99), nothing pushed |
 | `ReplaceRequest_UnknownOrigClOrdId_IsNotQueued` | Unknown OrigClOrdID → answered by the gateway (102=1), nothing pushed |
+| `ReplaceRequest_StopPxMovesAStopOrdersStop` | A stop limit's replace with StopPx (99) → the replacement's new stop; one without StopPx keeps the original's (#238) |
+| `ReplaceRequest_StopPxForAnOrderThatIsntAStopOrder_IsNotQueued` | StopPx on a limit order's replace → refused by the gateway (102=99), nothing pushed (#238) |
+| `ReplaceRequest_StopPxNoOrderTradesAt_IsNotQueued` | A replace's StopPx no order trades at → refused by the gateway (102=99), nothing pushed (#238) |
 | `NewOrderSingle_StoresTheClOrdIdUnderItsSession` | The order's ClOrdID is stored as `FIX:<SenderCompID>-><TargetCompID>\|<ClOrdID>` (#71) |
 | `NewOrderMultileg_StoresTheClOrdIdUnderItsSession` | The same for an FX swap (#71) |
 | `CancelRequest_ForAnotherSessionsOrder_IsNotQueued` | Cancel naming another session's ClOrdID → answered as unknown by the gateway, nothing pushed (#71) |
