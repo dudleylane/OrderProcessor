@@ -16,6 +16,7 @@
 #include "IdTGenerator.h"
 #include "OrderStorage.h"
 #include "TrOperations.h"
+#include "ExpiryScheduler.h"
 
 using namespace COP;
 using namespace COP::Proc;
@@ -49,6 +50,8 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
     assert(nullptr != cnxt.idGenerator_);
     const u64 contraLink = cnxt.idGenerator_->getId().id_;
     const u64 baseLink = cnxt.idGenerator_->getId().id_;
+    // Both sides' near legs trade in one business day (#244), as an outright match's sides do: the clock is read once
+    const DateTimeT dayStart = ExpiryScheduler::dayStartOf(cnxt.now());
 
     try
     {
@@ -67,6 +70,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         nearTradeEntry.tradeLink_ = contraLink;
 
         onTradeExecution contraEvnt(&nearTradeEntry);
+        contraEvnt.dayStart_ = dayStart;
         contraEvnt.orderBook_ = cnxt.orderBook_;
         contraEvnt.transaction_ = scope;
         func->process(contraEvnt, nearTrade_.order_, cnxt);
@@ -93,6 +97,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         baseNearTradeEntry.tradeLink_ = baseLink;
 
         onTradeExecution baseEvnt(&baseNearTradeEntry);
+        baseEvnt.dayStart_ = dayStart;
         baseEvnt.orderBook_ = cnxt.orderBook_;
         baseEvnt.transaction_ = scope;
         func->process(baseEvnt, baseOrder_, cnxt);

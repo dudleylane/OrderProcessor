@@ -873,6 +873,25 @@ The engine read an order's time in force and acted on none of it until #240.
 | `ExpirySchedulerTest.cpp` | `ExpirySchedulerTest.*` | The day's end, which orders have a timer, firing order, the thread |
 | `ServerDataTest.cpp` | `RestoredDayAndGtdOrdersThatAreLiveGetTheirTimersBack` | Timers set again at a restart |
 
+### 4.7 Business Days and Day Figures (#244)
+
+An order keeps FIX's day figures for the business day that began at its `dayStart_` (17:00 New York, `ExpiryScheduler::dayStartOf()`): `dayOrderQty_`, what it had left to trade when the day began, and `dayCumQty_` and `dayAvgPx_`, the day's fills. Nothing kept them before #244.
+
+- **Acceptance:** an order's first day is the one its `creationTime_` falls in, the day a DAY order expires with (#240). A replacement takes over its original's day and fills, and its `dayOrderQty_` is its own quantity less what it traded before the day.
+- **Fills:** `ExecutionDeferedEvent` reads the processor's clock once per match (`Context::now()`), so every side of a trade counts it in one day. `OrderParams::applyTrade()` begins the day figures first if the trade is in a later day than theirs (`startDay()`): a fill after the day's end, before the order's restatement ran, is the new day's.
+- **Restatement:** `ExpiryScheduler::restatementOf()` gives an order that rests past its day, any time in force but DAY, a `TimerEvent::RESTATEMENT` at the day's end. A GTD order that expires first gets none. `Processor::process(OrderStateChange::RESTATE)` decides it on the transaction worker without the state machine, since a restatement changes no state. A live order begins the day (unless a fill already did, which keeps that fill), is persisted, gets a `RESTATED` report (`ReportRestatementTrOperation`, after the persist, #28), and gets its next restatement. An order no longer live is restated no more.
+- **Restore:** format version 4 of the order record carries `dayStart_`; an older record's is 0. `App::scheduleRestoredExpiries()` sets each live order's restatement too, so one whose day ended while the server was down is restated as the server starts.
+- **Lookups:** each thread keeps the business day it last answered, for `dayStartOf()` and `dayEndAfter()` alike, and reads the zone database only when its day changes, under a mutex of `ExpiryScheduler`'s. libstdc++'s `time_zone` fills in its transitions on first use, under a lock made of atomics inside `libstdc++.so` that ThreadSanitizer can't see; the mutex is what lets the TSan job check the lookups.
+
+**Associated Test Cases:**
+
+| Test File | Test Case | Description |
+|-----------|-----------|-------------|
+| `ProcessorTest.cpp` | `*DayFigures*`, `*Restate*`, `*Restatement*` | The day's fills, a fill after the day's end, the restatement and its report, a replacement's day |
+| `ExpirySchedulerTest.cpp` | `*DayStart*`, `*Restatement*`, `DaysLookedUpFromSeveralThreadsAtOnceAgree` | The day a time is in, across the clock changes and from several threads at once; which orders are restated |
+| `StorageRecordDispatcherTest.cpp` | `*Golden*` | Format version 4, and `dayStart_` 0 from older ones |
+| `ServerDataTest.cpp` | `AnOrderWhoseDayEndedWhileTheServerWasDownIsRestatedAtOnce` | A restart's restatement |
+
 ## 5. State Machine Design
 
 ### 5.1 Order State Diagram
@@ -1459,7 +1478,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 
 **Orders a crash left without their fills (#207).** An order's booking and its fills are separate transactions, each persisted when it commits. The booking writes the order as accepted, and its match only starts the fills, which a later transaction writes. A crash between the two leaves the order on disk as booked, though it had traded. `finishLoad()` restores orders in id order, which is the order they arrived in. It books an open order only if it wouldn't have traded with one that arrived before it: one the matcher's own search finds among the orders booked so far (`OrderMatcher::findContra()`), or one already left out (`OrderMatcher::tradesWith()`). An open market order is always left out, since its own transaction trades or cancels it. `ordersToMatch()` lists those left out, in that order, and the server matches each (`Processor::matchRestored()`) before it takes orders, with the operations its booking ran. So each trades as it did, with the earlier order and at its price, and its fills persist and report like any others. If they don't reach disk either, the next restart finds the same orders and matches them again.
 
-**Record format (#149).** A record's first 4 bytes hold its type in the low 16 bits and, in the high 16, the version of the layout its codec wrote (`FORMAT_VERSION`). The order codec's is 3: version 1 added an order's execution instructions (#172), 2 whether a stop order's stop was reached (#223), and 3 its ClOrdID, its original's, its source and its destination (#192). Every other codec's is 0, so their records' first bytes are the type alone, as they always were. The dispatcher refuses a version newer than the codec reads, by name. Each decoder checks that the record holds every field it reads and that it has read the whole record, so a record cut short or with bytes after its last field is refused rather than misread. `static_assert`s pin the size of every field stored as its in-memory bytes.
+**Record format (#149).** A record's first 4 bytes hold its type in the low 16 bits and, in the high 16, the version of the layout its codec wrote (`FORMAT_VERSION`). The order codec's is 4: version 1 added an order's execution instructions (#172), 2 whether a stop order's stop was reached (#223), 3 its ClOrdID, its original's, its source and its destination (#192), and 4 the start of the business day its day figures are for (#244). Every other codec's is 0, so their records' first bytes are the type alone, as they always were. The dispatcher refuses a version newer than the codec reads, by name. Each decoder checks that the record holds every field it reads and that it has read the whole record, so a record cut short or with bytes after its last field is refused rather than misread. `static_assert`s pin the size of every field stored as its in-memory bytes.
 
 `StorageRecordDispatcherTest` holds golden records: the bytes each record type was written as before #149, and an order's in every format version since. The build must write the newest of each and read every field back from all of them, and every prefix of them, and every one with a byte more, must be refused. To change a layout on purpose, bump that codec's `FORMAT_VERSION`, keep decoding the old version, and add golden records for the new one; running the suite with `GOLDEN_PRINT=1` prints what the build writes.
 
@@ -1579,6 +1598,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | 1.6 | October 2026 | dudleylane, Claude | A replace's stopPx (#238) |
 | 1.7 | October 2026 | dudleylane, Claude | The last trade's price survives a restart (#237) |
 | 1.8 | October 2026 | dudleylane, Claude | Time in force: IOC, FOK, DAY and GTD (#240) |
+| 1.9 | October 2026 | dudleylane, Claude | Business days, day figures and restatements (#244) |
 
 ---
 

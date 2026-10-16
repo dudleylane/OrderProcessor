@@ -1137,6 +1137,19 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
 
     report.set(FIX::Symbol(order.instrument_.get().symbol_));
     report.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    // A restatement at a business day's start (#244): FIX's GT renewal / restatement, with no corporate action
+    if (RESTATED_EXECTYPE == exec->type_)
+    {
+        report.set(FIX::ExecRestatementReason(FIX::ExecRestatementReason_GT_RENEWAL));
+    }
+    // A GT order's figures for the business day, once it has traded on an earlier one, as FIX 4.4 defines them (#244)
+    if ((DAY_TIF != order.tif_) && (IOC_TIF != order.tif_) && (FOK_TIF != order.tif_) &&
+        (order.dayCumQty_ < order.cumQty_))
+    {
+        report.set(FIX::DayOrderQty(order.dayOrderQty_));
+        report.set(FIX::DayCumQty(order.dayCumQty_));
+        report.set(FIX::DayAvgPx(order.dayAvgPx_));
+    }
     // A GTD order's expiry (#240)
     if ((GTD_TIF == order.tif_) && (0 != order.expireTime_))
     {

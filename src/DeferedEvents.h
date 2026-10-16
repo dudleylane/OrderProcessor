@@ -27,7 +27,7 @@ namespace Proc
 {
 
 /// A change of an order's state that a request asks for: a suspend, resume or finish, or a timer's expiry, day end or
-/// day start (#96)
+/// day start (#96), or restatement (#244), which changes the order's day figures and not its state
 enum class OrderStateChange
 {
     SUSPEND,
@@ -35,7 +35,8 @@ enum class OrderStateChange
     FINISH,
     EXPIRE,
     DAY_END,
-    DAY_START
+    DAY_START,
+    RESTATE
 };
 
 class DeferedEventFunctor
@@ -102,7 +103,8 @@ struct ExecutionDeferedEvent : public DeferedEventBase
     virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
 
 private:
-    void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope, const TradeParams &param);
+    void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope, const TradeParams &param,
+                 DateTimeT dayStart);
 };
 
 struct MatchOrderDeferedEvent : public DeferedEventBase

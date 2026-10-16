@@ -55,6 +55,12 @@ json orderToJson(const OrderEntry &order)
     j["cumQty"] = order.cumQty_;
     j["leavesQty"] = order.leavesQty_;
     j["minQty"] = order.minQty_;
+    // The business day's figures, FIX's DayOrderQty, DayCumQty and DayAvgPx (#244): what the order had left to trade
+    // when the day began, and the day's fills. dayStart is when that day began, 17:00 New York; 0 for none.
+    j["dayOrderQty"] = order.dayOrderQty_;
+    j["dayCumQty"] = order.dayCumQty_;
+    j["dayAvgPx"] = order.dayAvgPx_;
+    j["dayStart"] = order.dayStart_;
     j["status"] = toJsonString(order.status_);
     j["tif"] = toJsonString(order.tif_);
     j["capacity"] = toJsonString(order.capacity_);

@@ -200,6 +200,7 @@ TEST_F(ServerDataTest, RestoredDayAndGtdOrdersThatAreLiveGetTheirTimersBack)
             val->tif_ = tif;
             val->creationTime_ = created;
             val->expireTime_ = expires;
+            val->dayStart_ = Proc::ExpiryScheduler::dayStartOf(created); // as the processor sets it (#244)
             writer.save(*val);
         };
         save(1, GTD_TIF, NEW_ORDSTATUS, now - hour, now + hour);        // later
@@ -207,7 +208,7 @@ TEST_F(ServerDataTest, RestoredDayAndGtdOrdersThatAreLiveGetTheirTimersBack)
         save(3, DAY_TIF, NEW_ORDSTATUS, now - 24 * hour, 0);            // yesterday's: ended at 21:00 UTC
         save(4, DAY_TIF, NEW_ORDSTATUS, now - hour, 0);                 // today's: ends at 21:00 UTC
         save(5, GTD_TIF, FILLED_ORDSTATUS, now - 2 * hour, now - hour); // done: no timer
-        save(6, GTC_TIF, NEW_ORDSTATUS, now - hour, 0);                 // no end
+        save(6, GTC_TIF, NEW_ORDSTATUS, now - hour, 0);                 // no end: restated at 21:00 UTC (#244)
     }
     restart();
     App::ServerData data = load();
@@ -225,7 +226,7 @@ TEST_F(ServerDataTest, RestoredDayAndGtdOrdersThatAreLiveGetTheirTimersBack)
                                  {
                                      return now;
                                  });
-    EXPECT_EQ(4u, App::scheduleRestoredExpiries(*OrderStorage::instance(), &expiry));
+    EXPECT_EQ(5u, App::scheduleRestoredExpiries(*OrderStorage::instance(), &expiry)) << "4 expiries, 1 restatement";
     EXPECT_EQ(2u, expiry.fireDue());
     std::sort(fired.begin(), fired.end(),
               [](const IdT &a, const IdT &b)
@@ -233,7 +234,65 @@ TEST_F(ServerDataTest, RestoredDayAndGtdOrdersThatAreLiveGetTheirTimersBack)
                   return a.id_ < b.id_;
               });
     EXPECT_EQ((std::vector<IdT>{ IdT(2, 20261014), IdT(3, 20261014) }), fired);
-    EXPECT_EQ(2u, expiry.pending());
+    EXPECT_EQ(3u, expiry.pending());
+}
+
+TEST_F(ServerDataTest, AnOrderWhoseDayEndedWhileTheServerWasDownIsRestatedAtOnce)
+{
+    // A restart sets each live order's restatement again (#244): one whose business day ended while the server was down
+    // is restated as the timers start, and so is one from a record before format version 4, whose figures are for no
+    // day
+    const DateTimeT now = 1792022400000ULL + 9ULL * 60 * 60 * 1000; // 2026-10-15 09:00 UTC, 05:00 in New York
+    const DateTimeT hour = 60ULL * 60 * 1000;
+    {
+        LMDBStorage lmdb(MAP_SIZE);
+        StorageRecordDispatcher writer;
+        writer.init(WideDataStorage::instance(), nullptr, &lmdb, OrderStorage::instance());
+        lmdb.load(dir_, &writer);
+        WideDataStorage::instance()->bindStorage(&writer);
+        const SourceIdT instrument = test::addInstrument("RESTATED");
+        const auto save = [&](u64 number, OrderStatus status, DateTimeT dayStart)
+        {
+            std::unique_ptr<OrderEntry> val = order(instrument, number, status, (FILLED_ORDSTATUS == status) ? 0 : 100);
+            val->tif_ = GTC_TIF;
+            val->creationTime_ = (0 == dayStart) ? 1000 : dayStart + hour;
+            val->dayStart_ = dayStart;
+            writer.save(*val);
+        };
+        save(1, NEW_ORDSTATUS, now - 36 * hour);    // the day that began 17:00 EDT on the 13th, which ended while down
+        save(2, NEW_ORDSTATUS, now - 12 * hour);    // today's, which ends at 21:00 UTC
+        save(3, NEW_ORDSTATUS, 0);                  // for no day
+        save(4, FILLED_ORDSTATUS, now - 36 * hour); // done: no timer
+    }
+    restart();
+    App::ServerData data = load();
+
+    ::testing::NiceMock<test::MockInQueues> queues;
+    std::vector<std::pair<IdT, Queues::TimerEvent::TimerType>> fired;
+    ON_CALL(queues, push(::testing::_, ::testing::An<const Queues::TimerEvent &>()))
+        .WillByDefault(
+            [&fired](const std::string &, const Queues::TimerEvent &evnt)
+            {
+                fired.emplace_back(evnt.id_, evnt.timerType_);
+            });
+    Proc::ExpiryScheduler expiry(&queues,
+                                 [now]
+                                 {
+                                     return now;
+                                 });
+    EXPECT_EQ(3u, App::scheduleRestoredExpiries(*OrderStorage::instance(), &expiry));
+    EXPECT_EQ(2u, expiry.fireDue());
+    std::sort(fired.begin(), fired.end(),
+              [](const auto &a, const auto &b)
+              {
+                  return a.first.id_ < b.first.id_;
+              });
+    ASSERT_EQ(2u, fired.size());
+    EXPECT_EQ(IdT(1, 20261014), fired[0].first);
+    EXPECT_EQ(IdT(3, 20261014), fired[1].first);
+    EXPECT_EQ(Queues::TimerEvent::RESTATEMENT, fired[0].second);
+    EXPECT_EQ(Queues::TimerEvent::RESTATEMENT, fired[1].second);
+    EXPECT_EQ(1u, expiry.pending()) << "today's order isn't restated until its day ends";
 }
 
 TEST_F(ServerDataTest, ARecordOfATypeThisBuildDoesNotKnowStopsTheLoad)

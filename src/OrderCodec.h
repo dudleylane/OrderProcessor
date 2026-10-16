@@ -56,7 +56,9 @@ public:
     /// at once as a market order.
     /// 3 since #192: the order's strings follow (OrderStrings), each a byte, 0 or 1, saying whether the record carries
     /// it, and then, if it does, its value: a ClOrdID's type, length and bytes, a string's length and bytes.
-    static constexpr u32 FORMAT_VERSION = 3;
+    /// 4 since #244: '.' and the start of the business day the day figures are for (dayStart_) follow them. An order
+    /// from an older version is decoded with 0, figures for no day: its first restatement begins them.
+    static constexpr u32 FORMAT_VERSION = 4;
 
     /// Writes the order and the strings given. Throws std::invalid_argument for a string given for a field whose id
     /// isn't set: nothing could restore it.

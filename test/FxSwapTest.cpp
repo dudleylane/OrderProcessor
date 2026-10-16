@@ -393,7 +393,8 @@ TEST_F(FxSwapTest, SwapCodecReadsTheFarLegWhateverTheVersion)
     // Every format version has a swap's far leg, and decode reads it by content. Records were once stored under the
     // storage's own version, 0 on an order's first write, and decode read the far leg only from version 1 on, so a swap
     // written once lost it (#144). Since #172 the far leg follows the execution instructions, in format version 1,
-    // since #223 the stop's mark too, in version 2, and since #192 the order's strings, in version 3.
+    // since #223 the stop's mark too, in version 2, since #192 the order's strings, in version 3, and since #244 the
+    // day's start, in version 4.
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     OrderEntry *saved = OrderStorage::instance()->save(*order, IdTGenerator::instance());
@@ -410,23 +411,26 @@ TEST_F(FxSwapTest, SwapCodecReadsTheFarLegWhateverTheVersion)
     COP::Codec::OrderCodec codec;
     codec.encode(*saved, &buf, &id, &version);
 
-    // Format version 3, as encode() writes it, carrying none of the order's strings ('.' and a 0 for each of the four,
-    // #192); version 2, the same record without them; version 1, without the stop's mark either ('.' and a byte,
-    // #223); and version 0, without the execution instructions too ('.' and their 4-byte mask). All come before the
-    // far leg ('.', farPrice_, '.', farSettlDate_).
+    // Format version 4, as encode() writes it, with the day's start ('.' and 8 bytes, #244); version 3, the same
+    // record without it, carrying none of the order's strings ('.' and a 0 for each of the four, #192); version 2,
+    // without the strings either; version 1, without the stop's mark too ('.' and a byte, #223); and version 0,
+    // without the execution instructions ('.' and their 4-byte mask). All come before the far leg ('.', farPrice_,
+    // '.', farSettlDate_).
     const size_t farLeg = 2 + sizeof(saved->farPrice_) + sizeof(saved->farSettlDate_);
+    const size_t dayStart = 1 + sizeof(saved->dayStart_);
     const size_t strings = 4 * 2;
     const size_t stopMark = 2;
     const size_t instructions = 1 + sizeof(u32);
-    ASSERT_LT(farLeg + strings + stopMark + instructions, buf.size());
+    ASSERT_LT(farLeg + dayStart + strings + stopMark + instructions, buf.size());
     ASSERT_EQ(std::string("\x2e\x00\x2e\x00\x2e\x00\x2e\x00", strings),
-              buf.substr(buf.size() - farLeg - strings, strings))
+              buf.substr(buf.size() - farLeg - dayStart - strings, strings))
         << "the record carries strings";
     const std::string farTail = buf.substr(buf.size() - farLeg);
-    const std::string v2 = buf.substr(0, buf.size() - farLeg - strings) + farTail;
-    const std::string v1 = buf.substr(0, buf.size() - farLeg - strings - stopMark) + farTail;
-    const std::string v0 = buf.substr(0, buf.size() - farLeg - strings - stopMark - instructions) + farTail;
-    const std::pair<u32, std::string> records[] = { { 3u, buf }, { 2u, v2 }, { 1u, v1 }, { 0u, v0 } };
+    const std::string v3 = buf.substr(0, buf.size() - farLeg - dayStart) + farTail;
+    const std::string v2 = buf.substr(0, buf.size() - farLeg - dayStart - strings) + farTail;
+    const std::string v1 = buf.substr(0, buf.size() - farLeg - dayStart - strings - stopMark) + farTail;
+    const std::string v0 = buf.substr(0, buf.size() - farLeg - dayStart - strings - stopMark - instructions) + farTail;
+    const std::pair<u32, std::string> records[] = { { 4u, buf }, { 3u, v3 }, { 2u, v2 }, { 1u, v1 }, { 0u, v0 } };
     for (const auto &[formatVersion, record] : records)
     {
         std::unique_ptr<OrderEntry> decoded(codec.decode(id, formatVersion, record.data(), record.size()));
