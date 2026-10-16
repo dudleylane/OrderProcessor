@@ -110,6 +110,11 @@ size_t App::scheduleRestoredExpiries(const Store::OrderDataStorage &storage, Pro
                 expiry->schedule(order.orderId_, when, type);
                 ++timers;
             }
+            if (live && Proc::ExpiryScheduler::restatementOf(order, &when))
+            {
+                expiry->schedule(order.orderId_, when, Queues::TimerEvent::RESTATEMENT);
+                ++timers;
+            }
         });
     return timers;
 }

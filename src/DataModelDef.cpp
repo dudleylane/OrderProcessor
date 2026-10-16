@@ -202,7 +202,7 @@ OrderParams::OrderParams(const SourceIdT &dest, const SourceIdT &instrument, con
                          const SourceIdT &origClOrderID, const SourceIdT &executions)
     : entryMutex_(), orderId_(), origOrderId_(), price_(0.0), status_(INVALID_ORDSTATUS), side_(INVALID_SIDE),
       ordType_(INVALID_ORDERTYPE), leavesQty_(0), cumQty_(0), orderQty_(0), tif_(INVALID_TIF), stopPx_(0.0),
-      avgPx_(0.0), dayAvgPx_(0.0), creationTime_(0), lastUpdateTime_(0), expireTime_(0), settlDate_(0),
+      avgPx_(0.0), dayAvgPx_(0.0), creationTime_(0), lastUpdateTime_(0), expireTime_(0), settlDate_(0), dayStart_(0),
       settlType_(INVALID_SETTLTYPE), capacity_(INVALID_CAPACITY), currency_(INVALID_CURRENCY), minQty_(0),
       dayOrderQty_(0), dayCumQty_(0), instrument_(instrument), account_(account), clearing_(clearing),
       destination_(dest), execInstruct_(), clOrderId_(clOrderId), origClOrderId_(origClOrderID), source_(source),
@@ -217,33 +217,57 @@ OrderParams::OrderParams(const OrderParams &ord)
       orderQty_(ord.orderQty_), tif_(ord.tif_), stopTriggered_(ord.stopTriggered_), stopPx_(ord.stopPx_),
       avgPx_(ord.avgPx_), dayAvgPx_(ord.dayAvgPx_), creationTime_(ord.creationTime_),
       lastUpdateTime_(ord.lastUpdateTime_), expireTime_(ord.expireTime_), settlDate_(ord.settlDate_),
-      settlType_(ord.settlType_), capacity_(ord.capacity_), currency_(ord.currency_), minQty_(ord.minQty_),
-      dayOrderQty_(ord.dayOrderQty_), dayCumQty_(ord.dayCumQty_), instrument_(ord.instrument_), account_(ord.account_),
-      clearing_(ord.clearing_), destination_(ord.destination_), execInstruct_(ord.execInstruct_),
-      clOrderId_(ord.clOrderId_), origClOrderId_(ord.origClOrderId_), source_(ord.source_), executions_(ord.executions_)
+      dayStart_(ord.dayStart_), settlType_(ord.settlType_), capacity_(ord.capacity_), currency_(ord.currency_),
+      minQty_(ord.minQty_), dayOrderQty_(ord.dayOrderQty_), dayCumQty_(ord.dayCumQty_), instrument_(ord.instrument_),
+      account_(ord.account_), clearing_(ord.clearing_), destination_(ord.destination_),
+      execInstruct_(ord.execInstruct_), clOrderId_(ord.clOrderId_), origClOrderId_(ord.origClOrderId_),
+      source_(ord.source_), executions_(ord.executions_)
 {
     instrument_.load();
 }
 
 OrderParams::~OrderParams() {}
 
-void OrderParams::applyTrade(const TradeExecEntry *trade)
+void OrderParams::applyTrade(const TradeExecEntry *trade, DateTimeT dayStart)
 {
     assert(nullptr != trade);
     if (leavesQty_ < trade->lastQty_)
     {
         throw std::runtime_error("OrderParams::applyTrade: trade quantity exceeds leaves quantity!");
     }
+    // A fill after the day's end, before the order's restatement ran: it is the new day's (#244)
+    startDay(dayStart);
     // The average fill price, weighted by quantity (#239). Nothing computed it before, so every order reported 0.
     const QuantityT cumBefore = cumQty_;
+    const QuantityT dayCumBefore = dayCumQty_;
     leavesQty_ -= trade->lastQty_;
     cumQty_ += trade->lastQty_;
+    dayCumQty_ += trade->lastQty_;
     if (0 < cumQty_) [[likely]]
     {
         avgPx_ = (avgPx_ * cumBefore + trade->lastPx_ * trade->lastQty_) / cumQty_;
     }
+    // The day's figures as FIX keeps them (#244): nothing kept them before, so every order reported 0
+    if (0 < dayCumQty_) [[likely]]
+    {
+        dayAvgPx_ = (dayAvgPx_ * dayCumBefore + trade->lastPx_ * trade->lastQty_) / dayCumQty_;
+    }
+    dayOrderQty_ = orderQty_ - (cumQty_ - dayCumQty_);
 
     executions_.get()->push_back(EventData(trade->execId_));
+}
+
+bool OrderParams::startDay(DateTimeT dayStart) noexcept
+{
+    if (dayStart <= dayStart_)
+    {
+        return false;
+    }
+    dayStart_ = dayStart;
+    dayCumQty_ = 0;
+    dayAvgPx_ = 0.0;
+    dayOrderQty_ = (cumQty_ < orderQty_) ? (orderQty_ - cumQty_) : 0;
+    return true;
 }
 
 void OrderParams::waitUntilBookingEnqueued() const noexcept
@@ -276,12 +300,13 @@ bool OrderEntry::compare(const OrderEntry &val) const
            (val.clearing_.getId() == clearing_.getId()) && (val.destination_.getId() == destination_.getId()) &&
            (val.execInstruct_ == execInstruct_) && (val.creationTime_ == creationTime_) &&
            (val.lastUpdateTime_ == lastUpdateTime_) && (val.expireTime_ == expireTime_) &&
-           (val.settlDate_ == settlDate_) && (val.price_ == price_) && (val.stopPx_ == stopPx_) &&
-           (val.stopTriggered_ == stopTriggered_) && (val.avgPx_ == avgPx_) && (val.dayAvgPx_ == dayAvgPx_) &&
-           (val.status_ == status_) && (val.side_ == side_) && (val.ordType_ == ordType_) && (val.tif_ == tif_) &&
-           (val.settlType_ == settlType_) && (val.capacity_ == capacity_) && (val.currency_ == currency_) &&
-           (val.minQty_ == minQty_) && (val.orderQty_ == orderQty_) && (val.leavesQty_ == leavesQty_) &&
-           (val.cumQty_ == cumQty_) && (val.dayOrderQty_ == dayOrderQty_) && (val.dayCumQty_ == dayCumQty_) &&
+           (val.settlDate_ == settlDate_) && (val.dayStart_ == dayStart_) && (val.price_ == price_) &&
+           (val.stopPx_ == stopPx_) && (val.stopTriggered_ == stopTriggered_) && (val.avgPx_ == avgPx_) &&
+           (val.dayAvgPx_ == dayAvgPx_) && (val.status_ == status_) && (val.side_ == side_) &&
+           (val.ordType_ == ordType_) && (val.tif_ == tif_) && (val.settlType_ == settlType_) &&
+           (val.capacity_ == capacity_) && (val.currency_ == currency_) && (val.minQty_ == minQty_) &&
+           (val.orderQty_ == orderQty_) && (val.leavesQty_ == leavesQty_) && (val.cumQty_ == cumQty_) &&
+           (val.dayOrderQty_ == dayOrderQty_) && (val.dayCumQty_ == dayCumQty_) &&
            (val.clOrderId_.getId() == clOrderId_.getId()) && (val.origClOrderId_.getId() == origClOrderId_.getId()) &&
            (val.source_.getId() == source_.getId()) && (val.orderId_ == orderId_) &&
            (val.origOrderId_ == origOrderId_) && (val.executions_.getId() == executions_.getId()) &&

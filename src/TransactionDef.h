@@ -12,11 +12,13 @@
 
 #pragma once
 
+#include <functional>
 #include <string>
 #include <memory>
 #include <vector>
 #include <set>
 
+#include "ExchUtils.h"
 #include "TypesDef.h"
 
 namespace COP
@@ -110,7 +112,8 @@ enum OperationType
     REMOVE_STOPBOOK_TROPERATION,           // takes a held stop order out of the stop book (#223)
     RELEASE_STOP_TROPERATION,              // releases a held stop order a trade reached, and matches it (#223)
     REPORT_RELEASE_TROPERATION,            // reports a stop's release, if it released the order (#236)
-    PERSIST_LASTTRADE_TROPERATION          // writes a new persisted version of an instrument's last trade (#237)
+    PERSIST_LASTTRADE_TROPERATION,         // writes a new persisted version of an instrument's last trade (#237)
+    REPORT_RESTATEMENT_TROPERATION         // reports an order's day figures begun again for a new business day (#244)
 };
 
 struct Context
@@ -122,6 +125,9 @@ struct Context
     Proc::OrderMatcher *orderMatch_;
     IdTValueGenerator *idGenerator_;
     Proc::DeferedEventContainer *deferedEvents_;
+    /// The processor's clock, milliseconds since the epoch, UTC: what business day a trade is in (#244). Tests give one
+    /// of their own; without one it is the system's.
+    const std::function<DateTimeT()> *clock_ = nullptr;
 
     Context()
         : orderStorage_(nullptr), orderBook_(nullptr), inQueues_(nullptr), outQueues_(nullptr), orderMatch_(nullptr),
@@ -135,6 +141,11 @@ struct Context
         : orderStorage_(orderStorage), orderBook_(orderBook), inQueues_(inQueues), outQueues_(outQueues),
           orderMatch_(orderMatch), idGenerator_(idGenerator), deferedEvents_(deferedEvents)
     {
+    }
+
+    DateTimeT now() const
+    {
+        return ((nullptr != clock_) && *clock_) ? (*clock_)() : aux::currentDateTime();
     }
 };
 

@@ -404,6 +404,11 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
     appendRaw(buf, strings.origClOrderId);
     appendString(buf, strings.source);
     appendString(buf, strings.destination);
+
+    // Format version 4 (#244)
+    buf->append(1, '.');
+    memcpy(typebuf, &(val.dayStart_), sizeof(val.dayStart_));
+    buf->append(typebuf, sizeof(val.dayStart_));
 }
 
 char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version, const OrderStrings &strings)
@@ -578,6 +583,12 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     p = writeRaw(p, strings.origClOrderId);
     p = writeString(p, strings.source);
     p = writeString(p, strings.destination);
+
+    // Format version 4 (#244)
+    *p = '.';
+    ++p;
+    memcpy(p, &(val.dayStart_), sizeof(val.dayStart_));
+    p += sizeof(val.dayStart_);
     return p;
 }
 
@@ -855,6 +866,20 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
         {
             *strings = std::move(carried);
         }
+    }
+    // Format version 4 (#244): the start of the business day the day figures are for. From an older version, none:
+    // they were never kept, and the order's first restatement begins them.
+    val->dayStart_ = 0;
+    if (4 <= formatVersion)
+    {
+        p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' before dayStart_!");
+        if (static_cast<size_t>(end - p) < sizeof(val->dayStart_))
+        {
+            throw std::runtime_error(
+                "Invalid format of the encoded OrderEntry - size less than required, unable decode dayStart_!");
+        }
+        memcpy(&(val->dayStart_), p, sizeof(val->dayStart_));
+        p += sizeof(val->dayStart_);
     }
     expectConsumed(p, end, "OrderEntry");
 

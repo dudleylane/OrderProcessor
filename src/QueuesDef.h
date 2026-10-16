@@ -166,7 +166,9 @@ struct TimerEvent : public EventBase
         INVALID_TIMER = 0,
         EXPIRATION,
         DAY_END,
-        DAY_START
+        DAY_START,
+        /// A business day starts for an order that outlives the one before it (#244): its day figures begin again
+        RESTATEMENT
     };
     TimerType timerType_;
 

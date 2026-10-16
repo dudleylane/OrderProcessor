@@ -246,6 +246,11 @@ public:
     DateTimeT lastUpdateTime_;
     DateTimeT expireTime_;
     DateTimeT settlDate_;
+    /// The start of the business day the day figures are for, 17:00 New York (#244, ExpiryScheduler::dayStartOf()).
+    /// They are FIX's DayOrderQty, DayCumQty and DayAvgPx: dayOrderQty_ is what the order had left to trade when the
+    /// day began, orderQty_ less what it traded before, and dayCumQty_ and dayAvgPx_ are the day's fills. 0 for no
+    /// day: an order from before format version 4, whose figures were never kept. Persisted from version 4.
+    DateTimeT dayStart_;
 
     SettlTypeBase settlType_;
     Capacity capacity_;
@@ -269,7 +274,12 @@ public:
 
     WideDataLazyRef<ExecutionsT *> executions_;
 
-    void applyTrade(const TradeExecEntry *trade);
+    /// Applies a fill in the business day that starts at dayStart (#244): one later than the day figures' begins them
+    /// again first, as the day's restatement would have. 0 keeps the figures' day.
+    void applyTrade(const TradeExecEntry *trade, DateTimeT dayStart);
+    /// Begins the day figures for the business day that starts at dayStart, unless they are for it already or a later
+    /// one (#244). Returns whether it began them: a second call for one day keeps that day's fills.
+    bool startDay(DateTimeT dayStart) noexcept;
     void addExecution(const IdT &execId);
 
     /// Where a working order rests (#223): in its instrument's price book, in its stop book, or in neither

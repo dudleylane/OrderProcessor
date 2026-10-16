@@ -71,8 +71,9 @@ struct OrderWrite
     unsigned int dayOrderQty;
     unsigned int dayCumQty;
 
-    u64 expireTime; // DateTimeT: milliseconds since the epoch, 0 for none
-    u64 settlDate;  // DateTimeT: milliseconds since the epoch at midnight UTC of the day, 0 for none
+    u64 expireTime;   // DateTimeT: milliseconds since the epoch, 0 for none
+    u64 settlDate;    // DateTimeT: milliseconds since the epoch at midnight UTC of the day, 0 for none
+    u64 dayStart = 0; // DateTimeT: when the business day the day figures are for began (#244), 0 for none
 };
 
 /// Removes an order's row: a rollback erased the only version LMDB had of it (#151)
