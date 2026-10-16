@@ -1756,6 +1756,10 @@ InstrumentEntry goldenInstrument()
     val.securityId_ = "GB00B03MLX29";
     val.securityIdSource_ = "ISIN";
     val.id_ = GOLDEN_INSTRUMENT_ID;
+    // Format version 1's fields, on this branch (#172), each with a value of its own
+    val.instrumentType_ = FX_SWAP_INSTRUMENTTYPE;
+    val.baseCurrency_ = EUR_CURRENCY;
+    val.termCurrency_ = USD_CURRENCY;
     return val;
 }
 
@@ -1842,8 +1846,13 @@ std::unique_ptr<OrderEntry> goldenOrder()
 }
 
 // Written by the codecs as of ea18de7, before #149 changed them
-const char *const GOLDEN_INSTRUMENT_RECORD = "010000000a000000000000004555522f5553442e53502e0c0000000000000047"
-                                             "4230304230334d4c5832392e04000000000000004953494e";
+const char *const GOLDEN_INSTRUMENT_RECORD_V0 = "010000000a000000000000004555522f5553442e53502e0c0000000000000047"
+                                                "4230304230334d4c5832392e04000000000000004953494e";
+// The instrument as InstrumentCodec has written it on this branch since #172, in format version 1: version 0's
+// fields, then '.' and its type, '.' and its base currency, and '.' and its term currency
+const char *const GOLDEN_INSTRUMENT_RECORD_V1 = "010001000a000000000000004555522f5553442e53502e0c0000000000000047"
+                                                "4230304230334d4c5832392e04000000000000004953494e2e030000002e0200"
+                                                "00002e01000000";
 const char *const GOLDEN_STRING_RECORD = "0200000009000000000000004e41534441512e5553";
 const char *const GOLDEN_ACCOUNT_RECORD = "030000000b0000000000000054524144494e472d312e412e0e00000000000000"
                                           "484f5553452d434c454152494e472e02000000";
@@ -1937,7 +1946,7 @@ TEST_F(StorageRecordDispatcherTest, WritesTheGoldenRecords)
         const auto it = saver_->records_.find(id);
         return (saver_->records_.end() == it) ? std::string() : it->second.record_;
     };
-    expectGolden("GOLDEN_INSTRUMENT_RECORD", written(GOLDEN_INSTRUMENT_ID), GOLDEN_INSTRUMENT_RECORD);
+    expectGolden("GOLDEN_INSTRUMENT_RECORD_V1", written(GOLDEN_INSTRUMENT_ID), GOLDEN_INSTRUMENT_RECORD_V1);
     expectGolden("GOLDEN_STRING_RECORD", written(GOLDEN_STRING_ID), GOLDEN_STRING_RECORD);
     expectGolden("GOLDEN_ACCOUNT_RECORD", written(GOLDEN_ACCOUNT_ID), GOLDEN_ACCOUNT_RECORD);
     expectGolden("GOLDEN_CLEARING_RECORD", written(GOLDEN_CLEARING_ID), GOLDEN_CLEARING_RECORD);
@@ -2141,7 +2150,7 @@ TEST_F(StorageRecordDispatcherTest, ReadsEveryFieldOfTheGoldenRecords)
         const std::string record = fromHex(golden);
         dispatcher_->onRecordLoaded(id, 0, record.data(), record.size());
     };
-    load(GOLDEN_INSTRUMENT_ID, GOLDEN_INSTRUMENT_RECORD);
+    load(GOLDEN_INSTRUMENT_ID, GOLDEN_INSTRUMENT_RECORD_V1);
     load(GOLDEN_STRING_ID, GOLDEN_STRING_RECORD);
     load(GOLDEN_ACCOUNT_ID, GOLDEN_ACCOUNT_RECORD);
     load(GOLDEN_CLEARING_ID, GOLDEN_CLEARING_RECORD);
@@ -2155,6 +2164,9 @@ TEST_F(StorageRecordDispatcherTest, ReadsEveryFieldOfTheGoldenRecords)
     EXPECT_EQ(instrument.securityId_, restore_->instruments_.at(0)->securityId_);
     EXPECT_EQ(instrument.securityIdSource_, restore_->instruments_.at(0)->securityIdSource_);
     EXPECT_EQ(instrument.id_, restore_->instruments_.at(0)->id_);
+    EXPECT_EQ(instrument.instrumentType_, restore_->instruments_.at(0)->instrumentType_);
+    EXPECT_EQ(instrument.baseCurrency_, restore_->instruments_.at(0)->baseCurrency_);
+    EXPECT_EQ(instrument.termCurrency_, restore_->instruments_.at(0)->termCurrency_);
 
     ASSERT_EQ(1u, restore_->strings_.size());
     EXPECT_EQ(GOLDEN_STRING, *restore_->strings_.at(0).str_);
@@ -2189,6 +2201,28 @@ TEST_F(StorageRecordDispatcherTest, ReadsEveryFieldOfTheGoldenRecords)
     expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V0, 0, InstructionSetT(), false);
 }
 
+TEST_F(StorageRecordDispatcherTest, AnInstrumentRecordInFormatVersion0HasNoTypeOrCurrencies)
+{
+    // Before #172 an instrument's record held its strings alone. One written then comes back with them, and without a
+    // type or currencies, which it never stored.
+    dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+    dispatcher_->startLoad();
+    const std::string record = fromHex(GOLDEN_INSTRUMENT_RECORD_V0);
+    dispatcher_->onRecordLoaded(GOLDEN_INSTRUMENT_ID, 0, record.data(), record.size());
+    dispatcher_->finishLoad();
+
+    const InstrumentEntry instrument = goldenInstrument();
+    ASSERT_EQ(1u, restore_->instruments_.size());
+    const InstrumentEntry &restored = *restore_->instruments_.at(0);
+    EXPECT_EQ(instrument.symbol_, restored.symbol_);
+    EXPECT_EQ(instrument.securityId_, restored.securityId_);
+    EXPECT_EQ(instrument.securityIdSource_, restored.securityIdSource_);
+    EXPECT_EQ(instrument.id_, restored.id_);
+    EXPECT_EQ(INVALID_INSTRUMENTTYPE, restored.instrumentType_);
+    EXPECT_EQ(INVALID_CURRENCY, restored.baseCurrency_);
+    EXPECT_EQ(INVALID_CURRENCY, restored.termCurrency_);
+}
+
 namespace
 {
 /// A copy of bytes in a heap block of exactly their size, so that ASan reports any read past the end
@@ -2203,9 +2237,13 @@ std::unique_ptr<char[]> exactCopy(const std::string &bytes)
 const std::vector<std::pair<IdT, const char *>> &goldenLoadedRecords()
 {
     static const std::vector<std::pair<IdT, const char *>> records = {
-        { GOLDEN_INSTRUMENT_ID, GOLDEN_INSTRUMENT_RECORD }, { GOLDEN_STRING_ID, GOLDEN_STRING_RECORD },
-        { GOLDEN_ACCOUNT_ID, GOLDEN_ACCOUNT_RECORD },       { GOLDEN_CLEARING_ID, GOLDEN_CLEARING_RECORD },
-        { GOLDEN_RAWDATA_ID, GOLDEN_RAWDATA_RECORD },       { IdT(0, 1), GOLDEN_ID_LIMIT_RECORD },
+        { GOLDEN_INSTRUMENT_ID, GOLDEN_INSTRUMENT_RECORD_V0 },
+        { GOLDEN_INSTRUMENT_ID, GOLDEN_INSTRUMENT_RECORD_V1 },
+        { GOLDEN_STRING_ID, GOLDEN_STRING_RECORD },
+        { GOLDEN_ACCOUNT_ID, GOLDEN_ACCOUNT_RECORD },
+        { GOLDEN_CLEARING_ID, GOLDEN_CLEARING_RECORD },
+        { GOLDEN_RAWDATA_ID, GOLDEN_RAWDATA_RECORD },
+        { IdT(0, 1), GOLDEN_ID_LIMIT_RECORD },
         { GOLDEN_LAST_TRADE_KEY, GOLDEN_LAST_TRADE_RECORD }
     };
     return records;
@@ -2295,15 +2333,21 @@ TEST_F(StorageRecordDispatcherTest, ARecordInANewerFormatIsRejected)
     for (const auto &golden : goldenLoadedRecords())
     {
         std::string record = fromHex(golden.second);
-        record[2] = 1; // format version 1
+        // One past the version its codec writes, which is 0 but for this branch's instruments (#172)
+        u32 word = 0;
+        std::memcpy(&word, record.data(), sizeof(word));
+        u32 current = 0;
+        std::memcpy(&current, createRecordTypePrefix(static_cast<int>(word & 0xffff)).data(), sizeof(current));
+        const u32 newer = (current >> 16) + 1;
+        record[2] = static_cast<char>(newer);
         try
         {
             dispatcher_->onRecordLoaded(golden.first, 0, record.data(), record.size());
-            ADD_FAILURE() << toHex(record.substr(0, 4)) << " record in format version 1 was loaded";
+            ADD_FAILURE() << toHex(record.substr(0, 4)) << " record in format version " << newer << " was loaded";
         }
         catch (const std::runtime_error &ex)
         {
-            EXPECT_NE(std::string::npos, std::string(ex.what()).find("format version 1"))
+            EXPECT_NE(std::string::npos, std::string(ex.what()).find("format version " + std::to_string(newer)))
                 << toHex(record.substr(0, 4)) << ": " << ex.what();
         }
     }

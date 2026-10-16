@@ -1456,7 +1456,7 @@ An order keeps FIX's day figures for the business day that began at its `dayStar
 │                      Codec Interface                                         │
 │                                                                              │
 │   class InstrumentCodec {   // and the other codecs alike                    │
-│       static constexpr u32 FORMAT_VERSION = 0;      // #149                  │
+│       static constexpr u32 FORMAT_VERSION = 1;      // #149, #172            │
 │       static void encode(const InstrumentEntry &, std::string *buf,          │
 │                          IdT *id, u32 *version);                             │
 │       static void decode(const IdT &id, u32 formatVersion,                   │
@@ -1481,6 +1481,8 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 **Record format (#149).** A record's first 4 bytes hold its type in the low 16 bits and, in the high 16, the version of the layout its codec wrote (`FORMAT_VERSION`). The order codec's is 4: version 1 added an order's execution instructions (#172), 2 whether a stop order's stop was reached (#223), 3 its ClOrdID, its original's, its source and its destination (#192), and 4 the start of the business day its day figures are for (#244). Every other codec's is 0, so their records' first bytes are the type alone, as they always were. The dispatcher refuses a version newer than the codec reads, by name. Each decoder checks that the record holds every field it reads and that it has read the whole record, so a record cut short or with bytes after its last field is refused rather than misread. `static_assert`s pin the size of every field stored as its in-memory bytes.
 
 `StorageRecordDispatcherTest` holds golden records: the bytes each record type was written as before #149, and an order's in every format version since. The build must write the newest of each and read every field back from all of them, and every prefix of them, and every one with a byte more, must be refused. To change a layout on purpose, bump that codec's `FORMAT_VERSION`, keep decoding the old version, and add golden records for the new one; running the suite with `GOLDEN_PRINT=1` prints what the build writes.
+
+**On this branch** the instrument codec's is 1 (#172): version 0's strings, then the instrument's type and an FX pair's base and term currencies. An older record restores without the three, and a value past the last this build knows is refused. `StorageRecordDispatcherTest` holds the instrument's record in both versions.
 
 **Associated Test Cases:**
 
