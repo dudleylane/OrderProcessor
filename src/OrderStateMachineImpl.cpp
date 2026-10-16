@@ -443,7 +443,7 @@ void OrdStateImpl::processFill(OrderEntry *orderData, OrdState::onTradeExecution
     ExecutionEntry *tr = evnt.orderStorage_->save(tradeEntry, evnt.generator_);
     assert(nullptr != tr);
 
-    orderData->applyTrade(static_cast<TradeExecEntry *>(tr));
+    orderData->applyTrade(static_cast<TradeExecEntry *>(tr), evnt.dayStart_);
     if (0 == orderData->leavesQty_)
     {
         // A market order is never booked (processReceive). Removing one threw, the state machine swallowed it, and the

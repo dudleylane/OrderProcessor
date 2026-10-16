@@ -122,6 +122,7 @@ void Processor::init(const ProcessorParams &params)
     inQueue_ = params.inQueue_;
     transactMgr_ = params.transactMgr_;
     expiry_ = params.expiry_;
+    clock_ = params.clock_;
 
     testStateMachine_ = params.testStateMachine_;
     testStateMachineCheckResult_ = params.testStateMachineCheckResult_;
@@ -198,6 +199,9 @@ void Processor::onEvent(const std::string &source, const OrderEvent &evnt)
         return;
     }
     smState.orderData_->setStateMachinePersistance(smState);
+    // Its day figures are for the business day it was created in, which a DAY order ends with (#240, #244)
+    smState.orderData_->dayStart_ = ExpiryScheduler::dayStartOf(smState.orderData_->creationTime_);
+    smState.orderData_->dayOrderQty_ = smState.orderData_->orderQty_;
     // Persist the order as part of this transaction (#20), ahead of the operations that publish
     // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(scope.get(), *smState.orderData_);
@@ -416,6 +420,9 @@ void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
     case TimerEvent::DAY_START:
         change = OrderStateChange::DAY_START;
         break;
+    case TimerEvent::RESTATEMENT:
+        change = OrderStateChange::RESTATE;
+        break;
     default:
         throw std::runtime_error("Processor::onEvent(TimerEvent): invalid timer type!");
     }
@@ -495,6 +502,7 @@ void Processor::persistOrder(ACID::Scope *transaction, const OrderEntry &order)
 void Processor::onEvent(DeferedEventBase *evnt)
 {
     Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
+    cntxt.clock_ = &clock_;
     PooledTransactionScope scope(scopePool_.get());
     ScopeArenaGuard arenaGuard(scope.get());
 
@@ -632,7 +640,7 @@ void Processor::process(OrdState::onExecCancel &evnt, OrderEntry *order, const s
     persistOrder(evnt.transaction_, *smState.orderData_);
 }
 
-void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope *scope, const ACID::Context & /*cnxt*/)
+void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope *scope, const ACID::Context &cnxt)
 {
     assert(nullptr != order);
     assert(nullptr != scope);
@@ -646,6 +654,29 @@ void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope 
     const bool live = (NEW_ORDSTATUS == status) || (PARTFILL_ORDSTATUS == status) || (SUSPENDED_ORDSTATUS == status);
     if ((OrderStateChange::EXPIRE == change) && !live)
     {
+        return;
+    }
+    if (OrderStateChange::RESTATE == change)
+    {
+        // A business day starts (#244): an order that outlived the last one begins its figures for this one, durable
+        // before its client hears of them (#28) with a RESTATED report, and its next restatement is set. A fill since
+        // the day's end began them already: they aren't begun again, which would lose it, and the report restates
+        // them as they are. A restatement changes no state, so the state machine has no part in it. An order no
+        // longer live is restated no more.
+        if (!live)
+        {
+            return;
+        }
+        const DateTimeT now = cnxt.now();
+        order->startDay(ExpiryScheduler::dayStartOf(now));
+        persistOrder(scope, *order);
+        std::unique_ptr<Operation> report(new ReportRestatementTrOperation(*order));
+        scope->addOperation(report);
+        DateTimeT next = 0;
+        if ((nullptr != expiry_) && ExpiryScheduler::restatementOf(*order, &next))
+        {
+            expiry_->schedule(order->orderId_, next, TimerEvent::RESTATEMENT);
+        }
         return;
     }
     if (OrderStateChange::DAY_END == change)
@@ -687,6 +718,9 @@ void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope 
         break;
     case OrderStateChange::DAY_END:
         run(onNewDay());
+        break;
+    case OrderStateChange::RESTATE:
+        assert(false && "a restatement is decided above, without the state machine");
         break;
     }
 
@@ -765,6 +799,10 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
     replacement.executions_ = original->executions_;
     replacement.cumQty_ = original->cumQty_;
     replacement.avgPx_ = original->avgPx_;
+    // and its day: the day's fills, for the day they are for (#244)
+    replacement.dayStart_ = original->dayStart_;
+    replacement.dayCumQty_ = original->dayCumQty_;
+    replacement.dayAvgPx_ = original->dayAvgPx_;
     replacement.status_ = RECEIVEDNEW_ORDSTATUS;
     if ((replacement.instrument_.getId() != original->instrument_.getId()) || (replacement.side_ != original->side_))
     {
@@ -788,6 +826,8 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
         return;
     }
     replacement.leavesQty_ = replacement.orderQty_ - original->cumQty_;
+    // What it had left to trade when the day began, from its own quantity (#244): FIX's OrderQty - (CumQty - DayCumQty)
+    replacement.dayOrderQty_ = replacement.orderQty_ - (replacement.cumQty_ - replacement.dayCumQty_);
     std::string invalid;
     if (!replacement.isValid(&invalid))
     {
@@ -871,12 +911,19 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
 
 void Processor::scheduleExpiry(const OrderEntry &order) const
 {
+    if ((nullptr == expiry_) || ((NEW_ORDSTATUS != order.status_) && (PARTFILL_ORDSTATUS != order.status_)))
+    {
+        return;
+    }
     DateTimeT when = 0;
     TimerEvent::TimerType type = TimerEvent::INVALID_TIMER;
-    if ((nullptr != expiry_) && ((NEW_ORDSTATUS == order.status_) || (PARTFILL_ORDSTATUS == order.status_)) &&
-        ExpiryScheduler::expiryOf(order, &when, &type))
+    if (ExpiryScheduler::expiryOf(order, &when, &type))
     {
         expiry_->schedule(order.orderId_, when, type);
+    }
+    if (ExpiryScheduler::restatementOf(order, &when))
+    {
+        expiry_->schedule(order.orderId_, when, TimerEvent::RESTATEMENT);
     }
 }
 
@@ -886,6 +933,7 @@ void Processor::process([[maybe_unused]] const ACID::TransactionId &id, ACID::Tr
     assert(id.isValid());
 
     Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
+    cntxt.clock_ = &clock_;
 
     bool success = tr->executeTransaction(cntxt);
 
@@ -935,6 +983,7 @@ void Processor::matchRestored(OrderEntry *order)
         }
     }
     Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
+    cntxt.clock_ = &clock_;
     if (!scope.executeTransaction(cntxt))
     {
         clearDeferedEvents();

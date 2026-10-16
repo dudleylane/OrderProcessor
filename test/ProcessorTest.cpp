@@ -1337,6 +1337,8 @@ public:
             return "CANCEL";
         case TRIGGERED_EXECTYPE:
             return "TRIGGERED";
+        case RESTATED_EXECTYPE:
+            return "RESTATED";
         default:
             return "OTHER";
         }
@@ -1755,12 +1757,13 @@ class StopEngine
 {
 public:
     StopEngine(OrderBookImpl *book, IncomingQueues *inQueues, TestTransactionManager *transactions,
-               ExpiryScheduler *expiry = nullptr)
+               ExpiryScheduler *expiry = nullptr, std::function<DateTimeT()> clock = {})
         : inQueues_(inQueues), transactions_(transactions)
     {
         ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), book, inQueues, &reports_, inQueues,
                                transactions);
         params.expiry_ = expiry;
+        params.clock_ = std::move(clock); // the business day a trade or a restatement is in (#244)
         processor_.init(params);
         transactions_->proc_ = &processor_;
         transactions_->keepNested_ = true;
@@ -2810,15 +2813,15 @@ TEST_F(ProcessorTest, ADayOrderExpiresAtTheEndOfItsDayAndAGtcOrderDoesNot)
     order = withTif(createTestOrder(instrId1_, BUY_SIDE, 9.0, 30), GTC_TIF);
     order->creationTime_ = now;
     OrderEntry *gtc = engine.submit(std::move(order));
-    ASSERT_EQ(1u, expiry.pending()) << "a GTC order has a timer";
+    ASSERT_EQ(2u, expiry.pending()) << "the DAY order's expiry, and the GTC order's restatement (#244)";
 
     now = OCT15 + 21 * HOUR - 1;
     EXPECT_EQ(0u, expiry.fireDue());
     now += 1;
-    ASSERT_EQ(1u, expiry.fireDue());
-    engine.processQueued(1);
+    ASSERT_EQ(2u, expiry.fireDue());
+    engine.processQueued(2);
     EXPECT_EQ(EXPIRED_ORDSTATUS, day->status_);
-    EXPECT_EQ(NEW_ORDSTATUS, gtc->status_);
+    EXPECT_EQ(NEW_ORDSTATUS, gtc->status_) << "a GTC order expired with the day";
     EXPECT_EQ(gtc->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
 }
 
@@ -2834,7 +2837,7 @@ TEST_F(ProcessorTest, ATimerOfAnOrderThatFilledDecidesNothing)
                            });
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry);
     OrderEntry *gtd = engine.submit(asGtd(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now, now + HOUR));
-    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), GTC_TIF)); // no timer of its own
+    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), IOC_TIF)); // no timer of its own
     ASSERT_EQ(FILLED_ORDSTATUS, gtd->status_);
 
     now += HOUR;
@@ -2970,4 +2973,326 @@ TEST_F(ProcessorTest, AReplacementHasATimerOfItsOwnAndTheOriginalsFindsItReplace
     ASSERT_EQ(1u, expiry.fireDue());
     engine.processQueued(1);
     EXPECT_EQ(EXPIRED_ORDSTATUS, live->status_);
+}
+
+// =============================================================================
+// Business days and day figures (#244)
+// =============================================================================
+
+namespace
+{
+/// Logs the business day of each version persisted, as "persist day <dayStart_>"
+class DayVersionLog final : public COP::OrderSaver
+{
+public:
+    explicit DayVersionLog(std::vector<std::string> *log) : log_(log) {}
+
+    COP::u32 save(const COP::OrderEntry &order) override
+    {
+        log_->push_back("persist day " + std::to_string(order.dayStart_));
+        return version_++;
+    }
+    void erase(const COP::IdT &, COP::u32) override {}
+
+private:
+    std::vector<std::string> *log_;
+    COP::u32 version_ = 0;
+};
+
+/// A GTC order created at 'now'
+std::unique_ptr<OrderEntry> asGtc(std::unique_ptr<OrderEntry> order, DateTimeT now)
+{
+    order->tif_ = GTC_TIF;
+    order->creationTime_ = now;
+    return order;
+}
+} // namespace
+
+TEST_F(ProcessorTest, AnOrdersDayFiguresAreItsFillsInTheDay)
+{
+    // FIX's DayOrderQty, DayCumQty and DayAvgPx: nothing kept them, and every order reported 0 (#244)
+    DateTimeT now = OCT15 + 13 * HOUR;
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+                      [&now]
+                      {
+                          return now;
+                      });
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30));
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.5, 20));
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 11.0, 100), now));
+    ASSERT_NE(nullptr, buy);
+    EXPECT_EQ(OCT15 - 3 * HOUR, buy->dayStart_) << "the day that began 17:00 EDT on the 14th";
+    EXPECT_EQ(50u, buy->dayCumQty_);
+    EXPECT_DOUBLE_EQ(10.2, buy->dayAvgPx_);
+    EXPECT_EQ(100u, buy->dayOrderQty_);
+    EXPECT_EQ(50u, buy->cumQty_);
+}
+
+TEST_F(ProcessorTest, AFillAfterTheDaysEndCountsInTheNewDay)
+{
+    // A trade after 17:00 New York, before the resting order's restatement ran, is the new day's (#244)
+    DateTimeT now = OCT15 + 13 * HOUR;
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+                      [&now]
+                      {
+                          return now;
+                      });
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), now));
+    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), IOC_TIF));
+    ASSERT_EQ(30u, buy->dayCumQty_);
+
+    now = OCT15 + 21 * HOUR; // the day's end
+    OrderEntry *sell = engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 20), IOC_TIF));
+    EXPECT_EQ(OCT15 + 21 * HOUR, buy->dayStart_);
+    EXPECT_EQ(20u, buy->dayCumQty_) << "the fill counted in the day before, or the day's figures didn't begin again";
+    EXPECT_DOUBLE_EQ(10.0, buy->dayAvgPx_);
+    EXPECT_EQ(70u, buy->dayOrderQty_) << "not what it had left when the day began";
+    EXPECT_EQ(50u, buy->cumQty_);
+    ASSERT_NE(nullptr, sell);
+    EXPECT_EQ(OCT15 + 21 * HOUR, sell->dayStart_);
+    EXPECT_EQ(20u, sell->dayCumQty_);
+}
+
+TEST_F(ProcessorTest, BothSidesOfATradeCountItInTheSameDay)
+{
+    // The clock is read once for a match (#244): a trade at the day's end can't count in one day for one side and in
+    // the next for the other. Here each read moves the clock on a millisecond, across 17:00 New York.
+    DateTimeT now = OCT15 + 13 * HOUR;
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+                      [&now]
+                      {
+                          return now++;
+                      });
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), OCT15 + 13 * HOUR));
+    now = OCT15 + 21 * HOUR - 1; // the day's last millisecond
+    OrderEntry *sell = engine.submit(asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 20), now));
+    ASSERT_NE(nullptr, sell);
+    EXPECT_EQ(buy->dayStart_, sell->dayStart_) << "the trade's sides counted it in different days";
+    EXPECT_EQ(20u, buy->dayCumQty_);
+    EXPECT_EQ(20u, sell->dayCumQty_);
+}
+
+TEST_F(ProcessorTest, ASwapsFillAfterTheDaysEndCountsInTheNewDay)
+{
+    // A swap's near legs are its fills (#239), applied by SwapExecutionDeferedEvent, which set no business day: a swap's
+    // fill after 17:00 New York counted in the day before (#244). Here the buy arrives in the day's last millisecond and
+    // trades at its end, so both sides count the fill in the new day: the resting sell, and the buy from the old day.
+    DateTimeT now = OCT15 + 13 * HOUR;
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+                      [&now]
+                      {
+                          return now;
+                      });
+    const auto swap = [&](Side side, PriceT nearPrice, QuantityT qty)
+    {
+        auto order = createTestOrder(instrId1_, side, nearPrice, qty);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->tif_ = GTC_TIF;
+        order->creationTime_ = now;
+        order->farPrice_ = 1.095;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        return order;
+    };
+    OrderEntry *sell = engine.submit(swap(SELL_SIDE, 1.085, 30));
+    ASSERT_EQ(OCT15 - 3 * HOUR, sell->dayStart_);
+
+    now = OCT15 + 21 * HOUR - 1; // the day's last millisecond
+    auto late = swap(BUY_SIDE, 1.085, 30);
+    now += 1; // the day's end
+    const OrderEntry *buy = engine.submit(std::move(late));
+    ASSERT_EQ(FILLED_ORDSTATUS, buy->status_) << "the swaps didn't trade";
+    EXPECT_EQ(OCT15 + 21 * HOUR, sell->dayStart_) << "the resting swap's fill counted in the day before";
+    EXPECT_EQ(30u, sell->dayCumQty_);
+    EXPECT_EQ(OCT15 + 21 * HOUR, buy->dayStart_) << "the arriving swap's fill counted in the day before";
+    EXPECT_EQ(30u, buy->dayCumQty_);
+}
+
+TEST_F(ProcessorTest, BothSidesOfASwapCountItInTheSameDay)
+{
+    // A swap's match reads the clock once (#244), as an outright match does (BothSidesOfATradeCountItInTheSameDay): here
+    // each read moves the clock on a millisecond, across 17:00 New York
+    DateTimeT now = OCT15 + 13 * HOUR;
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+                      [&now]
+                      {
+                          return now++;
+                      });
+    const auto swap = [&](Side side, PriceT nearPrice, QuantityT qty)
+    {
+        auto order = createTestOrder(instrId1_, side, nearPrice, qty);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->tif_ = GTC_TIF;
+        order->creationTime_ = now;
+        order->farPrice_ = 1.095;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        return order;
+    };
+    OrderEntry *sell = engine.submit(swap(SELL_SIDE, 1.085, 30));
+    now = OCT15 + 21 * HOUR - 1; // the day's last millisecond
+    const OrderEntry *buy = engine.submit(swap(BUY_SIDE, 1.085, 30));
+    ASSERT_EQ(FILLED_ORDSTATUS, buy->status_) << "the swaps didn't trade";
+    EXPECT_EQ(sell->dayStart_, buy->dayStart_) << "the swap's sides counted it in different days";
+    EXPECT_EQ(30u, sell->dayCumQty_);
+    EXPECT_EQ(30u, buy->dayCumQty_);
+}
+
+TEST_F(ProcessorTest, AnOrderThatOutlivesItsDayIsRestatedAtTheDaysEnd)
+{
+    // At 17:00 New York the order's day figures begin again, and its client gets a RESTATED report, FIX's ExecType D
+    // (#244, ruled 2026-10-16), then again at the next day's end
+    DateTimeT now = OCT15 + 13 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry,
+                      [&now]
+                      {
+                          return now;
+                      });
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), now));
+    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), IOC_TIF));
+    ASSERT_EQ(1u, expiry.pending()) << "the GTC order's restatement";
+
+    now = OCT15 + 21 * HOUR - 1;
+    EXPECT_EQ(0u, expiry.fireDue()) << "restated before its day ended";
+    now += 1;
+    ASSERT_EQ(1u, expiry.fireDue());
+    engine.processQueued(1);
+    EXPECT_EQ(OCT15 + 21 * HOUR, buy->dayStart_);
+    EXPECT_EQ(0u, buy->dayCumQty_);
+    EXPECT_DOUBLE_EQ(0.0, buy->dayAvgPx_);
+    EXPECT_EQ(70u, buy->dayOrderQty_);
+    EXPECT_EQ(30u, buy->cumQty_) << "a restatement changed the order's fills";
+    EXPECT_EQ(PARTFILL_ORDSTATUS, buy->status_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRADE_EXECTYPE, RESTATED_EXECTYPE }),
+              engine.reports_.reportTypesOf(buy->orderId_));
+
+    ASSERT_EQ(1u, expiry.pending()) << "no restatement for the next day";
+    now = OCT15 + 45 * HOUR;
+    ASSERT_EQ(1u, expiry.fireDue());
+    engine.processQueued(1);
+    EXPECT_EQ(OCT15 + 45 * HOUR, buy->dayStart_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRADE_EXECTYPE, RESTATED_EXECTYPE, RESTATED_EXECTYPE }),
+              engine.reports_.reportTypesOf(buy->orderId_));
+}
+
+TEST_F(ProcessorTest, ARestatementAfterAFillThatBeganTheDayKeepsTheFill)
+{
+    // A trade after the day's end began the new day's figures: the restatement doesn't begin them again, which would
+    // lose the trade, and reports them as they are (#244)
+    DateTimeT now = OCT15 + 13 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry,
+                      [&now]
+                      {
+                          return now;
+                      });
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), now));
+
+    now = OCT15 + 22 * HOUR; // after the day's end, before its restatement fires
+    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 20), IOC_TIF));
+    ASSERT_EQ(20u, buy->dayCumQty_);
+    ASSERT_EQ(1u, expiry.fireDue());
+    engine.processQueued(1);
+    EXPECT_EQ(OCT15 + 21 * HOUR, buy->dayStart_);
+    EXPECT_EQ(20u, buy->dayCumQty_) << "the restatement lost the day's fill";
+    EXPECT_EQ(100u, buy->dayOrderQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRADE_EXECTYPE, RESTATED_EXECTYPE }),
+              engine.reports_.reportTypesOf(buy->orderId_));
+}
+
+TEST_F(ProcessorTest, AnOrderNoLongerLiveIsRestatedNoMore)
+{
+    DateTimeT now = OCT15 + 13 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry,
+                      [&now]
+                      {
+                          return now;
+                      });
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now));
+    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), IOC_TIF));
+    ASSERT_EQ(FILLED_ORDSTATUS, buy->status_);
+
+    now = OCT15 + 21 * HOUR;
+    ASSERT_EQ(1u, expiry.fireDue());
+    EXPECT_NO_THROW(engine.processQueued(1));
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRADE_EXECTYPE }), engine.reports_.reportTypesOf(buy->orderId_));
+    EXPECT_EQ(0u, expiry.pending()) << "a filled order is still restated";
+}
+
+TEST_F(ProcessorTest, ARestatementIsDurableBeforeItsReport)
+{
+    // A client that hears RESTATED must find the new day's figures in the order's record after a crash (#28, #244)
+    std::vector<std::string> log;
+    DayVersionLog saver(&log);
+    OrderStorage::instance()->attach(&saver);
+    DateTimeT now = OCT15 + 13 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry,
+                      [&now]
+                      {
+                          return now;
+                      });
+    engine.reports_.log_ = &log;
+    engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), now));
+    log.clear();
+
+    now = OCT15 + 21 * HOUR;
+    ASSERT_EQ(1u, expiry.fireDue());
+    engine.processQueued(1);
+    const auto persisted = std::find(log.begin(), log.end(), "persist day " + std::to_string(OCT15 + 21 * HOUR));
+    const auto restated = std::find(log.begin(), log.end(), "report RESTATED");
+    ASSERT_NE(log.end(), persisted);
+    ASSERT_NE(log.end(), restated);
+    EXPECT_LT(persisted, restated) << "the restatement was reported before it was durable";
+}
+
+TEST_F(ProcessorTest, AReplacementTakesOverItsOriginalsDay)
+{
+    // The day's fills and the day they are for are the original's, as they are when the replace is decided; what it had
+    // left to trade when the day began is from its own quantity (#244)
+    DateTimeT now = OCT15 + 13 * HOUR;
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+                      [&now]
+                      {
+                          return now;
+                      });
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), now));
+    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), IOC_TIF));
+
+    OrderEntry *replacement = buy->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = buy->clOrderId_;
+    replacement->orderQty_ = 150;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    replacement->dayStart_ = 0; // as a client's copy taken before a fill would have them
+    replacement->dayCumQty_ = 0;
+    replacement->dayAvgPx_ = 0.0;
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+    engine.request(OrderReplaceEvent(buy->orderId_, replacement));
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    ASSERT_EQ(REPLACED_ORDSTATUS, buy->status_);
+    EXPECT_EQ(OCT15 - 3 * HOUR, live->dayStart_);
+    EXPECT_EQ(30u, live->dayCumQty_);
+    EXPECT_DOUBLE_EQ(10.0, live->dayAvgPx_);
+    EXPECT_EQ(150u, live->dayOrderQty_);
 }

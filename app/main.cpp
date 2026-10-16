@@ -431,11 +431,13 @@ int main(int argc, char *argv[])
     }
 
     // 9d. Restored DAY and GTD orders keep their times in force (#240): each gets its timer again, and one whose time
-    // passed while the server was down expires as soon as the timers start. Read with nothing else running: no
-    // client is connected yet, and the restore's transactions are done.
+    // passed while the server was down expires as soon as the timers start. An order that outlives a business day is
+    // restated at each day's start (#244), and one whose day ended while the server was down is restated at once.
+    // Read with nothing else running: no client is connected yet, and the restore's transactions are done.
     const size_t timers = App::scheduleRestoredExpiries(*Store::OrderStorage::instance(), expiry.get());
     expiry->start();
-    aux::ExchLogger::instance()->note("Expiry timers set for " + std::to_string(timers) + " restored order(s)");
+    aux::ExchLogger::instance()->note("Expiry and restatement timers set for restored orders: " +
+                                      std::to_string(timers));
 
     // 10. Create Beast io_context and WsServer
     boost::asio::io_context ioc{ 1 };

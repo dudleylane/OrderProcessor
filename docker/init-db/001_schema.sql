@@ -225,6 +225,8 @@ CREATE TABLE orders (
     day_order_qty       BIGINT        NOT NULL DEFAULT 0,
     day_cum_qty         BIGINT        NOT NULL DEFAULT 0,
     day_avg_px          NUMERIC(18,8) NOT NULL DEFAULT 0,
+    -- When the business day the day figures are for began, 17:00 New York (#244); NULL for none
+    day_start           TIMESTAMPTZ,
 
     status              order_status  NOT NULL DEFAULT 'RECEIVED_NEW',
     time_in_force       time_in_force NOT NULL DEFAULT 'DAY',

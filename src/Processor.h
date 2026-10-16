@@ -50,8 +50,12 @@ struct ProcessorParams
     Queues::OutQueues *outQueues_;
     Queues::InQueuesContainer *inQueue_;
     ACID::TransactionManager *transactMgr_;
-    /// Expires DAY and GTD orders at their time (#240); none in most tests
+    /// Expires DAY and GTD orders at their time (#240), and restates the orders that outlive a business day (#244);
+    /// none in most tests
     ExpiryScheduler *expiry_ = nullptr;
+    /// Milliseconds since the epoch, UTC: the business day a trade or a restatement is in (#244). The system's clock
+    /// when empty; tests give one of their own.
+    std::function<DateTimeT()> clock_;
 
     /// for the test purpose
     bool testStateMachine_;
@@ -102,7 +106,8 @@ public:
 
     /// Appends the operation that persists the order when the transaction commits (#20), once per transaction (#148)
     static void persistOrder(ACID::Scope *transaction, const OrderEntry &order);
-    /// Sets the timer of an order just accepted, if its time in force ends: a DAY or GTD order (#240)
+    /// Sets the timers of an order just accepted: its expiry, if its time in force ends, a DAY or GTD order (#240), and
+    /// its restatement, if it outlives the business day (#244)
     void scheduleExpiry(const OrderEntry &order) const;
 
     /// Matches a restored order that lost its fills, and books it if it is a limit order, as the transaction that booked
@@ -162,8 +167,11 @@ private:
     Queues::OutQueues *outQueues_;
     Queues::InQueuesContainer *inQueue_;
     ACID::TransactionManager *transactMgr_;
-    /// Expires DAY and GTD orders at their time (#240); none in most tests
+    /// Expires DAY and GTD orders at their time (#240), and restates the orders that outlive a day (#244); none in
+    /// most tests
     ExpiryScheduler *expiry_ = nullptr;
+    /// The business day's clock (#244), given to every transaction's context; the system's when empty
+    std::function<DateTimeT()> clock_;
 
     /// for the test purpose
     bool testStateMachine_;

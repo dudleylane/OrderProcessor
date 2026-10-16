@@ -263,6 +263,34 @@ TEST_F(PGWriteBehindTest, AStopsReleaseReachesItsRow)
     forget(151236);
 }
 
+TEST_F(PGWriteBehindTest, AnOrdersBusinessDayReachesItsRow)
+{
+    // day_start says which business day the day figures are for (#244): NULL for none, then the day's start
+    forget(151244);
+    OrderWrite order = makeOrder(151244);
+    {
+        PGWriteBehind writer(connection_);
+        writeReferenceData(writer);
+        writer.enqueue(PGWriteRequest{ OrderWrite(order) });
+        writer.shutdown();
+        ASSERT_EQ(0u, writer.totalErrors());
+    }
+    EXPECT_EQ("true", select("SELECT (day_start IS NULL)::text FROM orders WHERE order_id = 151244"));
+
+    order.dayStart = 1792098000000ULL; // 2026-10-15 21:00 UTC, 17:00 in New York
+    order.dayCumQty = 20;
+    {
+        PGWriteBehind writer(connection_);
+        writer.enqueue(PGWriteRequest{ OrderWrite(order) });
+        writer.shutdown();
+        ASSERT_EQ(0u, writer.totalErrors());
+    }
+    EXPECT_EQ("1792098000",
+              select("SELECT extract(epoch FROM day_start)::bigint::text FROM orders WHERE order_id = 151244"));
+    EXPECT_EQ("20", select("SELECT day_cum_qty::text FROM orders WHERE order_id = 151244"));
+    forget(151244);
+}
+
 TEST_F(PGWriteBehindTest, ALaterWriteOfAnOrderReplacesItsRowAndADeleteRemovesIt)
 {
     forget(151004);

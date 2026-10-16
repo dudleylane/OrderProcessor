@@ -1655,6 +1655,63 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_AGtdOrdersReportCarriesItsExpireTi
     EXPECT_FALSE(FixGateway::buildExecutionReport(&ack, *order).isSetField(FIX::FIELD::ExpireTime));
 }
 
+TEST_F(FixGatewayInboundTest, ExecutionReport_ARestatementIsExecTypeDForAGtRenewal)
+{
+    // A business day's restatement of a GT order (#244): 150=D and 378=1, GT renewal / restatement, with the order's
+    // status. No other report carries a restatement reason.
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    order->tif_ = GTC_TIF;
+    auto restated = makeReport<ExecutionEntry>(RESTATED_EXECTYPE, NEW_ORDSTATUS);
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&restated, *order);
+    FIX::ExecType execType;
+    report.get(execType);
+    EXPECT_EQ(FIX::ExecType_RESTATED, execType.getValue());
+    FIX::OrdStatus ordStatus;
+    report.get(ordStatus);
+    EXPECT_EQ(FIX::OrdStatus_NEW, ordStatus.getValue());
+    FIX::ExecRestatementReason reason;
+    ASSERT_TRUE(report.isSet(reason));
+    report.get(reason);
+    EXPECT_EQ(FIX::ExecRestatementReason_GT_RENEWAL, reason.getValue());
+    auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    EXPECT_FALSE(FixGateway::buildExecutionReport(&ack, *order).isSetField(FIX::FIELD::ExecRestatementReason));
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_AGtOrderCarriesItsDayFiguresOnceItTradedOnAnEarlierDay)
+{
+    // DayOrderQty (424), DayCumQty (425) and DayAvgPx (426), which FIX 4.4 gives a GT order on the days after its first
+    // trade (#244): 30 of its 50 filled before today. One whose fills are all today's, or a DAY order, carries none.
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    order->tif_ = GTC_TIF;
+    order->orderQty_ = 100;
+    order->cumQty_ = 50;
+    order->leavesQty_ = 50;
+    order->dayOrderQty_ = 70;
+    order->dayCumQty_ = 20;
+    order->dayAvgPx_ = 10.25;
+    auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, PARTFILL_ORDSTATUS);
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order);
+    FIX::DayOrderQty dayOrderQty;
+    ASSERT_TRUE(report.isSet(dayOrderQty));
+    report.get(dayOrderQty);
+    EXPECT_DOUBLE_EQ(70.0, dayOrderQty.getValue());
+    FIX::DayCumQty dayCumQty;
+    report.get(dayCumQty);
+    EXPECT_DOUBLE_EQ(20.0, dayCumQty.getValue());
+    FIX::DayAvgPx dayAvgPx;
+    report.get(dayAvgPx);
+    EXPECT_DOUBLE_EQ(10.25, dayAvgPx.getValue());
+
+    order->dayCumQty_ = 50;
+    EXPECT_FALSE(FixGateway::buildExecutionReport(&ack, *order).isSetField(FIX::FIELD::DayOrderQty))
+        << "every fill is today's";
+    order->dayCumQty_ = 20;
+    order->tif_ = DAY_TIF;
+    EXPECT_FALSE(FixGateway::buildExecutionReport(&ack, *order).isSetField(FIX::FIELD::DayOrderQty)) << "a DAY order";
+}
+
 TEST_F(FixGatewayInboundTest, ExecutionReport_CancelAckNamesTheCancelRequest)
 {
     // FIX 4.4 answers a cancel request with the request's own ClOrdID in 11, and the cancelled order's in 41 (#98)

@@ -410,7 +410,13 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
     appendString(buf, strings.source);
     appendString(buf, strings.destination);
 
-    // A swap's far leg (#144), after the execution instructions, the stop's mark (#223) and the strings (#192)
+    // Format version 4 (#244)
+    buf->append(1, '.');
+    memcpy(typebuf, &(val.dayStart_), sizeof(val.dayStart_));
+    buf->append(typebuf, sizeof(val.dayStart_));
+
+    // A swap's far leg (#144), after the execution instructions, the stop's mark (#223), the strings (#192) and the
+    // day's start (#244)
     if (FXSWAP_ORDERTYPE == val.ordType_)
     {
         buf->append(1, '.');
@@ -597,7 +603,14 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     p = writeString(p, strings.source);
     p = writeString(p, strings.destination);
 
-    // A swap's far leg (#144), after the execution instructions, the stop's mark (#223) and the strings (#192)
+    // Format version 4 (#244)
+    *p = '.';
+    ++p;
+    memcpy(p, &(val.dayStart_), sizeof(val.dayStart_));
+    p += sizeof(val.dayStart_);
+
+    // A swap's far leg (#144), after the execution instructions, the stop's mark (#223), the strings (#192) and the
+    // day's start (#244)
     if (FXSWAP_ORDERTYPE == val.ordType_)
     {
         *p = '.';
@@ -888,14 +901,28 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
             *strings = std::move(carried);
         }
     }
+    // Format version 4 (#244): the start of the business day the day figures are for. From an older version, none:
+    // they were never kept, and the order's first restatement begins them.
+    val->dayStart_ = 0;
+    if (4 <= formatVersion)
+    {
+        p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' before dayStart_!");
+        if (static_cast<size_t>(end - p) < sizeof(val->dayStart_))
+        {
+            throw std::runtime_error(
+                "Invalid format of the encoded OrderEntry - size less than required, unable decode dayStart_!");
+        }
+        memcpy(&(val->dayStart_), p, sizeof(val->dayStart_));
+        p += sizeof(val->dayStart_);
+    }
 
     // A swap's far leg follows its own '.' marker, after format version 1's execution instructions (#172), version 2's
-    // stop mark (#223) and version 3's strings (#192), and every other record ends here. Decide by content, not by
-    // version: every format version has the far leg, and when swaps came in, the dispatcher stored a record under the
-    // storage's own write counter, not the version encode() returned, so a swap written once came back as version 0
-    // (#144). The content is the order's type: encode() has written the far leg for every swap and for nothing else
-    // since swaps came in (e297f98), so a swap's record without one is cut short, and is refused rather than restored
-    // with a far leg of 0 (#149).
+    // stop mark (#223), version 3's strings (#192) and version 4's day start (#244), and every other record ends here.
+    // Decide by content, not by version: every format version has the far leg, and when swaps came in, the dispatcher
+    // stored a record under the storage's own write counter, not the version encode() returned, so a swap written once
+    // came back as version 0 (#144). The content is the order's type: encode() has written the far leg for every swap
+    // and for nothing else since swaps came in (e297f98), so a swap's record without one is cut short, and is refused
+    // rather than restored with a far leg of 0 (#149).
     if (FXSWAP_ORDERTYPE == val->ordType_)
     {
         p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' before farPrice_!");

@@ -138,6 +138,9 @@ public:
     {
         return trade_;
     }
+    /// The start of the business day the trade is in (#244), the same for every side of a match. 0 keeps each
+    /// order's day as it is.
+    DateTimeT dayStart_ = 0;
 
 private:
     const TradeExecEntry *trade_;

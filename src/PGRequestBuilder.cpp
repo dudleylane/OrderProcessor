@@ -95,6 +95,7 @@ OrderWrite PGRequestBuilder::fromOrder(const OrderEntry &val)
     w.price = val.price_;
     w.stopPx = val.stopPx_;
     w.stopTriggered = val.stopTriggered_;
+    w.dayStart = val.dayStart_;
     w.avgPx = val.avgPx_;
     w.dayAvgPx = val.dayAvgPx_;
 

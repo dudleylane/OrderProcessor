@@ -161,6 +161,8 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ExecutionReport_CorrectionIsTradeCorrect` | Correction → 150=G, not NEW |
 | `ExecutionReport_AStopsReleaseIsTriggeredAndNew` | A stop's release → 150=L, 39=0, its ClOrdID, no 103 or LastQty (#236) |
 | `ExecutionReport_AGtdOrdersReportCarriesItsExpireTime` | A GTD order's report → ExpireTime (126) to the millisecond; a Day order's has none (#240) |
+| `ExecutionReport_ARestatementIsExecTypeDForAGtRenewal` | A business day's restatement → 150=D, 378=1 (GT renewal / restatement), the order's status; no other report carries 378 (#244) |
+| `ExecutionReport_AGtOrderCarriesItsDayFiguresOnceItTradedOnAnEarlierDay` | A GT order with fills before today → DayOrderQty (424), DayCumQty (425), DayAvgPx (426); one whose fills are all today's, or a DAY order, carries none (#244) |
 | `ExecutionReport_ReplaceNamesTheReplacedOrder` | Replacement's REPLACE report → 150=5, its status, OrigClOrdID (41) |
 | `ExecutionReport_CarriesTheClientsOwnClOrdIds` | ClOrdIDs stored under the session's key go out as the client sent them, in 11 and 41 (#71) |
 | `ExecutionReport_OnlyTheReplacementsReplaceReportGoesOverFix` | The replaced order's own REPLACE report is not sent over FIX |
