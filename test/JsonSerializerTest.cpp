@@ -144,6 +144,23 @@ TEST_F(JsonSerializerTest, OrderWithUnsetReferencesSerializes)
     EXPECT_EQ("Internal", data.value("destination", "?"));
 }
 
+TEST_F(JsonSerializerTest, AnOrderCarriesItsDayFigures)
+{
+    // FIX's DayOrderQty, DayCumQty and DayAvgPx, and the business day they are for (#244): a RESTATED report's order
+    // update is how a client hears its figures began again
+    std::unique_ptr<OrderEntry> order = newOrder("CL-1", IdT(1, 1));
+    order->dayOrderQty_ = 70;
+    order->dayCumQty_ = 20;
+    order->dayAvgPx_ = 10.25;
+    order->dayStart_ = 1792098000000ULL;
+
+    nlohmann::json data = nlohmann::json::parse(App::serializeOrderUpdate(*order))["data"];
+    EXPECT_EQ(70u, data.value("dayOrderQty", 0u));
+    EXPECT_EQ(20u, data.value("dayCumQty", 0u));
+    EXPECT_DOUBLE_EQ(10.25, data.value("dayAvgPx", 0.0));
+    EXPECT_EQ(1792098000000ULL, data.value("dayStart", 0ULL));
+}
+
 TEST_F(JsonSerializerTest, SetReferencesAreSerialized)
 {
     // A replacement has an origClOrderId, and an order may have an account: both still come through.

@@ -60,9 +60,10 @@ struct ServerData
 ServerData loadServerData(const std::string &dataDir, size_t lmdbMapSize, u64 idBlock, const std::string &clearingFirm,
                           const std::string &defaultAccount);
 
-/// Sets the timers of the restored DAY and GTD orders that are live (#240): one whose time passed while the server was
-/// down fires as soon as the timers start. Call it with nothing else running on the orders, before the server takes
-/// orders. Returns how many it set.
+/// Sets the timers of the restored orders that are live: a DAY or GTD order's expiry (#240), and the restatement of
+/// one that outlives its business day (#244). One whose time passed while the server was down fires as soon as the
+/// timers start: an order whose day ended then begins the day the server restarted in. Call it with nothing else
+/// running on the orders, before the server takes orders. Returns how many it set.
 size_t scheduleRestoredExpiries(const Store::OrderDataStorage &storage, Proc::ExpiryScheduler *expiry);
 
 } // namespace App

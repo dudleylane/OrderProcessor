@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "DataModelDef.h"
+#include "ExchUtils.h"
 #include "IdTGenerator.h"
 #include "IncomingQueues.h"
 #include "Logger.h"
@@ -116,8 +117,12 @@ OrderEntry *makeOrder(const WideData &data, u64 sequence, const Side &side, Pric
     order->price_ = price;
     order->orderQty_ = qty;
     order->leavesQty_ = qty;
-    order->creationTime_ = 100;
-    order->lastUpdateTime_ = 115;
+    // Created in the business day the engine's clock is in, as a gateway creates an order (#244): acceptance asks for
+    // the day of an order's creation and a match for its clock's, and each thread keeps the last day it answered.
+    // Orders from 1970 made every timed match look both days up in the zone database, which production never does.
+    static const DateTimeT created = aux::currentDateTime();
+    order->creationTime_ = created;
+    order->lastUpdateTime_ = created + 15;
     order->expireTime_ = 175;
     order->settlDate_ = 225;
     return order;

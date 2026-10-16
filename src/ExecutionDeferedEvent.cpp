@@ -18,6 +18,7 @@
 #include "IdTGenerator.h"
 #include "OrderStorage.h"
 #include "TrOperations.h"
+#include "ExpiryScheduler.h"
 
 using namespace COP;
 using namespace COP::Proc;
@@ -34,7 +35,7 @@ ExecutionDeferedEvent::ExecutionDeferedEvent(OrderEntry *ord) : baseOrder_(ord)
 }
 
 void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope,
-                                    const TradeParams &param)
+                                    const TradeParams &param, DateTimeT dayStart)
 {
     TradeExecEntry trade;
     trade.lastQty_ = param.lastQty_;
@@ -45,6 +46,7 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const ACID::Conte
     trade.transactTime_ = 1;
     trade.orderId_ = param.order_->orderId_;
     onTradeExecution evnt4Proc(&trade);
+    evnt4Proc.dayStart_ = dayStart;
     evnt4Proc.orderBook_ = cnxt.orderBook_;
     evnt4Proc.transaction_ = scope;
 
@@ -62,6 +64,9 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
     baseOrderParam.lastQty_ = 0;
     baseOrderParam.lastPx_ = 0.0;
     PriceT lastPrint = 0.0;
+    // Every side of the match trades in one business day (#244): the clock is read once, so a match at a day's end
+    // can't count in one day for one side and in the next for the other
+    const DateTimeT dayStart = ExpiryScheduler::dayStartOf(cnxt.now());
     for (TradesT::const_iterator it = trades_.begin(); it != trades_.end(); ++it)
     {
         assert(nullptr != it->order_);
@@ -69,7 +74,7 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
         assert(0 < it->lastPx_);
 
         QuantityT quantBefore = it->order_->leavesQty_;
-        execute(func, cnxt, scope, *it);
+        execute(func, cnxt, scope, *it, dayStart);
 
         /// ToDo: should be redesigned: if execution applied - increase executed quantity
         if (quantBefore > it->order_->leavesQty_)
@@ -83,7 +88,7 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
     {
         baseOrderParam.lastPx_ /= baseOrderParam.lastQty_;
 
-        execute(func, cnxt, scope, baseOrderParam);
+        execute(func, cnxt, scope, baseOrderParam, dayStart);
 
         // The instrument's last trade, durable with the fills (#237). The id is drawn now, from the generator every order
         // id comes from, so a held stop that arrived before this trade has a smaller one: a restart releases the stops

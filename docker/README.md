@@ -309,6 +309,13 @@ docker compose exec oms-db psql -U oms -d oms -c "
   ALTER TYPE exec_type ADD VALUE IF NOT EXISTS 'TRIGGERED';"
 ```
 
+A volume made before #244 lacks `orders.day_start`, with the same symptom. Add it:
+
+```bash
+docker compose exec oms-db psql -U oms -d oms -c "
+  ALTER TABLE orders ADD COLUMN IF NOT EXISTS day_start TIMESTAMPTZ;"
+```
+
 ## Troubleshooting
 
 ### Port conflicts

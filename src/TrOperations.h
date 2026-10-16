@@ -269,6 +269,18 @@ private:
     const ReleaseStopTrOperation &release_;
 };
 
+/// Reports an order restated for a new business day with a RESTATED execution report, FIX's ExecType D (#244): its day
+/// figures as they begin the day, and its status as it is. It follows the persist that records them, so they are
+/// durable before its client hears (#28).
+class ReportRestatementTrOperation final : public Operation
+{
+public:
+    explicit ReportRestatementTrOperation(const OrderEntry &order);
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+};
+
 void executeEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
 void rollbackEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
 void executeEnqueueOrderEvent(const OrdState::onExecReplace &event_, const Context &cnxt);

@@ -62,7 +62,7 @@ const char *UPSERT_ORDER_SQL =
     "  day_order_qty, day_cum_qty, day_avg_px, "
     "  status, time_in_force, settl_type, capacity, currency, "
     "  instrument_id, account_id, clearing_firm_id, "
-    "  expire_time, settl_date, stop_triggered"
+    "  expire_time, settl_date, stop_triggered, day_start"
     ") VALUES ("
     "  $1, (to_timestamp($2::bigint) AT TIME ZONE 'UTC')::date, $3, $4, "
     "  $5, $6, $7::side, $8::order_type, $9, $10, "
@@ -75,6 +75,7 @@ const char *UPSERT_ORDER_SQL =
     "  CASE WHEN $27::bigint = 0 THEN NULL ELSE to_timestamp($27::bigint::float8 / 1000) END, "
     "  CASE WHEN $28::bigint = 0 THEN NULL ELSE (to_timestamp($28::bigint::float8 / 1000) AT TIME ZONE 'UTC')::date END"
     ", $29"
+    ", CASE WHEN $30::bigint = 0 THEN NULL ELSE to_timestamp($30::bigint::float8 / 1000) END"
     ") "
     "ON CONFLICT (order_id, order_date) DO UPDATE SET "
     "  cl_order_id = EXCLUDED.cl_order_id, orig_cl_order_id = EXCLUDED.orig_cl_order_id, "
@@ -87,7 +88,8 @@ const char *UPSERT_ORDER_SQL =
     "  capacity = EXCLUDED.capacity, currency = EXCLUDED.currency, "
     "  instrument_id = EXCLUDED.instrument_id, account_id = EXCLUDED.account_id, "
     "  clearing_firm_id = EXCLUDED.clearing_firm_id, "
-    "  expire_time = EXCLUDED.expire_time, settl_date = EXCLUDED.settl_date, stop_triggered = EXCLUDED.stop_triggered";
+    "  expire_time = EXCLUDED.expire_time, settl_date = EXCLUDED.settl_date, stop_triggered = EXCLUDED.stop_triggered, "
+    "  day_start = EXCLUDED.day_start";
 const std::string DELETE_ORDER_SQL =
     std::string("DELETE FROM orders WHERE order_id = $1 AND order_date = ") + ORDER_DATE_SQL;
 
@@ -148,7 +150,8 @@ void execute(pqxx::work &txn, const OrderWrite &w)
                                                           w.clearingFirm,
                                                           static_cast<int64_t>(w.expireTime),
                                                           static_cast<int64_t>(w.settlDate),
-                                                          w.stopTriggered });
+                                                          w.stopTriggered,
+                                                          static_cast<int64_t>(w.dayStart) });
 }
 
 void execute(pqxx::work &txn, const DeleteOrderWrite &w)

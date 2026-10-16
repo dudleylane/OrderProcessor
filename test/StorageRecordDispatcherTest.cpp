@@ -1786,7 +1786,8 @@ std::unique_ptr<OrderEntry> goldenOrder()
     val->stateMachinePersistance_.stateZone1Id_ = 3;
     val->stateMachinePersistance_.stateZone2Id_ = 2;
     val->execInstruct_ = { STAY_ON_OFFER_SIDE_INSTRUCTION, NOT_HELD_INSTRUCTION };
-    val->stopTriggered_ = true; // a STOPLIMIT its stop released (#223)
+    val->stopTriggered_ = true;        // a STOPLIMIT its stop released (#223)
+    val->dayStart_ = 1791900000005ULL; // the business day its day figures are for (#244)
     return val;
 }
 
@@ -1844,6 +1845,19 @@ const char *const GOLDEN_ORDER_RECORD_V3 = "06000300952835013a65000000000000002e
                                            "000b000000474f4c44454e2d434c2d312e01010000000b000000474f4c44454e"
                                            "2d434c2d302e0108000000434c49454e542d312e0108000000496e7465726e61"
                                            "6c";
+// Format version 4 (#244): version 3's fields, then '.' and the start of the business day the day figures are for
+const char *const GOLDEN_ORDER_RECORD_V4 = "06000400952835013a65000000000000002e060000003a10000000000000002e"
+                                           "070000003a11000000000000002e020000003a0c000000000000002e03000000"
+                                           "3a0d000000000000002e040000003a0e000000000000002e010000003a0b0000"
+                                           "00000000002e080000003a12000000000000002e942835013a5b110000000000"
+                                           "002e011f9035a10100002e021f9035a10100002e031f9035a10100002e041f90"
+                                           "35a10100002e00000000005059402e00000000002059402e0000000000485940"
+                                           "2e00000000004459402e060000002e020000002e040000002e030000002e0400"
+                                           "00002e020000002e020000002e050000002ee80300002e580200002e90010000"
+                                           "2ee90300002e910100002e030000003a020000002e060000002e012e01010000"
+                                           "000b000000474f4c44454e2d434c2d312e01010000000b000000474f4c44454e"
+                                           "2d434c2d302e0108000000434c49454e542d312e0108000000496e7465726e61"
+                                           "6c2e051f9035a1010000";
 const char *const GOLDEN_ID_LIMIT_RECORD = "09000000cb04fb711f010000";
 /// The golden instrument's last trade (#237): 101.25, made when id 4242 was drawn, keyed (101, 2)
 const IdT GOLDEN_TRADE_ID(4242, 1792000000);
@@ -1878,7 +1892,7 @@ TEST_F(StorageRecordDispatcherTest, WritesTheGoldenRecords)
     expectGolden("GOLDEN_ACCOUNT_RECORD", written(GOLDEN_ACCOUNT_ID), GOLDEN_ACCOUNT_RECORD);
     expectGolden("GOLDEN_CLEARING_RECORD", written(GOLDEN_CLEARING_ID), GOLDEN_CLEARING_RECORD);
     expectGolden("GOLDEN_RAWDATA_RECORD", written(GOLDEN_RAWDATA_ID), GOLDEN_RAWDATA_RECORD);
-    expectGolden("GOLDEN_ORDER_RECORD_V3", written(GOLDEN_ORDER_ID), GOLDEN_ORDER_RECORD_V3);
+    expectGolden("GOLDEN_ORDER_RECORD_V4", written(GOLDEN_ORDER_ID), GOLDEN_ORDER_RECORD_V4);
     expectGolden("GOLDEN_ID_LIMIT_RECORD", written(IdT(0, 1)), GOLDEN_ID_LIMIT_RECORD);
     expectGolden("GOLDEN_LAST_TRADE_RECORD", written(GOLDEN_LAST_TRADE_KEY), GOLDEN_LAST_TRADE_RECORD);
 }
@@ -1954,6 +1968,8 @@ void expectEveryFieldOfTheGoldenOrder(const char *golden, u32 formatVersion, con
     {
         EXPECT_FALSE(strings.clOrderId || strings.origClOrderId || strings.source || strings.destination);
     }
+    // Format version 4 says which business day the day figures are for; an older record's are for none (#244)
+    EXPECT_EQ((4 <= formatVersion) ? expected->dayStart_ : 0u, order->dayStart_) << "format version " << formatVersion;
 }
 
 /// The golden order records, each with the format version it was written in
@@ -1962,7 +1978,8 @@ const std::vector<std::pair<const char *, u32>> &goldenOrderRecords()
     static const std::vector<std::pair<const char *, u32>> records = { { GOLDEN_ORDER_RECORD_V0, 0 },
                                                                        { GOLDEN_ORDER_RECORD_V1, 1 },
                                                                        { GOLDEN_ORDER_RECORD_V2, 2 },
-                                                                       { GOLDEN_ORDER_RECORD_V3, 3 } };
+                                                                       { GOLDEN_ORDER_RECORD_V3, 3 },
+                                                                       { GOLDEN_ORDER_RECORD_V4, 4 } };
     return records;
 }
 } // namespace
@@ -2115,6 +2132,7 @@ TEST_F(StorageRecordDispatcherTest, ReadsEveryFieldOfTheGoldenRecords)
 
     // The order's codec, by itself: restoring an order looks its ClOrdID up in WideDataStorage, which the golden
     // record's ids don't name. Every version this build has written is still read (#172).
+    expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V4, 4, goldenOrder()->execInstruct_, true);
     expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V3, 3, goldenOrder()->execInstruct_, true);
     expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V2, 2, goldenOrder()->execInstruct_, true);
     expectEveryFieldOfTheGoldenOrder(GOLDEN_ORDER_RECORD_V1, 1, goldenOrder()->execInstruct_, false);

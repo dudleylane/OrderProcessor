@@ -45,6 +45,12 @@ export interface Order {
   cumQty: number;
   leavesQty: number;
   minQty: number;
+  /** The business day's figures (#244): what the order had left to trade when the day began, and the day's fills */
+  dayOrderQty: number;
+  dayCumQty: number;
+  dayAvgPx: number;
+  /** When that day began, 17:00 New York, ms since the epoch; 0 for none */
+  dayStart: number;
   status: OrderStatus;
   tif: TimeInForce;
   capacity: Capacity;

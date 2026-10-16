@@ -411,12 +411,14 @@ TEST_F(OrderCodecTest, AStringForAFieldThatNamesNothingIsRefused)
     EXPECT_THROW(OrderCodec::encode(val, &buf, &id, &version, strings), std::invalid_argument);
 
     // The record without it, then the same with the original's ClOrdID marked carried: its presence byte is the third
-    // from the end of the four ('.', 0) pairs that close a record carrying nothing
+    // from the end of the four ('.', 0) pairs that close the strings of a record carrying none, which version 4's '.'
+    // and day start follow (#244)
     buf.clear();
     OrderCodec::encode(val, &buf, &id, &version);
-    ASSERT_EQ('\0', buf[buf.size() - 5]);
-    std::string carried = buf.substr(0, buf.size() - 5) + std::string("\x01", 1) +
-                          std::string("\x01\0\0\0\x04\0\0\0CL-0", 12) + buf.substr(buf.size() - 4);
+    const size_t stringsEnd = buf.size() - (1 + sizeof(DateTimeT));
+    ASSERT_EQ('\0', buf[stringsEnd - 5]);
+    std::string carried = buf.substr(0, stringsEnd - 5) + std::string("\x01", 1) +
+                          std::string("\x01\0\0\0\x04\0\0\0CL-0", 12) + buf.substr(stringsEnd - 4);
     try
     {
         std::unique_ptr<OrderEntry>(OrderCodec::decode(id, OrderCodec::FORMAT_VERSION, carried.data(), carried.size()));
@@ -456,10 +458,10 @@ TEST_F(OrderCodecTest, AnUnknownExecutionInstructionIsRefused)
     u32 version = 0;
     OrderCodec::encode(val, &buf, &id, &version);
 
-    // The mask comes 10 bytes before the record's end: '.' and the stop flag (#223), then the four strings this order
-    // doesn't carry, each '.' and a 0 (#192)
+    // The mask comes 19 bytes before the record's end: '.' and the stop flag (#223), the four strings this order
+    // doesn't carry, each '.' and a 0 (#192), then '.' and the day its figures are for (#244)
     const u32 unknown = 1u << (static_cast<u32>(_INSTRUCTION) + 1);
-    std::memcpy(&buf[buf.size() - 10 - sizeof(unknown)], &unknown, sizeof(unknown));
+    std::memcpy(&buf[buf.size() - 19 - sizeof(unknown)], &unknown, sizeof(unknown));
     try
     {
         std::unique_ptr<OrderEntry>(OrderCodec::decode(id, OrderCodec::FORMAT_VERSION, buf.c_str(), buf.size()));

@@ -34,6 +34,9 @@ namespace Proc
 /// 2026-10-16). At each it pushes the order's TimerEvent into the incoming queues, EXPIRATION for a GTD order and
 /// DAY_END for a DAY order, and the processor decides it on the transaction worker with the order's other
 /// transactions: an order filled, canceled or replaced since is left as it is.
+///
+/// It restates the orders that outlive a business day, at each day's start (#244): the RESTATEMENT timer, at the day's
+/// end, begins the order's figures for the next one (OrderParams::startDay()) and sends a RESTATED report.
 class ExpiryScheduler
 {
 public:
@@ -53,8 +56,16 @@ public:
     /// The first business day end after the time given: when a DAY order created then expires. 21:00 UTC while New
     /// York keeps daylight time, 22:00 UTC while it keeps standard time.
     static DateTimeT dayEndAfter(DateTimeT when);
+    /// The start of the business day the time is in: the last day end at or before it, or 0 before the first (#244).
+    /// A day end itself starts the next day. Every match asks, so a thread keeps the day it last answered, for
+    /// dayEndAfter() too, and reads the zone database, under a lock of this class's, only when the day changes.
+    static DateTimeT dayStartOf(DateTimeT when);
     /// When the order expires, and with which timer, if its time in force has an end: false for any other order
     static bool expiryOf(const OrderEntry &order, DateTimeT *when, Queues::TimerEvent::TimerType *type);
+    /// When the order's day figures next begin again, if it outlives the business day they are for (#244): an order
+    /// that rests, in the price book or the stop book, unless its day ends it first, as it does a DAY order and a GTD
+    /// order that expires by then. False for any other order.
+    static bool restatementOf(const OrderEntry &order, DateTimeT *when);
 
     /// Fires the timer at the time given, or at once if it has passed. Thread-safe.
     void schedule(const IdT &orderId, DateTimeT when, Queues::TimerEvent::TimerType type);

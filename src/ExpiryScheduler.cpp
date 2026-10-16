@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <mutex>
 
 #include "DataModelDef.h"
 
@@ -32,6 +33,58 @@ const std::chrono::time_zone *dayZone()
 }
 /// The source the processor sees the timers' events from
 const char *const TIMER_SOURCE = "ExpiryScheduler";
+
+/// Held for every lookup in the zone database. libstdc++'s time_zone fills in its transitions on first use, under a lock
+/// of its own made of atomics inside libstdc++.so (GCC 14's tzdb.cc, RulesCounter), which ThreadSanitizer cannot see.
+/// Two threads asking about a day for the first time at once were reported as a race, and TSan gates CI. This mutex is
+/// one TSan sees, and with the per-thread day below it is taken once a day per thread.
+std::mutex zoneLock;
+
+/// A business day, from one day end to the next: [start, end)
+struct BusinessDay
+{
+    DateTimeT start;
+    DateTimeT end;
+};
+
+/// The business day the time is in, from the zone database
+BusinessDay lookUpDay(DateTimeT when)
+{
+    using namespace std::chrono;
+    const time_zone *const zone = dayZone();
+    const sys_time<milliseconds> at{ milliseconds{ when } };
+    std::lock_guard<std::mutex> lock(zoneLock);
+    // The end of the local day 'when' falls in, or of the next one if it has passed. 17:00 is never skipped or
+    // repeated: New York changes its clocks at 02:00.
+    local_days day = floor<days>(zone->to_local(at));
+    for (;;)
+    {
+        const sys_time<milliseconds> end = zone->to_sys(day + hours{ ExpiryScheduler::DAY_END_HOUR }, choose::earliest);
+        if (at < end)
+        {
+            // The day end before it is 17:00 of the local day before: there is one each day
+            const sys_time<milliseconds> start =
+                zone->to_sys(day - days{ 1 } + hours{ ExpiryScheduler::DAY_END_HOUR }, choose::earliest);
+            const auto startMs = start.time_since_epoch().count();
+            return BusinessDay{ (0 < startMs) ? static_cast<DateTimeT>(startMs) : 0,
+                                static_cast<DateTimeT>(end.time_since_epoch().count()) };
+        }
+        day += days{ 1 };
+    }
+}
+
+/// The business day the time is in, from the day this thread answered last when it is the same one: every match asks
+/// (#244), and every DAY order (#240)
+const BusinessDay &dayOf(DateTimeT when)
+{
+    thread_local BusinessDay day{ 0, 0 };
+    if ((day.start <= when) && (when < day.end)) [[likely]]
+    {
+        return day;
+    }
+    day = lookUpDay(when);
+    return day;
+}
 } // namespace
 
 ExpiryScheduler::ExpiryScheduler(InQueues *inQueues, Clock clock) : inQueues_(inQueues), clock_(std::move(clock))
@@ -48,21 +101,12 @@ ExpiryScheduler::~ExpiryScheduler()
 
 DateTimeT ExpiryScheduler::dayEndAfter(DateTimeT when)
 {
-    using namespace std::chrono;
-    const time_zone *const zone = dayZone();
-    const sys_time<milliseconds> at{ milliseconds{ when } };
-    // The end of the local day 'when' falls in, or of the next one if it has passed. 17:00 is never skipped or
-    // repeated: New York changes its clocks at 02:00.
-    local_days day = floor<days>(zone->to_local(at));
-    for (;;)
-    {
-        const sys_time<milliseconds> end = zone->to_sys(day + hours{ DAY_END_HOUR }, choose::earliest);
-        if (at < end)
-        {
-            return static_cast<DateTimeT>(end.time_since_epoch().count());
-        }
-        day += days{ 1 };
-    }
+    return dayOf(when).end;
+}
+
+DateTimeT ExpiryScheduler::dayStartOf(DateTimeT when)
+{
+    return dayOf(when).start;
 }
 
 bool ExpiryScheduler::expiryOf(const OrderEntry &order, DateTimeT *when, TimerEvent::TimerType *type)
@@ -84,6 +128,22 @@ bool ExpiryScheduler::expiryOf(const OrderEntry &order, DateTimeT *when, TimerEv
     default:
         return false;
     }
+}
+
+bool ExpiryScheduler::restatementOf(const OrderEntry &order, DateTimeT *when)
+{
+    assert(nullptr != when);
+    if ((DAY_TIF == order.tif_) || (OrderParams::Book::NONE == order.book()))
+    {
+        return false; // ended by its day, or never rests: a market, IOC or FOK order
+    }
+    const DateTimeT dayEnd = dayEndAfter(order.dayStart_);
+    if ((GTD_TIF == order.tif_) && (order.expireTime_ <= dayEnd))
+    {
+        return false; // expires first
+    }
+    *when = dayEnd;
+    return true;
 }
 
 void ExpiryScheduler::schedule(const IdT &orderId, DateTimeT when, TimerEvent::TimerType type)

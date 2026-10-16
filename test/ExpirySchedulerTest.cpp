@@ -80,6 +80,90 @@ TEST(ExpirySchedulerTest, ADayEndsAt1700NewYorkAcrossTheClockChanges)
     EXPECT_EQ(nov1 + 22 * hour, ExpiryScheduler::dayEndAfter(nov1)) << "the Saturday's evening, to Sunday 17:00 EST";
 }
 
+TEST(ExpirySchedulerTest, ADayStartsWhereTheOneBeforeEnds)
+{
+    // A business day runs from one 17:00 New York to the next (#244), and a day's end starts the next one
+    const DateTimeT hour = 60ULL * 60 * 1000;
+    const DateTimeT oct15 = 1792022400000ULL; // 2026-10-15 00:00 UTC, 20:00 EDT on the 14th
+    EXPECT_EQ(oct15 - 3 * hour, ExpiryScheduler::dayStartOf(oct15 + 13 * hour)) << "17:00 EDT on the 14th";
+    EXPECT_EQ(oct15 - 3 * hour, ExpiryScheduler::dayStartOf(oct15 + 21 * hour - 1));
+    EXPECT_EQ(oct15 + 21 * hour, ExpiryScheduler::dayStartOf(oct15 + 21 * hour)) << "a day's end starts the next";
+    const DateTimeT dec15 = 1797292800000ULL; // 2026-12-15 00:00 UTC
+    EXPECT_EQ(dec15 - 2 * hour, ExpiryScheduler::dayStartOf(dec15 + 13 * hour)) << "standard time";
+    // Asked about days apart in turn: a thread keeps the day it last answered
+    for (int i = 0; i < 3; ++i)
+    {
+        EXPECT_EQ(oct15 - 3 * hour, ExpiryScheduler::dayStartOf(oct15));
+        EXPECT_EQ(dec15 - 2 * hour, ExpiryScheduler::dayStartOf(dec15));
+    }
+}
+
+TEST(ExpirySchedulerTest, ADayStartsWhereTheOneBeforeEndsAcrossTheClockChanges)
+{
+    // The days New York's clocks change are 23 and 25 hours long
+    const DateTimeT hour = 60ULL * 60 * 1000;
+    const DateTimeT mar8 = 1772928000000ULL; // 2026-03-08 00:00 UTC; at 07:00 UTC, 02:00 EST becomes 03:00 EDT
+    EXPECT_EQ(mar8 - 2 * hour, ExpiryScheduler::dayStartOf(mar8 + 12 * hour)) << "Saturday 17:00 EST";
+    EXPECT_EQ(mar8 + 21 * hour, ExpiryScheduler::dayStartOf(mar8 + 21 * hour)) << "Sunday 17:00 EDT";
+    const DateTimeT nov1 = 1793491200000ULL; // 2026-11-01 00:00 UTC; at 06:00 UTC, 02:00 EDT becomes 01:00 EST
+    EXPECT_EQ(nov1 - 3 * hour, ExpiryScheduler::dayStartOf(nov1 + 12 * hour)) << "Saturday 17:00 EDT";
+    EXPECT_EQ(nov1 + 22 * hour, ExpiryScheduler::dayStartOf(nov1 + 22 * hour)) << "Sunday 17:00 EST";
+}
+
+TEST(ExpirySchedulerTest, BeforeTheFirstDayEndADayStartsAt0)
+{
+    // The first day end after the epoch was 1970-01-01 17:00 EST, 22:00 UTC. A time before it, such as a test order's
+    // creationTime_, is in no day, rather than one before the epoch, which DateTimeT can't hold.
+    const DateTimeT firstDayEnd = 22ULL * 60 * 60 * 1000;
+    EXPECT_EQ(0u, ExpiryScheduler::dayStartOf(0));
+    EXPECT_EQ(0u, ExpiryScheduler::dayStartOf(100));
+    EXPECT_EQ(firstDayEnd, ExpiryScheduler::dayStartOf(firstDayEnd));
+}
+
+TEST(ExpirySchedulerTest, DaysLookedUpFromSeveralThreadsAtOnceAgree)
+{
+    // Each thread's first look at a day reads the zone database, which fills in its transitions on first use. The
+    // lookups hold a lock TSan can see (#244): without it the TSan job reports this test, though libstdc++'s own lock,
+    // made of atomics TSan can't see, keeps the answers right. Days a year apart send every thread to the database.
+    const DateTimeT first = 631152000000ULL; // 1990-01-01 00:00 UTC
+    const DateTimeT year = 365 * DAY;
+    constexpr size_t years = 41;
+    std::vector<std::vector<std::pair<DateTimeT, DateTimeT>>> seen(4);
+    std::vector<std::thread> threads;
+    for (auto &answers : seen)
+    {
+        threads.emplace_back(
+            [&answers, first, year]
+            {
+                for (size_t i = 0; i < years; ++i)
+                {
+                    const DateTimeT when = first + i * year;
+                    answers.emplace_back(ExpiryScheduler::dayStartOf(when), ExpiryScheduler::dayEndAfter(when));
+                }
+            });
+    }
+    for (auto &thread : threads)
+    {
+        thread.join();
+    }
+    const DateTimeT hour = 60ULL * 60 * 1000;
+    for (size_t i = 0; i < years; ++i)
+    {
+        const DateTimeT when = first + i * year;
+        const DateTimeT start = ExpiryScheduler::dayStartOf(when);
+        const DateTimeT end = ExpiryScheduler::dayEndAfter(when);
+        EXPECT_LE(start, when);
+        EXPECT_LT(when, end);
+        EXPECT_LE(23 * hour, end - start) << "a day is 23, 24 or 25 hours long";
+        EXPECT_GE(25 * hour, end - start) << "a day is 23, 24 or 25 hours long";
+        for (const auto &answers : seen)
+        {
+            EXPECT_EQ(start, answers[i].first);
+            EXPECT_EQ(end, answers[i].second);
+        }
+    }
+}
+
 /// The singletons an order needs
 class ExpirySchedulerOrderTest : public test::SingletonFixture
 {
@@ -108,6 +192,41 @@ TEST_F(ExpirySchedulerOrderTest, OnlyADayOrAGtdOrderHasAnExpiry)
         order->tif_ = tif;
         EXPECT_FALSE(ExpiryScheduler::expiryOf(*order, &when, &type)) << tif;
     }
+}
+
+TEST_F(ExpirySchedulerOrderTest, AnOrderThatRestsPastItsDayIsRestatedAtTheDaysEnd)
+{
+    // #244: an order of any time in force but DAY, if it rests, unless it expires first
+    const DateTimeT hour = 60ULL * 60 * 1000;
+    const DateTimeT oct15 = 1792022400000ULL; // 2026-10-15 00:00 UTC
+    auto order = test::createCorrectOrder(test::addInstrument("RESTATE"));
+    order->dayStart_ = oct15 - 3 * hour; // its figures are for the day that began 17:00 EDT on the 14th
+    DateTimeT when = 0;
+    for (const TimeInForce tif : { GTC_TIF, OPG_TIF, ATCLOSE_TIF })
+    {
+        order->tif_ = tif;
+        ASSERT_TRUE(ExpiryScheduler::restatementOf(*order, &when)) << tif;
+        EXPECT_EQ(oct15 + 21 * hour, when) << tif;
+    }
+    order->tif_ = GTD_TIF;
+    order->expireTime_ = oct15 + 21 * hour;
+    EXPECT_FALSE(ExpiryScheduler::restatementOf(*order, &when)) << "a GTD order that expires as its day ends";
+    order->expireTime_ = oct15 + 21 * hour + 1;
+    EXPECT_TRUE(ExpiryScheduler::restatementOf(*order, &when));
+    for (const TimeInForce tif : { DAY_TIF, IOC_TIF, FOK_TIF })
+    {
+        order->tif_ = tif;
+        EXPECT_FALSE(ExpiryScheduler::restatementOf(*order, &when)) << tif;
+    }
+    order->tif_ = GTC_TIF;
+    order->ordType_ = MARKET_ORDERTYPE;
+    EXPECT_FALSE(ExpiryScheduler::restatementOf(*order, &when)) << "a market order never rests";
+    order->ordType_ = STOPLIMIT_ORDERTYPE;
+    order->stopPx_ = 1.4;
+    EXPECT_TRUE(ExpiryScheduler::restatementOf(*order, &when)) << "a held stop rests in the stop book";
+    order->dayStart_ = 0; // an order from before format version 4: restated at once
+    ASSERT_TRUE(ExpiryScheduler::restatementOf(*order, &when));
+    EXPECT_EQ(22ULL * 60 * 60 * 1000, when);
 }
 
 TEST(ExpirySchedulerTest, TimersFireWhenTheyComeDueInTheirOrder)
