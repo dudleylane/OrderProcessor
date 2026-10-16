@@ -30,6 +30,9 @@
    1. Add the fact to README.md, docs/ARCHITECTURE.md or docker/README.md wrapped
       in DOC_CHECK markers: `<!-- DOC_CHECK:my_fact -->VALUE<!-- /DOC_CHECK -->`
    2. Add an EXPECT_DOC_EQ() line below pointing to the source-of-truth.
+
+ It also checks that docs/ARCHITECTURE.md's file reference, section 10, names
+ every source, test and benchmark file (#261).
 */
 
 #include <gtest/gtest.h>
@@ -38,7 +41,9 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <iterator>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -239,6 +244,66 @@ TEST_F(DocConsistencyTest, WebSocketLimits)
 TEST_F(DocConsistencyTest, WebSocketAccessToken)
 {
     expectDocEq("ws_min_token_length", COP::App::WS_MIN_TOKEN_LENGTH);
+}
+
+// docs/ARCHITECTURE.md's section 10 names the sources, tests and benchmarks one by one, and nothing compared it with
+// the tree, so files went unlisted as they came (#261). Every .h, .cpp, .py and .sh under src/, test/ and bench/ is
+// named there, in backticks, by its path under that directory; `X.h/cpp` names X.h and X.cpp. The frontend, under
+// src/oms-frontend, and the fuzz corpus's units are left out: the section doesn't list them file by file.
+TEST_F(DocConsistencyTest, FileReferenceNamesEveryFile)
+{
+    const auto root = projectRoot();
+    std::ifstream in(root / "docs/ARCHITECTURE.md");
+    ASSERT_TRUE(in) << "can't read docs/ARCHITECTURE.md";
+    const std::string doc((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const size_t start = doc.find("## 10. Appendix: File Reference");
+    ASSERT_NE(std::string::npos, start) << "docs/ARCHITECTURE.md has no section 10";
+    const size_t end = doc.find("\n## ", start + 1);
+    const std::string section = doc.substr(start, (std::string::npos == end) ? std::string::npos : end - start);
+
+    std::set<std::string> named;
+    const std::regex ticked("`([A-Za-z0-9_./-]+)`");
+    const std::regex both(R"(^(.*)\.(\w+(?:/\w+)+)$)");
+    for (std::sregex_iterator it(section.begin(), section.end(), ticked), last; it != last; ++it)
+    {
+        const std::string name = (*it)[1].str();
+        named.insert(name);
+        std::smatch m;
+        if (std::regex_match(name, m, both))
+        {
+            std::istringstream extensions(m[2].str());
+            std::string extension;
+            while (std::getline(extensions, extension, '/'))
+            {
+                named.insert(m[1].str() + "." + extension);
+            }
+        }
+    }
+
+    size_t files = 0;
+    for (const char *dir : { "src", "test", "bench" })
+    {
+        for (auto it = std::filesystem::recursive_directory_iterator(root / dir);
+             std::filesystem::recursive_directory_iterator() != it; ++it)
+        {
+            const std::string path = std::filesystem::relative(it->path(), root / dir).generic_string();
+            // Not walked at all: the frontend holds node_modules once it is installed
+            if (it->is_directory() && (("oms-frontend" == path) || ("fuzz/corpus" == path)))
+            {
+                it.disable_recursion_pending();
+                continue;
+            }
+            const std::string extension = it->path().extension().string();
+            if (!it->is_regular_file() ||
+                ((".h" != extension) && (".cpp" != extension) && (".py" != extension) && (".sh" != extension)))
+            {
+                continue;
+            }
+            ++files;
+            EXPECT_TRUE(named.count(path)) << dir << "/" << path << " isn't in docs/ARCHITECTURE.md's section 10";
+        }
+    }
+    EXPECT_LT(100u, files) << "found only " << files << " files: the directories or the pattern are wrong";
 }
 
 } // namespace

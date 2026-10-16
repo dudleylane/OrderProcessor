@@ -1449,6 +1449,8 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 
 ## 10. Appendix: File Reference
 
+Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is named here, and `DocConsistencyTest.FileReferenceNamesEveryFile` fails naming any that isn't (#261). A new file needs its line.
+
 ### 10.1 Source Files
 
 | Category | Files |
