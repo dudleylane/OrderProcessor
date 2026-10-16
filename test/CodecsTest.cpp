@@ -65,10 +65,14 @@ TEST_F(CodecsTest, InstrumentCodecEmpty)
     EXPECT_FALSE(buf.empty());
     EXPECT_EQ(id, val.id_);
 
+    // In the layout encode() wrote: its out-parameter is the storage's version, not the layout's (#144)
     InstrumentEntry decVal;
-    InstrumentCodec::decode(id, version, buf.c_str(), buf.size(), &decVal);
+    InstrumentCodec::decode(id, InstrumentCodec::FORMAT_VERSION, buf.c_str(), buf.size(), &decVal);
 
     EXPECT_EQ(decVal.id_, val.id_);
+    EXPECT_EQ(INVALID_INSTRUMENTTYPE, decVal.instrumentType_);
+    EXPECT_EQ(INVALID_CURRENCY, decVal.baseCurrency_);
+    EXPECT_EQ(INVALID_CURRENCY, decVal.termCurrency_);
     EXPECT_EQ(decVal.securityId_, val.securityId_);
     EXPECT_TRUE(decVal.securityId_.empty());
     EXPECT_EQ(decVal.securityIdSource_, val.securityIdSource_);
@@ -84,6 +88,9 @@ TEST_F(CodecsTest, InstrumentCodecFilled)
     val.securityId_ = "securityId_";
     val.securityIdSource_ = "securityIdSource_";
     val.symbol_ = "symbol_";
+    val.instrumentType_ = FX_SPOT_INSTRUMENTTYPE;
+    val.baseCurrency_ = EUR_CURRENCY;
+    val.termCurrency_ = USD_CURRENCY;
     std::string buf;
     IdT id;
     u32 version = 0;
@@ -93,12 +100,56 @@ TEST_F(CodecsTest, InstrumentCodecFilled)
     EXPECT_EQ(id, val.id_);
 
     InstrumentEntry decVal;
-    InstrumentCodec::decode(id, version, buf.c_str(), buf.size(), &decVal);
+    InstrumentCodec::decode(id, InstrumentCodec::FORMAT_VERSION, buf.c_str(), buf.size(), &decVal);
 
     EXPECT_EQ(decVal.id_, val.id_);
     EXPECT_EQ(decVal.securityId_, val.securityId_);
     EXPECT_EQ(decVal.securityIdSource_, val.securityIdSource_);
     EXPECT_EQ(decVal.symbol_, val.symbol_);
+    EXPECT_EQ(FX_SPOT_INSTRUMENTTYPE, decVal.instrumentType_) << "an instrument's type is persisted (#172)";
+    EXPECT_EQ(EUR_CURRENCY, decVal.baseCurrency_);
+    EXPECT_EQ(USD_CURRENCY, decVal.termCurrency_);
+}
+
+TEST_F(CodecsTest, InstrumentCodecRefusesATypeOrCurrencyItDoesNotKnow)
+{
+    // Format version 1 stores the type and both currencies as their values (#172). One past the last this build knows
+    // is a newer build's, or not a record at all, and is refused rather than restored; the last is read.
+    InstrumentEntry val;
+    val.id_ = IdT(1234, 6789);
+    val.symbol_ = "NZD/USD";
+    val.securityId_ = "NZDUSD";
+    val.securityIdSource_ = "ISO";
+    val.instrumentType_ = FX_SWAP_INSTRUMENTTYPE;
+    val.baseCurrency_ = NZD_CURRENCY;
+    val.termCurrency_ = USD_CURRENCY;
+    std::string buf;
+    IdT id;
+    u32 version = 0;
+    InstrumentCodec::encode(val, &buf, &id, &version);
+
+    InstrumentEntry decVal;
+    InstrumentCodec::decode(id, InstrumentCodec::FORMAT_VERSION, buf.c_str(), buf.size(), &decVal);
+    EXPECT_EQ(FX_SWAP_INSTRUMENTTYPE, decVal.instrumentType_);
+    EXPECT_EQ(NZD_CURRENCY, decVal.baseCurrency_);
+
+    // The record ends '.', the type, '.', the base currency, '.', the term currency, each value 4 bytes
+    ASSERT_LT(15u, buf.size());
+    const size_t term = buf.size() - 4;
+    const size_t base = term - 5;
+    const size_t type = base - 5;
+    const auto refused = [&](size_t at, u32 value)
+    {
+        std::string bad = buf;
+        std::memcpy(bad.data() + at, &value, sizeof(value));
+        InstrumentEntry badVal;
+        EXPECT_THROW(InstrumentCodec::decode(id, InstrumentCodec::FORMAT_VERSION, bad.c_str(), bad.size(), &badVal),
+                     std::runtime_error)
+            << "a value of " << value << " at byte " << at;
+    };
+    refused(type, static_cast<u32>(FX_SWAP_INSTRUMENTTYPE) + 1);
+    refused(base, static_cast<u32>(NZD_CURRENCY) + 1);
+    refused(term, static_cast<u32>(NZD_CURRENCY) + 1);
 }
 
 TEST_F(CodecsTest, StringTCodecEmpty)

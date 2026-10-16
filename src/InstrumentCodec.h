@@ -29,7 +29,8 @@ public:
 public:
     /// The layout encode() writes, carried in the record's first 4 bytes (#149). decode() reads it and every older
     /// one: to change the layout, bump this, keep decoding the old version, and add golden records for the new one.
-    static constexpr u32 FORMAT_VERSION = 0;
+    /// Version 1 (#172) adds the instrument's type and an FX pair's base and term currencies to version 0's strings.
+    static constexpr u32 FORMAT_VERSION = 1;
 
     static void encode(const InstrumentEntry &instr, std::string *buf, IdT *id, u32 *version);
     static void decode(const IdT &id, u32 formatVersion, const char *buf, size_t size, InstrumentEntry *instr);
