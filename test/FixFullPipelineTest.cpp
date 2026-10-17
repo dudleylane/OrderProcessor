@@ -22,6 +22,7 @@
 #include <gtest/gtest.h>
 #include <atomic>
 #include <deque>
+#include <functional>
 #include <mutex>
 
 #include "DataModelDef.h"
@@ -198,11 +199,46 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
     auto gateway =
         std::make_unique<FixGateway>(inQueues.get(), WideDataStorage::instance(), OrderStorage::instance(), clearingId);
 
+    // Tear down on every path, an ASSERT's early return included (#301). Stop the transaction manager only after
+    // ~TaskManager has waited for every task: processing an event adds a transaction and finishing one removes it, and
+    // both require a started manager. Then the singletons, which the next test in the process creates again.
+    struct Teardown
+    {
+        std::function<void()> run;
+        ~Teardown()
+        {
+            run();
+        }
+    } teardown{ [&]
+                {
+                    EXPECT_TRUE(taskMgr->waitUntilTransactionsFinished(60))
+                        << "the pool didn't finish before the teardown";
+                    inQueues->detach();
+                    transMgr->detach();
+
+                    taskMgr.reset();
+                    transMgr->stop();
+                    transMgr.reset();
+                    multiOut.reset();
+                    recordingOut.reset();
+                    countingOut.reset();
+                    inQueues.reset();
+                    orderBook.reset();
+                    gateway.reset();
+
+                    OrderStorage::destroy();
+                    IdTGenerator::destroy();
+                    SubscrMgr::SubscriptionMgr::destroy();
+                    WideDataStorage::destroy();
+                    TaskManager::destroy();
+                } };
+
     const FIX::SessionID sid("FIX.4.4", "PIPELINE_CLIENT", "ORDER_PROCESSOR", "");
 
+    // A timeout fails here, as a timeout, not later as a wrong order state (#301)
     auto waitForProcessing = [&]()
     {
-        taskMgr->waitUntilTransactionsFinished(10);
+        EXPECT_TRUE(taskMgr->waitUntilTransactionsFinished(60)) << "the pool didn't finish the messages' work";
     };
 
     // =========================================================================
@@ -366,30 +402,7 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
         delete decoded;
     }
 
-    // =========================================================================
-    // TEARDOWN
-    // =========================================================================
-    // Stop the transaction manager only after ~TaskManager has waited for every task: processing an event
-    // adds a transaction and finishing one removes it, and both require a started manager.
-    taskMgr->waitUntilTransactionsFinished(5);
-    inQueues->detach();
-    transMgr->detach();
-
-    taskMgr.reset();
-    transMgr->stop();
-    transMgr.reset();
-    multiOut.reset();
-    recordingOut.reset();
-    countingOut.reset();
-    inQueues.reset();
-    orderBook.reset();
-    gateway.reset();
-
-    OrderStorage::destroy();
-    IdTGenerator::destroy();
-    SubscrMgr::SubscriptionMgr::destroy();
-    WideDataStorage::destroy();
-    TaskManager::destroy();
+    // TEARDOWN: the guard above, as this scope ends
 }
 
 } // anonymous namespace
