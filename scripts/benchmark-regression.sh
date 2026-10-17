@@ -17,10 +17,23 @@
 # can't decide it. Benchmarks that ask for real time (/real_time, /manual_time) are
 # judged by real time, the rest by CPU time.
 #
-# Trustworthy numbers need an otherwise idle machine and the run pinned to a few
-# isolated cores, with real-time priority where permitted: --pinned does this and
-# warns about whatever it could not arrange. Pin to a range, not one core: the
-# TaskManager benchmarks need worker threads (#120).
+# Pin the runs to a few cores, with real-time priority where permitted: --pinned
+# does this and warns about whatever it could not arrange. Pin to a range, not one
+# core: the TaskManager benchmarks need worker threads (#120).
+#
+# The machine is rarely idle: other repositories' CI runners share this laptop. So,
+# as QuickFIX's perf gate does (its #93 and #115), a comparison copes with load
+# rather than waiting for none (#265):
+#   - Each run waits for the one-minute load average to fall under --settle-load
+#     (2.0), and starts when it does, or after --settle-max seconds (600) anyway.
+#   - The rounds in which the baseline ran first, and the rounds in which it ran
+#     second, give two estimates of each benchmark's change. When they disagree by
+#     more than 25 points on more than a quarter of the benchmarks, the machine was
+#     too busy to judge: the verdict is INCONCLUSIVE, and the comparison wants a
+#     re-run when the machine is quieter.
+#   - A benchmark faster than --min-time (200 ns) is reported but can't fail the
+#     comparison: QuickFIX found run-to-run variation reaching 10% on this laptop
+#     at a few nanoseconds an operation.
 #
 # Each run's address space is capped, at half of RAM by default (--memory-cap), so a
 # benchmark that keeps more state than expected fails with exit 2 instead of pushing
@@ -29,7 +42,8 @@
 # 30 GB laptop before #125.
 #
 # Exit codes: 0 = no benchmark got slower by more than the threshold, 1 = at least
-# one did, 2 = usage/setup error, or a benchmark failed to run
+# one did, 2 = usage/setup error, or a benchmark failed to run, 3 = inconclusive:
+# the machine was too busy to judge
 
 set -euo pipefail
 
@@ -45,6 +59,9 @@ FILTER=""
 PINNED_CORES=""
 BASELINE_ARG=""
 MEMORY_CAP_GIB=""
+SETTLE_LOAD=2.0
+SETTLE_MAX=600
+MIN_TIME_NS=200
 
 # --- Resolve project root from script location ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,6 +88,14 @@ while [[ $# -gt 0 ]]; do
                 --memory-cap)  MEMORY_CAP_GIB="$2" ;;
             esac
             shift 2 ;;
+        --settle-load|--settle-max|--min-time)
+            [[ $# -ge 2 ]] || usage_error "$1 needs a value"
+            case "$1" in
+                --settle-load) SETTLE_LOAD="$2" ;;
+                --settle-max)  SETTLE_MAX="$2" ;;
+                --min-time)    MIN_TIME_NS="$2" ;;
+            esac
+            shift 2 ;;
         --no-build)
             DO_BUILD=false; shift ;;
         --update-baseline)
@@ -92,6 +117,12 @@ while [[ $# -gt 0 ]]; do
             echo "                       and request real-time priority where permitted"
             echo "  --memory-cap GIB     Cap each benchmark run's address space at GIB GiB (default:"
             echo "                       half of RAM; 0 for no cap, e.g. for a sanitizer build)"
+            echo "  --settle-load N      Start each run once the one-minute load average is under N"
+            echo "                       (default: 2.0)"
+            echo "  --settle-max SECONDS Wait at most SECONDS for that, then run anyway (default: 600;"
+            echo "                       0 never waits)"
+            echo "  --min-time NS        Report, but never fail on, a benchmark faster than NS"
+            echo "                       nanoseconds (default: 200)"
             echo "  -h, --help           Show this help"
             exit 0
             ;;
@@ -110,6 +141,10 @@ if ! [[ "$REPETITIONS" =~ ^[0-9]+$ ]] || (( 10#$REPETITIONS < 1 )); then
 fi
 ROUNDS=$(( 10#$ROUNDS ))
 REPETITIONS=$(( 10#$REPETITIONS ))
+[[ "$SETTLE_LOAD" =~ ^[0-9]+([.][0-9]+)?$ ]] || usage_error "--settle-load needs a number, got '$SETTLE_LOAD'"
+[[ "$SETTLE_MAX" =~ ^[0-9]+$ ]] || usage_error "--settle-max needs a whole number of seconds, got '$SETTLE_MAX'"
+SETTLE_MAX=$(( 10#$SETTLE_MAX ))
+[[ "$MIN_TIME_NS" =~ ^[0-9]+([.][0-9]+)?$ ]] || usage_error "--min-time needs a number of nanoseconds, got '$MIN_TIME_NS'"
 if [[ -n "$MEMORY_CAP_GIB" ]]; then
     [[ "$MEMORY_CAP_GIB" =~ ^[0-9]+$ ]] || usage_error "--memory-cap needs a whole number of GiB (0 for no cap), got '$MEMORY_CAP_GIB'"
     MEMORY_CAP_GIB=$(( 10#$MEMORY_CAP_GIB ))
@@ -291,6 +326,12 @@ if (( MEMORY_CAP_GIB > 0 )); then
 else
     echo "  memory:    no cap (--memory-cap 0)"
 fi
+now=$(cut -d' ' -f1 /proc/loadavg)
+if (( SETTLE_MAX > 0 )); then
+    echo "  settle:    each run waits up to $SETTLE_MAX s for a one-minute load under $SETTLE_LOAD (now $now)"
+else
+    echo "  settle:    none (--settle-max 0); one-minute load now $now"
+fi
 echo "--- before (baseline) ---"
 echo "  binary:    $BASELINE"
 if [[ -f "$BASELINE.info" ]]; then
@@ -317,8 +358,24 @@ limit_memory() {
     fi
 }
 
+# As QuickFIX's ptgate.sh does (#265): wait until the one-minute load average is under SETTLE_LOAD, for SETTLE_MAX
+# seconds at most, then let the run start regardless. Sets SETTLE_AT, the load it started at, and SETTLE_WAITED.
+settle() {
+    local step
+    SETTLE_WAITED=0
+    while (( SETTLE_WAITED < SETTLE_MAX )) && ! awk -v max="$SETTLE_LOAD" '{ exit !($1 + 0 < max + 0) }' /proc/loadavg; do
+        step=$(( SETTLE_MAX - SETTLE_WAITED < 10 ? SETTLE_MAX - SETTLE_WAITED : 10 ))
+        sleep "$step"
+        SETTLE_WAITED=$(( SETTLE_WAITED + step ))
+    done
+    SETTLE_AT=$(cut -d' ' -f1 /proc/loadavg)
+}
+
+# Leaves the run's starting load, its wait and its own duration in r<round>-<side>.load, for the report.
 run_side() {  # round, side, binary
-    local out="$WORK/r$1-$2.json" log="$WORK/r$1-$2.log"
+    local out="$WORK/r$1-$2.json" log="$WORK/r$1-$2.log" began
+    settle
+    began=$(date +%s)
     if ! ( cd "$WORK" && limit_memory && "${LAUNCH[@]}" "$3" "${BENCH_ARGS[@]}" "--benchmark_out=$out" ) > "$log" 2>&1; then
         echo "ERROR: the $2 binary failed in round $1. The last lines of its output:" >&2
         tail -n 20 "$log" >&2
@@ -328,6 +385,7 @@ run_side() {  # round, side, binary
         fi
         exit 2
     fi
+    echo "$SETTLE_AT $SETTLE_WAITED $(( $(date +%s) - began ))" > "$WORK/r$1-$2.load"
 }
 
 for (( r = 1; r <= ROUNDS; r++ )); do
@@ -336,32 +394,44 @@ for (( r = 1; r <= ROUNDS; r++ )); do
     else
         order=(after before)
     fi
-    started=$(date +%s)
+    took=0 starts=""
     for side in "${order[@]}"; do
         if [[ "$side" == before ]]; then
             run_side "$r" before "$BASELINE"
         else
             run_side "$r" after "$BENCH_EXE"
         fi
+        read -r load waited ran < "$WORK/r$r-$side.load"
+        took=$(( took + ran ))
+        starts+="${starts:+, }$side at load $load after ${waited} s"
     done
-    took=$(( $(date +%s) - started ))
     if (( r == 1 )); then
-        echo "  round 1/$ROUNDS: ${order[0]} first, ${took} s (about $(( (took * (ROUNDS - 1) + 59) / 60 )) min to go)"
+        eta=$(( (took * (ROUNDS - 1) + 59) / 60 ))
+        echo "  round 1/$ROUNDS: $starts; ${took} s of runs (about $eta min more, and the waits)"
     else
-        echo "  round $r/$ROUNDS: ${order[0]} first, ${took} s"
+        echo "  round $r/$ROUNDS: $starts; ${took} s of runs"
     fi
 done
 echo ""
 
 # --- Step 6: Judge and report ---
 set +e
-python3 - "$THRESHOLD" "$ROUNDS" "$WORK" <<'PYEOF'
+python3 - "$THRESHOLD" "$ROUNDS" "$WORK" "$MIN_TIME_NS" "$SETTLE_LOAD" "$SETTLE_MAX" <<'PYEOF'
 import json, os, statistics, sys
 
 threshold_pct = float(sys.argv[1])
 rounds = int(sys.argv[2])
 work = sys.argv[3]
+min_time_ns = float(sys.argv[4])
+settle_load = float(sys.argv[5])
+settle_max = int(sys.argv[6])
 limit = threshold_pct / 100.0
+# As QuickFIX's ptcompare.py (#265): the rounds in which the baseline ran first, and the rest, give two estimates of
+# a change. A benchmark is noisy when they differ by more than NOISE, and more than NOISY_SHARE of the benchmarks
+# noisy means the machine was too busy for either verdict.
+NOISE = 0.25
+NOISY_SHARE = 0.25
+NS_PER_UNIT = {'ns': 1.0, 'us': 1e3, 'ms': 1e6, 's': 1e9}
 
 
 def load(path):
@@ -411,36 +481,52 @@ def main():
             errors[name] = 'the baseline measured zero time'
             continue
         ratios = [a / b for a, b in zip(a_meds, b_meds)]
+        # Odd rounds ran the baseline first, even rounds second
+        halves = (statistics.median(ratios[0::2]) - 1.0, statistics.median(ratios[1::2]) - 1.0)
         rows.append({
             'name': name, 'timer': 'real' if timer == 'real_time' else 'cpu', 'unit': unit,
             'before': statistics.median(b_meds), 'after': statistics.median(a_meds),
             'change': statistics.median(ratios) - 1.0,
             'slower': sum(1 for x in ratios if x > 1.0),
             'lo': min(ratios) - 1.0, 'hi': max(ratios) - 1.0,
+            'halves': halves, 'noisy': abs(halves[0] - halves[1]) > NOISE,
+            'tiny': statistics.median(b_meds) * NS_PER_UNIT.get(unit, 1.0) < min_time_ns,
         })
 
-    regressions = sorted((r for r in rows if r['change'] > limit), key=lambda r: -r['change'])
+    past_limit = sorted((r for r in rows if r['change'] > limit), key=lambda r: -r['change'])
+    regressions = [r for r in past_limit if not r['tiny']]
+    tiny_slower = [r for r in past_limit if r['tiny']]
     improvements = sorted((r for r in rows if r['change'] < -limit), key=lambda r: r['change'])
+    noisy = sorted((r for r in rows if r['noisy']), key=lambda r: -abs(r['halves'][0] - r['halves'][1]))
 
     print("=" * 100)
     print(f"  BENCHMARK COMPARISON  ({len(rows)} benchmarks, {rounds} rounds, threshold {threshold_pct:.1f}%)")
     print("  change = median over rounds of after/before; slower = rounds in which after was slower;")
     print("  range = lowest..highest per-round change; timer = real for /real_time and /manual_time, else cpu")
+    print("  halves = the change over the rounds that ran the baseline first / second; noisy when they differ")
+    print(f"  by more than {NOISE * 100:.0f} points. A benchmark under {min_time_ns:g} ns is reported but can't fail")
     print("=" * 100)
 
     width = min(60, max([len(r['name']) for r in rows] + [9]))
 
     def table(title, entries):
         print(f"\n{title} ({len(entries)}):")
-        print(f"  {'Benchmark':<{width}s} {'timer':>5s} {'before':>14s} {'after':>14s} {'change':>8s} {'slower':>7s}  range")
+        print(f"  {'Benchmark':<{width}s} {'timer':>5s} {'before':>14s} {'after':>14s} {'change':>8s} {'slower':>7s}"
+              f"  {'range':<15s} halves")
         for r in entries:
+            spread = f"{r['lo'] * 100:+.1f}..{r['hi'] * 100:+.1f}%"
             print(f"  {r['name']:<{width}s} {r['timer']:>5s} {fmt(r['before'], r['unit']):>14s} {fmt(r['after'], r['unit']):>14s}"
-                  f" {r['change'] * 100:>+7.1f}% {r['slower']:>3d}/{rounds:<3d}  {r['lo'] * 100:+.1f}..{r['hi'] * 100:+.1f}%")
+                  f" {r['change'] * 100:>+7.1f}% {r['slower']:>3d}/{rounds:<3d}  {spread:<15s}"
+                  f" {r['halves'][0] * 100:+.1f}/{r['halves'][1] * 100:+.1f}%")
 
     if improvements:
         table("Faster by more than the threshold", improvements)
     if regressions:
         table("SLOWER by more than the threshold", regressions)
+    if tiny_slower:
+        table(f"Slower by more than the threshold, but under {min_time_ns:g} ns, so not failing", tiny_slower)
+    if noisy:
+        table(f"Noisy: the two halves differ by more than {NOISE * 100:.0f} points", noisy)
     if rows:
         overall = statistics.median(r['change'] for r in rows) * 100
         print(f"\nMedian change across all {len(rows)} compared benchmarks: {overall:+.1f}%")
@@ -461,6 +547,22 @@ def main():
     if not rows:
         print("\n*** ERROR: no benchmark ran in both binaries ***")
         return 2
+    loads = []
+    for r in range(1, rounds + 1):
+        for side in ('before', 'after'):
+            with open(os.path.join(work, f'r{r}-{side}.load')) as f:
+                started_at, waited, _ = f.read().split()
+                loads.append((float(started_at), int(waited)))
+    full = sum(1 for _, waited in loads if settle_max and waited >= settle_max)
+    lo, hi = min(x for x, _ in loads), max(x for x, _ in loads)
+    line = f"\nThe {len(loads)} runs started at one-minute loads {lo:.2f}..{hi:.2f}"
+    if full:
+        line += f"; {full} of them after the full {settle_max} s wait, with the load still at {settle_load:g} or more"
+    print(line)
+    if len(noisy) > NOISY_SHARE * len(rows):
+        print(f"\n*** INCONCLUSIVE: the two halves differ by more than {NOISE * 100:.0f} points on {len(noisy)} of "
+              f"{len(rows)} benchmarks: the machine was too busy to judge. Re-run when it is quieter ***")
+        return 3
     if regressions:
         print(f"\n*** FAIL: {len(regressions)} benchmark(s) slower by more than {threshold_pct:.1f}% ***")
         return 1
