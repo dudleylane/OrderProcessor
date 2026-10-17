@@ -5,7 +5,7 @@ This directory contains everything needed to run the full OrderProcessor OMS sta
 ## Prerequisites
 
 - Docker or Podman with `docker compose` (or `podman-compose`)
-- ~2 GB disk space for build images
+- About 3 GB of disk to build the stack: the base images take about 780 MB, the server's build stage about 1.5 GB (the build cache keeps it), and the server's image about 210 MB
 - Ports 3000, 5432, and 8080 available
 
 ## Quick Start
@@ -78,16 +78,16 @@ Override in `docker-compose.yml`:
 
 ```yaml
 oms-server:
-  command: ["--port", "8080", "--data-dir", "/data", "--workers", "4", "--huge-pages"]
+  command: ["--port", "8080", "--data-dir", "/data", "--workers", "4"]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--port` | 8080 | WebSocket listen port |
-| `--data-dir` | `/data` | LMDB persistence directory (mounted as Docker volume) |
-| `--workers` | 0 | Worker thread count (0 = auto-detect) |
+| `--data-dir` | `./data` | LMDB persistence directory. The image's command gives `/data`, its volume |
+| `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
-| `--huge-pages` | off | Enable huge page allocation (requires host configuration) |
+| `--huge-pages` | off | Reports whether huge pages are available; nothing allocates from them yet |
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
 | `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
 | `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock |
@@ -206,7 +206,7 @@ CI builds and runs this image on every push as well, with `scripts/check-fronten
 
 ## Database Schema
 
-The schema is initialized automatically on first boot from `init-db/001_schema.sql`. It includes:
+The schema is initialized automatically on first boot from `init-db/001_schema.sql`. Nothing writes to it yet: the server doesn't connect to Postgres (#151). It includes:
 
 **Enum types** (matching C++ and TypeScript): `side`, `order_type`, `order_status`, `exec_type`, `time_in_force`, `currency`, `capacity`, `settl_type`, `account_type`, `audit_action`
 
@@ -214,13 +214,13 @@ The schema is initialized automatically on first boot from `init-db/001_schema.s
 
 | Table | Description |
 |-------|-------------|
-| `users` | Authentication and authorization (UUID primary keys) |
+| `users` | User accounts (UUID primary keys); nothing authenticates against them |
 | `instruments` | Reference data — symbol, security ID |
 | `accounts` | Reference data — account name, firm, type |
 | `clearing_firms` | Reference data — clearing firm names |
 | `orders` | Order archive with full order parameters |
 | `executions` | Execution reports (single-table inheritance via `exec_type`) |
-| `audit_log` | Append-only audit trail with JSONB detail |
+| `audit_log` | Audit trail with JSONB detail; nothing enforces append-only |
 
 **Indexes** optimized for frontend blotter queries: active orders (partial index), executions by order and time, audit log with GIN index on JSONB.
 
@@ -258,8 +258,6 @@ A server that can't start logs why, as a line with `[Fatal]` and `Can't start:`,
 docker compose logs oms-server
 
 # Common issues:
-# - "Address already in use" → port 8080 is taken
-# - Database connection errors → oms-db not healthy yet (check health with docker compose ps)
 # - "mdb_env_open: Permission denied" → a volume an older image wrote as root (see "A volume written by an older image")
 # - Other LMDB errors → corrupt data (docker compose down -v starts again, and deletes it)
 ```
