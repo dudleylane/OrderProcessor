@@ -159,6 +159,24 @@ SourceIdT addInstrument(const std::string &name)
     return WideDataStorage::instance()->add(instr.release());
 }
 
+/// Stops the transaction manager when the test ends, on a failed assertion's early return too: ~TransactionMgr asserts
+/// it was stopped. Declared after the manager and before the TaskManager, it runs once the TaskManager and its tasks are
+/// gone (#301).
+class StopWhenDone
+{
+public:
+    explicit StopWhenDone(TransactionMgr &mgr) : mgr_(mgr) {}
+    ~StopWhenDone()
+    {
+        mgr_.stop();
+    }
+    StopWhenDone(const StopWhenDone &) = delete;
+    StopWhenDone &operator=(const StopWhenDone &) = delete;
+
+private:
+    TransactionMgr &mgr_;
+};
+
 class TestOutQueues : public Queues::OutQueues
 {
 public:
@@ -236,6 +254,7 @@ TEST_F(IntegrationTest, MarketOrderNotMatched)
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
     transMgr.init(transParams);
+    StopWhenDone stopWhenDone(transMgr);
 
     TaskManagerParams tmparams;
     {
@@ -264,7 +283,7 @@ TEST_F(IntegrationTest, MarketOrderNotMatched)
     inQueues.push("test", OrderEvent(ord.release()));
 
     // Wait until order accepted or rejected
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
     OrderEntry *order = OrderStorage::instance()->locateByClOrderId(ordClOrdId);
     ASSERT_NE(nullptr, order);
     EXPECT_EQ(NEW_ORDSTATUS, order->status_);
@@ -278,12 +297,10 @@ TEST_F(IntegrationTest, MarketOrderNotMatched)
     inQueues.push("test", OrderEvent(ord2.release()));
 
     // Wait until order canceled or rejected
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
     order = OrderStorage::instance()->locateByClOrderId(ord2ClOrdId);
     ASSERT_NE(nullptr, order);
     EXPECT_EQ(CANCELED_ORDSTATUS, order->status_);
-
-    transMgr.stop();
 }
 
 // =============================================================================
@@ -308,6 +325,7 @@ TEST_F(IntegrationTest, LimitOrderAccepted)
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
     transMgr.init(transParams);
+    StopWhenDone stopWhenDone(transMgr);
 
     TaskManagerParams tmparams;
     {
@@ -338,7 +356,7 @@ TEST_F(IntegrationTest, LimitOrderAccepted)
     inQueues.push("test", OrderEvent(ord.release()));
 
     // Wait for processing
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
 
     OrderEntry *order = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, order);
@@ -346,8 +364,6 @@ TEST_F(IntegrationTest, LimitOrderAccepted)
     EXPECT_EQ(100, order->orderQty_);
     EXPECT_EQ(100, order->leavesQty_);
     EXPECT_EQ(0, order->cumQty_);
-
-    transMgr.stop();
 }
 
 TEST_F(IntegrationTest, MatchingBuyAndSellOrders)
@@ -368,6 +384,7 @@ TEST_F(IntegrationTest, MatchingBuyAndSellOrders)
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
     transMgr.init(transParams);
+    StopWhenDone stopWhenDone(transMgr);
 
     TaskManagerParams tmparams;
     {
@@ -397,7 +414,7 @@ TEST_F(IntegrationTest, MatchingBuyAndSellOrders)
     RawDataEntry sellClOrdId = sellOrd->clOrderId_.get();
     inQueues.push("test", OrderEvent(sellOrd.release()));
 
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
 
     // Verify sell order is on the book
     OrderEntry *sellOrder = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
@@ -415,7 +432,7 @@ TEST_F(IntegrationTest, MatchingBuyAndSellOrders)
     RawDataEntry buyClOrdId = buyOrd->clOrderId_.get();
     inQueues.push("test", OrderEvent(buyOrd.release()));
 
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
 
     // Both orders should be filled
     sellOrder = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
@@ -431,8 +448,6 @@ TEST_F(IntegrationTest, MatchingBuyAndSellOrders)
     EXPECT_EQ(100, buyOrder->cumQty_);
     EXPECT_EQ(0, sellOrder->leavesQty_);
     EXPECT_EQ(0, buyOrder->leavesQty_);
-
-    transMgr.stop();
 }
 
 TEST_F(IntegrationTest, AnOrderForNothingIsRejectedAndTradesNothing)
@@ -455,6 +470,7 @@ TEST_F(IntegrationTest, AnOrderForNothingIsRejectedAndTradesNothing)
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
     transMgr.init(transParams);
+    StopWhenDone stopWhenDone(transMgr);
 
     TaskManagerParams tmparams;
     {
@@ -482,7 +498,7 @@ TEST_F(IntegrationTest, AnOrderForNothingIsRejectedAndTradesNothing)
     sellOrd->price_ = 10.00;
     RawDataEntry sellClOrdId = sellOrd->clOrderId_.get();
     inQueues.push("test", OrderEvent(sellOrd.release()));
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
 
     std::unique_ptr<OrderEntry> buyOrd(createCorrectOrder(instrId1));
     assignClOrderId(buyOrd.get());
@@ -493,7 +509,7 @@ TEST_F(IntegrationTest, AnOrderForNothingIsRejectedAndTradesNothing)
     buyOrd->price_ = 10.00;
     RawDataEntry buyClOrdId = buyOrd->clOrderId_.get();
     inQueues.push("test", OrderEvent(buyOrd.release()));
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
 
     // Rejected, as the engine rejects any order it can't accept: stored as such, with a REJECT report. The sell is as it
     // was.
@@ -506,8 +522,6 @@ TEST_F(IntegrationTest, AnOrderForNothingIsRejectedAndTradesNothing)
     EXPECT_EQ(NEW_ORDSTATUS, sellOrder->status_);
     EXPECT_EQ(0, sellOrder->cumQty_);
     EXPECT_EQ(100, sellOrder->leavesQty_);
-
-    transMgr.stop();
 }
 
 TEST_F(IntegrationTest, ALimitSellAtZeroIsRejectedNotSoldAtTheBid)
@@ -529,6 +543,7 @@ TEST_F(IntegrationTest, ALimitSellAtZeroIsRejectedNotSoldAtTheBid)
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
     transMgr.init(transParams);
+    StopWhenDone stopWhenDone(transMgr);
 
     TaskManagerParams tmparams;
     {
@@ -556,7 +571,7 @@ TEST_F(IntegrationTest, ALimitSellAtZeroIsRejectedNotSoldAtTheBid)
     buyOrd->price_ = 10.00;
     RawDataEntry buyClOrdId = buyOrd->clOrderId_.get();
     inQueues.push("test", OrderEvent(buyOrd.release()));
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
 
     std::unique_ptr<OrderEntry> sellOrd(createCorrectOrder(instrId1));
     assignClOrderId(sellOrd.get());
@@ -567,7 +582,7 @@ TEST_F(IntegrationTest, ALimitSellAtZeroIsRejectedNotSoldAtTheBid)
     sellOrd->price_ = 0;
     RawDataEntry sellClOrdId = sellOrd->clOrderId_.get();
     inQueues.push("test", OrderEvent(sellOrd.release()));
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
 
     OrderEntry *sellOrder = OrderStorage::instance()->locateByClOrderId(sellClOrdId);
     ASSERT_NE(nullptr, sellOrder);
@@ -578,8 +593,6 @@ TEST_F(IntegrationTest, ALimitSellAtZeroIsRejectedNotSoldAtTheBid)
     EXPECT_EQ(NEW_ORDSTATUS, buyOrder->status_);
     EXPECT_EQ(0, buyOrder->cumQty_);
     EXPECT_EQ(100, buyOrder->leavesQty_);
-
-    transMgr.stop();
 }
 
 // =============================================================================
@@ -606,6 +619,7 @@ TEST_F(IntegrationTest, MultipleInstruments)
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
     transMgr.init(transParams);
+    StopWhenDone stopWhenDone(transMgr);
 
     TaskManagerParams tmparams;
     {
@@ -646,7 +660,7 @@ TEST_F(IntegrationTest, MultipleInstruments)
     RawDataEntry clOrdId2 = ord2->clOrderId_.get();
     inQueues.push("test", OrderEvent(ord2.release()));
 
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
 
     // Both orders should be on the book
     OrderEntry *order1 = OrderStorage::instance()->locateByClOrderId(clOrdId1);
@@ -656,8 +670,6 @@ TEST_F(IntegrationTest, MultipleInstruments)
     ASSERT_NE(nullptr, order2);
     EXPECT_EQ(NEW_ORDSTATUS, order1->status_);
     EXPECT_EQ(NEW_ORDSTATUS, order2->status_);
-
-    transMgr.stop();
 }
 
 // =============================================================================
@@ -682,6 +694,7 @@ TEST_F(IntegrationTest, QueueProcessesMultipleOrders)
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
     transMgr.init(transParams);
+    StopWhenDone stopWhenDone(transMgr);
 
     TaskManagerParams tmparams;
     {
@@ -717,7 +730,7 @@ TEST_F(IntegrationTest, QueueProcessesMultipleOrders)
         inQueues.push("test", OrderEvent(ord.release()));
     }
 
-    manager.waitUntilTransactionsFinished(10);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
 
     // Verify all orders were processed
     for (const auto &clOrdId : clOrdIds)
@@ -730,8 +743,6 @@ TEST_F(IntegrationTest, QueueProcessesMultipleOrders)
 
     // Should have generated execution reports
     EXPECT_GT(outQueues.events_.load(), 0);
-
-    transMgr.stop();
 }
 
 // =============================================================================
@@ -759,6 +770,7 @@ TEST_F(IntegrationTest, StopsASweepReachesAreReleasedAfterItOnFourTransactionWor
     TransactionMgrParams transParams(IdTGenerator::instance());
     TransactionMgr transMgr;
     transMgr.init(transParams);
+    StopWhenDone stopWhenDone(transMgr);
 
     TaskManagerParams tmparams;
     {
@@ -799,11 +811,11 @@ TEST_F(IntegrationTest, StopsASweepReachesAreReleasedAfterItOnFourTransactionWor
     const RawDataEntry askId = submit(SELL_SIDE, LIMIT_ORDERTYPE, 13.0, 0.0, 50);
     const RawDataEntry stopId = submit(BUY_SIDE, STOP_ORDERTYPE, 0.0, 10.0, 10);
     const RawDataEntry stopLimitId = submit(BUY_SIDE, STOPLIMIT_ORDERTYPE, 13.0, 12.5, 5);
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
     ASSERT_TRUE(books.holdsStops(instrId));
 
     const RawDataEntry sweepId = submit(BUY_SIDE, LIMIT_ORDERTYPE, 12.0, 0.0, 30);
-    manager.waitUntilTransactionsFinished(5);
+    ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
 
     const OrderEntry *sweep = OrderStorage::instance()->locateByClOrderId(sweepId);
     const OrderEntry *stop = OrderStorage::instance()->locateByClOrderId(stopId);
@@ -824,6 +836,4 @@ TEST_F(IntegrationTest, StopsASweepReachesAreReleasedAfterItOnFourTransactionWor
     EXPECT_EQ(35u, ask->leavesQty_);
     EXPECT_DOUBLE_EQ(13.0, ask->avgPx_);
     EXPECT_FALSE(books.holdsStops(instrId));
-
-    transMgr.stop();
 }

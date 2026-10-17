@@ -211,7 +211,7 @@ protected:
     {
         // Stop the transaction manager only after ~TaskManager has waited for every task: processing an event
         // adds a transaction and finishing one removes it, and both require a started manager.
-        taskMgr_->waitUntilTransactionsFinished(5);
+        EXPECT_TRUE(taskMgr_->waitUntilTransactionsFinished(60)) << "the pool didn't finish before the teardown";
         inQueues_->detach();
         transMgr_->detach();
 
@@ -268,9 +268,10 @@ protected:
         return msg;
     }
 
+    /// A timeout fails here, as a timeout, not later as a wrong order state (#301)
     void waitForProcessing()
     {
-        taskMgr_->waitUntilTransactionsFinished(10);
+        EXPECT_TRUE(taskMgr_->waitUntilTransactionsFinished(60)) << "the pool didn't finish the messages' work";
     }
 
     /// The order sid placed with this ClOrdID, which is stored under the session's key (#71)
