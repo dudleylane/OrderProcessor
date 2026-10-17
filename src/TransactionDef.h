@@ -276,6 +276,9 @@ public:
     virtual bool getRelatedTransactions(const TransactionId &id, TransactionIdsT *related) const = 0;
 
     virtual TransactionIterator *iterator() = 0;
+
+    /// the transactions added and not yet removed, waiting or running
+    virtual size_t pendingTransactions() const = 0;
 };
 
 } // namespace ACID

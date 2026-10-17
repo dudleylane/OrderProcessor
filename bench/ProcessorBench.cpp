@@ -167,6 +167,11 @@ public:
     {
         return nullptr;
     }
+    /// Each transaction runs as it is added, so none is ever left
+    size_t pendingTransactions() const override
+    {
+        return 0;
+    }
 
     Processor *processor_;
 
