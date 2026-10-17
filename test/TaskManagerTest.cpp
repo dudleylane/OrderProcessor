@@ -462,7 +462,12 @@ protected:
     /// fresh id and a ClOrdID of its own, naming the original (#74). The queue owns it once pushed.
     static OrderEntry *makeReplacement(const OrderEntry &original, PriceT price, QuantityT qty)
     {
-        OrderEntry *replacement = original.clone();
+        OrderEntry *replacement = nullptr;
+        {
+            // A transaction worker may be filling the original: read it under its lock, as the session does (#299)
+            oneapi::tbb::spin_rw_mutex::scoped_lock lock(original.entryMutex_, false);
+            replacement = original.clone();
+        }
         replacement->orderId_ = IdT();
         assignClOrderId(replacement);
         replacement->origClOrderId_ = original.clOrderId_;
