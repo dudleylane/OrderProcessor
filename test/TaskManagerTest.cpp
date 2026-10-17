@@ -300,6 +300,87 @@ private:
     bool released_ = false;
 };
 
+/// Hands each pop to a real processor, which it owns, since TaskManager deletes this one. Once armed, its next empty pop
+/// says so and waits to be released before returning: a task between finding the queue empty and handing its processor
+/// back (#298).
+class HoldEmptyPopProcessor final : public InQueueProcessor
+{
+public:
+    explicit HoldEmptyPopProcessor(std::unique_ptr<Processor> processor) : processor_(std::move(processor)) {}
+
+    bool process() override
+    {
+        const bool popped = processor_->process();
+        if (!popped && armed_.exchange(false))
+        {
+            std::unique_lock<std::mutex> lock(holdLock_);
+            holding_ = true;
+            changed_.notify_all();
+            changed_.wait(lock,
+                          [this]
+                          {
+                              return released_;
+                          });
+        }
+        return popped;
+    }
+    void onEvent(const std::string &source, const OrderEvent &evnt) override
+    {
+        processor_->onEvent(source, evnt);
+    }
+    void onEvent(const std::string &source, const OrderCancelEvent &evnt) override
+    {
+        processor_->onEvent(source, evnt);
+    }
+    void onEvent(const std::string &source, const OrderReplaceEvent &evnt) override
+    {
+        processor_->onEvent(source, evnt);
+    }
+    void onEvent(const std::string &source, const OrderChangeStateEvent &evnt) override
+    {
+        processor_->onEvent(source, evnt);
+    }
+    void onEvent(const std::string &source, const ProcessEvent &evnt) override
+    {
+        processor_->onEvent(source, evnt);
+    }
+    void onEvent(const std::string &source, const TimerEvent &evnt) override
+    {
+        processor_->onEvent(source, evnt);
+    }
+
+    void arm()
+    {
+        armed_ = true;
+    }
+
+    /// Whether an empty pop was held before the timeout
+    bool waitUntilHolding(std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(holdLock_);
+        return changed_.wait_for(lock, timeout,
+                                 [this]
+                                 {
+                                     return holding_;
+                                 });
+    }
+
+    void release()
+    {
+        std::lock_guard<std::mutex> lock(holdLock_);
+        released_ = true;
+        changed_.notify_all();
+    }
+
+private:
+    std::unique_ptr<Processor> processor_;
+    std::atomic<bool> armed_{ false };
+    std::mutex holdLock_;
+    std::condition_variable changed_;
+    bool holding_ = false;
+    bool released_ = false;
+};
+
 // =============================================================================
 // Task Manager Test Fixture
 // =============================================================================
@@ -601,6 +682,47 @@ TEST_F(TaskManagerTest, NotFinishedWhileAFinishedTransactionWaitsToBeRemoved)
     EXPECT_TRUE(waitUntilIdle(*manager));
     EXPECT_EQ(0u, holding.pendingTransactions());
     EXPECT_EQ(1, outQueues_->execReportCount_.load());
+}
+
+TEST_F(TaskManagerTest, EventPushedWhileATaskFindsTheQueueEmptyIsProcessed)
+{
+    // A task whose pop finds the queue empty hands its processor back, and a push meanwhile finds no processor free: the
+    // task must look at the queue again, or nothing starts the event until the next push (#298). With one event
+    // processor, hold its task in that window and push then.
+    TaskManagerParams params;
+    params.transactMgr_ = transMgr_.get();
+    params.inQueues_ = inQueues_.get();
+    auto evntProc = std::make_unique<Processor>();
+    evntProc->init(*procParams_);
+    auto *holder = new HoldEmptyPopProcessor(std::move(evntProc));
+    params.evntProcessors_.push_back(holder);
+    auto trProc = std::make_unique<Processor>();
+    trProc->init(*procParams_);
+    params.transactProcessors_.push_back(trProc.release());
+    auto manager = std::make_unique<TaskManager>(params);
+
+    // The first order's task pops it, then chains a task that finds the queue empty: that one is held
+    holder->arm();
+    pushOrder(BUY_SIDE, 10.0, 100, "first");
+    EXPECT_TRUE(holder->waitUntilHolding(std::chrono::seconds(10)));
+    const RawDataEntry secondId = pushOrder(BUY_SIDE, 10.0, 100, "second");
+    holder->release();
+
+    EXPECT_TRUE(waitUntilIdle(*manager, std::chrono::seconds(5))) << "the second order is still queued";
+    EXPECT_EQ(0u, inQueues_->size());
+    EXPECT_NE(nullptr, OrderStorage::instance()->locateByClOrderId(secondId));
+
+    // Two events, though more tasks ran: the empty pops count as tasks, not as events. A task counts itself finished
+    // after handing its processor back, so the last may still be on its way.
+    EXPECT_EQ(2, manager->eventsProcessed());
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while ((manager->eventsFinished() != manager->eventsCreated()) && (std::chrono::steady_clock::now() < deadline))
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(manager->eventsCreated(), manager->eventsFinished())
+        << "a task that found the queue empty never finished";
+    EXPECT_LT(2, manager->eventsCreated());
 }
 
 // =============================================================================
