@@ -42,7 +42,7 @@ jobs:
         # FIX ON builds QuickFIX at the server image's ref (#178).
         fix: ['OFF', 'ON']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build QuickFIX at the image's ref (cached)
         # FIX ON builds against the QuickFIX the server image ships: QUICKFIX_REF in
