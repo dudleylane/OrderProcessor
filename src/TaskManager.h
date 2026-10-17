@@ -85,14 +85,17 @@ public:
     void taskFinishedTr();
 
     // Read-only accessors for monitoring (relaxed ordering — statistics only)
+    /// Event tasks started
     int eventsCreated() const noexcept
     {
         return created_.load(std::memory_order_relaxed);
     }
+    /// Events taken off the incoming queues, those that threw included: a task that found them empty took none (#298)
     int eventsProcessed() const noexcept
     {
         return processed_.load(std::memory_order_relaxed);
     }
+    /// Event tasks finished: each task started, once its last statement has run (#298)
     int eventsFinished() const noexcept
     {
         return finished_.load(std::memory_order_relaxed);

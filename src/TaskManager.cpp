@@ -116,7 +116,7 @@ TaskManager::~TaskManager(void) noexcept
     char buf[64];
     buf[0] = 0;
     aux::toStr(buf, processed_.load(std::memory_order_relaxed));
-    aux::ExchLogger::instance()->debug(string("Tasks processed: ") + buf);
+    aux::ExchLogger::instance()->debug(string("Events processed: ") + buf);
     buf[0] = 0;
     aux::toStr(buf, finished_.load(std::memory_order_relaxed));
     aux::ExchLogger::instance()->debug(string("Tasks finished: ") + buf);
@@ -321,14 +321,22 @@ void TaskManager::onNewEvent()
             {
                 taskFailed("event", "unknown exception");
             }
-            taskProcessed();
-
-            finishEvent(proc);
+            // An event taken counts, one that threw included; a pop that found the queue empty took none. The
+            // dashboard shows this count per second as events per second (#298).
             if (rez)
             {
-                onNewEvent();
-                taskFinished();
+                taskProcessed();
             }
+
+            finishEvent(proc);
+            // Look again after an empty pop too: a push meanwhile found no processor free and started nothing (#298).
+            // The push made the queue non-empty before taking eventLock_, which finishEvent() has taken since, so this
+            // sees its event. An empty queue still ends the chain.
+            if (rez || (0 != inQueues_->size()))
+            {
+                onNewEvent();
+            }
+            taskFinished();
         });
 }
 
