@@ -158,11 +158,15 @@ bool TaskManager::waitUntilTransactionsFinished(int waitIntervalSeconds) const
     {
         bool finished = false;
         {
+            // An idle pool is not enough. A task hands its processor back before it removes its transaction, whose
+            // removal releases the transactions ordered after it, so for that moment the pool is idle with work left
+            // (#263); the transaction is still in the manager until then. The manager's lock is taken under these two,
+            // as onReadyToExecute() takes it under transactLock_, and the manager calls no observer while holding it.
             oneapi::tbb::mutex::scoped_lock lock(transactLock_);
             oneapi::tbb::mutex::scoped_lock lock2(eventLock_);
             finished = (lastAvailableTransactProcessor_.load() == totalAvailableTransactProcessor_.load()) &&
                        (lastAvailableEvntProcessor_.load() == totalAvailableEvntProcessor_.load()) &&
-                       (0 == inQueues_->size());
+                       (0 == inQueues_->size()) && (0 == transactMgr_->pendingTransactions());
         }
         if (finished && !onceSucceed && (0 != waitIntervalSeconds))
         {

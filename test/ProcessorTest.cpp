@@ -174,6 +174,11 @@ public:
         return nullptr;
     }
 
+    size_t pendingTransactions() const override
+    {
+        return kept_.size();
+    }
+
     int transactionCount() const
     {
         return transactionCount_;

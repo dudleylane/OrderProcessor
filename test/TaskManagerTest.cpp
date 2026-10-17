@@ -16,6 +16,7 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -242,6 +243,63 @@ private:
     std::atomic<bool> thrown_{ false };
 };
 
+/// Holds the first removal it is asked for until released. TaskManager hands a finished transaction's processor back
+/// before it removes the transaction, so while the removal is held every processor can be idle with the transaction
+/// still here (#263).
+class HoldingTransactionMgr final : public TransactionMgr
+{
+public:
+    explicit HoldingTransactionMgr(IdTValueGenerator *generator)
+    {
+        init(TransactionMgrParams(generator));
+    }
+    ~HoldingTransactionMgr() override
+    {
+        stop();
+    }
+
+    bool removeTransaction(const TransactionId &id, Transaction *t) override
+    {
+        if (!held_.exchange(true))
+        {
+            std::unique_lock<std::mutex> lock(holdLock_);
+            holding_ = true;
+            changed_.notify_all();
+            changed_.wait(lock,
+                          [this]
+                          {
+                              return released_;
+                          });
+        }
+        return TransactionMgr::removeTransaction(id, t);
+    }
+
+    /// Whether a removal was held before the timeout
+    bool waitUntilHolding(std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(holdLock_);
+        return changed_.wait_for(lock, timeout,
+                                 [this]
+                                 {
+                                     return holding_;
+                                 });
+    }
+
+    void release()
+    {
+        std::lock_guard<std::mutex> lock(holdLock_);
+        released_ = true;
+        changed_.notify_all();
+    }
+
+private:
+    std::atomic<bool> held_{ false };
+    std::mutex holdLock_;
+    std::condition_variable changed_;
+    bool holding_ = false;
+    bool released_ = false;
+};
+
 // =============================================================================
 // Task Manager Test Fixture
 // =============================================================================
@@ -333,25 +391,30 @@ protected:
         return replacement;
     }
 
-    /// Polls until the pool is idle, where waitUntilTransactionsFinished(N) takes at least two seconds: it sleeps a
-    /// second between its two checks. One passing check is not enough, because TaskManager hands a finished
-    /// transaction's processor back before it removes the transaction from TransactionMgr, which may then release its
-    /// children: for that instant the pool looks idle with work left. So the check must pass ten times in a row, 10 ms
-    /// apart, which also covers a thread descheduled inside that window for up to about 90 ms.
+    /// Polls until the work is done, where waitUntilTransactionsFinished(N) takes at least two seconds: it sleeps a
+    /// second between its two checks. One check is enough since #263, when it began to count the transactions still in
+    /// the manager: an idle pool alone could be a finished transaction's task between handing its processor back and
+    /// removing the transaction, with the transactions that removal releases still to run.
     bool waitUntilIdle(TaskManager &manager, std::chrono::milliseconds timeout = std::chrono::seconds(10))
     {
         const auto deadline = std::chrono::steady_clock::now() + timeout;
-        int idleChecks = 0;
         while (std::chrono::steady_clock::now() < deadline)
         {
-            idleChecks = manager.waitUntilTransactionsFinished(0) ? idleChecks + 1 : 0;
-            if (10 == idleChecks)
+            if (manager.waitUntilTransactionsFinished(0))
             {
                 return true;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         return false;
+    }
+
+    /// Every processor back in its pool and nothing queued, which is all waitUntilTransactionsFinished checked before
+    /// #263
+    bool poolIdle(const TaskManager &manager) const
+    {
+        return (manager.totalEventProcessors() == manager.availableEventProcessors()) &&
+               (manager.totalTransactProcessors() == manager.availableTransactProcessors()) && (0 == inQueues_->size());
     }
 
 protected:
@@ -500,6 +563,44 @@ TEST_F(TaskManagerTest, WaitUntilTransactionsFinishedWithEmptyQueue)
 
     // With no transactions, should return immediately
     EXPECT_TRUE(manager->waitUntilTransactionsFinished(1));
+}
+
+TEST_F(TaskManagerTest, NotFinishedWhileAFinishedTransactionWaitsToBeRemoved)
+{
+    // A transaction's task hands its processor back before it removes the transaction from the manager, and the
+    // removal releases the transactions ordered after it. In between, every processor can be idle and the queue empty
+    // with work left, and waitUntilTransactionsFinished said finished there (#263). Hold a removal in that window.
+    HoldingTransactionMgr holding(IdTGenerator::instance());
+    ProcessorParams procParams(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
+                               outQueues_.get(), inQueues_.get(), &holding);
+    TaskManagerParams params;
+    params.transactMgr_ = &holding;
+    params.inQueues_ = inQueues_.get();
+    auto evntProc = std::make_unique<Processor>();
+    evntProc->init(procParams);
+    params.evntProcessors_.push_back(evntProc.release());
+    auto trProc = std::make_unique<Processor>();
+    trProc->init(procParams);
+    params.transactProcessors_.push_back(trProc.release());
+    auto manager = std::make_unique<TaskManager>(params);
+
+    pushOrder(BUY_SIDE, 10.0, 100, "test");
+    EXPECT_TRUE(holding.waitUntilHolding(std::chrono::seconds(10)));
+    // The event's task gives its processor back once it has enqueued the transaction, which may be held by then
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!poolIdle(*manager) && (std::chrono::steady_clock::now() < deadline))
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_TRUE(poolIdle(*manager));
+    EXPECT_EQ(1u, holding.pendingTransactions());
+    EXPECT_FALSE(manager->waitUntilTransactionsFinished(0)) << "the pool is idle, but a transaction is still pending";
+
+    // No assertion above returns early: the held task must be released, or ~TaskManager would wait for it forever
+    holding.release();
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    EXPECT_EQ(0u, holding.pendingTransactions());
+    EXPECT_EQ(1, outQueues_->execReportCount_.load());
 }
 
 // =============================================================================
