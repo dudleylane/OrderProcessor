@@ -63,6 +63,7 @@ public:
     MOCK_METHOD(bool, getRelatedTransactions, (const COP::ACID::TransactionId &id, COP::ACID::TransactionIdsT *related),
                 (const, override));
     MOCK_METHOD(COP::ACID::TransactionIterator *, iterator, (), (override));
+    MOCK_METHOD(size_t, pendingTransactions, (), (const, override));
 };
 
 /**
