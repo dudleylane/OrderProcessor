@@ -55,9 +55,10 @@ public:
     static void init(int workerAmount = 0);
     static void destroy();
 
-    /// method waits until all incoming events and transactions finished processing
+    /// method waits until all incoming events and transactions finished processing: every processor back in its pool,
+    /// the incoming queues empty, and no transaction left in the transaction manager (#263)
     /// returns false, if events and transactions not finished during waitIntervalSeconds
-    /// waitIntervalSeconds = -1, means infinite
+    /// waitIntervalSeconds = -1, means infinite; 0 checks once and returns at once
     bool waitUntilTransactionsFinished(int waitIntervalSeconds) const;
 
     bool finishTransaction(const ACID::TransactionId &id, ACID::Transaction *tr, ACID::TransactionProcessor *proc);
