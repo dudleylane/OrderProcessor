@@ -11,6 +11,10 @@
 #   - A push skips the other jobs (run=false) only when a pull request merged into this branch has a run of this
 #     workflow in which every job passed, and that run recorded this push's tree. The log and a notice name that run:
 #     it is the push's CI record.
+#   - GitHub links a rebase merge's commit to its pull request a few seconds after the merge, and a push's first job
+#     can ask before then (#331). So a commit that lists no pull request merged into this branch is asked about again,
+#     five asks in all, six seconds apart, before the push runs everything. TESTED_TREE_RETRY_DELAY sets the seconds
+#     between asks (the test sets 0).
 #   - Anything else runs them (run=true): any other event, no such pull request, a run that didn't pass, a different
 #     tree, a missing record, a failed API call.
 #
@@ -51,11 +55,18 @@ GH_CONFIG_DIR=$(mktemp -d) || decide true "can't make a configuration directory 
 export GH_CONFIG_DIR GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1
 trap 'rm -rf -- "${GH_CONFIG_DIR:?}"' EXIT
 
-pulls=$(gh api "repos/$repo/commits/$sha/pulls") || decide true "can't list the pull requests that have $sha"
-merged=$(jq -r --arg branch "$branch" \
-    '.[] | select(.merged_at != null and .base.ref == $branch) | "\(.number) \(.head.sha)"' <<< "$pulls") \
-    || decide true "can't read the pull requests that have $sha"
-[[ -n "$merged" ]] || decide true "no pull request merged into $branch has $sha"
+asks=5; delay=${TESTED_TREE_RETRY_DELAY:-6}
+[[ "$delay" =~ ^[0-9]+$ ]] || delay=6
+for (( ask = 1; ; ask++ )); do
+    pulls=$(gh api "repos/$repo/commits/$sha/pulls") || decide true "can't list the pull requests that have $sha"
+    merged=$(jq -r --arg branch "$branch" \
+        '.[] | select(.merged_at != null and .base.ref == $branch) | "\(.number) \(.head.sha)"' <<< "$pulls") \
+        || decide true "can't read the pull requests that have $sha"
+    [[ -z "$merged" ]] || break
+    (( ask < asks )) || decide true "no pull request merged into $branch has $sha, asked $asks times, $delay s apart"
+    echo "No pull request merged into $branch has $sha yet (ask $ask of $asks): asking again in $delay s"
+    sleep "$delay"
+done
 
 while read -r number head; do
     query="head_sha=$head&event=pull_request&status=success&per_page=100"
