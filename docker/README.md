@@ -191,7 +191,7 @@ docker compose run --rm --no-deps --user 0 --entrypoint chown oms-server -R oms:
 
 The build compiles with `-DCMAKE_BUILD_TYPE=Release` (LTO, -O3) and disables tests and benchmarks to minimize build time. It targets x86-64-v3 (`-DMARCH=x86-64-v3`), not the build machine's CPU, so the image runs on any CPU at that level, which has AVX2, BMI1/2, FMA and MOVBE: most Intel Core CPUs since Haswell (2013) and AMD CPUs since Excavator (2015), though not every Pentium or Celeron. CentOS Stream 10, its base, is built for the same level, so it can't run on less anyway. Builds outside the image default to `-march=native` (#170).
 
-CI builds and runs this image on every push (`.github/workflows/docker.yml`), with `scripts/check-server-image.sh`. The script seeds a volume and starts the server. It then checks that the server listens on every port the image exposes, that it answers a WebSocket upgrade on `/ws`, and that SIGTERM stops it cleanly. Run the script before changing this Dockerfile, the build or a dependency; it takes a few minutes.
+CI builds and runs this image for every pull request (`.github/workflows/docker.yml`), with `scripts/check-server-image.sh`, and on each push to `master` or `feature/fx-swap-support` whose tree the merged pull request's run hasn't already passed (#314). The script seeds a volume and starts the server. It then checks that the server listens on every port the image exposes, that it answers a WebSocket upgrade on `/ws`, and that SIGTERM stops it cleanly. Run the script before changing this Dockerfile, the build or a dependency; it takes a few minutes.
 
 ### oms-frontend (Multi-stage)
 
@@ -202,7 +202,7 @@ CI builds and runs this image on every push (`.github/workflows/docker.yml`), wi
 
 The frontend connects to `/ws` on whatever host and port served the page, and nginx passes that on to the server. So it works from another machine and behind a remapped port, such as `"3001:3000"`.
 
-CI builds and runs this image on every push as well, with `scripts/check-frontend-image.sh` (#139). The build runs `npm ci` and `npm run build`, so a TypeScript error fails it: nothing else in CI compiles the frontend. The script then checks that nginx runs as `nginx`, starts before anything called `oms-server` exists, serves the app and its script, passes its health check, and passes `/ws` with its WebSocket headers to a stand-in for the server. Run it before changing the frontend, this Dockerfile or `nginx.conf`; it takes under a minute.
+CI builds and runs this image as well, with `scripts/check-frontend-image.sh` (#139). The build runs `npm ci` and `npm run build`, so a TypeScript error fails it: nothing else in CI compiles the frontend. The script then checks that nginx runs as `nginx`, starts before anything called `oms-server` exists, serves the app and its script, passes its health check, and passes `/ws` with its WebSocket headers to a stand-in for the server. Run it before changing the frontend, this Dockerfile or `nginx.conf`; it takes under a minute.
 
 ## Database Schema
 
