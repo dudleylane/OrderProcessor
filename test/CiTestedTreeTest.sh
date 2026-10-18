@@ -22,7 +22,8 @@ repo=dudleylane/OrderProcessor
 head=89abcdef0123456789abcdef0123456789abcdef
 
 # A gh that answers `gh api <endpoint>` from $FAKE_GH_DIR, and fails as GitHub's 404 does for an endpoint it has no
-# answer for. It notes each call, and whether gh was given a token and a configuration directory of its own.
+# answer for. It notes each call, and whether gh was given a token and a configuration directory of its own. An answer
+# can change between calls: <answer>.<n>, where there is one, answers the endpoint's nth call.
 mkdir "$work/bin"
 cat > "$work/bin/gh" << 'EOF'
 #!/usr/bin/env bash
@@ -33,6 +34,8 @@ else
 fi
 [[ $# -eq 2 && "$1" == api ]] || { echo "gh: unexpected arguments: $*" >&2; exit 1; }
 answer="$FAKE_GH_DIR/$(printf '%s' "$2" | tr -c 'A-Za-z0-9._-' '_')"
+n=$(grep -cxF "call $*" "$FAKE_GH_LOG")
+[[ -f "$answer.$n" ]] && answer="$answer.$n"
 [[ -f "$answer" ]] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
 cat "$answer"
 EOF
@@ -66,7 +69,8 @@ expect() { # true|false description event branch [token]
     rm -f "$work/output"
     (cd "$work/repo" && env -i PATH="$work/bin:/usr/bin:/bin" HOME="$work" GITHUB_OUTPUT="$work/output" \
         GITHUB_EVENT_NAME="$3" GITHUB_SHA="$sha" GITHUB_REF_NAME="$4" GITHUB_REPOSITORY="$repo" \
-        GH_TOKEN="${5-token}" FAKE_GH_DIR="$answers" FAKE_GH_LOG="$work/gh.log" bash "$SCRIPT" build-test.yml) \
+        GH_TOKEN="${5-token}" TESTED_TREE_RETRY_DELAY=0 FAKE_GH_DIR="$answers" FAKE_GH_LOG="$work/gh.log" \
+        bash "$SCRIPT" build-test.yml) \
         > "$work/stdout" 2>&1
     local status=$? got
     got=$(cat "$work/output" 2>/dev/null)
@@ -87,6 +91,12 @@ expect() { # true|false description event branch [token]
     fi
 }
 calls() { wc -l < "$work/gh.log"; }
+expect_asked() { # n: how many times the script asked for the commit's pull requests
+    local n; n=$(grep -c "commits/$sha/pulls" "$work/gh.log")
+    [[ $n -eq $1 ]] && return
+    echo "FAIL: it asked for the commit's pull requests $n times, not $1"
+    failures=$((failures + 1))
+}
 
 new_case
 expect true "a pull request's run records its tree and runs" pull_request master
@@ -129,8 +139,10 @@ expect true "the pull request is still open" push master
 new_case
 answer "repos/$repo/commits/$sha/pulls" '[]'
 expect true "a push no pull request has" push master
+expect_asked 5
 new_case
 expect true "the pull requests can't be listed" push master
+expect_asked 1
 new_case
 merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$tree"
 rm -f "$answers/repos_${repo//\//_}_check-runs_1011_annotations_per_page_100"
@@ -139,6 +151,15 @@ new_case
 merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$tree"
 expect true "no token: gh isn't asked" push master ""
 [[ $(calls) -eq 0 ]] || { echo "FAIL: gh ran with no token"; failures=$((failures + 1)); }
+
+# GitHub links a merge's commit to its pull request seconds after the merge (#331): until then the commit lists none
+new_case
+merged master '"2026-10-18T22:17:51Z"' pull_request success success "Tested tree" "$tree"
+pulls_answer="$answers/repos_${repo//\//_}_commits_${sha}_pulls"
+echo '[]' > "$pulls_answer.1"
+echo '[]' > "$pulls_answer.2"
+expect false "the commit is linked to its pull request only at the third ask" push master
+expect_asked 3
 
 # Two pull requests have the commit: the first one's run tested another tree, the second one's this tree
 new_case
