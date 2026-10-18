@@ -30,7 +30,7 @@ jobs:
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Record the tree, and decide whether the other jobs run
         id: decide
@@ -113,7 +113,7 @@ jobs:
       CC: /opt/rh/gcc-toolset-15/root/usr/bin/gcc
       CXX: /opt/rh/gcc-toolset-15/root/usr/bin/g++
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build TSan-instrumented oneTBB (cached)
         # Same oneTBB version as the system tbb-devel, built with

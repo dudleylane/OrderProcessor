@@ -30,7 +30,7 @@ jobs:
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Record the tree, and decide whether the other jobs run
         id: decide
@@ -65,7 +65,7 @@ jobs:
     # either branch to 2026-10-14, took 2.3 minutes at most.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Verify .clang-format conformance
         shell: bash
@@ -98,7 +98,7 @@ jobs:
     # takes seconds once the images are in the store.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Lint the shell scripts, the workflows and the Dockerfiles
         shell: bash
