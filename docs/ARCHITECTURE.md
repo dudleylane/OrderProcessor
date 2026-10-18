@@ -434,7 +434,8 @@ COP (Concurrent Order Processor)
 |-----------|-----------|-------------|
 | `OrderMatcherTest.cpp` | `OrderMatcherTest.*` | Order matching unit tests |
 | `IntegrationTest.cpp` | `IntegrationTest.*` | Order matching in full flow |
-| `OrderMatchingBench.cpp` | `BM_OrderMatching*` | Matching performance |
+| `ProcessorBench.cpp` | `BM_ProcessNewOrderWithMatch`, `BM_TaskManagerTrades` | Matching through a `Processor`, and through the worker pool |
+| `OrderMatchingBench.cpp` | `BM_OrderBook*` | The book the matcher searches: add, remove, find, top of book |
 
 ---
 
@@ -1484,7 +1485,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | File | Purpose |
 |------|---------|
 | `EventProcessingBench.cpp` | Event queue throughput measurement |
-| `OrderMatchingBench.cpp` | Order matching performance |
+| `OrderMatchingBench.cpp` | The order book: add, remove, find and top of book at the book's depth (#293); no matching |
 | `StateMachineBench.cpp` | State transition performance |
 | `TransactionScopePoolBench.cpp` | Lock-free object pool allocation |
 | `NumaAllocatorBench.cpp` | NUMA-aware allocation performance |
