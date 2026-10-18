@@ -1511,7 +1511,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Queues** | `IncomingQueuesTest.cpp`, `OutgoingQueuesTest.cpp`, `QueuesManagerTest.cpp` | `EventProcessingBench.cpp` |
 | **Processor** | `ProcessorTest.cpp`, `DeferedEventsTest.cpp`, `IntegrationTest.cpp` | `ProcessorBench.cpp` |
 | **Transactions** | `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `NLinkTreeTest.cpp` | - |
-| **Concurrency** | `TaskManagerTest.cpp` | `ProcessorBench.cpp` (`BM_TaskManagerThroughput`) |
+| **Concurrency** | `TaskManagerTest.cpp` | `ProcessorBench.cpp` (`BM_TaskManagerThroughput`, `BM_TaskManagerTrades`) |
 | **Storage** | `LMDBStorageTest.cpp`, `OrderStorageTest.cpp`, `WideDataStorageTest.cpp`; `FileStorageTest.cpp` for the legacy file storage | - |
 | **Low-Latency** | `CacheAlignedAtomicTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `NumaAllocatorTest.cpp`, `TransactionScopePoolTest.cpp` | `TransactionScopePoolBench.cpp`, `NumaAllocatorBench.cpp`, `OrderParamsLayoutBench.cpp` |
 | **Server (`app/`)** | `ClientMessageParserTest.cpp`, `JsonSerializerTest.cpp`, `WsSessionTest.cpp`, `WsServerLimitsTest.cpp`, `WsAuthTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `SeedDataArgsTest.cpp`; the ctest scripts `ServerThatCannotStartExits` and `SeedDataIfEmptySeedsOnlyADirectoryWithoutInstruments`, and `SeedDataRunsCleanly`; with `BUILD_FUZZ=ON`, `test/fuzz/` | `SessionManagerBench.cpp` |
@@ -1587,7 +1587,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | `TransactionScopePoolBench.cpp` | Lock-free object pool allocation |
 | `NumaAllocatorBench.cpp` | NUMA-aware allocation performance |
 | `OrderParamsLayoutBench.cpp` | Field layout optimization |
-| `ProcessorBench.cpp` | The real path: new order, match and cancel through a `Processor`, and `TaskManager` throughput (#25) |
+| `ProcessorBench.cpp` | The real path: new order, match and cancel through a `Processor`, and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290) |
 | `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159) |
 | `FixGatewayBench.cpp` | The FIX gateway (`BUILD_FIX=ON`): enum conversion, NewOrderSingle translation, ExecutionReport construction, the fan-out, swap and single-leg matching, and a FIX order's fill end to end |
 
