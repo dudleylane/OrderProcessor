@@ -156,6 +156,13 @@ if(BUILD_TESTS)
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/JobStartedHookTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/runner/job-started.sh)
     set_tests_properties(JobStartedHookDecides PROPERTIES SKIP_RETURN_CODE 77)
+
+    # Each workflow's tested-tree job against canned API answers (#314): when the push of a merge may skip the jobs
+    # its pull request's run passed. It needs jq and git, as the script does: without them the test is skipped.
+    add_test(NAME CiTestedTreeDecides
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/CiTestedTreeTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/ci-tested-tree.sh)
+    set_tests_properties(CiTestedTreeDecides PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 if(BUILD_BENCHMARKS)
