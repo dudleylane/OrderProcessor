@@ -1,17 +1,19 @@
 name: Compose Stack
 
 # A run takes about three minutes of the only runner, most of it building both images, which docker.yml's jobs build
-# on every push anyway. So this runs when what only it covers changes, and weekly, for new base images (#140).
+# for every pull request anyway. So this runs when what only it covers changes, and weekly, for new base images (#140).
 on:
+  # Pushes to the two long-lived branches, and pull requests into them: a pull request's branch runs once, for the
+  # pull request, and a branch with none runs nothing (#314)
   push:
-    branches: ['**']
+    branches: [master, feature/fx-swap-support]
     paths:
       - 'docker/**'
       - '.dockerignore'
       - 'scripts/check-compose-stack.sh'
       - '.github/workflows/compose.yml'
   pull_request:
-    branches: [master]
+    branches: [master, feature/fx-swap-support]
     paths:
       - 'docker/**'
       - '.dockerignore'
@@ -23,6 +25,37 @@ on:
   workflow_dispatch:
 
 jobs:
+  tested-tree:
+    name: Tested tree
+    # Records the tree this run tests, and decides whether the jobs below run: the push of a merge skips them when the
+    # merged pull request's run of this workflow passed on the same tree (#314). scripts/ci-tested-tree.sh says how it
+    # decides; whatever it can't confirm runs them. Skipped for a fork's pull request and for Dependabot, as the jobs
+    # below are (#143, #168).
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      && github.actor != 'dependabot[bot]'
+    runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
+    # A few API calls: a hung one would hold the only runner until it is killed (#169)
+    timeout-minutes: 5
+    # Read access to what it compares, and nothing else
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record the tree, and decide whether the other jobs run
+        id: decide
+        shell: bash
+        env:
+          # The job's own token: the runner runs as the maintainer, whose gh login this must never use
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci-tested-tree.sh compose.yml
+
   compose-stack:
     name: Compose stack up + order
     # Brings up docker/docker-compose.yml's stack, Postgres, the server and the
@@ -36,8 +69,12 @@ jobs:
     # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
     # same-repository pull requests run as before.
     # Dependabot's jobs are refused by the same hook, and skipped here (#168): its pull requests are checked locally.
+    # Skipped on the push of a merge when the merged pull request's run of this workflow passed on the same tree: only
+    # a tested-tree job that succeeded and found that run skips it (#314).
+    needs: tested-tree
     if: >-
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      !cancelled() && (needs.tested-tree.result != 'success' || needs.tested-tree.outputs.run != 'false')
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
     # A hung build or start would hold the only runner until it is killed (#59).
