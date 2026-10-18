@@ -11,6 +11,7 @@
 #include <benchmark/benchmark.h>
 #include <oneapi/tbb/info.h>
 
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -130,7 +131,7 @@ OrderEntry *makeOrder(const WideData &data, u64 sequence, const Side &side, Pric
 
 /// Runs each transaction on the thread that built it, as soon as it is enqueued, so the per-order
 /// benchmarks measure the processing path itself - state machine, operations, book, storage -
-/// rather than TaskManager's scheduling, which BM_TaskManagerThroughput covers.
+/// rather than TaskManager's scheduling, which BM_TaskManagerThroughput and BM_TaskManagerTrades cover.
 class InlineTransactionManager final : public TransactionManager
 {
 public:
@@ -272,6 +273,31 @@ private:
     std::unique_ptr<OutgoingQueues> outQueues_;
     std::unique_ptr<InlineTransactionManager> transactMgr_;
     std::unique_ptr<Processor> processor_;
+};
+
+/// Counts the trade reports the engine sends and keeps nothing, as production's queues keep nothing, so that a pool
+/// benchmark can tell when its batch has traded. Transaction workers push at once.
+class TradeCountingOutQueues final : public OutQueues
+{
+public:
+    void push(const ExecReportEvent &evnt, const std::string &) override
+    {
+        if (TRADE_EXECTYPE == evnt.exec_->type_)
+        {
+            tradeReports_.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    void push(const CancelRejectEvent &, const std::string &) override {}
+    void push(const BusinessRejectEvent &, const std::string &) override {}
+
+    /// Two a trade: one to each side
+    u64 tradeReports() const
+    {
+        return tradeReports_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<u64> tradeReports_{ 0 };
 };
 
 } // namespace
@@ -472,3 +498,134 @@ static void BM_TaskManagerThroughput(benchmark::State &state)
     destroyEngineState();
 }
 BENCHMARK(BM_TaskManagerThroughput)->Arg(2)->Arg(4)->Arg(8)->UseRealTime()->Iterations(20);
+
+/// The worker pool while orders trade (#290). BM_TaskManagerThroughput's orders all buy, so it times no match: no
+/// deferred match or execution event, no fill, and no transaction that waits for another's. Here each batch alternates
+/// sells and buys at one price and quantity, so every order trades in full, with whichever order of the other side
+/// reached the book first, and the batch makes one trade a pair and leaves the book empty.
+///
+/// The first argument is the number of instruments the pairs are dealt over, in turn. In one, every booking, match
+/// and fill relates to the same instrument; in several, the pool can run each instrument's transactions beside the
+/// others'. The second is the number of event and transaction processors, as BM_TaskManagerThroughput's argument is,
+/// and the pool is wired and polled as there. A batch is done when its trades have been reported and the pool has
+/// finished. Reports orders per second, and trades per second as "trades".
+static void BM_TaskManagerTrades(benchmark::State &state)
+{
+    if (oneapi::tbb::info::default_concurrency() < 2)
+    {
+        state.SkipWithError("needs at least 2 CPUs, so TaskManager has a worker; pin to a range such as 2-5");
+        return;
+    }
+
+    const size_t instrumentCount = static_cast<size_t>(state.range(0));
+    const int processors = static_cast<int>(state.range(1));
+    const u64 batch = 500; // 250 pairs, a trade each
+
+    WideData data = createEngineState();
+    {
+        // An instrument's orders differ from the first instrument's in their instrument alone
+        std::vector<WideData> books(instrumentCount, data);
+        OrderBookImpl::InstrumentsT instruments;
+        instruments.insert(data.instrument_);
+        for (size_t k = 1; k < instrumentCount; ++k)
+        {
+            auto *instrument = new InstrumentEntry();
+            instrument->symbol_ = "BENCH" + std::to_string(k);
+            instrument->securityId_ = "BENCHSEC" + std::to_string(k);
+            instrument->securityIdSource_ = "ISIN";
+            books[k].instrument_ = WideDataStorage::instance()->add(instrument);
+            instruments.insert(books[k].instrument_);
+        }
+        auto orderBook = std::make_unique<OrderBookImpl>();
+        orderBook->init(instruments);
+
+        auto inQueues = std::make_unique<IncomingQueues>();
+        auto outQueues = std::make_unique<TradeCountingOutQueues>();
+
+        TransactionMgrParams transParams(IdTGenerator::instance());
+        auto transactMgr = std::make_unique<TransactionMgr>();
+        transactMgr->init(transParams);
+
+        ProcessorParams procParams(IdTGenerator::instance(), OrderStorage::instance(), orderBook.get(), inQueues.get(),
+                                   outQueues.get(), inQueues.get(), transactMgr.get());
+
+        TaskManagerParams params;
+        params.transactMgr_ = transactMgr.get();
+        params.inQueues_ = inQueues.get();
+        // TaskManager owns and deletes these, and event and transaction processors must be distinct.
+        for (int i = 0; i < processors; ++i)
+        {
+            auto proc = std::make_unique<Processor>();
+            proc->init(procParams);
+            params.evntProcessors_.push_back(proc.release());
+        }
+        for (int i = 0; i < processors; ++i)
+        {
+            auto proc = std::make_unique<Processor>();
+            proc->init(procParams);
+            params.transactProcessors_.push_back(proc.release());
+        }
+
+        TaskManager::init(processors);
+        {
+            auto taskMgr = std::make_unique<TaskManager>(params);
+
+            u64 sequence = 0;
+            u64 reportsDue = 0; // the trade reports the batches so far make
+            for (auto _ : state)
+            {
+                state.PauseTiming();
+                std::vector<OrderEntry *> orders;
+                orders.reserve(batch);
+                for (u64 i = 0; i < batch; ++i)
+                {
+                    const WideData &book = books[(i / 2) % instrumentCount];
+                    orders.push_back(makeOrder(book, ++sequence, (0 == i % 2) ? SELL_SIDE : BUY_SIDE, 100.0, 100));
+                }
+                reportsDue += batch; // a trade a pair, reported to both its sides
+                state.ResumeTiming();
+
+                for (OrderEntry *order : orders)
+                {
+                    inQueues->push("bench", OrderEvent(order));
+                }
+
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+                while ((outQueues->tradeReports() < reportsDue) || !taskMgr->waitUntilTransactionsFinished(0))
+                {
+                    if (std::chrono::steady_clock::now() > deadline)
+                    {
+                        state.SkipWithError("worker pool did not finish the batch's trades within 60s");
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::microseconds(50));
+                }
+                // As in BM_TaskManagerThroughput: otherwise each remaining iteration waits out its own deadline
+                if (state.skipped())
+                {
+                    break;
+                }
+            }
+            if (!state.skipped() && (outQueues->tradeReports() != reportsDue))
+            {
+                state.SkipWithError(("the batches made " + std::to_string(outQueues->tradeReports()) +
+                                     " trade reports, not " + std::to_string(reportsDue))
+                                        .c_str());
+            }
+            state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * batch));
+            state.counters["trades"] =
+                benchmark::Counter(static_cast<double>(state.iterations() * batch / 2), benchmark::Counter::kIsRate);
+        }
+        inQueues->detach();
+        transactMgr->detach();
+        // As app/main.cpp does once the TaskManager is gone (#37); ~TransactionMgr asserts it.
+        transactMgr->stop();
+        TaskManager::destroy();
+    }
+    destroyEngineState();
+}
+BENCHMARK(BM_TaskManagerTrades)
+    ->ArgNames({ "instruments", "processors" })
+    ->ArgsProduct({ { 1, 8 }, { 2, 4, 8 } })
+    ->UseRealTime()
+    ->Iterations(20);

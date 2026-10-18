@@ -276,9 +276,17 @@ differ; these numbers are a shape, not a specification.
 | `BM_ProcessNewOrderWithMatch` | ~4.9 µs | ~205K orders/sec | the same, for an order that crosses: trade, deferred execution events, book removal |
 | `BM_ProcessCancelOrder` | ~1.6 µs | ~635K orders/sec | cancel of a resting order, completed: decided after the order's earlier transactions, removed from the book, reported |
 | `BM_TaskManagerThroughput/4` | ~1.9 ms per 500 orders | ~265K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
+| `BM_TaskManagerTrades/instruments:8/processors:4` | ~3.6 ms per 500 orders | ~140K orders/sec, ~70K trades/sec | the same pool while every order trades: 250 sells and 250 buys at one price a batch, dealt over 8 instruments |
 
 `BM_TaskManagerThroughput` takes the processor count as its argument: ~205K orders/sec at 2, ~265K at
 4, and little more (~270K) at 8 on a 4-core machine.
+
+`BM_TaskManagerTrades` (#290) sends its orders in pairs, a sell and a buy at one price, so each pair
+trades. It takes the number of instruments the pairs are dealt over, 1 or 8, and the processor count.
+In one instrument every booking, match and fill relates to the same instrument: ~154K, ~148K and ~148K
+orders/sec at 2, 4 and 8 processors, against ~150K, ~140K and ~139K over 8 instruments: neither more
+processors nor more instruments raised it. In the same run `BM_TaskManagerThroughput/4` gave ~212K
+orders/sec, all of them pinned to 4 CPUs.
 
 Two things these numbers deliberately exclude, both real in production:
 
@@ -294,7 +302,8 @@ Two things these numbers deliberately exclude, both real in production:
 
 And one thing they include that production doesn't: the benchmark's `OutgoingQueues` keeps a copy of
 every report until the run ends, where production's queues keep none. That is about 2% of the
-instructions of a new order or a cancel.
+instructions of a new order or a cancel. `BM_TaskManagerTrades` reports into a queue that counts trade
+reports and keeps nothing.
 
 For the queue, order book, state machine, arena, pool, NUMA and field-layout microbenchmarks, run the binary:
 `./build/orderProcessorBench --benchmark_list_tests` shows everything available.
