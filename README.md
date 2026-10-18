@@ -324,6 +324,9 @@ processors (#162). This branch's `BM_ProcessSwapWithMatch` times a swap that cro
 matching, and the deferred events that report and book each leg. No `OrderSaver` is attached, so nothing
 reaches LMDB.
 
+`BM_TaskManagerTrades` runs the same pool while every order trades: sells and buys in pairs at one price,
+dealt over 1 or 8 instruments, into a queue that counts the trade reports and keeps nothing (#290).
+
 ---
 
 ## Architecture
