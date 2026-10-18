@@ -30,7 +30,7 @@ jobs:
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Record the tree, and decide whether the other jobs run
         id: decide
@@ -68,7 +68,7 @@ jobs:
     env:
       CHECK_NAME: orderprocessor-ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Remove what an interrupted run left behind
         # The host has powered off mid-job (#32), and a run that dies never
@@ -116,7 +116,7 @@ jobs:
     env:
       CHECK_NAME: orderprocessor-ci-${{ github.run_id }}-${{ github.run_attempt }}-frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Remove what an interrupted run left behind
         # As in server-image above.

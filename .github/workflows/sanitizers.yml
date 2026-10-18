@@ -30,7 +30,7 @@ jobs:
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Record the tree, and decide whether the other jobs run
         id: decide
@@ -120,7 +120,7 @@ jobs:
       CC: /opt/rh/gcc-toolset-15/root/usr/bin/gcc
       CXX: /opt/rh/gcc-toolset-15/root/usr/bin/g++
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build QuickFIX at the image's ref (cached)
         # FIX ON builds against the QuickFIX the server image ships: QUICKFIX_REF in
