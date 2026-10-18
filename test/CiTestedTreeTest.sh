@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# Each workflow's tested-tree job (#314), against canned API answers in the shapes GitHub's API returns. A push may skip
+# the jobs only when a pull request merged into its branch has a run of the workflow in which every job passed and which
+# recorded the push's tree; anything else, a failed call among them, must run them.
+# usage: CiTestedTreeTest.sh <scripts/ci-tested-tree.sh>
+set -u
+SCRIPT=$(realpath -e -- "$1") || { echo "no script $1"; exit 1; }
+command -v jq > /dev/null || { echo "jq is missing, so the script can't run here: skipped"; exit 77; }
+command -v git > /dev/null || { echo "git is missing: skipped"; exit 77; }
+work=$(mktemp -d)
+trap 'rm -rf -- "${work:?}"' EXIT
+
+# A checkout: the script reads the tree of HEAD
+git init -q "$work/repo"
+echo tree > "$work/repo/file"
+git -C "$work/repo" add file
+git -C "$work/repo" -c user.name=test -c user.email=test@example.com commit -q -m tree
+sha=$(git -C "$work/repo" rev-parse HEAD)
+tree=$(git -C "$work/repo" rev-parse 'HEAD^{tree}')
+other=0123456789abcdef0123456789abcdef01234567
+repo=dudleylane/OrderProcessor
+head=89abcdef0123456789abcdef0123456789abcdef
+
+# A gh that answers `gh api <endpoint>` from $FAKE_GH_DIR, and fails as GitHub's 404 does for an endpoint it has no
+# answer for. It notes each call, and whether gh was given a token and a configuration directory of its own.
+mkdir "$work/bin"
+cat > "$work/bin/gh" << 'EOF'
+#!/usr/bin/env bash
+if [[ -n "${GH_TOKEN:-}" && -d "${GH_CONFIG_DIR:-}" && "$GH_CONFIG_DIR" != "$HOME/.config/gh" ]]; then
+    echo "call $*" >> "$FAKE_GH_LOG"
+else
+    echo "call with the wrong token or configuration: $*" >> "$FAKE_GH_LOG"
+fi
+[[ $# -eq 2 && "$1" == api ]] || { echo "gh: unexpected arguments: $*" >&2; exit 1; }
+answer="$FAKE_GH_DIR/$(printf '%s' "$2" | tr -c 'A-Za-z0-9._-' '_')"
+[[ -f "$answer" ]] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+cat "$answer"
+EOF
+chmod 755 "$work/bin/gh"
+
+answer() { # endpoint json: the fake gh's answer for the endpoint
+    printf '%s\n' "$2" > "$answers/$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')"
+}
+# The answers for a pull request merged into a base, whose run of build-test.yml recorded a tree
+merged() { # base merged_at run_event run_conclusion job_conclusion annotation_title annotation_tree [number head run]
+    local number=${8:-7} pr_head=${9:-$head} run=${10:-101}
+    local query="head_sha=$pr_head&event=pull_request&status=success&per_page=100"
+    answer "repos/$repo/commits/$sha/pulls" "$(jq -n --argjson number "$number" --argjson merged_at "$2" \
+        --arg base "$1" --arg head "$pr_head" \
+        '[{number: $number, state: "closed", merged_at: $merged_at, base: {ref: $base}, head: {sha: $head}}]')"
+    answer "repos/$repo/actions/workflows/build-test.yml/runs?$query" "$(jq -n --argjson id "$run" --arg event "$3" \
+        --arg conclusion "$4" --arg head "$pr_head" --arg url "https://github.com/$repo/actions/runs/$run" \
+        '{total_count: 1, workflow_runs: [{id: $id, event: $event, status: "completed", conclusion: $conclusion,
+          head_sha: $head, path: ".github/workflows/build-test.yml", run_attempt: 1, html_url: $url}]}')"
+    answer "repos/$repo/actions/runs/$run/jobs?per_page=100" "$(jq -n --argjson id "$run" --arg conclusion "$5" \
+        '{total_count: 2, jobs: [{id: ($id * 10 + 1), name: "Tested tree", status: "completed", conclusion: "success"},
+          {id: ($id * 10 + 2), name: "Release build + ctest", status: "completed", conclusion: $conclusion}]}')"
+    answer "repos/$repo/check-runs/${run}1/annotations?per_page=100" "$(jq -n --arg title "$6" --arg tree "$7" \
+        '[{path: ".github", start_line: 1, end_line: 1, annotation_level: "notice", title: $title, message: $tree,
+          raw_details: ""}]')"
+}
+new_case() { answers=$(mktemp -d -p "$work"); : > "$work/gh.log"; }
+
+failures=0
+expect() { # true|false description event branch [token]
+    rm -f "$work/output"
+    (cd "$work/repo" && env -i PATH="$work/bin:/usr/bin:/bin" HOME="$work" GITHUB_OUTPUT="$work/output" \
+        GITHUB_EVENT_NAME="$3" GITHUB_SHA="$sha" GITHUB_REF_NAME="$4" GITHUB_REPOSITORY="$repo" \
+        GH_TOKEN="${5-token}" FAKE_GH_DIR="$answers" FAKE_GH_LOG="$work/gh.log" bash "$SCRIPT" build-test.yml) \
+        > "$work/stdout" 2>&1
+    local status=$? got
+    got=$(cat "$work/output" 2>/dev/null)
+    if [[ $status -ne 0 || "$got" != "run=$1" ]]; then
+        echo "FAIL: $2: expected exit 0 and run=$1, got exit $status and '${got//$'\n'/ }'"
+        cat "$work/stdout"
+        failures=$((failures + 1))
+    elif ! grep -qx "::notice title=Tested tree::$tree" "$work/stdout"; then
+        echo "FAIL: $2: no 'Tested tree' notice for $tree"
+        cat "$work/stdout"
+        failures=$((failures + 1))
+    elif grep -q 'wrong token' "$work/gh.log"; then
+        echo "FAIL: $2: gh ran without the job's token, or with the user's configuration"
+        cat "$work/gh.log"
+        failures=$((failures + 1))
+    else
+        echo "ok: $2: run=$1"
+    fi
+}
+calls() { wc -l < "$work/gh.log"; }
+
+new_case
+expect true "a pull request's run records its tree and runs" pull_request master
+[[ $(calls) -eq 0 ]] || { echo "FAIL: a pull request's run called gh"; failures=$((failures + 1)); }
+new_case
+expect true "a scheduled run" schedule master
+new_case
+expect true "a run started by hand" workflow_dispatch master
+
+new_case
+merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$tree"
+expect false "a merge whose pull request's run passed on the same tree" push master
+grep -q "::notice title=Already tested::pull request #7's run https://github.com/$repo/actions/runs/101" \
+    "$work/stdout" || { echo "FAIL: the skip doesn't name the run it relied on"; failures=$((failures + 1)); }
+new_case
+merged feature/fx-swap-support '"2026-10-18T09:49:31Z"' pull_request success success "Tested tree" "$tree"
+expect false "the same on the FX branch" push feature/fx-swap-support
+
+new_case
+merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$other"
+expect true "the pull request's run tested another tree" push master
+new_case
+merged master '"2026-10-18T08:28:00Z"' pull_request success skipped "Tested tree" "$tree"
+expect true "a job of the pull request's run was skipped" push master
+new_case
+merged master '"2026-10-18T08:28:00Z"' pull_request failure failure "Tested tree" "$tree"
+expect true "the pull request's run failed" push master
+new_case
+merged master '"2026-10-18T08:28:00Z"' push success success "Tested tree" "$tree"
+expect true "the only run is a push's, not the pull request's" push master
+new_case
+merged master '"2026-10-18T08:28:00Z"' pull_request success success "Already tested" "$tree"
+expect true "the run has no 'Tested tree' record" push master
+new_case
+merged feature/fx-swap-support '"2026-10-18T09:49:31Z"' pull_request success success "Tested tree" "$tree"
+expect true "the pull request was merged into the other branch" push master
+new_case
+merged master null pull_request success success "Tested tree" "$tree"
+expect true "the pull request is still open" push master
+new_case
+answer "repos/$repo/commits/$sha/pulls" '[]'
+expect true "a push no pull request has" push master
+new_case
+expect true "the pull requests can't be listed" push master
+new_case
+merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$tree"
+rm -f "$answers/repos_${repo//\//_}_check-runs_1011_annotations_per_page_100"
+expect true "the run's annotations can't be read" push master
+new_case
+merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$tree"
+expect true "no token: gh isn't asked" push master ""
+[[ $(calls) -eq 0 ]] || { echo "FAIL: gh ran with no token"; failures=$((failures + 1)); }
+
+# Two pull requests have the commit: the first one's run tested another tree, the second one's this tree
+new_case
+merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$tree" 8 "$other" 102
+pulls_8=$(cat "$answers/repos_${repo//\//_}_commits_${sha}_pulls")
+merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$other"
+answer "repos/$repo/commits/$sha/pulls" "$(jq -c --argjson more "$pulls_8" '. + $more' \
+    "$answers/repos_${repo//\//_}_commits_${sha}_pulls")"
+expect false "the second of two pull requests passed on this tree" push master
+if ! grep -q "pull request #8's run" "$work/stdout"; then
+    echo "FAIL: the skip names the wrong run"
+    failures=$((failures + 1))
+fi
+
+if (cd "$work/repo" && GITHUB_OUTPUT="$work/output" bash "$SCRIPT" > /dev/null 2>&1); [[ $? -eq 2 ]]; then
+    echo "ok: no workflow named: usage"
+else
+    echo "FAIL: no workflow named: expected exit 2"
+    failures=$((failures + 1))
+fi
+exit $((failures > 0))

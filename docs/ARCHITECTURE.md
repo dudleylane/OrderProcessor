@@ -1288,7 +1288,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Low-Latency** | `CacheAlignedAtomicTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `NumaAllocatorTest.cpp`, `TransactionScopePoolTest.cpp` | `TransactionScopePoolBench.cpp`, `NumaAllocatorBench.cpp`, `OrderParamsLayoutBench.cpp` |
 | **Server (`app/`)** | `ClientMessageParserTest.cpp`, `JsonSerializerTest.cpp`, `WsSessionTest.cpp`, `WsServerLimitsTest.cpp`, `ServerDataTest.cpp`, `SeedDataArgsTest.cpp`; the ctest scripts `ServerThatCannotStartExits` and `SeedDataIfEmptySeedsOnlyADirectoryWithoutInstruments`, and `SeedDataRunsCleanly`; with `BUILD_FUZZ=ON`, `test/fuzz/` | `SessionManagerBench.cpp` |
 | **PostgreSQL** | `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`; with `BUILD_PG=ON`, `PGWriteBehindTest.cpp`, whose integration cases need `PG_CONNECTION_STRING` | - |
-| **CI runner** | the ctest script `JobStartedHookDecides` (`JobStartedHookTest.sh`): the job-started hook's verdicts, a fork's pull request and anything Dependabot sent refused (#143, #168) | - |
+| **CI runner** | the ctest script `JobStartedHookDecides` (`JobStartedHookTest.sh`): the job-started hook's verdicts, a fork's pull request and anything Dependabot sent refused (#143, #168); the ctest script `CiTestedTreeDecides` (`CiTestedTreeTest.sh`): when the push of a merge may skip the jobs its pull request's run passed (#314) | - |
 | **Other** | `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `FiltersTest.cpp`, `SubscriptionTest.cpp`, `IdTGeneratorTest.cpp`, `LoggerTest.cpp` | - |
 
 ### 9.2 State Machine Tests
@@ -1341,7 +1341,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `SeedDataArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
-| **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `JobStartedHookTest.sh` |
+| **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh` |
 | **Fuzzing** | `fuzz/fuzz_client_message.cpp`, `fuzz/standalone_main.cpp`, `fuzz/corpus/` (`BUILD_FUZZ=ON`) |
 
 ### 10.3 Benchmark Files
