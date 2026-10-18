@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <benchmark/benchmark.h>
+#include <chrono>
 #include <memory>
 #include <vector>
 #include <random>
@@ -124,68 +125,99 @@ public:
     bool result_;
 };
 
+/// The time since start, for SetIterationTime() in a benchmark registered with UseManualTime(): a batch timed by hand,
+/// with nothing else in it (#305). Pausing the timer instead reads the thread's CPU clock, a system call, and each pause
+/// and resume counted about 1.5 us with the batch, more than a batch of 8 takes.
+double secondsSince(std::chrono::steady_clock::time_point start)
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+// Times adding orders into a book that holds the orders it was given throughout, as BM_OrderBookRemove times removing
+// them (#181): each iteration adds the orders made beforehand for it, timed by hand (#305), then takes them out again
+// untimed. So add() alone is timed, and items processed counts adds. The book holds between its own depth and that plus
+// the batch, which is at most 64 and never more than the depth. Until #293 each iteration made and stored its order
+// inside the timed loop and left it in the book, so the book grew by an order an iteration, whatever the argument
+// said, and every size timed the same work.
+void timeAdds(benchmark::State &state, OrderBookBenchmarkSetup &setup, const std::vector<OrderEntry *> &adds)
+{
+    int64_t added = 0;
+    for (auto _ : state)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        for (OrderEntry *order : adds)
+        {
+            setup.orderBook_->add(*order);
+        }
+        state.SetIterationTime(secondsSince(start));
+        added += static_cast<int64_t>(adds.size());
+
+        for (OrderEntry *order : adds)
+        {
+            setup.orderBook_->remove(*order);
+        }
+    }
+    state.SetItemsProcessed(added);
+}
+
+/// The orders a batch adds into a book of depth orders
+size_t addBatch(int64_t depth)
+{
+    return std::min<size_t>(static_cast<size_t>(depth), 64);
+}
+
 } // namespace
 
 // =============================================================================
 // Order Book Add Benchmarks
 // =============================================================================
 
-static void BM_OrderBookAddBuy(benchmark::State &state)
+// Adds into a book of range(0) orders (#293). Each order in the book and in the batch is priced a tick above the one
+// before it, so every buy added becomes the top of its side and every sell goes to the back of its side, as when the
+// benchmarks added one order an iteration. The mixed benchmark alternates the sides.
+static void addInSequence(benchmark::State &state, Side first, Side second)
 {
     OrderBookBenchmarkSetup setup;
-    double price = 100.0;
-
-    for (auto _ : state)
+    const int64_t depth = state.range(0);
+    const size_t batch = addBatch(depth);
+    for (int64_t i = 0; i < depth; ++i)
     {
-        OrderEntry *order = setup.createOrder(BUY_SIDE, price, 100);
-        setup.orderBook_->add(*order);
-        price += 0.01;
+        setup.orderBook_->add(*setup.createOrder((0 == i % 2) ? first : second, 100.0 + i * 0.01, 100));
     }
-    state.SetItemsProcessed(state.iterations());
+    std::vector<OrderEntry *> adds;
+    for (int64_t i = depth; i < depth + static_cast<int64_t>(batch); ++i)
+    {
+        adds.push_back(setup.createOrder((0 == i % 2) ? first : second, 100.0 + i * 0.01, 100));
+    }
+    timeAdds(state, setup, adds);
 }
-BENCHMARK(BM_OrderBookAddBuy)->Range(8, 8 << 10);
+
+static void BM_OrderBookAddBuy(benchmark::State &state)
+{
+    addInSequence(state, BUY_SIDE, BUY_SIDE);
+}
+BENCHMARK(BM_OrderBookAddBuy)->Range(8, 8 << 10)->UseManualTime();
 
 static void BM_OrderBookAddSell(benchmark::State &state)
 {
-    OrderBookBenchmarkSetup setup;
-    double price = 100.0;
-
-    for (auto _ : state)
-    {
-        OrderEntry *order = setup.createOrder(SELL_SIDE, price, 100);
-        setup.orderBook_->add(*order);
-        price += 0.01;
-    }
-    state.SetItemsProcessed(state.iterations());
+    addInSequence(state, SELL_SIDE, SELL_SIDE);
 }
-BENCHMARK(BM_OrderBookAddSell)->Range(8, 8 << 10);
+BENCHMARK(BM_OrderBookAddSell)->Range(8, 8 << 10)->UseManualTime();
 
 static void BM_OrderBookAddMixed(benchmark::State &state)
 {
-    OrderBookBenchmarkSetup setup;
-    double price = 100.0;
-    int iteration = 0;
-
-    for (auto _ : state)
-    {
-        Side side = (iteration % 2 == 0) ? BUY_SIDE : SELL_SIDE;
-        OrderEntry *order = setup.createOrder(side, price, 100);
-        setup.orderBook_->add(*order);
-        price += 0.01;
-        ++iteration;
-    }
-    state.SetItemsProcessed(state.iterations());
+    addInSequence(state, BUY_SIDE, SELL_SIDE);
 }
-BENCHMARK(BM_OrderBookAddMixed)->Range(8, 8 << 10);
+BENCHMARK(BM_OrderBookAddMixed)->Range(8, 8 << 10)->UseManualTime();
 
 // =============================================================================
 // Order Book Remove Benchmarks
 // =============================================================================
 
-// Removal from a book that holds range(0) orders throughout (#181). Each iteration removes a batch of them and puts them
-// back with the timer paused. Pausing once per batch keeps PauseTiming's own cost, more than one removal's, out of the
-// measurement, and items processed counts removals. Before, an iteration removed one order until the book was empty,
-// so all but range(0) of millions timed nothing, and the benchmark reported 0 ns.
+// Removal from a book that holds range(0) orders throughout (#181). Each iteration removes a batch of them, timed by
+// hand (#305), and puts them back untimed; items processed counts removals. Before #181 an iteration removed one order
+// until the book was empty, so all but range(0) of millions timed nothing, and the benchmark reported 0 ns. Until #305
+// the batch went back with the timer paused, and each pause and resume counted about 1.5 us, most of /8's time.
 static void BM_OrderBookRemove(benchmark::State &state)
 {
     OrderBookBenchmarkSetup setup;
@@ -204,23 +236,23 @@ static void BM_OrderBookRemove(benchmark::State &state)
     int64_t removed = 0;
     for (auto _ : state)
     {
+        const auto start = std::chrono::steady_clock::now();
         for (size_t i = 0; i < batch; ++i)
         {
             setup.orderBook_->remove(*orders[(next + i) % orders.size()]);
         }
+        state.SetIterationTime(secondsSince(start));
         removed += static_cast<int64_t>(batch);
 
-        state.PauseTiming();
         for (size_t i = 0; i < batch; ++i)
         {
             setup.orderBook_->add(*orders[(next + i) % orders.size()]);
         }
         next = (next + batch) % orders.size();
-        state.ResumeTiming();
     }
     state.SetItemsProcessed(removed);
 }
-BENCHMARK(BM_OrderBookRemove)->Range(8, 8 << 10);
+BENCHMARK(BM_OrderBookRemove)->Range(8, 8 << 10)->UseManualTime();
 
 // =============================================================================
 // Order Book GetTop Benchmarks
@@ -244,7 +276,8 @@ static void BM_OrderBookGetTopBuy(benchmark::State &state)
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_OrderBookGetTopBuy)->Range(8, 8 << 10);
+// No argument: getTop() reads the first entry of its side, so the book's depth doesn't change it (#293)
+BENCHMARK(BM_OrderBookGetTopBuy);
 
 static void BM_OrderBookGetTopSell(benchmark::State &state)
 {
@@ -264,7 +297,8 @@ static void BM_OrderBookGetTopSell(benchmark::State &state)
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_OrderBookGetTopSell)->Range(8, 8 << 10);
+// No argument, as BM_OrderBookGetTopBuy
+BENCHMARK(BM_OrderBookGetTopSell);
 
 // =============================================================================
 // Order Book Find Benchmarks
@@ -290,14 +324,17 @@ static void BM_OrderBookFind(benchmark::State &state)
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_OrderBookFind)->Range(8, 8 << 10);
+// No argument: the functor matches the first order it is offered, so find() reads one entry whatever the book's depth
+// (#293). BM_OrderBookFindAll walks them all.
+BENCHMARK(BM_OrderBookFind);
 
+// Walks a book of range(0) orders, each a match (#293; until then 1000 orders, whatever the argument)
 static void BM_OrderBookFindAll(benchmark::State &state)
 {
     OrderBookBenchmarkSetup setup;
 
     // Pre-populate order book
-    for (int i = 0; i < 1000; ++i)
+    for (int64_t i = 0; i < state.range(0); ++i)
     {
         OrderEntry *order = setup.createOrder(BUY_SIDE, 100.0 + i * 0.01, 100);
         setup.orderBook_->add(*order);
@@ -320,13 +357,14 @@ BENCHMARK(BM_OrderBookFindAll)->Range(8, 8 << 10);
 // Order Book Depth Scaling Benchmarks
 // =============================================================================
 
+// Adds buys above a book with range(0) levels a side, which it now holds (#293): it grew by an order an iteration too
 static void BM_OrderBookDepthAdd(benchmark::State &state)
 {
     OrderBookBenchmarkSetup setup;
-    const int depth = state.range(0);
+    const int64_t depth = state.range(0);
 
     // Pre-populate with depth levels
-    for (int i = 0; i < depth; ++i)
+    for (int64_t i = 0; i < depth; ++i)
     {
         OrderEntry *buyOrder = setup.createOrder(BUY_SIDE, 100.0 - i * 0.01, 100);
         setup.orderBook_->add(*buyOrder);
@@ -335,34 +373,42 @@ static void BM_OrderBookDepthAdd(benchmark::State &state)
         setup.orderBook_->add(*sellOrder);
     }
 
-    double price = 105.0;
-    for (auto _ : state)
+    std::vector<OrderEntry *> adds;
+    for (size_t i = 0; i < addBatch(depth); ++i)
     {
-        OrderEntry *order = setup.createOrder(BUY_SIDE, price, 100);
-        setup.orderBook_->add(*order);
-        price += 0.01;
+        adds.push_back(setup.createOrder(BUY_SIDE, 105.0 + i * 0.01, 100));
     }
-    state.SetItemsProcessed(state.iterations());
+    timeAdds(state, setup, adds);
 }
-BENCHMARK(BM_OrderBookDepthAdd)->RangeMultiplier(4)->Range(16, 4096);
+BENCHMARK(BM_OrderBookDepthAdd)->RangeMultiplier(4)->Range(16, 4096)->UseManualTime();
 
 // =============================================================================
 // Order Book Worst Case Benchmarks
 // =============================================================================
 
+// Adds at random prices and sides into a book of range(0) orders drawn the same way (#293)
 static void BM_OrderBookWorstCaseAdd(benchmark::State &state)
 {
     OrderBookBenchmarkSetup setup;
     std::mt19937 gen(42);
     std::uniform_real_distribution<> priceDist(90.0, 110.0);
-
-    for (auto _ : state)
+    auto randomOrder = [&]()
     {
         double price = priceDist(gen);
         Side side = (gen() % 2 == 0) ? BUY_SIDE : SELL_SIDE;
-        OrderEntry *order = setup.createOrder(side, price, 100);
-        setup.orderBook_->add(*order);
+        return setup.createOrder(side, price, 100);
+    };
+
+    const int64_t depth = state.range(0);
+    for (int64_t i = 0; i < depth; ++i)
+    {
+        setup.orderBook_->add(*randomOrder());
     }
-    state.SetItemsProcessed(state.iterations());
+    std::vector<OrderEntry *> adds;
+    for (size_t i = 0; i < addBatch(depth); ++i)
+    {
+        adds.push_back(randomOrder());
+    }
+    timeAdds(state, setup, adds);
 }
-BENCHMARK(BM_OrderBookWorstCaseAdd)->Range(8, 8 << 10);
+BENCHMARK(BM_OrderBookWorstCaseAdd)->Range(8, 8 << 10)->UseManualTime();
