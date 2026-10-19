@@ -11,12 +11,14 @@
 #   - A push skips the other jobs (run=false) only when a pull request merged into this branch has a run of this
 #     workflow in which every job passed, and that run recorded this push's tree. The log and a notice name that run:
 #     it is the push's CI record.
-#   - GitHub links a rebase merge's commit to its pull request a few seconds after the merge, and a push's first job
-#     can ask before then (#331). So a commit that lists no pull request merged into this branch is asked about again,
-#     five asks in all, six seconds apart, before the push runs everything. TESTED_TREE_RETRY_DELAY sets the seconds
-#     between asks (the test sets 0).
-#   - Anything else runs them (run=true): any other event, no such pull request, a run that didn't pass, a different
-#     tree, a missing record, a failed API call.
+#   - GitHub's answers settle some seconds after a merge, and a push's first job can ask before then: it linked a
+#     rebase merge's commit to its pull request late (#331), and once answered without a pull request's passing run,
+#     or its record, until later (#357). So until a passing run that recorded this tree turns up, the whole lookup is
+#     asked again, five asks in all, six seconds apart, before the push runs everything. Each ask that finds none
+#     says what it found. TESTED_TREE_RETRY_DELAY sets the seconds between asks (the test sets 0).
+#   - Anything else runs them (run=true): any other event, a failed call listing the commit's pull requests, and,
+#     after the five asks, no such pull request, a run that didn't pass, a different tree, a missing record or
+#     another failed call. The reason says what the last ask found.
 #
 # It writes run=true or run=false to $GITHUB_OUTPUT and exits 0. The workflows run every job when this one fails, so a
 # failure here costs runner time, never coverage.
@@ -57,33 +59,59 @@ trap 'rm -rf -- "${GH_CONFIG_DIR:?}"' EXIT
 
 asks=5; delay=${TESTED_TREE_RETRY_DELAY:-6}
 [[ "$delay" =~ ^[0-9]+$ ]] || delay=6
+
+seen=() # what this ask found in each merged pull request's runs, for the reason when none passed on this tree
+look() { # number head: decides run=false if one of the pull request's runs of this workflow passed on this tree
+    local number=$1 head=$2 runs listed id url jobs failed job annotations recorded unread note
+    local query="head_sha=$head&event=pull_request&status=success&per_page=100"
+    runs=$(gh api "repos/$repo/actions/workflows/$workflow/runs?$query") \
+        || { seen+=("#$number: its runs can't be listed"); return; }
+    listed=$(jq -r --arg head "$head" '.workflow_runs[]
+        | select(.event == "pull_request" and .conclusion == "success" and .head_sha == $head)
+        | "\(.id) \(.html_url)"' <<< "$runs") || listed=''
+    [[ -n "$listed" ]] || { seen+=("#$number: no passing pull_request run listed"); return; }
+    while read -r id url; do
+        jobs=$(gh api "repos/$repo/actions/runs/$id/jobs?per_page=100") \
+            || { seen+=("#$number's run $id: its jobs can't be listed"); continue; }
+        # Every job ran and passed: a skipped one would make a run green without testing anything
+        failed=$(jq -r 'if (.jobs | length) == 0 then "no jobs" else
+            [.jobs[] | select(.conclusion != "success") | "\(.name) \(.conclusion)"] | join(", ") end' <<< "$jobs") \
+            || failed="its jobs can't be read"
+        [[ -z "$failed" ]] || { seen+=("#$number's run $id: $failed"); continue; }
+        recorded='' unread=''
+        for job in $(jq -r '.jobs[] | select(.name == "Tested tree") | .id' <<< "$jobs"); do
+            annotations=$(gh api "repos/$repo/check-runs/$job/annotations?per_page=100") \
+                || { unread+=" $job"; continue; }
+            if jq -e --arg tree "$tree" 'any(.[]; .title == "Tested tree" and .message == $tree)' <<< "$annotations" \
+                > /dev/null; then
+                decide false "pull request #$number's run $url passed on this tree, $tree"
+            fi
+            recorded+=$(jq -r '[.[] | select(.title == "Tested tree") | " " + .message] | join("")' <<< "$annotations")
+        done
+        note="#$number's run $id recorded${recorded:- no tree}"
+        [[ -z "$unread" ]] || note+=", and job$unread's annotations can't be read"
+        seen+=("$note")
+    done <<< "$listed"
+}
+
 for (( ask = 1; ; ask++ )); do
     pulls=$(gh api "repos/$repo/commits/$sha/pulls") || decide true "can't list the pull requests that have $sha"
     merged=$(jq -r --arg branch "$branch" \
         '.[] | select(.merged_at != null and .base.ref == $branch) | "\(.number) \(.head.sha)"' <<< "$pulls") \
         || decide true "can't read the pull requests that have $sha"
-    [[ -z "$merged" ]] || break
-    (( ask < asks )) || decide true "no pull request merged into $branch has $sha, asked $asks times, $delay s apart"
-    echo "No pull request merged into $branch has $sha yet (ask $ask of $asks): asking again in $delay s"
+    if [[ -z "$merged" ]]; then
+        waiting="No pull request merged into $branch has $sha yet"
+        reason="no pull request merged into $branch has $sha, asked $asks times, $delay s apart"
+    else
+        seen=()
+        while read -r number head; do look "$number" "$head"; done <<< "$merged"
+        found=$(printf '%s; ' "${seen[@]}"); found=${found%; }
+        waiting="No passing run of $workflow, in a pull request merged into $branch, has recorded this tree yet"
+        waiting+=" ($found)"
+        reason="no passing run of $workflow, in a pull request merged into $branch, recorded this tree, $tree, asked"
+        reason+=" $asks times, $delay s apart ($found)"
+    fi
+    (( ask < asks )) || decide true "$reason"
+    echo "$waiting (ask $ask of $asks): asking again in $delay s"
     sleep "$delay"
 done
-
-while read -r number head; do
-    query="head_sha=$head&event=pull_request&status=success&per_page=100"
-    runs=$(gh api "repos/$repo/actions/workflows/$workflow/runs?$query") || continue
-    while read -r id url; do
-        jobs=$(gh api "repos/$repo/actions/runs/$id/jobs?per_page=100") || continue
-        # Every job ran and passed: a skipped one would make a run green without testing anything
-        jq -e '(.jobs | length) > 0 and all(.jobs[]; .conclusion == "success")' <<< "$jobs" > /dev/null || continue
-        for job in $(jq -r '.jobs[] | select(.name == "Tested tree") | .id' <<< "$jobs"); do
-            annotations=$(gh api "repos/$repo/check-runs/$job/annotations?per_page=100") || continue
-            if jq -e --arg tree "$tree" 'any(.[]; .title == "Tested tree" and .message == $tree)' <<< "$annotations" \
-                > /dev/null; then
-                decide false "pull request #$number's run $url passed on this tree, $tree"
-            fi
-        done
-    done < <(jq -r --arg head "$head" '.workflow_runs[]
-        | select(.event == "pull_request" and .conclusion == "success" and .head_sha == $head)
-        | "\(.id) \(.html_url)"' <<< "$runs")
-done <<< "$merged"
-decide true "no passing run of $workflow, in a pull request merged into $branch, recorded this tree, $tree"
