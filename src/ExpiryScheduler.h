@@ -60,6 +60,10 @@ public:
     /// A day end itself starts the next day. Every match asks, so a thread keeps the day it last answered, for
     /// dayEndAfter() too, and reads the zone database, under a lock of this class's, only when the day changes.
     static DateTimeT dayStartOf(DateTimeT when);
+    /// The business day that began at dayStart, as FIX's TradeDate (75) names it: YYYYMMDD, the date it ends on (#258).
+    /// It began at 17:00 New York the evening before, 21:00 or 22:00 UTC, so twelve hours on is that date in either
+    /// season. 0 for no day.
+    static u32 tradeDateOf(DateTimeT dayStart);
     /// When the order expires, and with which timer, if its time in force has an end: false for any other order
     static bool expiryOf(const OrderEntry &order, DateTimeT *when, Queues::TimerEvent::TimerType *type);
     /// When the order's day figures next begin again, if it outlives the business day they are for (#244): an order

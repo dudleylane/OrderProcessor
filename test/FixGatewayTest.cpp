@@ -1759,6 +1759,28 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_TradeCarriesLastQtyAndLastPx)
     EXPECT_FALSE(report.isSetField(FIX::FIELD::Text));
 }
 
+TEST_F(FixGatewayInboundTest, ExecutionReport_TradeCarriesItsTradeDate)
+{
+    // TradeDate (75), a LocalMktDate: the business day the trade counts in, YYYYMMDD, as the engine keeps it (#258). The
+    // gateway sent none, and the engine's own was 1 for every trade.
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+    trade.lastQty_ = 40;
+    trade.lastPx_ = 10.5;
+    trade.tradeDate_ = 20261016;
+
+    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+    ASSERT_TRUE(report.isSetField(FIX::FIELD::TradeDate));
+    FIX::TradeDate tradeDate;
+    report.get(tradeDate);
+    EXPECT_EQ("20261016", tradeDate.getString());
+
+    trade.tradeDate_ = 0;
+    EXPECT_FALSE(FixGateway::buildExecutionReport(&trade, *order).isSetField(FIX::FIELD::TradeDate))
+        << "a trade in no day has a date";
+}
+
 TEST_F(FixGatewayInboundTest, ExecutionReport_CorrectionIsTradeCorrect)
 {
     // Corrections used to fall through fromExecType's default and go out as ExecType NEW
