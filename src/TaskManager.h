@@ -136,6 +136,8 @@ public:
 
 private:
     void taskFailed(const char *kind, const char *what);
+    /// Starts a task of this manager's: spawned from inside one of its tasks, enqueued from any other thread (#364)
+    template <typename F> void submit(F &&task);
 
     mutable oneapi::tbb::mutex lock_;
     mutable oneapi::tbb::mutex transactLock_;
