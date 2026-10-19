@@ -108,6 +108,12 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 |------|-------------|
 | `NewOrderSingle_PushesToQueue` | Limit order: correct side, ordType, price, qty, tif, status |
 | `NewOrderSingle_MarketOrder` | Market order: ordType=MARKET, side=SELL, qty=50 |
+| `NewOrderSingle_OrderQtyTheEngineCannotHold_IsNotQueued` | OrderQty (38) of -5, 4294967296, 0.5 or 0, none a whole number QuantityT holds → refused before anything is stored, nothing pushed (#145) |
+| `NewOrderSingle_LargestOrderQtyTheEngineHolds_IsQueued` | OrderQty 4294967295, the largest QuantityT → queued, its orderQty and leavesQty (#145) |
+| `NewOrderSingle_LimitPriceNoOrderTradesAt_IsNotQueued` | A limit order's Price (44) of 0, of -1.25, or of 310 digits either way, which QuickFIX reads as infinity → refused, nothing pushed (#145) |
+| `NewOrderSingle_MarketOrderWithPriceZero_IsQueued` | A market order's Price of 0 → queued: it trades at no price of its own (#145) |
+| `NewOrderSingle_MarketOrderWithAPriceBeyondDoubleRange_IsNotQueued` | A market order's 310-digit Price → refused, nothing pushed (#145) |
+| `NewOrderSingle_FxSwapFarPriceNoOrderTradesAt_IsNotQueued` | A swap's far price (6500) no order trades at → refused, nothing pushed (#145) |
 | `NewOrderSingle_UnknownSymbol_NoPush` | Unknown symbol → no event pushed; refused to the sender, 103=1 (#189) |
 | `NewOrderSingle_WithoutAccount_GetsTheServerDefaults` | No Account (1) → the server's default account and clearing firm (#34) |
 | `NewOrderSingle_NamingAnAccount_KeepsIt` | An Account (1) the server knows → kept |
@@ -120,6 +126,8 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ReplaceRequest_CarriesTheRequestsSideAndSymbol` | Side and Symbol come from the request, so the engine refuses a change |
 | `ReplaceRequest_UnknownSymbol_IsNotQueued` | Unknown Symbol → refused by the gateway (102=99), nothing pushed |
 | `ReplaceRequest_UnknownOrigClOrdId_IsNotQueued` | Unknown OrigClOrdID → answered by the gateway (102=1), nothing pushed |
+| `ReplaceRequest_OrderQtyTheEngineCannotHold_IsNotQueued` | A replace's OrderQty QuantityT can't hold → refused with an OrderCancelReject, as an unknown symbol is; nothing pushed (#145) |
+| `ReplaceRequest_PriceNoOrderTradesAt_IsNotQueued` | A replace's Price no order trades at → refused likewise, nothing pushed (#145) |
 | `ReplaceRequest_StopPxMovesAStopOrdersStop` | A stop limit's replace with StopPx (99) → the replacement's new stop; one without StopPx keeps the original's (#238) |
 | `ReplaceRequest_StopPxForAnOrderThatIsntAStopOrder_IsNotQueued` | StopPx on a limit order's replace → refused by the gateway (102=99), nothing pushed (#238) |
 | `ReplaceRequest_StopPxNoOrderTradesAt_IsNotQueued` | A replace's StopPx no order trades at → refused by the gateway (102=99), nothing pushed (#238) |
@@ -142,6 +150,8 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ExecutionReport_ASwapsLegsCarryTheirSideDateAndPrice` | Each leg's report carries its side, its LegSettlDate as `YYYYMMDD` (#198), its price, and a TradeLinkID (#153): the fill's link, the same on both legs even when their transact times differ (#199) |
 | `NewOrderMultileg_NonSwapOrdType_Rejected` | Non-FXSWAP OrdType in multileg → no push; refused to the sender, 103=11 (#189) |
 | `NewOrderMultileg_TooFewLegs_Rejected` | Single leg multileg → no push; refused to the sender, 103=11 (#189) |
+| `NewOrderMultileg_OrderQtyTheEngineCannotHold_IsNotQueued` | The same quantities on an FX swap → refused, nothing pushed (#145) |
+| `NewOrderMultileg_LegPriceNoOrderTradesAt_IsNotQueued` | Either leg's LegPrice (566) no order trades at → refused, nothing pushed (#145) |
 | `SessionMapPopulatedOnLogon` | `onLogon()` makes the session known |
 | `ALogonNeedsItsCounterpartysUsernameAndPassword` | With credentials, `fromAdmin()` accepts a Logon only with its counterparty's Username and Password, and from a CompID the credentials name; it refuses with `RejectLogon` and a text that doesn't say which was wrong. Other admin messages aren't checked (#147) |
 | `WithoutCredentialsEveryLogonIsAccepted` | The gateway without credentials, as tests run it, checks nothing; the server won't run FIX that way (#147) |
@@ -185,6 +195,7 @@ Pure unit tests for the messages that answer a new order or a replacement the en
 | `DuplicateReplacementGetsAnOrderCancelReject` | A replacement whose ClOrdID is in use → 35=9, 434=2, 102=6, and the order it was to replace |
 | `RefusedReplaceSaysWhyAsARefusedCancelDoes` | The engine's reason maps to CxlRejReason as for a cancel; a ClOrdID in use still says 6 (#74) |
 | `ReplaceOfAnUnknownOrderIsRejectedAsUnknown` | The gateway's own answer to an unknown OrigClOrdID → 102=1, OrderID NONE, 39=8, and the request's ClOrdIDs (#74) |
+| `AnOrderTheGatewayRefusesGetsAnExecutionReportRejectQuotingItsQuantityAsSent` | An order the gateway refuses before the engine sees it → 150=8, 39=8, OrderID NONE, its OrderQty (38) as the client sent it, OrdRejReason 13 (incorrect quantity) and why in Text (58) (#145) |
 
 ---
 
@@ -366,6 +377,20 @@ Runs `orderProcessorServer` with a certificate made for the run, and checks, on 
 | Test | Description |
 |------|-------------|
 | `ASessionsDayEndsAt1700NewYork` | `config/fix.cfg`'s StartTime and EndTime, read as QuickFIX's SessionFactory reads them with UseLocalTime, in the zone `useBusinessDayLocalTime()` gives the process: a session rolls at 17:00 New York, 21:00 UTC in daylight time and 22:00 UTC in standard time, and not at New York's midnight or 00:00 UTC (#240) |
+
+---
+
+## 19. FixQuantityTest and FixPriceTest — What the Gateway Takes
+
+**File:** `test/FixGatewayTest.cpp`
+**Requires:** `BUILD_FIX=ON`
+
+The checks the gateway makes on a quantity and a price before the engine sees them (#145).
+
+| Test | Description |
+|------|-------------|
+| `OrderQtyIsAWholeNumberTheEngineCanHold` (FixQuantityTest) | `toQuantity()`: 1, 100 and 4294967295 → those; -5, 4294967296, 0.5, 0, -0, 4294967295.5, 1e300, both infinities and NaN → none |
+| `APriceIsFiniteAndAboveZeroUnlessTheOrderIsAMarketOrder` (FixPriceTest) | `isTradablePrice()`: a limit order's or a swap's price is finite and above 0; a market order's may be 0, but not infinite |
 
 ---
 

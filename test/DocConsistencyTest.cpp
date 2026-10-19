@@ -169,6 +169,57 @@ protected:
 
 DocMap DocConsistencyTest::docs_;
 
+// docs/FIX_TEST_SUITE.md says it lists the tests by suite and what each one checks. It missed the 13 #145 added, and
+// #228's, because nothing compared it with the tests (#257). Every TEST and TEST_F in test/Fix*.cpp is named on it in
+// backticks now, and so is every test/Fix*.py, the ctests that run a real server.
+TEST_F(DocConsistencyTest, FixTestSuiteNamesEveryFixTest)
+{
+    const auto root = projectRoot();
+    std::ifstream in(root / "docs/FIX_TEST_SUITE.md");
+    ASSERT_TRUE(in) << "can't read docs/FIX_TEST_SUITE.md";
+    const std::string page((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::set<std::string> named;
+    // A name between backticks, and nothing else: a code fence's backticks would pair with the wrong ones
+    const std::regex ticked("`([A-Za-z_][A-Za-z0-9_./-]*)`");
+    for (std::sregex_iterator it(page.begin(), page.end(), ticked), end; it != end; ++it)
+    {
+        named.insert((*it)[1].str());
+    }
+
+    const std::regex test(R"(^\s*TEST(?:_F|_P)?\(\s*(\w+)\s*,\s*(\w+)\s*\))");
+    size_t tests = 0;
+    for (const auto &entry : std::filesystem::directory_iterator(root / "test"))
+    {
+        const std::string file = entry.path().filename().string();
+        if (0 != file.rfind("Fix", 0))
+        {
+            continue;
+        }
+        if (".py" == entry.path().extension())
+        {
+            EXPECT_TRUE(named.count("test/" + file)) << "test/" << file << " isn't on docs/FIX_TEST_SUITE.md";
+            continue;
+        }
+        if (".cpp" != entry.path().extension())
+        {
+            continue;
+        }
+        std::ifstream source(entry.path());
+        std::string line;
+        std::smatch m;
+        while (std::getline(source, line))
+        {
+            if (std::regex_search(line, m, test))
+            {
+                ++tests;
+                EXPECT_TRUE(named.count(m[2].str()))
+                    << "test/" << file << ": " << m[1] << "." << m[2] << " isn't on docs/FIX_TEST_SUITE.md";
+            }
+        }
+    }
+    EXPECT_LT(100u, tests) << "found only " << tests << " FIX tests: the pattern or the directory is wrong";
+}
+
 // ----------------------------------------------------------------------------
 // Marker assertions
 // ----------------------------------------------------------------------------
