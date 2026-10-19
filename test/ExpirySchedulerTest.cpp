@@ -120,6 +120,32 @@ TEST(ExpirySchedulerTest, BeforeTheFirstDayEndADayStartsAt0)
     EXPECT_EQ(firstDayEnd, ExpiryScheduler::dayStartOf(firstDayEnd));
 }
 
+TEST(ExpirySchedulerTest, ADaysTradeDateIsTheDateItEndsOn)
+{
+    // FIX's TradeDate (75) for a business day: YYYYMMDD of the date it ends on, at 17:00 New York (#258). A trade after
+    // 17:00 takes the next day's date, though New York's date hasn't changed.
+    const DateTimeT hour = 60ULL * 60 * 1000;
+    auto dateAt = [](DateTimeT when)
+    {
+        return ExpiryScheduler::tradeDateOf(ExpiryScheduler::dayStartOf(when));
+    };
+    const DateTimeT oct15 = 1792022400000ULL; // 2026-10-15 00:00 UTC, 20:00 EDT on the 14th
+    EXPECT_EQ(20261015u, dateAt(oct15)) << "20:00 EDT on the 14th is in the day that ends on the 15th";
+    EXPECT_EQ(20261015u, dateAt(oct15 + 21 * hour - 1));
+    EXPECT_EQ(20261016u, dateAt(oct15 + 21 * hour)) << "17:00 EDT starts the 16th's day";
+    const DateTimeT dec15 = 1797292800000ULL; // 2026-12-15 00:00 UTC
+    EXPECT_EQ(20261215u, dateAt(dec15 + 22 * hour - 1)) << "standard time";
+    EXPECT_EQ(20261216u, dateAt(dec15 + 22 * hour));
+    // The days New York's clocks change are 23 and 25 hours long, and have their dates as any other
+    const DateTimeT mar8 = 1772928000000ULL; // 2026-03-08 00:00 UTC
+    EXPECT_EQ(20260308u, dateAt(mar8 + 12 * hour));
+    EXPECT_EQ(20260309u, dateAt(mar8 + 21 * hour));
+    const DateTimeT nov1 = 1793491200000ULL; // 2026-11-01 00:00 UTC
+    EXPECT_EQ(20261101u, dateAt(nov1 + 22 * hour - 1));
+    EXPECT_EQ(20261102u, dateAt(nov1 + 22 * hour));
+    EXPECT_EQ(0u, ExpiryScheduler::tradeDateOf(0)) << "no day";
+}
+
 TEST(ExpirySchedulerTest, DaysLookedUpFromSeveralThreadsAtOnceAgree)
 {
     // Each thread's first look at a day reads the zone database, which fills in its transitions on first use. The

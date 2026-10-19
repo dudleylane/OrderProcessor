@@ -20,6 +20,7 @@
 #include <memory>
 #include <deque>
 #include <filesystem>
+#include <set>
 #include <vector>
 
 #include "TestFixtures.h"
@@ -1192,6 +1193,7 @@ public:
         IdT orderId_;
         QuantityT lastQty_;
         PriceT lastPx_;
+        DateTimeT tradeDate_;
     };
 
     void push(const Queues::ExecReportEvent &evnt, const std::string &) override
@@ -1208,7 +1210,7 @@ public:
         if (TRADE_EXECTYPE == evnt.exec_->type_)
         {
             const TradeExecEntry *trade = static_cast<const TradeExecEntry *>(evnt.exec_);
-            trades_.push_back(Trade{ trade->orderId_, trade->lastQty_, trade->lastPx_ });
+            trades_.push_back(Trade{ trade->orderId_, trade->lastQty_, trade->lastPx_, trade->tradeDate_ });
         }
     }
     void push(const Queues::CancelRejectEvent &, const std::string &) override {}
@@ -1225,6 +1227,20 @@ public:
                 char buf[64];
                 snprintf(buf, sizeof(buf), "%llu@%g", static_cast<unsigned long long>(trade.lastQty_), trade.lastPx_);
                 result.emplace_back(buf);
+            }
+        }
+        return result;
+    }
+
+    /// The dates of the trades reported for the order, YYYYMMDD (#258)
+    std::vector<DateTimeT> tradeDatesOf(const IdT &orderId) const
+    {
+        std::vector<DateTimeT> result;
+        for (const Trade &trade : trades_)
+        {
+            if (trade.orderId_ == orderId)
+            {
+                result.push_back(trade.tradeDate_);
             }
         }
         return result;
@@ -2806,6 +2822,45 @@ TEST_F(ProcessorTest, AFillAfterTheDaysEndCountsInTheNewDay)
     ASSERT_NE(nullptr, sell);
     EXPECT_EQ(OCT15 + 21 * HOUR, sell->dayStart_);
     EXPECT_EQ(20u, sell->dayCumQty_);
+}
+
+TEST_F(ProcessorTest, ATradesDateIsTheBusinessDayItCountsIn)
+{
+    // Every trade's tradeDate was 1, so a client read 1970-01-01 (#258). It is the business day's date, as YYYYMMDD:
+    // the date the day ends on, at 17:00 New York, so a trade after 17:00 has the next day's (ruled 2026-10-19).
+    DateTimeT now = OCT15 + 13 * HOUR; // 09:00 EDT
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+                      [&now]
+                      {
+                          return now;
+                      });
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), now));
+    OrderEntry *sell = engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), IOC_TIF));
+    now = OCT15 + 21 * HOUR; // 17:00 EDT
+    OrderEntry *late = engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 20), IOC_TIF));
+    ASSERT_NE(nullptr, buy);
+    ASSERT_NE(nullptr, sell);
+    ASSERT_NE(nullptr, late);
+    EXPECT_EQ((std::vector<DateTimeT>{ 20261015, 20261016 }), engine.reports_.tradeDatesOf(buy->orderId_));
+    EXPECT_EQ(std::vector<DateTimeT>{ 20261015 }, engine.reports_.tradeDatesOf(sell->orderId_));
+    EXPECT_EQ(std::vector<DateTimeT>{ 20261016 }, engine.reports_.tradeDatesOf(late->orderId_));
+    // The stored trades have it too. Each trade is in the order's executions twice, as the match stored it and as it
+    // was reported, so compare the dates they hold.
+    auto storedDates = [](OrderEntry &order)
+    {
+        std::set<DateTimeT> dates;
+        for (const EventData &event : *order.executions_.get())
+        {
+            const ExecutionEntry *exec = OrderStorage::instance()->locateByExecId(event.eventId_);
+            if ((nullptr != exec) && (TRADE_EXECTYPE == exec->type_))
+            {
+                dates.insert(static_cast<const TradeExecEntry *>(exec)->tradeDate_);
+            }
+        }
+        return dates;
+    };
+    EXPECT_EQ((std::set<DateTimeT>{ 20261015, 20261016 }), storedDates(*buy));
+    EXPECT_EQ(std::set<DateTimeT>{ 20261016 }, storedDates(*late));
 }
 
 TEST_F(ProcessorTest, BothSidesOfATradeCountItInTheSameDay)

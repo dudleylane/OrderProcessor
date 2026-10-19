@@ -41,7 +41,8 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const ACID::Conte
     trade.lastQty_ = param.lastQty_;
     trade.lastPx_ = param.lastPx_;
     trade.currency_ = param.order_->currency_;
-    trade.tradeDate_ = 1;
+    // The business day the match counts in, as YYYYMMDD (#258): every side of it gets the same
+    trade.tradeDate_ = ExpiryScheduler::tradeDateOf(dayStart);
     trade.type_ = TRADE_EXECTYPE;
     trade.transactTime_ = 1;
     trade.orderId_ = param.order_->orderId_;

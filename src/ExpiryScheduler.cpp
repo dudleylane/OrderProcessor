@@ -109,6 +109,19 @@ DateTimeT ExpiryScheduler::dayStartOf(DateTimeT when)
     return dayOf(when).start;
 }
 
+u32 ExpiryScheduler::tradeDateOf(DateTimeT dayStart)
+{
+    if (0 == dayStart)
+    {
+        return 0;
+    }
+    using namespace std::chrono;
+    const year_month_day date(floor<days>(sys_time<milliseconds>(milliseconds(dayStart) + hours(12))));
+    return static_cast<u32>(static_cast<int>(date.year()) * 10000 +
+                            static_cast<int>(static_cast<unsigned>(date.month())) * 100 +
+                            static_cast<int>(static_cast<unsigned>(date.day())));
+}
+
 bool ExpiryScheduler::expiryOf(const OrderEntry &order, DateTimeT *when, TimerEvent::TimerType *type)
 {
     assert(nullptr != when);
