@@ -84,6 +84,7 @@ export interface TradeExecution extends ExecutionReport {
   lastQty: number;
   lastPx: number;
   currency: Currency;
+  /** The business day the trade counts in, YYYYMMDD: the date it ends on, 17:00 New York (#258) */
   tradeDate: number;
 }
 
@@ -110,6 +111,7 @@ export interface CorrectExecution extends ExecutionReport {
   lastQty: number;
   lastPx: number;
   currency: Currency;
+  /** The business day the trade counts in, YYYYMMDD: the date it ends on, 17:00 New York (#258) */
   tradeDate: number;
   origOrderId: number;
   execRefId: number;

@@ -425,8 +425,8 @@ void OrdStateImpl::processFill(OrderEntry *orderData, OrdState::onTradeExecution
     ex.transactTime_ = 1;
     ex.orderId_ = orderData->orderId_;
 
+    // The trade's date comes with it: the business day its match counts in (#258)
     TradeExecEntry tradeEntry(ex, *trade);
-    tradeEntry.tradeDate_ = 1;
 
     ExecutionEntry *tr = evnt.orderStorage_->save(tradeEntry, evnt.generator_);
     assert(nullptr != tr);

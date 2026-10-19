@@ -415,7 +415,7 @@ struct ExecTradeParams
     PriceT lastPx_;
     // trade's currency
     Currency currency_;
-    // time stamp of the trade
+    // the business day the trade counts in, 17:00 New York to 17:00 New York, as YYYYMMDD (#258)
     DateTimeT tradeDate_;
 
     ExecTradeParams();
