@@ -21,7 +21,11 @@
 #include "MultiOutQueues.h"
 
 #include <benchmark/benchmark.h>
+#include <oneapi/tbb/info.h>
+#include <atomic>
+#include <chrono>
 #include <memory>
+#include <thread>
 
 #include "DataModelDef.h"
 #include "WideDataStorage.h"
@@ -67,6 +71,41 @@ public:
     void push(const CancelRejectEvent &, const std::string &) override {}
     void push(const BusinessRejectEvent &, const std::string &) override {}
     int count_ = 0;
+};
+
+// =============================================================================
+// Counting OutQueues — counts the reports the pool's workers push
+// =============================================================================
+
+/// Atomic, since the benchmark's thread reads the counts while the workers write them. NullOutQueues keeps its plain
+/// count, whose increment the fan-out benchmarks time (#309).
+class CountingOutQueues final : public Queues::OutQueues
+{
+public:
+    void push(const ExecReportEvent &evnt, const std::string &) override
+    {
+        reports_.fetch_add(1, std::memory_order_relaxed);
+        if (TRADE_EXECTYPE == evnt.exec_->type_)
+        {
+            trades_.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    void push(const CancelRejectEvent &, const std::string &) override {}
+    void push(const BusinessRejectEvent &, const std::string &) override {}
+
+    u64 reports() const
+    {
+        return reports_.load(std::memory_order_relaxed);
+    }
+    /// Two a trade: one to each side
+    u64 trades() const
+    {
+        return trades_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<u64> reports_{ 0 };
+    std::atomic<u64> trades_{ 0 };
 };
 
 // =============================================================================
@@ -139,6 +178,23 @@ FIX44::NewOrderSingle makeBenchNOS(const std::string &clOrdId, char side, char o
     return msg;
 }
 
+/// Polls until the queue has counted `due` reports and the pool has finished, for a minute at most; whether it got
+/// there. The blocking form of waitUntilTransactionsFinished() can't time a cycle: it sleeps a second between its two
+/// checks (#309). The count is read first, since asking the pool takes the locks its workers need.
+bool waitForPool(const TaskManager &taskMgr, const CountingOutQueues &outQueues, u64 due)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while ((outQueues.reports() < due) || !taskMgr.waitUntilTransactionsFinished(0))
+    {
+        if (std::chrono::steady_clock::now() > deadline)
+        {
+            return false;
+        }
+        std::this_thread::yield();
+    }
+    return true;
+}
+
 } // anonymous namespace
 
 // =============================================================================
@@ -207,7 +263,7 @@ static void BM_FixNewOrderSingleTranslation(benchmark::State &state)
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_FixNewOrderSingleTranslation)->Range(8, 1024);
+BENCHMARK(BM_FixNewOrderSingleTranslation);
 
 // =============================================================================
 // 3. ExecutionReport Construction Benchmark
@@ -235,25 +291,31 @@ static void BM_FixExecReportConstruction(benchmark::State &state)
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_FixExecReportConstruction)->Range(8, 1024);
+BENCHMARK(BM_FixExecReportConstruction);
 
 // =============================================================================
 // 4. MultiOutQueues Fan-Out Overhead
 // =============================================================================
 
+// The engine pushes through an OutQueues pointer, a virtual call, whatever queue is behind it, so both push that way,
+// through a pointer the compiler can't see through, to a target made once. A push into a local NullOutQueues was
+// inlined into nothing, and timed 0 ns (#310).
 static void BM_MultiOutQueuesFanOut(benchmark::State &state)
 {
     NullOutQueues out1, out2;
     MultiOutQueues multi;
     multi.addDelegate(&out1);
     multi.addDelegate(&out2);
+    Queues::OutQueues *out = &multi;
+    benchmark::DoNotOptimize(out);
 
     ExecutionEntry exec;
     ExecReportEvent evt(&exec);
+    const std::string target = "target";
 
     for (auto _ : state)
     {
-        multi.push(evt, "target");
+        out->push(evt, target);
     }
     state.SetItemsProcessed(state.iterations());
 }
@@ -261,13 +323,17 @@ BENCHMARK(BM_MultiOutQueuesFanOut);
 
 static void BM_DirectOutQueuesPush(benchmark::State &state)
 {
-    NullOutQueues out;
+    NullOutQueues queue;
+    Queues::OutQueues *out = &queue;
+    benchmark::DoNotOptimize(out);
+
     ExecutionEntry exec;
     ExecReportEvent evt(&exec);
+    const std::string target = "target";
 
     for (auto _ : state)
     {
-        out.push(evt, "target");
+        out->push(evt, target);
     }
     state.SetItemsProcessed(state.iterations());
 }
@@ -276,6 +342,11 @@ BENCHMARK(BM_DirectOutQueuesPush);
 // =============================================================================
 // 5. FX Swap Matching vs Single-Leg Matching
 // =============================================================================
+//
+// Each makes its resting sell and its aggressor buy once, and times one match() an iteration (#306). match() finds the
+// first sell that trades with the buy and defers the trade, which the benchmark's container deletes, so neither the
+// book nor the two orders change: every iteration matches the same pair. A deeper book wouldn't change that, since the
+// search ends at the first sell, which trades.
 
 static void BM_SingleLegMatch(benchmark::State &state)
 {
@@ -312,53 +383,53 @@ static void BM_SingleLegMatch(benchmark::State &state)
 
     Context ctxt(OrderStorage::instance(), &orderBook, &inQueues, &outQueues, &matcher, IdTGenerator::instance());
 
-    int ordNum = 0;
+    // The resting sell, in the book
+    SourceIdT srcId, destId, clOrdId, origClOrdId, accountId, clearingId, execList;
+    const std::string clOrdStr = "SELL-1";
+    auto *raw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
+    clOrdId = WideDataStorage::instance()->add(raw);
+
+    auto sell = std::make_unique<OrderEntry>(srcId, destId, clOrdId, origClOrdId, setup.instrId_, accountId, clearingId,
+                                             execList);
+    sell->side_ = SELL_SIDE;
+    sell->ordType_ = LIMIT_ORDERTYPE;
+    sell->price_ = 1.2650;
+    sell->orderQty_ = 100;
+    sell->leavesQty_ = 100;
+    sell->status_ = NEW_ORDSTATUS;
+    OrderEntry *savedSell = OrderStorage::instance()->save(*sell, IdTGenerator::instance());
+    sell.reset(); // save() stored a clone
+    orderBook.add(*savedSell);
+
+    // The aggressor buy
+    const std::string buyClOrdStr = "BUY-1";
+    auto *buyRaw = new RawDataEntry(STRING_RAWDATATYPE, buyClOrdStr.c_str(), static_cast<u32>(buyClOrdStr.size()));
+    SourceIdT buyClOrdId = WideDataStorage::instance()->add(buyRaw);
+
+    auto buy = std::make_unique<OrderEntry>(srcId, destId, buyClOrdId, origClOrdId, setup.instrId_, accountId,
+                                            clearingId, execList);
+    buy->side_ = BUY_SIDE;
+    buy->ordType_ = LIMIT_ORDERTYPE;
+    buy->price_ = 1.2650;
+    buy->orderQty_ = 100;
+    buy->leavesQty_ = 100;
+    buy->status_ = NEW_ORDSTATUS;
+    OrderEntry *savedBuy = OrderStorage::instance()->save(*buy, IdTGenerator::instance());
+    buy.reset(); // save() stored a clone
+
     for (auto _ : state)
     {
-        state.PauseTiming();
-        // Create and add a resting sell order
-        SourceIdT srcId, destId, clOrdId, origClOrdId, accountId, clearingId, execList;
-        std::string clOrdStr = "SELL-" + std::to_string(++ordNum);
-        auto *raw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
-        clOrdId = WideDataStorage::instance()->add(raw);
-
-        auto sell = std::make_unique<OrderEntry>(srcId, destId, clOrdId, origClOrdId, setup.instrId_, accountId,
-                                                 clearingId, execList);
-        sell->side_ = SELL_SIDE;
-        sell->ordType_ = LIMIT_ORDERTYPE;
-        sell->price_ = 1.2650;
-        sell->orderQty_ = 100;
-        sell->leavesQty_ = 100;
-        sell->status_ = NEW_ORDSTATUS;
-        OrderEntry *savedSell = OrderStorage::instance()->save(*sell, IdTGenerator::instance());
-        sell.reset(); // save() stored a clone; free the template before timing resumes
-        orderBook.add(*savedSell);
-
-        // Create aggressor buy
-        std::string buyClOrdStr = "BUY-" + std::to_string(ordNum);
-        auto *buyRaw = new RawDataEntry(STRING_RAWDATATYPE, buyClOrdStr.c_str(), static_cast<u32>(buyClOrdStr.size()));
-        SourceIdT buyClOrdId = WideDataStorage::instance()->add(buyRaw);
-
-        auto buy = std::make_unique<OrderEntry>(srcId, destId, buyClOrdId, origClOrdId, setup.instrId_, accountId,
-                                                clearingId, execList);
-        buy->side_ = BUY_SIDE;
-        buy->ordType_ = LIMIT_ORDERTYPE;
-        buy->price_ = 1.2650;
-        buy->orderQty_ = 100;
-        buy->leavesQty_ = 100;
-        buy->status_ = NEW_ORDSTATUS;
-        OrderEntry *savedBuy = OrderStorage::instance()->save(*buy, IdTGenerator::instance());
-        buy.reset(); // save() stored a clone; free the template before timing resumes
-
-        defered.count_ = 0;
-        state.ResumeTiming();
-
         matcher.match(savedBuy, ctxt);
         benchmark::DoNotOptimize(defered.count_);
     }
+    // Each match defers its one trade: a run that timed anything else fails
+    if (defered.count_ != static_cast<size_t>(state.iterations()))
+    {
+        state.SkipWithError("a match didn't defer exactly one trade");
+    }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_SingleLegMatch)->Range(8, 512);
+BENCHMARK(BM_SingleLegMatch);
 
 static void BM_FxSwapMatch(benchmark::State &state)
 {
@@ -395,67 +466,78 @@ static void BM_FxSwapMatch(benchmark::State &state)
 
     Context ctxt(OrderStorage::instance(), &orderBook, &inQueues, &outQueues, &matcher, IdTGenerator::instance());
 
-    int ordNum = 0;
+    SourceIdT srcId, destId, origClOrdId, accountId, clearingId, execList;
+
+    // The resting sell swap, in the book
+    const std::string sellStr = "SWSELL-1";
+    auto *sellRaw = new RawDataEntry(STRING_RAWDATATYPE, sellStr.c_str(), static_cast<u32>(sellStr.size()));
+    SourceIdT sellClOrdId = WideDataStorage::instance()->add(sellRaw);
+
+    auto sell = std::make_unique<OrderEntry>(srcId, destId, sellClOrdId, origClOrdId, setup.instrId_, accountId,
+                                             clearingId, execList);
+    sell->side_ = SELL_SIDE;
+    sell->ordType_ = FXSWAP_ORDERTYPE;
+    sell->price_ = 1.2650;
+    sell->farPrice_ = 1.2680;
+    sell->settlDate_ = 1000;
+    sell->farSettlDate_ = 2000;
+    sell->orderQty_ = 100;
+    sell->leavesQty_ = 100;
+    sell->status_ = NEW_ORDSTATUS;
+    OrderEntry *savedSell = OrderStorage::instance()->save(*sell, IdTGenerator::instance());
+    sell.reset(); // save() stored a clone
+    orderBook.add(*savedSell);
+
+    // The aggressor buy swap
+    const std::string buyStr = "SWBUY-1";
+    auto *buyRaw = new RawDataEntry(STRING_RAWDATATYPE, buyStr.c_str(), static_cast<u32>(buyStr.size()));
+    SourceIdT buyClOrdId = WideDataStorage::instance()->add(buyRaw);
+
+    auto buy = std::make_unique<OrderEntry>(srcId, destId, buyClOrdId, origClOrdId, setup.instrId_, accountId,
+                                            clearingId, execList);
+    buy->side_ = BUY_SIDE;
+    buy->ordType_ = FXSWAP_ORDERTYPE;
+    buy->price_ = 1.2650;
+    buy->farPrice_ = 1.2680;
+    buy->settlDate_ = 1000;
+    buy->farSettlDate_ = 2000;
+    buy->orderQty_ = 100;
+    buy->leavesQty_ = 100;
+    buy->status_ = NEW_ORDSTATUS;
+    OrderEntry *savedBuy = OrderStorage::instance()->save(*buy, IdTGenerator::instance());
+    buy.reset(); // save() stored a clone
+
     for (auto _ : state)
     {
-        state.PauseTiming();
-        SourceIdT srcId, destId, origClOrdId, accountId, clearingId, execList;
-
-        // Resting sell swap
-        std::string sellStr = "SWSELL-" + std::to_string(++ordNum);
-        auto *sellRaw = new RawDataEntry(STRING_RAWDATATYPE, sellStr.c_str(), static_cast<u32>(sellStr.size()));
-        SourceIdT sellClOrdId = WideDataStorage::instance()->add(sellRaw);
-
-        auto sell = std::make_unique<OrderEntry>(srcId, destId, sellClOrdId, origClOrdId, setup.instrId_, accountId,
-                                                 clearingId, execList);
-        sell->side_ = SELL_SIDE;
-        sell->ordType_ = FXSWAP_ORDERTYPE;
-        sell->price_ = 1.2650;
-        sell->farPrice_ = 1.2680;
-        sell->settlDate_ = 1000;
-        sell->farSettlDate_ = 2000;
-        sell->orderQty_ = 100;
-        sell->leavesQty_ = 100;
-        sell->status_ = NEW_ORDSTATUS;
-        OrderEntry *savedSell = OrderStorage::instance()->save(*sell, IdTGenerator::instance());
-        sell.reset(); // save() stored a clone; free the template before timing resumes
-        orderBook.add(*savedSell);
-
-        // Aggressor buy swap
-        std::string buyStr = "SWBUY-" + std::to_string(ordNum);
-        auto *buyRaw = new RawDataEntry(STRING_RAWDATATYPE, buyStr.c_str(), static_cast<u32>(buyStr.size()));
-        SourceIdT buyClOrdId = WideDataStorage::instance()->add(buyRaw);
-
-        auto buy = std::make_unique<OrderEntry>(srcId, destId, buyClOrdId, origClOrdId, setup.instrId_, accountId,
-                                                clearingId, execList);
-        buy->side_ = BUY_SIDE;
-        buy->ordType_ = FXSWAP_ORDERTYPE;
-        buy->price_ = 1.2650;
-        buy->farPrice_ = 1.2680;
-        buy->settlDate_ = 1000;
-        buy->farSettlDate_ = 2000;
-        buy->orderQty_ = 100;
-        buy->leavesQty_ = 100;
-        buy->status_ = NEW_ORDSTATUS;
-        OrderEntry *savedBuy = OrderStorage::instance()->save(*buy, IdTGenerator::instance());
-        buy.reset(); // save() stored a clone; free the template before timing resumes
-
-        defered.count_ = 0;
-        state.ResumeTiming();
-
         matcher.match(savedBuy, ctxt);
         benchmark::DoNotOptimize(defered.count_);
     }
+    // Each match defers its one swap execution: a run that timed anything else fails
+    if (defered.count_ != static_cast<size_t>(state.iterations()))
+    {
+        state.SkipWithError("a match didn't defer exactly one swap execution");
+    }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_FxSwapMatch)->Range(8, 512);
+BENCHMARK(BM_FxSwapMatch);
 
 // =============================================================================
 // 6. End-to-End: FIX NOS → Processor → Match → Fill → OutQueues
 // =============================================================================
 
+/// A sell through the gateway, booked, then a buy that trades with it, each waited for until the pool has finished. The
+/// pool's workers do the work, so a cycle is timed in real time: this thread's CPU time is the two translations and the
+/// polls (#309).
 static void BM_FixEndToEndFillCycle(benchmark::State &state)
 {
+    // As in BM_TaskManagerThroughput (#120): this thread only polls, so on one CPU the pool has no worker and nothing
+    // drains. Say so now, not after a minute's deadline.
+    if (oneapi::tbb::info::default_concurrency() < 2)
+    {
+        state.SkipWithError("needs at least 2 CPUs, so TaskManager has a worker; pin to a range such as 2-5");
+        return;
+    }
+
     FixBenchSetup setup;
 
     DummyOrderSaver saver;
@@ -465,7 +547,7 @@ static void BM_FixEndToEndFillCycle(benchmark::State &state)
     orderBook->init(instruments);
 
     auto inQueues = std::make_unique<IncomingQueues>();
-    auto outQueues = std::make_unique<NullOutQueues>();
+    auto outQueues = std::make_unique<CountingOutQueues>();
 
     TransactionMgrParams transParams(IdTGenerator::instance());
     auto transMgr = std::make_unique<TransactionMgr>();
@@ -492,25 +574,43 @@ static void BM_FixEndToEndFillCycle(benchmark::State &state)
     auto gateway = std::make_unique<FixGateway>(inQueues.get(), WideDataStorage::instance(), OrderStorage::instance(),
                                                 setup.clearingId_);
 
+    u64 reportsDue = 0;
     int ordNum = 0;
     for (auto _ : state)
     {
-        // Submit sell
+        // Submit sell: its report says it rests
         std::string sellId = "E2E-S-" + std::to_string(++ordNum);
         auto sellMsg = makeBenchNOS(sellId, FIX::Side_SELL, FIX::OrdType_LIMIT, 1.2650, 100);
         gateway->onMessage(sellMsg, BENCH_SID);
-        taskMgr->waitUntilTransactionsFinished(10);
+        reportsDue += 1;
+        if (!waitForPool(*taskMgr, *outQueues, reportsDue))
+        {
+            state.SkipWithError("the pool did not book the sell within 60s");
+            break;
+        }
 
-        // Submit buy → triggers match + fill
+        // Submit buy → triggers match + fill: its own report, and the trade's, one to each side
         std::string buyId = "E2E-B-" + std::to_string(ordNum);
         auto buyMsg = makeBenchNOS(buyId, FIX::Side_BUY, FIX::OrdType_LIMIT, 1.2650, 100);
         gateway->onMessage(buyMsg, BENCH_SID);
-        taskMgr->waitUntilTransactionsFinished(10);
+        reportsDue += 3;
+        if (!waitForPool(*taskMgr, *outQueues, reportsDue))
+        {
+            state.SkipWithError("the pool did not fill the buy within 60s");
+            break;
+        }
+    }
+    // Every cycle is a trade: a run that timed anything else fails
+    if (!state.skipped() && (outQueues->trades() != 2 * static_cast<u64>(state.iterations())))
+    {
+        state.SkipWithError(("the cycles made " + std::to_string(outQueues->trades()) + " trade reports, not " +
+                             std::to_string(2 * state.iterations()))
+                                .c_str());
     }
     state.SetItemsProcessed(state.iterations() * 2); // 2 orders per cycle
 
+    // Nothing to wait for: each cycle ended with the pool finished, and a run stopped at a deadline has waited a minute
     transMgr->stop();
-    taskMgr->waitUntilTransactionsFinished(5);
     inQueues->detach();
     transMgr->detach();
     taskMgr.reset();
@@ -521,6 +621,6 @@ static void BM_FixEndToEndFillCycle(benchmark::State &state)
     gateway.reset();
     TaskManager::destroy();
 }
-BENCHMARK(BM_FixEndToEndFillCycle)->Range(1, 64)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_FixEndToEndFillCycle)->UseRealTime()->Unit(benchmark::kMicrosecond);
 
 #endif // BUILD_FIX
