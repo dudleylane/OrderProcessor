@@ -257,7 +257,7 @@ The styles are Tailwind CSS 4 (#220), so the app needs a browser from 2023 or la
 cd build && ctest --output-on-failure
 ```
 
-458 tests across 33 test files covering all core components. Run a specific suite:
+`ctest -N` lists every registered test. Run a specific suite:
 ```bash
 ./orderProcessorTest --gtest_filter="ProcessorTest.*"
 ```
@@ -512,7 +512,7 @@ OrderProcessor/
 │       ├── src/components/  # UI components
 │       ├── src/hooks/       # WebSocket state + alerts hooks
 │       └── src/types/       # TypeScript type definitions
-├── test/                   # Google Test unit tests (33 files, 458 tests)
+├── test/                   # Google Test unit tests
 │   └── mocks/              # Mock objects for testing
 ├── bench/                  # Google Benchmark performance tests
 ├── app/                    # WebSocket server application
