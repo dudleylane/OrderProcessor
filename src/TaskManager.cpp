@@ -13,6 +13,8 @@
 #include <cassert>
 #include <iostream>
 
+#include <oneapi/tbb/task_arena.h>
+
 #include "Logger.h"
 #include "TaskManager.h"
 #include "ExchUtils.h"
@@ -29,6 +31,31 @@ std::unique_ptr<oneapi::tbb::global_control> TaskManager::scheduler_;
 /// Global atomic counter for distributing TBB workers across CPU cores.
 /// Each TBB worker thread pins itself to the next core on first task pickup.
 static std::atomic<int> g_nextWorkerCore{ 0 };
+
+/// Whether this thread is running one of a TaskManager's tasks, which decides how submit() starts the next (#364)
+static thread_local bool g_inTask = false;
+
+namespace
+{
+/// Marks this thread as in a task for the task body's extent
+class InTask final
+{
+public:
+    InTask() noexcept : was_(g_inTask)
+    {
+        g_inTask = true;
+    }
+    ~InTask()
+    {
+        g_inTask = was_;
+    }
+    InTask(const InTask &) = delete;
+    InTask &operator=(const InTask &) = delete;
+
+private:
+    bool was_;
+};
+} // namespace
 
 TaskManager::TaskManager(const TaskManagerParams &params)
     : transactMgr_(nullptr), transactIt_(nullptr), cpuAffinityStart_(-1), lastAvailableTransactProcessor_(0),
@@ -186,6 +213,27 @@ bool TaskManager::waitUntilTransactionsFinished(int waitIntervalSeconds) const
     return false;
 }
 
+// A spawn (task_group::run) waits for a worker to steal it, and oneTBB doesn't promise to wake one: its arena.h says the
+// spawn's double check is "deliberately sloppy about memory fences" (2021.11, advertise_new_work()). A worker that
+// spawns runs its own spawn when it returns to the dispatcher, so a task started from inside one of these tasks, as
+// almost every task is (a task's tail starts the next), is spawned, the cheaper start. The threads that push events and
+// transactions here don't return to the dispatcher: the IO thread, the FIX gateway, the expiry scheduler, restore, a
+// test. Their spawn could miss its wakeup, and then the task held an event processor and never ran, so with one
+// processor nothing ran after it (#364). So a task they start is enqueued: an enqueued task takes the fenced path
+// oneTBB promises to run, with a worker even where the arena has none. Enqueuing every task instead cost the pool
+// benchmarks about 10% (#364). defer() keeps the task in taskGroup_, so the destructor's wait() still covers it.
+template <typename F> void TaskManager::submit(F &&task)
+{
+    if (g_inTask)
+    {
+        taskGroup_.run(std::forward<F>(task));
+    }
+    else
+    {
+        oneapi::tbb::this_task_arena::enqueue(taskGroup_.defer(std::forward<F>(task)));
+    }
+}
+
 void TaskManager::addTask(const TransactionId & /*id*/)
 {
     onReadyToExecute();
@@ -215,9 +263,10 @@ void TaskManager::onReadyToExecute()
 
     taskCreatedTr();
 
-    taskGroup_.run(
+    submit(
         [this, id, tr, proc]()
         {
+            InTask inTask;
             // Pin this TBB worker thread to a dedicated core (once per thread)
             if (cpuAffinityStart_ >= 0)
             {
@@ -288,9 +337,10 @@ void TaskManager::onNewEvent()
 
     taskCreated();
 
-    taskGroup_.run(
+    submit(
         [this, proc]()
         {
+            InTask inTask;
             // Pin this TBB worker thread to a dedicated core (once per thread)
             if (cpuAffinityStart_ >= 0)
             {

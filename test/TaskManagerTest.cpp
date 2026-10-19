@@ -730,6 +730,40 @@ TEST_F(TaskManagerTest, EventPushedWhileATaskFindsTheQueueEmptyIsProcessed)
     EXPECT_LT(2, manager->eventsCreated());
 }
 
+TEST_F(TaskManagerTest, EachEventPushedFromOutsideThePoolIsProcessed)
+{
+    // The IO thread pushes events from outside oneTBB's pool and never waits on it. A task it spawned could go unrun:
+    // oneTBB doesn't promise that a spawn wakes a worker, and with one event processor the unrun task held it, so no
+    // later push started anything (#364). Trade a sell and a buy, each pushed from the test thread the moment the pool
+    // is idle, when its workers are going to sleep: what FX's fill-cycle benchmark does, where 4 runs in 10 stalled.
+    // Against the spawning code it failed 10 runs of 20.
+    auto manager = createTaskManager(1, 1);
+    auto idleWithin = [&manager](std::chrono::seconds timeout)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (!manager->waitUntilTransactionsFinished(0))
+        {
+            if (std::chrono::steady_clock::now() > deadline)
+            {
+                return false;
+            }
+            std::this_thread::yield();
+        }
+        return true;
+    };
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    int cycles = 0;
+    while ((cycles < 10000) && (std::chrono::steady_clock::now() < end))
+    {
+        pushOrder(SELL_SIDE, 10.0, 100, "test");
+        ASSERT_TRUE(idleWithin(std::chrono::seconds(5))) << "cycle " << cycles << "'s sell was never processed";
+        pushOrder(BUY_SIDE, 10.0, 100, "test");
+        ASSERT_TRUE(idleWithin(std::chrono::seconds(5))) << "cycle " << cycles << "'s buy was never processed";
+        ++cycles;
+    }
+    EXPECT_EQ(2 * cycles, manager->eventsProcessed());
+}
+
 // =============================================================================
 // Stress Tests
 // =============================================================================
