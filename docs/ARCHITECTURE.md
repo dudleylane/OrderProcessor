@@ -518,11 +518,11 @@ COP (Concurrent Order Processor)
 
 | Test File | Test Case | Description |
 |-----------|-----------|-------------|
-| `FixFullPipelineTest.cpp` | `FixFullPipelineTest.EveryComponentTouched` | Single test verifying all 15 components |
-| `FixEndToEndTest.cpp` | `FixEndToEndTest.*` | Full order lifecycle via FIX (6 tests) |
-| `FixGatewayTest.cpp` | `FixEnumTest.*` | Enum conversion round-trips (7 tests) |
-| `FixGatewayTest.cpp` | `FixGatewayInboundTest.*` | FIX message translation (7 tests) |
-| `FixGatewayTest.cpp` | `MultiOutQueuesTest.*` | Fan-out adapter (4 tests) |
+| `FixFullPipelineTest.cpp` | `FixFullPipelineTest.EveryComponentTouched` | Two FIX orders through the whole pipeline, checking each component's mark |
+| `FixEndToEndTest.cpp` | `FixEndToEndTest.*` | Full order lifecycle via FIX |
+| `FixGatewayTest.cpp` | `FixEnumTest.*` | Enum conversion round-trips |
+| `FixGatewayTest.cpp` | `FixGatewayInboundTest.*` | FIX message translation |
+| `FixGatewayTest.cpp` | `MultiOutQueuesTest.*` | Fan-out adapter |
 | `FixRotatingLogTest.cpp` | `FixRotatingLogTest.*` | The FIX log's files rotate and stay bounded (#160) |
 | `FixCredentialsTest.cpp` | `FixCredentialsTest.*` | The FIX credentials file, and its PBKDF2 password hashes (#147) |
 | `FixRefusalTest.py` | `FixRefusalsReachOnlyTheirSender` (ctest) | A real server: an order the gateway refuses is answered to its sender alone (#189) |
@@ -1557,6 +1557,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Low-Latency** | `TransactionScopePool.h`, `CacheAlignedAtomic.h`, `CpuAffinity.h`, `HugePages.h`, `NumaAllocator.h` |
 | **Subscriptions** | `SubscrManager.h/cpp`, `SubscriptionLayerImpl.h/cpp`, `SubscriptionLayerDef.h`, `SubscriptionDef.h`, `FilterImpl.h/cpp`, `EntryFilter.h/cpp`, `OrderFilter.h/cpp` |
 | **Events** | `EventManager.h/cpp`, `DeferedEvents.h`, `CancelOrderDeferedEvent.cpp`, `ExecutionDeferedEvent.cpp`, `MatchOrderDeferedEvent.cpp`, `ReleaseStopDeferedEvent.cpp`, `ReplaceRequestDeferedEvent.cpp`, `StateChangeDeferedEvent.cpp` |
+| **FX swaps** | `MatchSwapOrderDeferedEvent.cpp`, `SwapExecutionDeferedEvent.cpp` |
 | **PostgreSQL** | `PGWriteBehind.h/cpp`, `PGRequestBuilder.h/cpp`, `PGWriteRequest.h`, `PGEnumStrings.h` (optional) |
 | **Utilities** | `Logger.h/cpp`, `IdTGenerator.h/cpp`, `ExchUtils.h/cpp`, `Singleton.h`, `WideDataStorage.h/cpp`, `WideDataLazyRef.h` |
 
@@ -1565,9 +1566,11 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | Category | Files |
 |----------|-------|
 | **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `ExpirySchedulerTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
+| **This branch's** | `EnumCouplingTest.cpp`, `FxSwapTest.cpp`, and with `BUILD_FIX=ON`: `FixCredentialsTest.cpp`, `FixEndToEndTest.cpp`, `FixFullPipelineTest.cpp`, `FixGatewayTest.cpp`, `FixRotatingLogTest.cpp`, `FixTlsTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 | **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh` |
+| **FIX ctest scripts** (`BUILD_FIX=ON`) | `FixLogonTest.py`, `FixRefusalTest.py`, `FixResendTest.py`, `FixTlsTest.py`, and the client they share, `fix_client.py` |
 | **Fuzzing** | `fuzz/fuzz_client_message.cpp`, `fuzz/standalone_main.cpp`, `fuzz/corpus/` (`BUILD_FUZZ=ON`) |
 
 ### 10.3 Benchmark Files
@@ -1582,6 +1585,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | `OrderParamsLayoutBench.cpp` | Field layout optimization |
 | `ProcessorBench.cpp` | The real path: new order, match and cancel through a `Processor`, and `TaskManager` throughput (#25) |
 | `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159) |
+| `FixGatewayBench.cpp` | The FIX gateway (`BUILD_FIX=ON`): enum conversion, NewOrderSingle translation, ExecutionReport construction, the fan-out, swap and single-leg matching, and a FIX order's fill end to end |
 
 ---
 
