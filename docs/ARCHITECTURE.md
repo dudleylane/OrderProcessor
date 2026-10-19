@@ -450,6 +450,7 @@ COP (Concurrent Order Processor)
 | `IntegrationTest.cpp` | `IntegrationTest.*` | Order matching in full flow |
 | `ProcessorBench.cpp` | `BM_ProcessNewOrderWithMatch`, `BM_ProcessSwapWithMatch`, `BM_TaskManagerTrades` | Matching through a `Processor`, a swap's too, and through the worker pool |
 | `OrderMatchingBench.cpp` | `BM_OrderBook*` | The book the matcher searches: add, remove, find, top of book |
+| `FixGatewayBench.cpp` | `BM_SingleLegMatch`, `BM_FxSwapMatch` | One `OrderMatcher::match()`, outright and swap, with `BUILD_FIX=ON` (#306) |
 
 ---
 
