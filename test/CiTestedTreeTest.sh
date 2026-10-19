@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Each workflow's tested-tree job (#314), against canned API answers in the shapes GitHub's API returns. A push may skip
 # the jobs only when a pull request merged into its branch has a run of the workflow in which every job passed and which
-# recorded the push's tree; anything else, a failed call among them, must run them.
+# recorded the push's tree; anything else, a failed call among them, must run them, after asking again (#331, #357)
+# and saying what it found.
 # usage: CiTestedTreeTest.sh <scripts/ci-tested-tree.sh>
 set -u
 SCRIPT=$(realpath -e -- "$1") || { echo "no script $1"; exit 1; }
@@ -20,6 +21,8 @@ tree=$(git -C "$work/repo" rev-parse 'HEAD^{tree}')
 other=0123456789abcdef0123456789abcdef01234567
 repo=dudleylane/OrderProcessor
 head=89abcdef0123456789abcdef0123456789abcdef
+runs_endpoint="repos/$repo/actions/workflows/build-test.yml/runs"
+runs_endpoint+="?head_sha=$head&event=pull_request&status=success&per_page=100"
 
 # A gh that answers `gh api <endpoint>` from $FAKE_GH_DIR, and fails as GitHub's 404 does for an endpoint it has no
 # answer for. It notes each call, and whether gh was given a token and a configuration directory of its own. An answer
@@ -43,6 +46,9 @@ chmod 755 "$work/bin/gh"
 
 answer() { # endpoint json: the fake gh's answer for the endpoint
     printf '%s\n' "$2" > "$answers/$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')"
+}
+answer_at() { # endpoint n json: the fake gh's answer for the endpoint's nth call only
+    printf '%s\n' "$3" > "$answers/$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_').$2"
 }
 # The answers for a pull request merged into a base, whose run of build-test.yml recorded a tree
 merged() { # base merged_at run_event run_conclusion job_conclusion annotation_title annotation_tree [number head run]
@@ -97,6 +103,12 @@ expect_asked() { # n: how many times the script asked for the commit's pull requ
     echo "FAIL: it asked for the commit's pull requests $n times, not $1"
     failures=$((failures + 1))
 }
+expect_said() { # text: the script's output has it
+    grep -qF -- "$1" "$work/stdout" && return
+    echo "FAIL: the output doesn't say: $1"
+    cat "$work/stdout"
+    failures=$((failures + 1))
+}
 
 new_case
 expect true "a pull request's run records its tree and runs" pull_request master
@@ -118,18 +130,25 @@ expect false "the same on the FX branch" push feature/fx-swap-support
 new_case
 merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$other"
 expect true "the pull request's run tested another tree" push master
+expect_asked 5
+expect_said "run=true: no passing run of build-test.yml, in a pull request merged into master, recorded this tree, \
+$tree, asked 5 times, 0 s apart (#7's run 101 recorded $other)"
 new_case
 merged master '"2026-10-18T08:28:00Z"' pull_request success skipped "Tested tree" "$tree"
 expect true "a job of the pull request's run was skipped" push master
+expect_said "(#7's run 101: Release build + ctest skipped)"
 new_case
 merged master '"2026-10-18T08:28:00Z"' pull_request failure failure "Tested tree" "$tree"
 expect true "the pull request's run failed" push master
+expect_said "(#7: no passing pull_request run listed)"
 new_case
 merged master '"2026-10-18T08:28:00Z"' push success success "Tested tree" "$tree"
 expect true "the only run is a push's, not the pull request's" push master
+expect_said "(#7: no passing pull_request run listed)"
 new_case
 merged master '"2026-10-18T08:28:00Z"' pull_request success success "Already tested" "$tree"
 expect true "the run has no 'Tested tree' record" push master
+expect_said "(#7's run 101 recorded no tree)"
 new_case
 merged feature/fx-swap-support '"2026-10-18T09:49:31Z"' pull_request success success "Tested tree" "$tree"
 expect true "the pull request was merged into the other branch" push master
@@ -147,6 +166,8 @@ new_case
 merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$tree"
 rm -f "$answers/repos_${repo//\//_}_check-runs_1011_annotations_per_page_100"
 expect true "the run's annotations can't be read" push master
+expect_asked 5
+expect_said "(#7's run 101 recorded no tree, and job 1011's annotations can't be read)"
 new_case
 merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$tree"
 expect true "no token: gh isn't asked" push master ""
@@ -160,6 +181,22 @@ echo '[]' > "$pulls_answer.1"
 echo '[]' > "$pulls_answer.2"
 expect false "the commit is linked to its pull request only at the third ask" push master
 expect_asked 3
+
+# Seconds after a merge GitHub once answered without the pull request's passing run (#357): its run, or its record,
+# turns up at a later ask
+new_case
+merged master '"2026-10-19T16:07:16Z"' pull_request success success "Tested tree" "$tree"
+answer_at "$runs_endpoint" 1 '{"total_count": 0, "workflow_runs": []}'
+expect false "the pull request's run is listed only at the second ask" push master
+expect_asked 2
+expect_said "has recorded this tree yet (#7: no passing pull_request run listed) (ask 1 of 5): asking again in 0 s"
+new_case
+merged master '"2026-10-19T16:07:16Z"' pull_request success success "Tested tree" "$tree"
+answer_at "repos/$repo/check-runs/1011/annotations?per_page=100" 1 '[]'
+answer_at "repos/$repo/check-runs/1011/annotations?per_page=100" 2 '[]'
+expect false "the run's record is listed only at the third ask" push master
+expect_asked 3
+expect_said "has recorded this tree yet (#7's run 101 recorded no tree) (ask 2 of 5)"
 
 # Two pull requests have the commit: the first one's run tested another tree, the second one's this tree
 new_case
