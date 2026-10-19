@@ -1161,6 +1161,12 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
     {
         report.set(FIX::LastQty(trade->lastQty_));
         report.set(FIX::LastPx(trade->lastPx_));
+        // TradeDate (75), a LocalMktDate: the business day the trade counts in, which the engine keeps as YYYYMMDD
+        // (#258). A trade in no day has none.
+        if (0 != trade->tradeDate_)
+        {
+            report.set(FIX::TradeDate(std::to_string(trade->tradeDate_)));
+        }
     }
     // A reject says why: OrdRejReason (103) and the engine's reason in Text (58)
     if (auto *reject = dynamic_cast<const RejectExecEntry *>(exec))
