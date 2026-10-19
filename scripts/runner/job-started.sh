@@ -20,8 +20,8 @@
 # Dependabot pushes its branches into this repository itself, so its pull requests pass the fork check, and the push of
 # its branch starts every workflow too. Its jobs would run the updated dependencies, a new action's code among them,
 # before anyone has looked at them. So a job whose event Dependabot sent is refused, push and pull request alike, and a
-# re-run is refused too, since it replays the same payload. Check a Dependabot pull request locally with the pre-push
-# gate (and `npm run build` for an npm update), then merge it: the push to the branch it targets runs CI as usual.
+# re-run is refused too, since it replays the same payload. Since #340 Dependabot is off, as on QuickFIX's fork: no
+# .github/dependabot.yml and no alerts. The refusal stays, so that its branches don't run here if it's turned on again.
 #
 # Install it in the runner's directory, outside _work, and restart the runner when it is
 # idle, since the runner reads .env when it starts:
@@ -69,7 +69,7 @@ verdict=$(jq -e -r --slurp '
 echo "job-started hook (#143, #168): ${GITHUB_EVENT_NAME:-unknown} event, $verdict"
 if [[ "$verdict" != "run: "* ]]; then
     if [[ "$verdict" == *"dependabot[bot]"* ]]; then
-        echo "Dependabot's jobs don't run on this self-hosted runner: check its pull request locally (#168)." >&2
+        echo "Dependabot's jobs don't run on this self-hosted runner (#168), and Dependabot is off here (#340)." >&2
     else
         echo "A fork's pull request doesn't run on this self-hosted runner (#143)." >&2
     fi
