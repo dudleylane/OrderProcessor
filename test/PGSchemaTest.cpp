@@ -17,37 +17,18 @@
 #include <string>
 
 #include "PGEnumStrings.h"
+#include "TestAux.h"
 
 using namespace COP;
 
 namespace
 {
 
-/// The project's root: the first directory up from the test's that has README.md and CMakeLists.txt
-std::filesystem::path projectRoot()
-{
-    auto p = std::filesystem::current_path();
-    for (int i = 0; i < 8; ++i)
-    {
-        if (std::filesystem::exists(p / "README.md") && std::filesystem::exists(p / "CMakeLists.txt"))
-        {
-            return p;
-        }
-        if (!p.has_parent_path())
-        {
-            break;
-        }
-        p = p.parent_path();
-    }
-    ADD_FAILURE() << "Could not locate the project root from " << std::filesystem::current_path();
-    return std::filesystem::current_path();
-}
-
 /// Each enum type docker/init-db's scripts create, and its values
 std::map<std::string, std::set<std::string>> schemaEnums()
 {
     std::map<std::string, std::set<std::string>> types;
-    const std::filesystem::path dir = projectRoot() / "docker" / "init-db";
+    const std::filesystem::path dir = test::sourceRoot() / "docker" / "init-db";
     for (const auto &file : std::filesystem::directory_iterator(dir))
     {
         if (".sql" != file.path().extension())

@@ -90,6 +90,14 @@ target_sources(orderProcessorTest
         ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
 )
 
+# The repository the tests read files from, such as the docs DocConsistencyTest checks: test::sourceRoot(). They looked
+# for it above the working directory, which ctest sets to the build directory, and a build directory outside the
+# checkout has no repository above it (#374)
+target_compile_definitions(orderProcessorTest
+    PRIVATE
+        OP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
 target_include_directories(orderProcessorTest
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
