@@ -1359,23 +1359,6 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_AnExpireTimeTheRulesRefuse_IsNotQue
     gateway_->onMessage(day, TEST_SID);
 }
 
-/// The repository's config/fix.cfg, found by walking up from where the test runs, as DocConsistencyTest finds README
-std::filesystem::path fixConfig()
-{
-    for (auto dir = std::filesystem::current_path();; dir = dir.parent_path())
-    {
-        const std::filesystem::path cfg = dir / "config" / "fix.cfg";
-        if (std::filesystem::exists(cfg))
-        {
-            return cfg;
-        }
-        if (dir == dir.parent_path())
-        {
-            return {};
-        }
-    }
-}
-
 TEST(FixSessionTimeTest, ASessionsDayEndsAt1700NewYork)
 {
     // config/fix.cfg's sessions roll where the engine's business day ends, 17:00 New York (#240, ruled 2026-10-16), and
@@ -1386,8 +1369,8 @@ TEST(FixSessionTimeTest, ASessionsDayEndsAt1700NewYork)
     ::setenv("TZ", "UTC", 1);
     ::tzset();
     App::useBusinessDayLocalTime();
-    const std::filesystem::path cfg = fixConfig();
-    ASSERT_FALSE(cfg.empty()) << "config/fix.cfg not found";
+    const std::filesystem::path cfg = test::sourceRoot() / "config" / "fix.cfg";
+    ASSERT_TRUE(std::filesystem::exists(cfg)) << cfg << " not found";
     const FIX::SessionSettings settings(cfg.string());
     const FIX::Dictionary &defaults = settings.get();
     ASSERT_TRUE(defaults.has("UseLocalTime") && defaults.getBool("UseLocalTime"));
