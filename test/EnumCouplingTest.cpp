@@ -25,6 +25,7 @@
 #include "DataModelDef.h"
 #include "EnumStrings.h"
 #include "PGEnumStrings.h"
+#include "TestAux.h"
 
 using namespace COP;
 
@@ -32,26 +33,6 @@ namespace
 {
 
 using Values = std::set<std::string>;
-
-// The project root, found by walking up from where the test runs, as DocConsistencyTest finds it
-std::filesystem::path projectRoot()
-{
-    auto p = std::filesystem::current_path();
-    for (int i = 0; i < 8; ++i)
-    {
-        if (std::filesystem::exists(p / "README.md") && std::filesystem::exists(p / "CMakeLists.txt"))
-        {
-            return p;
-        }
-        if (!p.has_parent_path())
-        {
-            break;
-        }
-        p = p.parent_path();
-    }
-    ADD_FAILURE() << "Could not locate project root from " << std::filesystem::current_path();
-    return std::filesystem::current_path();
-}
 
 std::string readFile(const std::filesystem::path &path)
 {
@@ -133,7 +114,7 @@ void expectSame(const std::map<std::string, Values> &file, const std::string &na
 
 TEST(EnumCouplingTest, TheFrontendKnowsEveryValueTheServerWrites)
 {
-    const auto ts = tsEnums(readFile(projectRoot() / "src/oms-frontend/src/types/enums.ts"));
+    const auto ts = tsEnums(readFile(test::sourceRoot() / "src/oms-frontend/src/types/enums.ts"));
     const char *where = "enums.ts";
     expectSame(ts, "Side", jsonValues(CROSS_SIDE), where);
     expectSame(ts, "OrderType", jsonValues(FXSWAP_ORDERTYPE), where);
@@ -148,7 +129,7 @@ TEST(EnumCouplingTest, TheFrontendKnowsEveryValueTheServerWrites)
 TEST(EnumCouplingTest, ThePostgresSchemaHasEveryValueTheWriterWrites)
 {
     // The enums PGRequestBuilder converts with toSQL(); executions aren't written, so exec_type has no C++ side
-    const auto sql = sqlEnums(readFile(projectRoot() / "docker/init-db/001_schema.sql"));
+    const auto sql = sqlEnums(readFile(test::sourceRoot() / "docker/init-db/001_schema.sql"));
     const char *where = "001_schema.sql";
     expectSame(sql, "side", sqlValues(CROSS_SIDE), where);
     expectSame(sql, "order_type", sqlValues(FXSWAP_ORDERTYPE), where);
