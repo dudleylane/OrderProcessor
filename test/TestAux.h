@@ -51,6 +51,16 @@ inline std::string uniqueTestPath(const std::string &tag)
     return (dir / ("op_" + tag + "_" + name + "_" + std::to_string(::getpid()))).string();
 }
 
+/**
+ * Returns the root of the repository this binary was built from, for the tests that read its files, such as its docs
+ * and docker/init-db's schema.
+ *
+ * Those tests looked for README.md and CMakeLists.txt above the working directory, but ctest runs them in the build
+ * directory, and one outside the checkout has no repository above it (#374). CMake gives the source directory instead
+ * (OP_SOURCE_DIR, test/CMakeLists.txt). Defined in TestAux.cpp, since the benchmarks include this header without it.
+ */
+std::filesystem::path sourceRoot();
+
 // =============================================================================
 // Legacy Assertion Helper (for migration from legacy tests)
 // =============================================================================

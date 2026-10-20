@@ -54,6 +54,7 @@
 #include "ServerDefaults.h"
 #include "StateMachine.h"
 #include "StateMachineDef.h"
+#include "TestAux.h"
 #include "TransactionScope.h"
 #include "TransactionScopePool.h"
 #include "WsAuth.h"
@@ -111,42 +112,27 @@ void parseDocCheckMarkers(const std::filesystem::path &root, const std::string &
     }
 }
 
-// Locate the project root by walking up from the test binary directory until
-// we find README.md (this works regardless of where ctest invokes the binary).
-std::filesystem::path projectRoot()
-{
-    auto p = std::filesystem::current_path();
-    for (int i = 0; i < 8; ++i)
-    {
-        if (std::filesystem::exists(p / "README.md") && std::filesystem::exists(p / "CMakeLists.txt"))
-        {
-            return p;
-        }
-        if (!p.has_parent_path())
-        {
-            break;
-        }
-        p = p.parent_path();
-    }
-    ADD_FAILURE() << "Could not locate project root from " << std::filesystem::current_path();
-    return std::filesystem::current_path();
-}
-
 // ----------------------------------------------------------------------------
-// Test fixture: parses README.md, docs/ARCHITECTURE.md and docker/README.md once and exposes the marker map
+// Test fixture: parses README.md, docs/ARCHITECTURE.md and docker/README.md for each test and exposes the marker map
 // ----------------------------------------------------------------------------
 
 class DocConsistencyTest : public ::testing::Test
 {
 protected:
-    static DocMap docs_;
+    DocMap docs_;
 
-    static void SetUpTestSuite()
+    // Reads the docs' markers, and fails the test before it checks anything if a doc can't be read or gives a marker
+    // twice. Not in SetUpTestSuite(): GoogleTest skips every test of a suite whose SetUpTestSuite() fails, and ctest,
+    // told by gtest_discover_tests that "[  SKIPPED ]" means skipped, counted them all as passed, so a repeated marker
+    // or a moved doc turned every check off (#374). ctest runs each test in a process of its own, so the docs were
+    // read once a test anyway.
+    void SetUp() override
     {
-        const auto root = projectRoot();
+        const auto root = test::sourceRoot();
         parseDocCheckMarkers(root, "README.md", docs_);
         parseDocCheckMarkers(root, "docs/ARCHITECTURE.md", docs_);
         parseDocCheckMarkers(root, "docker/README.md", docs_);
+        ASSERT_FALSE(HasFailure()) << "The docs didn't read cleanly, so this test checked nothing";
     }
 
     // Helper: assert that every documented value of a marker equals an actual code value.
@@ -166,8 +152,6 @@ protected:
         }
     }
 };
-
-DocMap DocConsistencyTest::docs_;
 
 // ----------------------------------------------------------------------------
 // Marker assertions
@@ -252,7 +236,7 @@ TEST_F(DocConsistencyTest, WebSocketAccessToken)
 // src/oms-frontend, and the fuzz corpus's units are left out: the section doesn't list them file by file.
 TEST_F(DocConsistencyTest, FileReferenceNamesEveryFile)
 {
-    const auto root = projectRoot();
+    const auto root = test::sourceRoot();
     std::ifstream in(root / "docs/ARCHITECTURE.md");
     ASSERT_TRUE(in) << "can't read docs/ARCHITECTURE.md";
     const std::string doc((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
