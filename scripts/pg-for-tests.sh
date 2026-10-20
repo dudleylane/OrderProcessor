@@ -3,7 +3,7 @@
 # tests (#151). The host's own PostgreSQL, its roles and its secrets are left alone.
 #
 # usage: scripts/pg-for-tests.sh start NAME   start it, and print its connection string on standard output
-#        scripts/pg-for-tests.sh stop NAME    remove it
+#        scripts/pg-for-tests.sh stop NAME    remove it, and its data
 #
 # start runs the image docker/docker-compose.yml gives oms-db, as container NAME, published on 127.0.0.1 at a port the
 # system picks, with a password made for the run. Once the server takes TCP connections, it applies docker/init-db/*.sql
@@ -11,6 +11,9 @@
 #   PG_CONNECTION_STRING="$(scripts/pg-for-tests.sh start pg-test)" ctest -R PGWriteBehind
 #   scripts/pg-for-tests.sh stop pg-test
 # CI runs it so (.github/workflows/build-test.yml and sanitizers.yml). It needs podman.
+#
+# The image declares its data directory a VOLUME, so each start makes an anonymous volume, about 47 MB, which podman rm
+# keeps unless given -v (#371): every removal here gives it, or each run's database stays in the podman store.
 #
 # Exit codes: 0 = done, 1 = the database didn't start or the schema didn't apply, 2 = usage error
 
@@ -29,7 +32,7 @@ command -v podman >/dev/null 2>&1 || { echo "pg-for-tests: podman is not install
 
 case "$ACTION" in
     stop)
-        podman rm -f -t 0 "$NAME" >/dev/null 2>&1 || true
+        podman rm -f -v -t 0 "$NAME" >/dev/null 2>&1 || true
         exit 0 ;;
     start) ;;
     *) usage ;;
@@ -42,11 +45,11 @@ PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')"
 fail() {
     echo "pg-for-tests: $1" >&2
     podman logs "$NAME" 2>&1 | tail -n 20 >&2 || true
-    podman rm -f -t 0 "$NAME" >/dev/null 2>&1 || true
+    podman rm -f -v -t 0 "$NAME" >/dev/null 2>&1 || true
     exit 1
 }
 
-podman rm -f -t 0 "$NAME" >/dev/null 2>&1 || true
+podman rm -f -v -t 0 "$NAME" >/dev/null 2>&1 || true
 podman run -d --name "$NAME" -e POSTGRES_USER=oms -e POSTGRES_DB=oms -e POSTGRES_PASSWORD="$PASSWORD" \
     -p 127.0.0.1::5432 "$IMAGE" >/dev/null || fail "the container didn't start"
 PORT="$(podman port "$NAME" 5432/tcp | head -n 1)"
