@@ -92,7 +92,7 @@ Pure unit tests for static enum conversion functions. No I/O, no singletons.
 | `OrdTypeConversion` | FIX OrdType (1,2,3,4) → COP OrderType |
 | `TifConversion` | FIX TimeInForce (0,1,2,3,4,7) → COP TimeInForce |
 | `CurrencyConversion` | FIX currency strings → COP Currency (8 currencies + invalid) |
-| `OrdStatusConversion` | COP OrderStatus → FIX OrdStatus chars (11 statuses; REPLACED → 4, since FIX 4.4 has no 39=5) |
+| `OrdStatusConversion` | COP OrderStatus → FIX OrdStatus chars (11 statuses; REPLACED → 4, since 39=5 has been out of use since FIX 4.4) |
 | `ExecTypeConversion` | COP ExecType → FIX ExecType chars (12 types) |
 
 ---
@@ -154,20 +154,21 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `NewOrderMultileg_LegPriceNoOrderTradesAt_IsNotQueued` | Either leg's LegPrice (566) no order trades at → refused, nothing pushed (#145) |
 | `SessionMapPopulatedOnLogon` | `onLogon()` makes the session known |
 | `ALogonNeedsItsCounterpartysUsernameAndPassword` | With credentials, `fromAdmin()` accepts a Logon only with its counterparty's Username and Password, and from a CompID the credentials name; it refuses with `RejectLogon` and a text that doesn't say which was wrong. Other admin messages aren't checked (#147) |
-| `WithoutCredentialsEveryLogonIsAccepted` | The gateway without credentials, as tests run it, checks nothing; the server won't run FIX that way (#147) |
+| `WithoutCredentialsEveryLogonIsAccepted` | The gateway without credentials, as tests run it, checks only a Logon's version (FixtSessionTest); the server won't run FIX that way (#147) |
 | `ASessionTradesOnlyItsCounterpartysAccounts` | An order, single or FX swap, naming one of the counterparty's accounts is queued; one naming no account trades its first; one naming another account is refused before the engine sees it (#147) |
 | `CredentialsGivingAnAccountTheServerDoesntHaveAreRefused` | `setCredentials()` throws for an account the data directory doesn't have (#147) |
 | `ASessionStaysKnownWhileItsClientIsAway` | A session is known from `onCreate()`, before any logon, and still after `onLogout()`, so a report for its order reaches QuickFIX, which keeps it for a ResendRequest (#160) |
 | `MakeSourceString_Format` | Source string format: `"FIX:SENDER->TARGET"` |
 | `FromApp_RoutesAGenericNewOrderSingle` | `fromApp()` given a plain `FIX::Message` builds the typed message, without the cracker's bad cast that UBSan reported |
 | `FromApp_RoutesAGenericCancelRequest` | The same for a cancel request |
-| `FromApp_UnsupportedTypeStillReachesQuickFix` | A type the gateway doesn't handle still throws UnsupportedMessageType, which QuickFIX answers |
+| `FromApp_UnsupportedTypeIsAnsweredByTheGateway` | A type the gateway doesn't handle is answered with the gateway's own BusinessMessageReject, not thrown for QuickFIX to answer (#377) |
 | `FromApp_HandlerExceptionIsContained` | A handler's exception stays in `fromApp()` and is answered with a BusinessMessageReject, rather than ending the server (#36) |
 | `NewOrdersAndAReplaceWriteNoStringRecords` (FixGatewayStringsTest) | A NewOrderSingle, an FX swap's NewOrderMultileg and a replace write no string records: their ClOrdIDs, source and destination go in the order's own record (#192) |
 | `ExecutionReport_RejectCarriesOrdRejReasonAndText` | Reject → 150=8, 39=8, OrdRejReason 103=0, the reason in Text (58) |
 | `ExecutionReport_AcknowledgementCarriesNoRejectFields` | A new order's acknowledgement → 150=0, 39=0, no 103 |
 | `ExecutionReport_CancelAckNamesTheCancelRequest` | A cancel's acknowledgement → 11 the request's ClOrdID, 41 the order's; a cancel no request asked for keeps the order's in 11 (#98) |
 | `ExecutionReport_TradeCarriesLastQtyAndLastPx` | Trade → 150=F, LastQty (32), LastPx (31) |
+| `ExecutionReport_CarriesTheOrdersAvgPx` | The order's AvgPx (6), which FIX 5.0 SP2 doesn't require and FIX 4.4 did (#377) |
 | `ExecutionReport_TradeCarriesItsTradeDate` | Trade → TradeDate (75), the business day it counts in, `YYYYMMDD`; a trade in no day has none (#258) |
 | `ExecutionReport_CorrectionIsTradeCorrect` | Correction → 150=G, not NEW |
 | `ExecutionReport_AStopsReleaseIsTriggeredAndNew` | A stop's release → 150=L, 39=0, its ClOrdID, no 103 or LastQty (#236) |
@@ -189,7 +190,7 @@ Pure unit tests for the messages that answer a new order or a replacement the en
 
 | Test | Description |
 |------|-------------|
-| `DuplicateNewOrderGetsAnExecutionReportReject` | A new order whose ClOrdID is in use → 150=8, 39=8, OrdRejReason 6, the reason in Text (58), OrderID NONE |
+| `DuplicateNewOrderGetsAnExecutionReportReject` | A new order whose ClOrdID is in use → 150=8, 39=8, OrdRejReason 6, the reason in Text (58), OrderID NONE, AvgPx (6) 0 |
 | `TheSenderSeesItsOwnClOrdIdsInAnOrderReject` | The engine's event names ClOrdIDs under the session's key → the client gets its own, in 11, 41 and Text (58) (#71) |
 | `AnOrderRejectsExecIdIsTheIdItIsGiven` | The ExecID comes from the shared id generator, so it doesn't repeat after a restart (#81) |
 | `OrderRefusedForAnotherReasonUsesTheBrokerOptionCode` | Refused for another reason → OrdRejReason 0 |
@@ -313,8 +314,8 @@ Runs `orderProcessorServer` with this branch's `config/fix.cfg` and two FIX clie
 **Requires:** `BUILD_FIX=ON`, Python 3
 
 Runs `orderProcessorServer` with this branch's `config/fix.cfg` and a credentials file, and checks, on the wire:
-- the server won't start FIX without `--fix-credentials` (exit 2), nor with an account the data directory lacks (exit 1);
-- a Logon with a wrong password, none, or another username gets a Logout and a closed connection, and one from a CompID no line names is dropped; the log says why, and has no password in it;
+- the server won't start FIX without `--fix-credentials` (exit 2), nor with an account the data directory lacks, nor with a BeginString or DefaultApplVerID other than FIXT.1.1's and FIX 5.0 SP2's (exit 1, #377);
+- a Logon with a wrong password, none, another username, or DefaultApplVerID 7 (FIX 5.0, not SP2) gets a Logout and a closed connection, and one from a CompID no line names, or of FIX 4.4, is dropped; the log says why, and has no password in it;
 - with its password the counterparty logs on, an order on one of its accounts is acknowledged, and one on another account is refused with 150=8 and 103=15;
 - `--hash-fix-password` makes a hash Python's own PBKDF2 agrees with, with 600000 iterations.
 
@@ -392,6 +393,30 @@ The checks the gateway makes on a quantity and a price before the engine sees th
 |------|-------------|
 | `OrderQtyIsAWholeNumberTheEngineCanHold` (FixQuantityTest) | `toQuantity()`: 1, 100 and 4294967295 → those; -5, 4294967296, 0.5, 0, -0, 4294967295.5, 1e300, both infinities and NaN → none |
 | `APriceIsFiniteAndAboveZeroUnlessTheOrderIsAMarketOrder` (FixPriceTest) | `isTradablePrice()`: a limit order's or a swap's price is finite and above 0; a market order's may be 0, but not infinite |
+
+---
+
+## 20. FixtSessionTest — FIXT.1.1 Sessions, with FIX 5.0 SP2
+
+**File:** `test/FixGatewayTest.cpp`
+**Requires:** `BUILD_FIX=ON`
+
+The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's messages to a real QuickFIX session that `config/fix.cfg` makes, as the acceptor makes one, with the gateway as its application, and reads what the session sends as a counterparty does: parsed with the session's dictionaries, this tree's `config/spec`, and validated as QuickFIX validates by default. "Taken" means such a counterparty accepts every message sent. Each test loads FIX 5.0 SP2's dictionary, most of a second.
+
+| Test | Description |
+|------|-------------|
+| `TheSettingsMakeAFixtSessionWithFix50Sp2` | `config/fix.cfg`'s session is FIXT.1.1's, DefaultApplVerID 9, with `FIX50SP2.xml`, whose ExecType has L; no other version has a dictionary |
+| `ALogonIsAnsweredWithFix50Sp2AsTheDefault` | A Logon gets a Logon, 8=FIXT.1.1 and 1137=9 |
+| `ALogonOfAnotherVersionIsRefused` | A Logon with DefaultApplVerID 7, 6 or `FIX.5.0SP2` (the name, where the value belongs) gets a Logout saying 1137 must be 9, and the connection closed: the session would check that version's messages against no dictionary |
+| `AMessageOfAnotherVersionIsRefused` | A message with ApplVerID (1128) 7 gets a Reject (35=3) naming 1128, SessionRejectReason 18, and isn't queued; the session goes on |
+| `AMessageOfFix50Sp2OrOfNoVersionIsTaken` | A message with 1128=9, and one without 1128, are queued |
+| `AValueFix50Sp2DoesntHaveIsRefused` | OrdType Z gets a Reject naming 40: the session checks against FIX 5.0 SP2's dictionary |
+| `AMessageTypeTheGatewayDoesntTakeIsRefusedReadably` | News (35=B) gets the gateway's BusinessMessageReject, 380=3; QuickFIX's own carried 1137, which a counterparty that validates refuses |
+| `ARequestWithoutAFieldTheGatewayNeedsIsRefusedReadably` | A cancel without OrigClOrdID (41) and an order without OrderQty (38), which FIX 5.0 SP2 doesn't require, get a BusinessMessageReject, 380=5, naming the field |
+| `TheGatewaysOwnRefusalsAreTaken` | The gateway's refusal of an unknown symbol (35=8), and of a cancel and a replace of an unknown order (35=9) |
+| `TheEnginesRefusalsAreTaken` | The engine's refusals as the gateway reports them: a new order and a replacement whose ClOrdID is in use, a cancel too late, a business reject |
+| `EveryKindOfExecutionReportIsTaken` | Every ExecType the gateway sends, a stop's release (150=L, #236) among them, and a trade, a correction, a cancel's acknowledgement and a replacement's report |
+| `ASwapsTradeReportIsRefusedForItsTradeLinkIdAlone` | A swap leg's trade report is refused for TradeLinkID (820), which neither FIX 4.4's ExecutionReport nor FIX 5.0 SP2's has (#378), and for nothing else: its LegLastQty (1418) is in the NoLegs group, where FIX 5.0 SP2 has it |
 
 ---
 

@@ -4,6 +4,8 @@
 #include <quickfix/ThreadedSSLSocketAcceptor.h>
 #include <quickfix/ThreadedSocketAcceptor.h>
 #include <quickfix/FileStore.h>
+#include <quickfix/FixValues.h>
+#include <quickfix/Message.h>
 #include <quickfix/SessionSettings.h>
 
 #include <set>
@@ -57,6 +59,37 @@ void addCounterpartySessions(FIX::SessionSettings &settings, const FixCredential
         }
     }
 }
+
+/// The gateway speaks FIX 5.0 SP2 over FIXT.1.1 alone (#377), so a session of anything else is refused before the
+/// acceptor starts. A FIXT session checks a message against the dictionary of its version, and against none for a
+/// version that has none: AppDataDictionary is its DefaultApplVerID's.
+void checkSessionsSpeakFix50Sp2(const FIX::SessionSettings &settings)
+{
+    for (const FIX::SessionID &sid : settings.getSessions())
+    {
+        const FIX::Dictionary &session = settings.get(sid);
+        std::string problem;
+        if (!sid.isFIXT())
+        {
+            problem = "its BeginString is " + sid.getBeginString().getString() + ", not FIXT.1.1";
+        }
+        else if (!session.has(FIX::DEFAULT_APPLVERID) ||
+                 (FIX::ApplVerID_FIX50_SP2 !=
+                  FIX::Message::toApplVerID(session.getString(FIX::DEFAULT_APPLVERID)).getValue()))
+        {
+            problem = "its DefaultApplVerID isn't FIX.5.0SP2";
+        }
+        else if (!session.has(FIX::TRANSPORT_DATA_DICTIONARY) || !session.has(FIX::APP_DATA_DICTIONARY))
+        {
+            problem = "it has no TransportDataDictionary or no AppDataDictionary";
+        }
+        if (!problem.empty())
+        {
+            throw std::runtime_error("the FIX session " + sid.toString() + " can't be served: " + problem +
+                                     "; the gateway speaks FIX 5.0 SP2 over FIXT.1.1 alone (#377)");
+        }
+    }
+}
 } // namespace
 
 struct FixServer::Impl
@@ -94,6 +127,7 @@ void FixServer::start(const std::string &configFile, const std::string &credenti
     }
     impl_->credentials = std::make_unique<FixCredentials>(FixCredentials::load(credentialsFile));
     addCounterpartySessions(*impl_->settings, *impl_->credentials, credentialsFile);
+    checkSessionsSpeakFix50Sp2(*impl_->settings);
     impl_->gateway->setCredentials(impl_->credentials.get());
     std::string compIds;
     for (const FixCounterparty &counterparty : impl_->credentials->counterparties())

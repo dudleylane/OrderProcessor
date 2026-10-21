@@ -8,7 +8,7 @@ ExecutionReport (150=8, 39=8) with its OrdRejReason (103), while CLIENT_B gets n
      server doesn't have (103=1). These used to go to every session logged on, as a BusinessMessageReject that named no
      order.
 
-usage: FixRefusalTest.py <orderProcessorServer> <seedData> <config/fix.cfg> <config/spec/FIX44.xml>
+usage: FixRefusalTest.py <orderProcessorServer> <seedData> <config/fix.cfg> <config/spec>
 """
 import os
 import sys

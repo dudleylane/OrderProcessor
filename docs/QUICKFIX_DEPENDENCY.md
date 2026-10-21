@@ -50,7 +50,7 @@ uses 22.
 
 ## What the gateway uses
 
-FIX 4.4 only:
+FIX 5.0 SP2 over FIXT.1.1 only (#377):
 
 - **Transport and sessions:** `ThreadedSocketAcceptor`, or `ThreadedSSLSocketAcceptor` with `--fix-tls-cert` and
   `--fix-tls-key` (#228), `Session`, `SessionSettings`, `SessionID`, `FileStore`, `FileLog`, `Application`.
@@ -62,18 +62,34 @@ FIX 4.4 only:
   `all -SSLv2`, would allow SSLv3, TLS 1.0 and TLS 1.1.
 - **Messages:** `NewOrderSingle`, `NewOrderMultileg` (FX swaps, with the `NoLegs` group),
   `OrderCancelRequest`, `OrderCancelReplaceRequest`, `ExecutionReport`, `OrderCancelReject`,
-  `BusinessMessageReject`, `News`.
+  `BusinessMessageReject`, `News`, from `quickfix/fix50sp2/`; FIXT.1.1's `Logon` and `Reject`, from
+  `quickfix/fixt11/`.
 - **Settings:** `config/fix.cfg` (acceptor on port 5001, `ResetOnLogon=N`, one session a day from 17:00 New York,
   read with `UseLocalTime=Y` (#240)). It names no session: the server makes one for each counterparty in
   `--fix-credentials` (#147).
 - **Logon:** `Application::fromAdmin` checks a Logon's `Username` (553) and `Password` (554) against the credentials
-  file, and throws `RejectLogon` to refuse it (#147).
+  file, and throws `RejectLogon` to refuse it (#147). It refuses a Logon whose `DefaultApplVerID` (1137) isn't 9 the
+  same way, and `fromApp` answers a message whose `ApplVerID` (1128) isn't 9 with a `Reject`, SessionRejectReason 18:
+  QuickFIX checks a message against the dictionary of its version, and against none for a version without one.
+  A Logon of another BeginString, FIX.4.4's among them, never reaches `fromAdmin`: the acceptor has no session for
+  it, and closes the connection unanswered.
+- **Rejects:** the gateway answers a message type it doesn't take, and a `FieldNotFound` from a handler, with its own
+  `BusinessMessageReject`, where it used to let QuickFIX answer them. On a FIXT session QuickFIX's own
+  (`Session::generateBusinessReject`) carries `DefaultApplVerID` (1137), which FIX 5.0 SP2's `BusinessMessageReject`
+  doesn't have, so a counterparty that validates refuses it: dudleylane/quickfix#173, inherited from upstream, where
+  quickfix/quickfix#387 was closed as not planned.
   The logs come from the project's `FixRotatingLogFactory` (`app/FixRotatingLog.cpp`), not `FileLog`:
   the same files and lines, rotated at `FileLogMaxMB` with `FileLogBackups` kept (#160).
 
-The data dictionary is the project's own copy, `config/spec/FIX44.xml`. It differs from the
-`FIX44.xml` that QuickFIX installs only in the types of fields 139 (MiscFeeType) and 532
-(MassCancelRejectReason): CHAR here, STRING there. The gateway uses neither.
+The data dictionaries are QuickFIX's own, `config/spec/FIXT11.xml` (`TransportDataDictionary`) and
+`config/spec/FIX50SP2.xml` (`AppDataDictionary`), byte for byte as the pinned ref has them in `spec/`
+(v22.1.0, c1ce0a0; the same in v22.3.0). A FIXT session reads only those two settings, and QuickFIX
+registers `AppDataDictionary` under the session's `DefaultApplVerID`. FIX 5.0 SP2's dictionary is
+large: the server listened after about 0.5 s of CPU, at 93 MiB resident, where FIX 4.4's took 0.04 s,
+at 29 MiB (2026-10-21, Release, one counterparty or three). It is paid once, since `SessionFactory`
+shares a parsed dictionary between sessions whose settings agree (dudleylane/quickfix#68), and the
+sessions `config/fix.cfg` makes all take theirs from `[DEFAULT]`. Until #377 the gateway spoke
+FIX 4.4, with a copy of QuickFIX's `FIX44.xml` that differed in the types of fields 139 and 532.
 
 ## Building against the pinned release
 
@@ -102,12 +118,14 @@ keeps the QuickFIX it found first (`quickfix_DIR` in its cache).
 2. Raise `QUICKFIX_REF` in `docker/Dockerfile.oms-server`, the one place CI and the image take the
    ref from (#178). For a new major, also raise the version in `find_package(quickfix 22 CONFIG
    REQUIRED)`.
-3. Verify with FIX on: the pre-push hook (Release, `ctest -j1`, clang-format), ASan+UBSan and TSan
+3. Compare `config/spec/FIXT11.xml` and `config/spec/FIX50SP2.xml` with the release's `spec/`
+   (`git diff vOLD vNEW -- spec/FIXT11.xml spec/FIX50SP2.xml`), and take its copies if they changed.
+4. Verify with FIX on: the pre-push hook (Release, `ctest -j1`, clang-format), ASan+UBSan and TSan
    as `sanitizers.yml` runs them, and a live FIX session (logon, orders that cross, a cancel, a
    two-leg FX swap) against `orderProcessorServer --fix-cfg`.
 
 22.1.0 was taken that way. 22.0 changed three things the gateway reaches: how `message_order`
-looks up a field's position (an array for compact field numbers, as FIX 4.4's are, and a hash
-table otherwise, with the same ordering rule), the parsing of `SocketAcceptPort` (now checked as
+looks up a field's position (an array for compact field numbers and a hash table otherwise, with
+the same ordering rule), the parsing of `SocketAcceptPort` (now checked as
 0 to 65535 instead of truncated to `short`), and how data dictionaries load (faster, same
 result). 22.1.0 changed only the Ruby binding.

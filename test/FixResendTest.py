@@ -10,7 +10,7 @@ counterparties (#147):
 The fill must come back, marked PossDupFlag (43=Y). Before #160 it was lost twice over: the gateway forgot a session at
 logout and dropped the report, and ResetOnLogon=Y started both sides from 1 at A's logon.
 
-usage: FixResendTest.py <orderProcessorServer> <seedData> <config/fix.cfg> <config/spec/FIX44.xml>
+usage: FixResendTest.py <orderProcessorServer> <seedData> <config/fix.cfg> <config/spec>
 """
 import os
 import sys
@@ -73,8 +73,8 @@ def scenario(port):
 def main():
     if len(sys.argv) != 5:
         sys.exit(__doc__)
-    server, seed, cfg, dictionary = sys.argv[1:]
-    with Server(server, seed, cfg, dictionary, COUNTERPARTIES) as running:
+    server, seed, cfg, spec = sys.argv[1:]
+    with Server(server, seed, cfg, spec, COUNTERPARTIES) as running:
         scenario(running.fix_port)
     sys.exit(1 if problems else 0)
 

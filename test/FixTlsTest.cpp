@@ -19,7 +19,7 @@ namespace
 /// Settings as config/fix.cfg gives them, plus extra, which goes into [DEFAULT]
 FIX::SessionSettings settingsWith(const std::string &extra = "")
 {
-    std::istringstream text("[DEFAULT]\nConnectionType=acceptor\nBeginString=FIX.4.4\nSenderCompID=ORDER_PROCESSOR\n"
+    std::istringstream text("[DEFAULT]\nConnectionType=acceptor\nBeginString=FIXT.1.1\nSenderCompID=ORDER_PROCESSOR\n"
                             "SocketAcceptPort=5001\n" +
                             extra);
     return FIX::SessionSettings(text);
@@ -52,7 +52,7 @@ TEST(FixTlsTest, TheFilesAndTheProtocolsGoIntoDefault)
     EXPECT_EQ("-all +TLSv1_2 +TLSv1_3", settings.get().getString(FIX::SSL_PROTOCOL));
 
     // A counterparty's session, made after, as FixServer makes them, carries them too
-    const FIX::SessionID sid("FIX.4.4", "ORDER_PROCESSOR", "CLIENT_A");
+    const FIX::SessionID sid("FIXT.1.1", "ORDER_PROCESSOR", "CLIENT_A");
     settings.set(sid, FIX::Dictionary());
     EXPECT_EQ(cert.path, settings.get(sid).getString(FIX::SERVER_CERTIFICATE_FILE));
 }

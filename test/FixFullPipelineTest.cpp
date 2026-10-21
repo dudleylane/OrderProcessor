@@ -13,7 +13,7 @@
 #ifdef BUILD_FIX
 
 // QuickFIX headers MUST come before any <flat_map> include (see FixGateway.h)
-#include <quickfix/fix44/NewOrderSingle.h>
+#include <quickfix/fix50sp2/NewOrderSingle.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
 #include "FixGateway.h"
@@ -233,7 +233,7 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
                     TaskManager::destroy();
                 } };
 
-    const FIX::SessionID sid("FIX.4.4", "PIPELINE_CLIENT", "ORDER_PROCESSOR", "");
+    const FIX::SessionID sid("FIXT.1.1", "PIPELINE_CLIENT", "ORDER_PROCESSOR", "");
 
     // A timeout fails here, as a timeout, not later as a wrong order state (#301)
     auto waitForProcessing = [&]()
@@ -248,7 +248,7 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
     // --- STEP 1: Submit SELL via FixGateway ---
     {
         FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
-        FIX44::NewOrderSingle sellMsg;
+        FIX50SP2::NewOrderSingle sellMsg;
         sellMsg.set(FIX::ClOrdID("PIPE-SELL-001"));
         sellMsg.set(FIX::Side(FIX::Side_SELL));
         sellMsg.set(FIX::TransactTime(now));
@@ -268,7 +268,7 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
     // --- STEP 2: Submit BUY at same price ---
     {
         FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
-        FIX44::NewOrderSingle buyMsg;
+        FIX50SP2::NewOrderSingle buyMsg;
         buyMsg.set(FIX::ClOrdID("PIPE-BUY-001"));
         buyMsg.set(FIX::Side(FIX::Side_BUY));
         buyMsg.set(FIX::TransactTime(now));

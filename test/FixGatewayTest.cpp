@@ -8,18 +8,21 @@
 #ifdef BUILD_FIX
 
 // QuickFIX headers MUST come before any <flat_map> include (see FixGateway.h)
-#include <quickfix/fix44/NewOrderSingle.h>
-#include <quickfix/fix44/NewOrderMultileg.h>
-#include <quickfix/fix44/OrderCancelRequest.h>
-#include <quickfix/fix44/OrderCancelReplaceRequest.h>
-#include <quickfix/fix44/News.h>
-#include <quickfix/fix44/Logon.h>
-#include <quickfix/fix44/Heartbeat.h>
+#include <quickfix/fix50sp2/NewOrderSingle.h>
+#include <quickfix/fix50sp2/NewOrderMultileg.h>
+#include <quickfix/fix50sp2/OrderCancelRequest.h>
+#include <quickfix/fix50sp2/OrderCancelReplaceRequest.h>
+#include <quickfix/fix50sp2/News.h>
+#include <quickfix/fixt11/Logon.h>
+#include <quickfix/fixt11/Heartbeat.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
 #include <quickfix/FieldConvertors.h>
+#include <quickfix/MessageStore.h>
+#include <quickfix/SessionFactory.h>
 #include <quickfix/SessionSettings.h>
 #include <quickfix/TimeRange.h>
+#include <quickfix/Utility.h>
 #include "FixGateway.h"
 #include "FixServer.h"
 #include "MultiOutQueues.h"
@@ -32,6 +35,7 @@
 #include "MockQueues.h"
 #include "MockStorage.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -40,6 +44,8 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 using namespace COP;
 using namespace COP::App;
@@ -52,9 +58,9 @@ using ::testing::Invoke;
 namespace
 {
 
-const FIX::SessionID TEST_SID("FIX.4.4", "CLIENT_A", "ORDER_PROCESSOR", "");
+const FIX::SessionID TEST_SID("FIXT.1.1", "CLIENT_A", "ORDER_PROCESSOR", "");
 /// A second client, whose orders TEST_SID must not be able to name (#71)
-const FIX::SessionID OTHER_SID("FIX.4.4", "CLIENT_B", "ORDER_PROCESSOR", "");
+const FIX::SessionID OTHER_SID("FIXT.1.1", "CLIENT_B", "ORDER_PROCESSOR", "");
 
 // =============================================================================
 // Enum Conversion Tests
@@ -122,7 +128,7 @@ TEST_F(FixEnumTest, OrdStatusConversion)
     EXPECT_EQ(FIX::OrdStatus_FILLED, FixGateway::fromOrdStatus(FILLED_ORDSTATUS));
     EXPECT_EQ(FIX::OrdStatus_CANCELED, FixGateway::fromOrdStatus(CANCELED_ORDSTATUS));
     EXPECT_EQ(FIX::OrdStatus_REJECTED, FixGateway::fromOrdStatus(REJECTED_ORDSTATUS));
-    // FIX 4.4 has no Replaced status (39=5 is not in its dictionary): a replaced order is closed (#74)
+    // 39=5, Replaced, has been out of use since FIX 4.4, though FIX 5.0 SP2 lists it: a replaced order is closed (#74)
     EXPECT_EQ(FIX::OrdStatus_CANCELED, FixGateway::fromOrdStatus(REPLACED_ORDSTATUS));
     EXPECT_EQ(FIX::OrdStatus_EXPIRED, FixGateway::fromOrdStatus(EXPIRED_ORDSTATUS));
     EXPECT_EQ(FIX::OrdStatus_SUSPENDED, FixGateway::fromOrdStatus(SUSPENDED_ORDSTATUS));
@@ -169,11 +175,11 @@ protected:
         ProcessorFixture::TearDown();
     }
 
-    FIX44::NewOrderSingle makeNewOrderSingle(const std::string &clOrdId, const std::string &symbol, char side,
-                                             char ordType, double price, double qty, char tif = FIX::TimeInForce_DAY)
+    FIX50SP2::NewOrderSingle makeNewOrderSingle(const std::string &clOrdId, const std::string &symbol, char side,
+                                                char ordType, double price, double qty, char tif = FIX::TimeInForce_DAY)
     {
         FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
-        FIX44::NewOrderSingle msg;
+        FIX50SP2::NewOrderSingle msg;
         msg.set(FIX::ClOrdID(clOrdId));
         msg.set(FIX::Side(side));
         msg.set(FIX::TransactTime(now));
@@ -191,11 +197,11 @@ protected:
 
     /// An FX swap built as NewOrderMultileg_FxSwap_PushesToQueue builds it; it names no account. Its legs settle on these
     /// LocalMktDates (#198).
-    FIX44::NewOrderMultileg makeFxSwap(const std::string &clOrdId, const std::string &nearDate = "20261015",
-                                       const std::string &farDate = "20261115")
+    FIX50SP2::NewOrderMultileg makeFxSwap(const std::string &clOrdId, const std::string &nearDate = "20261015",
+                                          const std::string &farDate = "20261115")
     {
         FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
-        FIX44::NewOrderMultileg msg;
+        FIX50SP2::NewOrderMultileg msg;
         msg.set(FIX::ClOrdID(clOrdId));
         msg.set(FIX::Side(FIX::Side_BUY));
         msg.set(FIX::TransactTime(now));
@@ -204,14 +210,14 @@ protected:
         msg.set(FIX::OrderQty(1000000));
         msg.set(FIX::Currency("USD"));
 
-        FIX44::NewOrderMultileg::NoLegs nearLeg;
+        FIX50SP2::NewOrderMultileg::NoLegs nearLeg;
         nearLeg.set(FIX::LegSymbol("aaa"));
         nearLeg.set(FIX::LegSide(FIX::Side_BUY));
         nearLeg.set(FIX::LegPrice(1.2650));
         nearLeg.set(FIX::LegSettlDate(nearDate));
         msg.addGroup(nearLeg);
 
-        FIX44::NewOrderMultileg::NoLegs farLeg;
+        FIX50SP2::NewOrderMultileg::NoLegs farLeg;
         farLeg.set(FIX::LegSymbol("aaa"));
         farLeg.set(FIX::LegSide(FIX::Side_SELL));
         farLeg.set(FIX::LegPrice(1.2680));
@@ -239,9 +245,9 @@ protected:
         return saveOrder(source, FixGateway::sessionClOrdId(source, clOrdId));
     }
 
-    FIX44::OrderCancelRequest makeCancelRequest(const std::string &origClOrdId, const std::string &clOrdId)
+    FIX50SP2::OrderCancelRequest makeCancelRequest(const std::string &origClOrdId, const std::string &clOrdId)
     {
-        FIX44::OrderCancelRequest msg;
+        FIX50SP2::OrderCancelRequest msg;
         msg.set(FIX::OrigClOrdID(origClOrdId));
         msg.set(FIX::ClOrdID(clOrdId));
         msg.set(FIX::Side(FIX::Side_BUY));
@@ -435,7 +441,7 @@ TEST_F(FixGatewayInboundTest, CancelRequest_PushesToQueue)
             }));
 
     FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
-    FIX44::OrderCancelRequest cancelMsg;
+    FIX50SP2::OrderCancelRequest cancelMsg;
     cancelMsg.set(FIX::OrigClOrdID(clOrdStr));
     cancelMsg.set(FIX::ClOrdID("CANCEL001"));
     cancelMsg.set(FIX::Side(FIX::Side_BUY));
@@ -466,7 +472,7 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_PushesToQueue)
             }));
 
     FIX::UtcTimeStamp now2 = FIX::UtcTimeStamp::now();
-    FIX44::OrderCancelReplaceRequest replaceMsg;
+    FIX50SP2::OrderCancelReplaceRequest replaceMsg;
     replaceMsg.set(FIX::OrigClOrdID(clOrdStr));
     replaceMsg.set(FIX::ClOrdID("REPLACE001"));
     replaceMsg.set(FIX::Side(FIX::Side_BUY));
@@ -508,7 +514,7 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_CarriesTheRequestsSideAndSymbol)
                 capturedReplacement = evt.replacementOrder_;
             }));
 
-    FIX44::OrderCancelReplaceRequest replaceMsg;
+    FIX50SP2::OrderCancelReplaceRequest replaceMsg;
     replaceMsg.set(FIX::OrigClOrdID("ORD-R2"));
     replaceMsg.set(FIX::ClOrdID("REPLACE002"));
     replaceMsg.set(FIX::Side(FIX::Side_SELL));
@@ -532,7 +538,7 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_UnknownSymbol_IsNotQueued)
     ASSERT_NE(nullptr, saveOrderOf(TEST_SID, "ORD-R4"));
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
 
-    FIX44::OrderCancelReplaceRequest replaceMsg;
+    FIX50SP2::OrderCancelReplaceRequest replaceMsg;
     replaceMsg.set(FIX::OrigClOrdID("ORD-R4"));
     replaceMsg.set(FIX::ClOrdID("REPLACE004"));
     replaceMsg.set(FIX::Side(FIX::Side_BUY));
@@ -550,7 +556,7 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_UnknownOrigClOrdId_IsNotQueued)
     // session here to send that to, so this checks that nothing reaches the engine.
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
 
-    FIX44::OrderCancelReplaceRequest replaceMsg;
+    FIX50SP2::OrderCancelReplaceRequest replaceMsg;
     replaceMsg.set(FIX::OrigClOrdID("NO-SUCH-ORDER"));
     replaceMsg.set(FIX::ClOrdID("REPLACE003"));
     replaceMsg.set(FIX::Side(FIX::Side_BUY));
@@ -630,7 +636,7 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_ForAnotherSessionsOrder_IsNotQueued
     ASSERT_NE(nullptr, saveOrderOf(OTHER_SID, "SHARED-2"));
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
 
-    FIX44::OrderCancelReplaceRequest replaceMsg;
+    FIX50SP2::OrderCancelReplaceRequest replaceMsg;
     replaceMsg.set(FIX::OrigClOrdID("SHARED-2"));
     replaceMsg.set(FIX::ClOrdID("REPLACE-X2"));
     replaceMsg.set(FIX::Side(FIX::Side_BUY));
@@ -645,11 +651,12 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_ForAnotherSessionsOrder_IsNotQueued
 // --- Who may log on, and what each counterparty may trade (#147) ---
 
 /// The acceptor's own view of its session with CLIENT_A, as QuickFIX passes it: TargetCompID is the counterparty's
-const FIX::SessionID ACCEPTOR_SID("FIX.4.4", "ORDER_PROCESSOR", "CLIENT_A");
+const FIX::SessionID ACCEPTOR_SID("FIXT.1.1", "ORDER_PROCESSOR", "CLIENT_A");
 
-FIX44::Logon makeLogon(const std::string &username, const std::string &password)
+FIXT11::Logon makeLogon(const std::string &username, const std::string &password)
 {
-    FIX44::Logon logon(FIX::EncryptMethod(FIX::EncryptMethod_NONE_OTHER), FIX::HeartBtInt(30));
+    FIXT11::Logon logon(FIX::EncryptMethod(FIX::EncryptMethod_NONE_OTHER), FIX::HeartBtInt(30),
+                        FIX::DefaultApplVerID(FIX::ApplVerID_FIX50_SP2));
     if (!username.empty())
     {
         logon.set(FIX::Username(username));
@@ -679,10 +686,10 @@ TEST_F(FixGatewayInboundTest, ALogonNeedsItsCounterpartysUsernameAndPassword)
     EXPECT_THROW(gateway_->fromAdmin(makeLogon("", ""), ACCEPTOR_SID), FIX::RejectLogon);
     // A session the credentials don't name, with another counterparty's username and password
     EXPECT_THROW(
-        gateway_->fromAdmin(makeLogon("client_a", "secret"), FIX::SessionID("FIX.4.4", "ORDER_PROCESSOR", "CLIENT_Z")),
+        gateway_->fromAdmin(makeLogon("client_a", "secret"), FIX::SessionID("FIXT.1.1", "ORDER_PROCESSOR", "CLIENT_Z")),
         FIX::RejectLogon);
     // Only a Logon is checked: the session's other admin messages carry no credentials
-    EXPECT_NO_THROW(gateway_->fromAdmin(FIX44::Heartbeat(), ACCEPTOR_SID));
+    EXPECT_NO_THROW(gateway_->fromAdmin(FIXT11::Heartbeat(), ACCEPTOR_SID));
     // The client learns only that it was refused, whatever the reason
     try
     {
@@ -781,7 +788,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_PushesToQueue)
             }));
 
     FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
-    FIX44::NewOrderMultileg msg;
+    FIX50SP2::NewOrderMultileg msg;
     msg.set(FIX::ClOrdID("SWAP-001"));
     msg.set(FIX::Side(FIX::Side_BUY)); // near-leg side
     msg.set(FIX::TransactTime(now));
@@ -791,7 +798,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_PushesToQueue)
     msg.set(FIX::Currency("USD"));
 
     // Near leg: BUY at 1.2650, settl T+2
-    FIX44::NewOrderMultileg::NoLegs nearLeg;
+    FIX50SP2::NewOrderMultileg::NoLegs nearLeg;
     nearLeg.set(FIX::LegSymbol("aaa"));
     nearLeg.set(FIX::LegSide(FIX::Side_BUY));
     nearLeg.set(FIX::LegPrice(1.2650));
@@ -799,7 +806,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_PushesToQueue)
     msg.addGroup(nearLeg);
 
     // Far leg: SELL at 1.2680, settl T+92
-    FIX44::NewOrderMultileg::NoLegs farLeg;
+    FIX50SP2::NewOrderMultileg::NoLegs farLeg;
     farLeg.set(FIX::LegSymbol("aaa"));
     farLeg.set(FIX::LegSide(FIX::Side_SELL));
     farLeg.set(FIX::LegPrice(1.2680));
@@ -826,7 +833,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_NonSwapOrdType_Rejected)
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
 
     FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
-    FIX44::NewOrderMultileg msg;
+    FIX50SP2::NewOrderMultileg msg;
     msg.set(FIX::ClOrdID("MLEG-BAD"));
     msg.set(FIX::Side(FIX::Side_BUY));
     msg.set(FIX::TransactTime(now));
@@ -842,7 +849,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_TooFewLegs_Rejected)
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
 
     FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
-    FIX44::NewOrderMultileg msg;
+    FIX50SP2::NewOrderMultileg msg;
     msg.set(FIX::ClOrdID("MLEG-1"));
     msg.set(FIX::Side(FIX::Side_BUY));
     msg.set(FIX::TransactTime(now));
@@ -851,7 +858,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_TooFewLegs_Rejected)
     msg.set(FIX::OrderQty(100));
 
     // Only one leg — should be rejected
-    FIX44::NewOrderMultileg::NoLegs oneLeg;
+    FIX50SP2::NewOrderMultileg::NoLegs oneLeg;
     oneLeg.set(FIX::LegSymbol("aaa"));
     oneLeg.set(FIX::LegSide(FIX::Side_BUY));
     oneLeg.set(FIX::LegPrice(1.2650));
@@ -953,7 +960,7 @@ TEST_F(FixGatewayStringsTest, NewOrdersAndAReplaceWriteNoStringRecords)
 
     gateway_->onMessage(makeNewOrderSingle("STR-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100), TEST_SID);
     gateway_->onMessage(makeFxSwap("STR-SWAP"), TEST_SID);
-    FIX44::OrderCancelReplaceRequest replaceMsg;
+    FIX50SP2::OrderCancelReplaceRequest replaceMsg;
     replaceMsg.set(FIX::OrigClOrdID("ORD-STR"));
     replaceMsg.set(FIX::ClOrdID("STR-REPLACE"));
     replaceMsg.set(FIX::Side(FIX::Side_BUY));
@@ -1072,7 +1079,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_OrderQtyTheEngineCannotHold_IsNot
     int n = 0;
     for (double qty : BAD_QUANTITIES)
     {
-        FIX44::NewOrderMultileg msg = makeFxSwap("SWAP-QTY-" + std::to_string(++n));
+        FIX50SP2::NewOrderMultileg msg = makeFxSwap("SWAP-QTY-" + std::to_string(++n));
         msg.set(FIX::OrderQty(qty));
         gateway_->onMessage(msg, TEST_SID);
     }
@@ -1087,8 +1094,8 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_LegPriceNoOrderTradesAt_IsNotQueu
     {
         for (const std::string &price : BAD_PRICES)
         {
-            FIX44::NewOrderMultileg msg = makeFxSwap("SWAP-PX-" + std::to_string(++n));
-            FIX44::NewOrderMultileg::NoLegs group;
+            FIX50SP2::NewOrderMultileg msg = makeFxSwap("SWAP-PX-" + std::to_string(++n));
+            FIX50SP2::NewOrderMultileg::NoLegs group;
             msg.getGroup(leg, group);
             group.setField(FIX::FIELD::LegPrice, price);
             msg.replaceGroup(leg, group);
@@ -1105,7 +1112,7 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_OrderQtyTheEngineCannotHold_IsNotQu
     int n = 0;
     for (double qty : BAD_QUANTITIES)
     {
-        FIX44::OrderCancelReplaceRequest replaceMsg;
+        FIX50SP2::OrderCancelReplaceRequest replaceMsg;
         replaceMsg.set(FIX::OrigClOrdID("ORD-R5"));
         replaceMsg.set(FIX::ClOrdID("REPLACE-QTY-" + std::to_string(++n)));
         replaceMsg.set(FIX::Side(FIX::Side_BUY));
@@ -1125,7 +1132,7 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_PriceNoOrderTradesAt_IsNotQueued)
     int n = 0;
     for (const std::string &price : BAD_PRICES)
     {
-        FIX44::OrderCancelReplaceRequest replaceMsg;
+        FIX50SP2::OrderCancelReplaceRequest replaceMsg;
         replaceMsg.set(FIX::OrigClOrdID("ORD-R6"));
         replaceMsg.set(FIX::ClOrdID("REPLACE-PX-" + std::to_string(++n)));
         replaceMsg.set(FIX::Side(FIX::Side_BUY));
@@ -1139,9 +1146,9 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_PriceNoOrderTradesAt_IsNotQueued)
 }
 
 /// A replace request for this session's order origClOrdId, of a buy of "aaa", as a stop limit
-FIX44::OrderCancelReplaceRequest makeStopReplace(const std::string &origClOrdId, const std::string &clOrdId)
+FIX50SP2::OrderCancelReplaceRequest makeStopReplace(const std::string &origClOrdId, const std::string &clOrdId)
 {
-    FIX44::OrderCancelReplaceRequest msg;
+    FIX50SP2::OrderCancelReplaceRequest msg;
     msg.set(FIX::OrigClOrdID(origClOrdId));
     msg.set(FIX::ClOrdID(clOrdId));
     msg.set(FIX::Side(FIX::Side_BUY));
@@ -1229,9 +1236,9 @@ DateTimeT anHourAhead()
 }
 
 /// A replace request for this session's limit order origClOrdId, a buy of "aaa"
-FIX44::OrderCancelReplaceRequest makeLimitReplace(const std::string &origClOrdId, const std::string &clOrdId)
+FIX50SP2::OrderCancelReplaceRequest makeLimitReplace(const std::string &origClOrdId, const std::string &clOrdId)
 {
-    FIX44::OrderCancelReplaceRequest msg;
+    FIX50SP2::OrderCancelReplaceRequest msg;
     msg.set(FIX::OrigClOrdID(origClOrdId));
     msg.set(FIX::ClOrdID(clOrdId));
     msg.set(FIX::Side(FIX::Side_BUY));
@@ -1467,8 +1474,8 @@ TEST_F(FixGatewayInboundTest, MakeSourceString_Format)
 
 TEST_F(FixGatewayInboundTest, FromApp_RoutesAGenericNewOrderSingle)
 {
-    // The session hands fromApp() a plain FIX::Message, as here. FIX44::MessageCracker cast it to
-    // NewOrderSingle through a temporary FIX44::Message, which UBSan reports as a member call on an object
+    // The session hands fromApp() a plain FIX::Message, as here. FIX50SP2::MessageCracker cast it to
+    // NewOrderSingle through a temporary FIX50SP2::Message, which UBSan reports as a member call on an object
     // of the wrong type; dispatch() builds the typed message instead.
     OrderEntry *capturedOrder = nullptr;
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
@@ -1504,13 +1511,14 @@ TEST_F(FixGatewayInboundTest, FromApp_RoutesAGenericCancelRequest)
     gateway_->fromApp(FIX::Message(makeCancelRequest("ORD-G1", "CANCEL-GEN")), TEST_SID);
 }
 
-TEST_F(FixGatewayInboundTest, FromApp_UnsupportedTypeStillReachesQuickFix)
+TEST_F(FixGatewayInboundTest, FromApp_UnsupportedTypeIsAnsweredByTheGateway)
 {
-    // QuickFIX turns UnsupportedMessageType into the right reject, so a type the gateway does not handle
-    // must still throw it.
-    FIX44::News news;
+    // A type the gateway does not handle is answered with its own BusinessMessageReject, not QuickFIX's, which a
+    // counterparty that validates refuses on a FIXT session (FixtSessionTest); it used to throw UnsupportedMessageType
+    // for QuickFIX to answer. No session is logged on here, so the reject cannot be sent; that is logged, not thrown.
+    FIX50SP2::News news;
     news.set(FIX::Headline("not handled"));
-    EXPECT_THROW(gateway_->fromApp(news, TEST_SID), FIX::UnsupportedMessageType);
+    EXPECT_NO_THROW(gateway_->fromApp(news, TEST_SID));
 }
 
 // =============================================================================
@@ -1565,7 +1573,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_RejectCarriesOrdRejReasonAndText)
     auto reject = makeReport<RejectExecEntry>(REJECT_EXECTYPE, REJECTED_ORDSTATUS);
     reject.rejectReason_ = "There is no market for this instrument!";
 
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&reject, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&reject, *order);
 
     FIX::ExecType execType;
     report.get(execType);
@@ -1589,7 +1597,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_AcknowledgementCarriesNoRejectFiel
     assignClOrderId(order.get());
     auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
 
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order);
 
     FIX::ExecType execType;
     report.get(execType);
@@ -1603,14 +1611,14 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_AcknowledgementCarriesNoRejectFiel
 
 TEST_F(FixGatewayInboundTest, ExecutionReport_AStopsReleaseIsTriggeredAndNew)
 {
-    // A held stop released by a trade at its stop price (#223) is reported with FIX 4.4's ExecType L, triggered or
-    // activated by system, and the order NEW (#236). The gateway sent ExecType NEW (0) for an execution type it
-    // didn't know
+    // A held stop released by a trade at its stop price (#223) is reported with ExecType L, triggered or activated by
+    // system, and the order NEW (#236). The gateway sent ExecType NEW (0) for an execution type it didn't know. L is
+    // FIX 5.0's: FIX 4.4's ExecType ends at I, which is why the gateway speaks FIX 5.0 SP2 (#377)
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     auto release = makeReport<ExecutionEntry>(TRIGGERED_EXECTYPE, NEW_ORDSTATUS);
 
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&release, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&release, *order);
 
     FIX::ExecType execType;
     report.get(execType);
@@ -1631,7 +1639,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_AGtdOrdersReportCarriesItsExpireTi
     order->tif_ = GTD_TIF;
     order->expireTime_ = 1792098000250ULL; // 2026-10-15 21:00:00.250 UTC
     auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order);
     ASSERT_TRUE(report.isSetField(FIX::FIELD::ExpireTime));
     EXPECT_EQ("20261015-21:00:00.250", report.getField(FIX::FIELD::ExpireTime));
     order->tif_ = DAY_TIF;
@@ -1646,7 +1654,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ARestatementIsExecTypeDForAGtRenew
     assignClOrderId(order.get());
     order->tif_ = GTC_TIF;
     auto restated = makeReport<ExecutionEntry>(RESTATED_EXECTYPE, NEW_ORDSTATUS);
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&restated, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&restated, *order);
     FIX::ExecType execType;
     report.get(execType);
     EXPECT_EQ(FIX::ExecType_RESTATED, execType.getValue());
@@ -1663,7 +1671,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ARestatementIsExecTypeDForAGtRenew
 
 TEST_F(FixGatewayInboundTest, ExecutionReport_AGtOrderCarriesItsDayFiguresOnceItTradedOnAnEarlierDay)
 {
-    // DayOrderQty (424), DayCumQty (425) and DayAvgPx (426), which FIX 4.4 gives a GT order on the days after its first
+    // DayOrderQty (424), DayCumQty (425) and DayAvgPx (426), which FIX gives a GT order on the days after its first
     // trade (#244): 30 of its 50 filled before today. One whose fills are all today's, or a DAY order, carries none.
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
@@ -1675,7 +1683,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_AGtOrderCarriesItsDayFiguresOnceIt
     order->dayCumQty_ = 20;
     order->dayAvgPx_ = 10.25;
     auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, PARTFILL_ORDSTATUS);
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order);
     FIX::DayOrderQty dayOrderQty;
     ASSERT_TRUE(report.isSet(dayOrderQty));
     report.get(dayOrderQty);
@@ -1697,14 +1705,14 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_AGtOrderCarriesItsDayFiguresOnceIt
 
 TEST_F(FixGatewayInboundTest, ExecutionReport_CancelAckNamesTheCancelRequest)
 {
-    // FIX 4.4 answers a cancel request with the request's own ClOrdID in 11, and the cancelled order's in 41 (#98)
+    // FIX answers a cancel request with the request's own ClOrdID in 11, and the cancelled order's in 41 (#98)
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     const auto &clOrd = order->clOrderId_.get();
     const std::string orderClOrdId(clOrd.data_, clOrd.length_);
     auto ack = makeReport<ExecutionEntry>(CANCEL_EXECTYPE, CANCELED_ORDSTATUS);
 
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order, "CXL-7");
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order, "CXL-7");
     FIX::ClOrdID clOrdId;
     report.get(clOrdId);
     EXPECT_EQ("CXL-7", clOrdId.getValue());
@@ -1714,7 +1722,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_CancelAckNamesTheCancelRequest)
 
     // A cancel no request asked for, as of a market order the engine can't fill, has no request ClOrdID: the order's
     // own stays in 11
-    FIX44::ExecutionReport internal = FixGateway::buildExecutionReport(&ack, *order);
+    FIX50SP2::ExecutionReport internal = FixGateway::buildExecutionReport(&ack, *order);
     internal.get(clOrdId);
     EXPECT_EQ(orderClOrdId, clOrdId.getValue());
     EXPECT_FALSE(internal.isSetField(FIX::FIELD::OrigClOrdID));
@@ -1728,7 +1736,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_TradeCarriesLastQtyAndLastPx)
     trade.lastQty_ = 40;
     trade.lastPx_ = 10.5;
 
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
 
     FIX::ExecType execType;
     report.get(execType);
@@ -1742,6 +1750,23 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_TradeCarriesLastQtyAndLastPx)
     EXPECT_FALSE(report.isSetField(FIX::FIELD::Text));
 }
 
+TEST_F(FixGatewayInboundTest, ExecutionReport_CarriesTheOrdersAvgPx)
+{
+    // AvgPx (6): FIX 4.4's ExecutionReport required it, so its type did too, and FIX 5.0 SP2's doesn't. The gateway
+    // still sends it (#377).
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    order->avgPx_ = 10.25;
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+
+    ASSERT_TRUE(report.isSetField(FIX::FIELD::AvgPx));
+    FIX::AvgPx avgPx;
+    report.get(avgPx);
+    EXPECT_DOUBLE_EQ(10.25, avgPx.getValue());
+}
+
 TEST_F(FixGatewayInboundTest, ExecutionReport_TradeCarriesItsTradeDate)
 {
     // TradeDate (75), a LocalMktDate: the business day the trade counts in, YYYYMMDD, as the engine keeps it (#258). The
@@ -1753,7 +1778,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_TradeCarriesItsTradeDate)
     trade.lastPx_ = 10.5;
     trade.tradeDate_ = 20261016;
 
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
     ASSERT_TRUE(report.isSetField(FIX::FIELD::TradeDate));
     FIX::TradeDate tradeDate;
     report.get(tradeDate);
@@ -1771,7 +1796,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_CorrectionIsTradeCorrect)
     assignClOrderId(order.get());
     auto correct = makeReport<ExecCorrectExecEntry>(CORRECT_EXECTYPE, PARTFILL_ORDSTATUS);
 
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&correct, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&correct, *order);
 
     FIX::ExecType execType;
     report.get(execType);
@@ -1790,7 +1815,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ReplaceNamesTheReplacedOrder)
     replace.orderId_ = order->orderId_;
     replace.origOrderId_ = IdT(7, 1);
 
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&replace, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&replace, *order);
 
     FIX::ExecType execType;
     report.get(execType);
@@ -1834,7 +1859,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_CarriesTheClientsOwnClOrdIds)
     EXPECT_EQ("ORD-2", clOrdId.getValue());
 
     auto replace = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, NEW_ORDSTATUS);
-    FIX44::ExecutionReport replaced = FixGateway::buildExecutionReport(&replace, *order);
+    FIX50SP2::ExecutionReport replaced = FixGateway::buildExecutionReport(&replace, *order);
     replaced.get(clOrdId);
     EXPECT_EQ("ORD-2", clOrdId.getValue());
     replaced.get(origClOrdId);
@@ -1848,7 +1873,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_CarriesTheClientsOwnClOrdIds)
 TEST_F(FixGatewayInboundTest, ExecutionReport_OnlyTheReplacementsReplaceReportGoesOverFix)
 {
     // The engine reports a replace for both orders. FIX acknowledges it once, with the replacement's report: the
-    // replaced order's has no FIX 4.4 form, since 39=5 left the protocol (#74).
+    // replaced order's isn't sent, since 39=5 has been out of use since FIX 4.4 (#74).
     auto replaced = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, REPLACED_ORDSTATUS);
     auto replacement = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, NEW_ORDSTATUS);
     auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, FILLED_ORDSTATUS);
@@ -1880,7 +1905,7 @@ TEST(FixOrderRejectTest, DuplicateNewOrderGetsAnExecutionReportReject)
 {
     // The FIX convention for a duplicate order: 150=8, 39=8, OrdRejReason 6, and the reason in Text (58). The order
     // was never stored, so it has no OrderID.
-    FIX44::ExecutionReport report = FixGateway::buildOrderReject(makeOrderReject(false), 41);
+    FIX50SP2::ExecutionReport report = FixGateway::buildOrderReject(makeOrderReject(false), 41);
 
     FIX::OrderID orderId;
     report.get(orderId);
@@ -1909,6 +1934,9 @@ TEST(FixOrderRejectTest, DuplicateNewOrderGetsAnExecutionReportReject)
     FIX::LeavesQty leavesQty;
     report.get(leavesQty);
     EXPECT_DOUBLE_EQ(0, leavesQty.getValue());
+    FIX::AvgPx avgPx; // which FIX 5.0 SP2 doesn't require, and FIX 4.4 did (#377)
+    report.get(avgPx);
+    EXPECT_DOUBLE_EQ(0, avgPx.getValue());
     FIX::Symbol symbol;
     report.get(symbol);
     EXPECT_EQ("aaa", symbol.getValue());
@@ -1929,7 +1957,7 @@ TEST(FixOrderRejectTest, TheSenderSeesItsOwnClOrdIdsInAnOrderReject)
     EXPECT_EQ("ORD-1", shown.origClOrderId_);
     EXPECT_EQ("Replace refused: ClOrdID ORD-7 is already in use", shown.reason_);
 
-    FIX44::OrderCancelReject reject = FixGateway::buildReplaceReject(shown, "7", FIX::OrdStatus_NEW);
+    FIX50SP2::OrderCancelReject reject = FixGateway::buildReplaceReject(shown, "7", FIX::OrdStatus_NEW);
     FIX::ClOrdID clOrdId;
     reject.get(clOrdId);
     EXPECT_EQ("ORD-7", clOrdId.getValue());
@@ -1968,13 +1996,14 @@ TEST(FixOrderRejectTest, AnOrderTheGatewayRefusesGetsAnExecutionReportRejectQuot
 {
     // Refused before the engine sees it (#145), so it has no OrderID; OrderQty is the client's own, which QuantityT
     // can't hold, and OrdRejReason 13 is FIX's code for an incorrect quantity
-    FIX44::NewOrderSingle order;
+    FIX50SP2::NewOrderSingle order;
     order.set(FIX::ClOrdID("QTY-1"));
     order.set(FIX::Side(FIX::Side_SELL));
     order.set(FIX::Symbol("aaa"));
     order.set(FIX::OrderQty(-5));
     const std::string why = "Order refused: OrderQty (38) must be a whole number from 1 to 4294967295";
-    FIX44::ExecutionReport report = FixGateway::buildOrderRefusal(order, FIX::OrdRejReason_INCORRECT_QUANTITY, why, 43);
+    FIX50SP2::ExecutionReport report =
+        FixGateway::buildOrderRefusal(order, FIX::OrdRejReason_INCORRECT_QUANTITY, why, 43);
 
     FIX::OrderID orderId;
     report.get(orderId);
@@ -2010,7 +2039,7 @@ TEST(FixOrderRejectTest, DuplicateReplacementGetsAnOrderCancelReject)
 {
     // A cancel/replace request is refused with an OrderCancelReject (35=9) that answers it (434=2), says why
     // (CxlRejReason 6, duplicate ClOrdID; Text 58), and describes the order it was to replace
-    FIX44::OrderCancelReject reject =
+    FIX50SP2::OrderCancelReject reject =
         FixGateway::buildReplaceReject(makeOrderReject(true), "12", FIX::OrdStatus_PARTIALLY_FILLED);
 
     EXPECT_EQ("9", reject.getHeader().getField(FIX::FIELD::MsgType));
@@ -2068,7 +2097,7 @@ TEST(FixOrderRejectTest, ReplaceOfAnUnknownOrderIsRejectedAsUnknown)
 {
     // The gateway's own answer to an OrigClOrdID that names no order (#74): 102=1, OrderID NONE, OrdStatus 8, and the
     // request's ClOrdIDs. Before, the request got no answer at all.
-    FIX44::OrderCancelReject reject = FixGateway::buildUnknownReplaceReject("RPL-2", "ORD-9");
+    FIX50SP2::OrderCancelReject reject = FixGateway::buildUnknownReplaceReject("RPL-2", "ORD-9");
 
     EXPECT_EQ("9", reject.getHeader().getField(FIX::FIELD::MsgType));
     FIX::OrderID orderId;
@@ -2101,7 +2130,7 @@ TEST(FixCancelRejectTest, CancelOfAFilledOrderIsTooLate)
     Queues::CancelRejectEvent evnt;
     evnt.reason_ = Queues::CancelRejectEvent::TOO_LATE;
     evnt.ordStatus_ = FILLED_ORDSTATUS;
-    FIX44::OrderCancelReject reject = FixGateway::buildCancelReject(evnt, "7", "ORD-1", "ORD-1");
+    FIX50SP2::OrderCancelReject reject = FixGateway::buildCancelReject(evnt, "7", "ORD-1", "ORD-1");
 
     EXPECT_EQ("9", reject.getHeader().getField(FIX::FIELD::MsgType));
     FIX::OrderID orderId;
@@ -2134,7 +2163,7 @@ TEST(FixCancelRejectTest, AnEngineRejectNamesTheCancelRequestAndTheOrder)
     evnt.reason_ = Queues::CancelRejectEvent::TOO_LATE;
     evnt.ordStatus_ = CANCELED_ORDSTATUS;
     evnt.requestClOrdId_ = "CXL-8";
-    FIX44::OrderCancelReject reject = FixGateway::buildEngineCancelReject(evnt, "7", "ORD-1");
+    FIX50SP2::OrderCancelReject reject = FixGateway::buildEngineCancelReject(evnt, "7", "ORD-1");
     FIX::ClOrdID clOrdId;
     reject.get(clOrdId);
     EXPECT_EQ("CXL-8", clOrdId.getValue());
@@ -2152,7 +2181,7 @@ TEST(FixCancelRejectTest, CancelOfAnUnknownOrderIsRejectedAsUnknown)
 {
     // The gateway's own answer to an unknown OrigClOrdID: 102=1, and OrdStatus 8, since there is no order to report
     Queues::CancelRejectEvent evnt;
-    FIX44::OrderCancelReject reject = FixGateway::buildCancelReject(evnt, "NONE", "CXL-2", "ORD-9");
+    FIX50SP2::OrderCancelReject reject = FixGateway::buildCancelReject(evnt, "NONE", "CXL-2", "ORD-9");
 
     FIX::OrderID orderId;
     reject.get(orderId);
@@ -2280,10 +2309,10 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsLegsCarryTheirSideDateAndPri
         trade.lastQty_ = 100;
         trade.lastPx_ = (NEAR_LEG == leg) ? 1.0850 : 1.0872;
 
-        FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+        FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
 
         ASSERT_EQ(1u, report.groupCount(FIX::FIELD::NoLegs)) << "leg " << leg;
-        FIX44::ExecutionReport::NoLegs group;
+        FIX50SP2::ExecutionReport::NoLegs group;
         report.getGroup(1, group);
         FIX::LegSide side;
         group.get(side);
@@ -2302,7 +2331,7 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsLegsCarryTheirSideDateAndPri
 
     // A plain fill has no legs
     auto plain = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
-    FIX44::ExecutionReport report = FixGateway::buildExecutionReport(&plain, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&plain, *order);
     EXPECT_EQ(0u, report.groupCount(FIX::FIELD::NoLegs));
     EXPECT_FALSE(report.isSetField(820));
 }
@@ -2378,6 +2407,430 @@ TEST_F(FixGatewayInboundTest, ASwapWithADateThatIsntOneIsNotQueued)
         gateway_->onMessage(makeFxSwap("SWAP-BAD-" + std::to_string(++n), bad, "20261115"), TEST_SID);
         gateway_->onMessage(makeFxSwap("SWAP-BAD-" + std::to_string(++n), "20261015", bad), TEST_SID);
     }
+}
+
+// =============================================================================
+// FIXT.1.1 sessions, with FIX 5.0 SP2's messages (#377)
+// =============================================================================
+
+/// A field's value, or "(not set)", so that a field that isn't there fails a comparison rather than throws
+std::string fieldOf(const FIX::FieldMap &fields, int tag)
+{
+    return fields.isSetField(tag) ? fields.getField(tag) : "(not set)";
+}
+
+/// The tests above call the gateway as QuickFIX would. These hand CLIENT_A's messages to a QuickFIX session made from
+/// config/fix.cfg, as the server's acceptor makes one, with the gateway as its application, and read what the session
+/// sends as a counterparty reads it: parsed with the session's own dictionaries, this tree's config/spec, and validated
+/// as QuickFIX validates by default. The session never ends, where the cfg's ends at 17:00 New York, so that no test
+/// sees it roll.
+class FixtSessionTest : public FixGatewayInboundTest, public FIX::Responder
+{
+protected:
+    void SetUp() override
+    {
+        FixGatewayInboundTest::SetUp();
+        const FIX::SessionSettings cfg((test::sourceRoot() / "config" / "fix.cfg").string());
+        FIX::Dictionary settings;
+        for (const auto &[key, value] : cfg.get())
+        {
+            // The session's times: a session that never ends has none
+            if ((FIX::string_toUpper(FIX::START_TIME) != key) && (FIX::string_toUpper(FIX::END_TIME) != key))
+            {
+                settings.setString(key, value);
+            }
+        }
+        settings.setBool(FIX::NON_STOP_SESSION, true);
+        for (const char *dictionary : { FIX::TRANSPORT_DATA_DICTIONARY, FIX::APP_DATA_DICTIONARY })
+        {
+            ASSERT_TRUE(settings.has(dictionary)) << "config/fix.cfg names no " << dictionary;
+            // The file of its name in this tree's config/spec, as fix_client.py's write_cfg() finds it
+            const std::filesystem::path file = std::filesystem::path(settings.getString(dictionary)).filename();
+            settings.setString(dictionary, (test::sourceRoot() / "config" / "spec" / file).string());
+        }
+        sid_ = FIX::SessionID(settings.getString(FIX::BEGINSTRING), settings.getString(FIX::SENDERCOMPID), "CLIENT_A");
+        factory_ = std::make_unique<FIX::SessionFactory>(*gateway_, stores_, nullptr);
+        session_ = factory_->create(sid_, settings);
+        session_->setResponder(this);
+    }
+
+    void TearDown() override
+    {
+        if (nullptr != session_)
+        {
+            factory_->destroy(session_); // before the gateway, its application
+        }
+        factory_.reset();
+        FixGatewayInboundTest::TearDown();
+    }
+
+    // FIX::Responder: the connection to CLIENT_A
+    bool send(const std::string &raw) override
+    {
+        sent_.push_back(raw);
+        return true;
+    }
+    void disconnect() override
+    {
+        disconnected_ = true;
+    }
+
+    /// Hands the session msg as CLIENT_A sends it: from CLIENT_A, with its next MsgSeqNum
+    void receive(FIX::Message msg)
+    {
+        FIX::Header &header = msg.getHeader();
+        header.setField(FIX::BeginString(sid_.getBeginString().getValue()));
+        header.setField(FIX::SenderCompID(sid_.getTargetCompID().getValue()));
+        header.setField(FIX::TargetCompID(sid_.getSenderCompID().getValue()));
+        header.setField(FIX::MsgSeqNum(nextSeqNum_++));
+        header.setField(FIX::SendingTime(FIX::UtcTimeStamp::now()));
+        session_->next(msg.toString(), FIX::UtcTimeStamp::now());
+    }
+
+    /// CLIENT_A logs on, as config/fix.cfg's clients do; what the session answers is forgotten
+    void logOn()
+    {
+        receive(makeLogon("", ""));
+        ASSERT_TRUE(session_->isLoggedOn()) << sentText();
+        sent_.clear();
+    }
+
+    const FIX::DataDictionary &transportDictionary() const
+    {
+        return session_->getDataDictionaryProvider().getSessionDataDictionary(sid_.getBeginString());
+    }
+    const FIX::DataDictionary &applicationDictionary() const
+    {
+        return session_->getDataDictionaryProvider().getApplicationDataDictionary(
+            FIX::ApplVerID(FIX::ApplVerID_FIX50_SP2));
+    }
+
+    /// A message the session sent, as a counterparty parses it
+    FIX::Message parsed(const std::string &raw) const
+    {
+        return FIX::Message(raw, transportDictionary(), applicationDictionary(), true);
+    }
+
+    /// Why a counterparty that validates, as QuickFIX does by default, refuses raw, a message the session sent: empty
+    /// if it doesn't. QuickFIX answers such a message with a Reject (35=3), and never hands it to its application.
+    std::string refusalOf(const std::string &raw) const
+    {
+        try
+        {
+            const FIX::Message msg = parsed(raw);
+            if (msg.isApp())
+            {
+                FIX::DataDictionary::validate(msg, &transportDictionary(), &applicationDictionary());
+            }
+            else
+            {
+                transportDictionary().validate(msg);
+            }
+            return "";
+        }
+        catch (const std::exception &ex)
+        {
+            return ex.what();
+        }
+    }
+
+    /// What the session sent of MsgType type, parsed
+    std::vector<FIX::Message> sentOfType(const std::string &type) const
+    {
+        std::vector<FIX::Message> found;
+        for (const std::string &raw : sent_)
+        {
+            FIX::Message msg = parsed(raw);
+            if (type == msg.getHeader().getField(FIX::FIELD::MsgType))
+            {
+                found.push_back(msg);
+            }
+        }
+        return found;
+    }
+
+    /// Every message the session sent, one a line with '|' for SOH, for a failure to show
+    std::string sentText() const
+    {
+        std::string text;
+        for (std::string raw : sent_)
+        {
+            std::replace(raw.begin(), raw.end(), '\x01', '|');
+            text += raw + "\n";
+        }
+        return text;
+    }
+
+    /// Fails for each message the session sent that a counterparty would refuse
+    void expectEverythingSentIsTaken() const
+    {
+        for (const std::string &raw : sent_)
+        {
+            EXPECT_EQ("", refusalOf(raw)) << raw;
+        }
+    }
+
+    FIX::MemoryStoreFactory stores_;
+    std::unique_ptr<FIX::SessionFactory> factory_;
+    FIX::Session *session_ = nullptr;
+    FIX::SessionID sid_;
+    std::vector<std::string> sent_; // what the session sent, raw
+    bool disconnected_ = false;
+    int nextSeqNum_ = 1;
+};
+
+TEST_F(FixtSessionTest, TheSettingsMakeAFixtSessionWithFix50Sp2)
+{
+    // config/fix.cfg's sessions are FIXT.1.1's, with FIX 5.0 SP2's messages, whose ExecType has the L a stop's release
+    // is reported with (#236); FIX 4.4's ends at I
+    EXPECT_TRUE(sid_.isFIXT()) << sid_.toString();
+    EXPECT_EQ(FIX::ApplVerID_FIX50_SP2, session_->getSenderDefaultApplVerID());
+    EXPECT_EQ(FIX::BeginString_FIXT11, transportDictionary().getVersion());
+    // QuickFIX names a dictionary by its major and minor version alone
+    EXPECT_EQ("FIX.5.0", applicationDictionary().getVersion());
+    const FIX::SessionSettings cfg((test::sourceRoot() / "config" / "fix.cfg").string());
+    EXPECT_EQ("FIX50SP2.xml", std::filesystem::path(cfg.get().getString(FIX::APP_DATA_DICTIONARY)).filename());
+    EXPECT_TRUE(applicationDictionary().isFieldValue(FIX::FIELD::ExecType,
+                                                     std::string(1, FIX::ExecType_TRIGGERED_OR_ACTIVATED_BY_SYSTEM)));
+    // No other version has a dictionary, so the session would check a message of one against nothing: the gateway
+    // refuses them (below)
+    EXPECT_EQ("", session_->getDataDictionaryProvider()
+                      .getApplicationDataDictionary(FIX::ApplVerID(FIX::ApplVerID_FIX50))
+                      .getVersion());
+}
+
+TEST_F(FixtSessionTest, ALogonIsAnsweredWithFix50Sp2AsTheDefault)
+{
+    receive(makeLogon("", ""));
+    ASSERT_TRUE(session_->isLoggedOn()) << sentText();
+    const std::vector<FIX::Message> logons = sentOfType(FIX::MsgType_Logon);
+    ASSERT_EQ(1u, logons.size()) << sentText();
+    EXPECT_EQ(FIX::BeginString_FIXT11, fieldOf(logons[0].getHeader(), FIX::FIELD::BeginString));
+    EXPECT_EQ(FIX::ApplVerID_FIX50_SP2, fieldOf(logons[0], FIX::FIELD::DefaultApplVerID));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ALogonOfAnotherVersionIsRefused)
+{
+    // The session checks a counterparty's messages against the dictionary of the version its Logon names in
+    // DefaultApplVerID (1137), and has none but FIX 5.0 SP2's. FIX 5.0's value, FIX 4.4's, and FIX 5.0 SP2's name
+    // where its value belongs: each Logon is answered with a Logout saying why, and the connection closed.
+    for (const char *version : { FIX::ApplVerID_FIX50, FIX::ApplVerID_FIX44, "FIX.5.0SP2" })
+    {
+        sent_.clear();
+        disconnected_ = false;
+        nextSeqNum_ = 1;
+        session_->setResponder(this); // a new connection
+        FIXT11::Logon logon = makeLogon("", "");
+        logon.set(FIX::DefaultApplVerID(version));
+        receive(logon);
+        EXPECT_FALSE(session_->isLoggedOn()) << version;
+        EXPECT_TRUE(disconnected_) << version;
+        const std::vector<FIX::Message> logouts = sentOfType(FIX::MsgType_Logout);
+        ASSERT_EQ(1u, logouts.size()) << version << ": " << sentText();
+        EXPECT_THAT(fieldOf(logouts[0], FIX::FIELD::Text), testing::HasSubstr("DefaultApplVerID (1137) must be 9"))
+            << version;
+        expectEverythingSentIsTaken();
+    }
+}
+
+TEST_F(FixtSessionTest, AMessageOfAnotherVersionIsRefused)
+{
+    // A message may name its own version, in ApplVerID (1128), which the session would check it against no dictionary
+    // for. Refused with a Reject naming 1128, SessionRejectReason 18 (invalid or unsupported application version), and
+    // not queued; the session goes on.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    auto order = makeNewOrderSingle("ORD-FIX50", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100);
+    order.getHeader().setField(FIX::ApplVerID(FIX::ApplVerID_FIX50));
+    receive(order);
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_Reject);
+    ASSERT_EQ(1u, rejects.size()) << sentText();
+    EXPECT_EQ("2", fieldOf(rejects[0], FIX::FIELD::RefSeqNum));
+    EXPECT_EQ(FIX::MsgType_NewOrderSingle, fieldOf(rejects[0], FIX::FIELD::RefMsgType));
+    EXPECT_EQ("1128", fieldOf(rejects[0], FIX::FIELD::RefTagID));
+    EXPECT_EQ(std::to_string(FIX::SessionRejectReason_INVALID_UNSUPPORTED_APPLICATION_VERSION),
+              fieldOf(rejects[0], FIX::FIELD::SessionRejectReason));
+    expectEverythingSentIsTaken();
+    EXPECT_EQ(3u, session_->getExpectedTargetNum());
+}
+
+TEST_F(FixtSessionTest, AMessageOfFix50Sp2OrOfNoVersionIsTaken)
+{
+    // QuickFIX's FIX 5.0 SP2 messages name it, 1128=9; one that names none is of the Logon's version
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::vector<OrderEntry *> queued;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .Times(2)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                queued.push_back(evt.order_);
+            }));
+    auto named = makeNewOrderSingle("ORD-FIX50SP2", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100);
+    ASSERT_EQ(FIX::ApplVerID_FIX50_SP2, fieldOf(named.getHeader(), FIX::FIELD::ApplVerID));
+    receive(named);
+    auto unnamed = makeNewOrderSingle("ORD-DEFAULT", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100);
+    unnamed.getHeader().removeField(FIX::FIELD::ApplVerID);
+    receive(unnamed);
+    EXPECT_TRUE(sent_.empty()) << sentText();
+    for (OrderEntry *order : queued)
+    {
+        delete order;
+    }
+}
+
+TEST_F(FixtSessionTest, AValueFix50Sp2DoesntHaveIsRefused)
+{
+    // The session checks each message against FIX 5.0 SP2's dictionary, which has no OrdType Z
+    ASSERT_FALSE(applicationDictionary().isFieldValue(FIX::FIELD::OrdType, "Z"));
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    receive(makeNewOrderSingle("ORD-Z", "aaa", FIX::Side_BUY, 'Z', 10.25, 100));
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_Reject);
+    ASSERT_EQ(1u, rejects.size()) << sentText();
+    EXPECT_EQ("40", fieldOf(rejects[0], FIX::FIELD::RefTagID));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AMessageTypeTheGatewayDoesntTakeIsRefusedReadably)
+{
+    // A BusinessMessageReject (35=j), unsupported message type (380=3). QuickFIX's own carries the session's
+    // DefaultApplVerID (1137), which FIX 5.0 SP2's BusinessMessageReject doesn't have, so a counterparty that validates
+    // refused it; the gateway sends its own.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    FIX50SP2::News news;
+    news.set(FIX::Headline("not taken"));
+    receive(news);
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_BusinessMessageReject);
+    ASSERT_EQ(1u, rejects.size()) << sentText();
+    EXPECT_EQ("2", fieldOf(rejects[0], FIX::FIELD::RefSeqNum));
+    EXPECT_EQ(FIX::MsgType_News, fieldOf(rejects[0], FIX::FIELD::RefMsgType));
+    EXPECT_EQ(std::to_string(FIX::BusinessRejectReason_UNSUPPORTED_MESSAGE_TYPE),
+              fieldOf(rejects[0], FIX::FIELD::BusinessRejectReason));
+    expectEverythingSentIsTaken();
+    EXPECT_EQ(3u, session_->getExpectedTargetNum());
+}
+
+TEST_F(FixtSessionTest, ARequestWithoutAFieldTheGatewayNeedsIsRefusedReadably)
+{
+    // FIX 5.0 SP2 doesn't require a cancel's OrigClOrdID (41), which FIX 4.4 did, nor a new order's OrderQty (38): the
+    // session lets them through, and the gateway, which needs them, refuses them with a BusinessMessageReject,
+    // conditionally required field missing (380=5), that names the field, as QuickFIX's own would, without its 1137
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderCancelEvent &>())).Times(0);
+    auto cancel = makeCancelRequest("ORD-1", "CXL-NO-41");
+    cancel.removeField(FIX::FIELD::OrigClOrdID);
+    receive(cancel);
+    auto order = makeNewOrderSingle("ORD-NO-38", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100);
+    order.removeField(FIX::FIELD::OrderQty);
+    receive(order);
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_BusinessMessageReject);
+    ASSERT_EQ(2u, rejects.size()) << sentText();
+    const std::string missing = std::to_string(FIX::BusinessRejectReason_CONDITIONALLY_REQUIRED_FIELD_MISSING);
+    EXPECT_EQ(missing, fieldOf(rejects[0], FIX::FIELD::BusinessRejectReason));
+    EXPECT_EQ("CXL-NO-41", fieldOf(rejects[0], FIX::FIELD::BusinessRejectRefID));
+    EXPECT_THAT(fieldOf(rejects[0], FIX::FIELD::Text), testing::HasSubstr("(41)"));
+    EXPECT_EQ(missing, fieldOf(rejects[1], FIX::FIELD::BusinessRejectReason));
+    EXPECT_THAT(fieldOf(rejects[1], FIX::FIELD::Text), testing::HasSubstr("(38)"));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, TheGatewaysOwnRefusalsAreTaken)
+{
+    // What the gateway refuses before the engine sees it: an order for a symbol it doesn't know (150=8), and a cancel
+    // and a replace of an order the session doesn't have (35=9)
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    receive(makeNewOrderSingle("ORD-UNKNOWN", "NONEXISTENT", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    receive(makeCancelRequest("NO-SUCH", "CXL-UNKNOWN"));
+    receive(makeLimitReplace("NO-SUCH", "RPL-UNKNOWN"));
+    EXPECT_EQ(1u, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText();
+    EXPECT_EQ(2u, sentOfType(FIX::MsgType_OrderCancelReject).size()) << sentText();
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, TheEnginesRefusalsAreTaken)
+{
+    // What the engine refuses, as the gateway reports it: a new order and a replacement whose ClOrdID is in use, a
+    // cancel too late, and a business reject naming an order
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1");
+    const std::string source = FixGateway::makeSourceString(sid_);
+    gateway_->sendOrderReject(makeOrderReject(false), source);
+    gateway_->sendOrderReject(makeOrderReject(true), source);
+    Queues::CancelRejectEvent tooLate;
+    tooLate.id_ = order->orderId_;
+    tooLate.reason_ = Queues::CancelRejectEvent::TOO_LATE;
+    tooLate.ordStatus_ = FILLED_ORDSTATUS;
+    tooLate.requestClOrdId_ = "CXL-LATE";
+    gateway_->sendCancelReject(tooLate, source);
+    gateway_->sendBusinessReject(order->orderId_, "refused");
+    EXPECT_EQ(1u, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText();
+    EXPECT_EQ(2u, sentOfType(FIX::MsgType_OrderCancelReject).size()) << sentText();
+    EXPECT_EQ(1u, sentOfType(FIX::MsgType_BusinessMessageReject).size()) << sentText();
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, EveryKindOfExecutionReportIsTaken)
+{
+    // Each ExecType the gateway sends, on an order of the session's. A stop's release, 150=L (#236), is why the gateway
+    // left FIX 4.4.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1");
+    order->tif_ = GTC_TIF;
+    size_t reports = 0;
+    for (const ExecType type :
+         { NEW_EXECTYPE, DFD_EXECTYPE, REJECT_EXECTYPE, EXPIRED_EXECTYPE, SUSPENDED_EXECTYPE, STATUS_EXECTYPE,
+           RESTATED_EXECTYPE, PEND_CANCEL_EXECTYPE, PEND_REPLACE_EXECTYPE, TRIGGERED_EXECTYPE })
+    {
+        auto report = makeReport<RejectExecEntry>(type, NEW_ORDSTATUS);
+        if (REJECT_EXECTYPE == type)
+        {
+            report.orderStatus_ = REJECTED_ORDSTATUS;
+            report.rejectReason_ = "There is no market for this instrument!";
+        }
+        gateway_->sendExecutionReport(&report, *order);
+        ++reports;
+    }
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+    trade.lastQty_ = 40;
+    trade.lastPx_ = 10.5;
+    trade.tradeDate_ = 20261016;
+    gateway_->sendExecutionReport(&trade, *order);
+    auto correct = makeReport<ExecCorrectExecEntry>(CORRECT_EXECTYPE, PARTFILL_ORDSTATUS);
+    gateway_->sendExecutionReport(&correct, *order);
+    auto cancel = makeReport<ExecutionEntry>(CANCEL_EXECTYPE, CANCELED_ORDSTATUS);
+    gateway_->sendExecutionReport(&cancel, *order, "CXL-1"); // a cancel's acknowledgement (#98)
+    order->origClOrderId_ = WideDataStorage::instance()->add(new RawDataEntry(STRING_RAWDATATYPE, "ORD-0", 5));
+    auto replacement = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, NEW_ORDSTATUS);
+    replacement.origOrderId_ = IdT(6, 1);
+    gateway_->sendExecutionReport(&replacement, *order);
+    reports += 4;
+    EXPECT_EQ(reports, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText();
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ASwapsTradeReportIsRefusedForItsTradeLinkIdAlone)
+{
+    // FIX 5.0 SP2 has LegLastQty (1418) in the report's NoLegs group, where FIX 4.4 had no such field. TradeLinkID
+    // (820), which pairs a swap's two fills (#199), is a field of neither version's ExecutionReport, so a counterparty
+    // that validates refuses the report for it, as it did on FIX 4.4 (#378). Nothing else in it is refused.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *order = saveOrderOf(sid_, "SWAP-1");
+    order->ordType_ = FXSWAP_ORDERTYPE;
+    order->settlDate_ = 1792022400000ULL;    // 2026-10-15, midnight UTC
+    order->farSettlDate_ = 1794700800000ULL; // 2026-11-15
+    order->farPrice_ = 1.0872;
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+    trade.execLegType_ = FAR_LEG;
+    trade.tradeLink_ = 4242;
+    trade.lastQty_ = 100;
+    trade.lastPx_ = 1.0872;
+    gateway_->sendExecutionReport(&trade, *order);
+    ASSERT_EQ(1u, sent_.size()) << sentText();
+    EXPECT_EQ("Tag not defined for this message type: 820", refusalOf(sent_[0]));
+    EXPECT_EQ(1u, parsed(sent_[0]).groupCount(FIX::FIELD::NoLegs));
 }
 
 } // anonymous namespace

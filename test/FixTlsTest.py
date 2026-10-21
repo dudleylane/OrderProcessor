@@ -12,7 +12,7 @@ clear. With a certificate made for the run (it needs the openssl command):
      ends, whatever the server sets. FixTlsTest.cpp checks the protocols the server sets by default.)
   5. Without the flags FIX runs over plain TCP, and the server says so, once.
 
-usage: FixTlsTest.py <orderProcessorServer> <seedData> <config/fix.cfg> <config/spec/FIX44.xml>
+usage: FixTlsTest.py <orderProcessorServer> <seedData> <config/fix.cfg> <config/spec>
 """
 import os
 import re
@@ -63,8 +63,8 @@ def logs_on(port, tls, what):
 
 
 def startup(args, cert, key):
-    server, seed, cfg, dictionary = args
-    unusable = Server(server, seed, cfg, dictionary, COUNTERPARTIES, tls=(cert, key))
+    server, seed, cfg, spec = args
+    unusable = Server(server, seed, cfg, spec, COUNTERPARTIES, tls=(cert, key))
     try:
         unusable.seed_data()
         full = unusable.args()

@@ -12,8 +12,8 @@
 #ifdef BUILD_FIX
 
 // QuickFIX headers MUST come before any <flat_map> include (see FixGateway.h)
-#include <quickfix/fix44/NewOrderSingle.h>
-#include <quickfix/fix44/OrderCancelRequest.h>
+#include <quickfix/fix50sp2/NewOrderSingle.h>
+#include <quickfix/fix50sp2/OrderCancelRequest.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
 #include "FixGateway.h"
@@ -231,11 +231,11 @@ protected:
     }
 
     // Helper: build a FIX NewOrderSingle
-    FIX44::NewOrderSingle makeNOS(const std::string &clOrdId, char side, char ordType, double price, double qty,
-                                  char tif = FIX::TimeInForce_DAY)
+    FIX50SP2::NewOrderSingle makeNOS(const std::string &clOrdId, char side, char ordType, double price, double qty,
+                                     char tif = FIX::TimeInForce_DAY)
     {
         FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
-        FIX44::NewOrderSingle msg;
+        FIX50SP2::NewOrderSingle msg;
         msg.set(FIX::ClOrdID(clOrdId));
         msg.set(FIX::Side(side));
         msg.set(FIX::TransactTime(now));
@@ -253,10 +253,10 @@ protected:
     }
 
     // Helper: build a FIX OrderCancelReplaceRequest for a limit order
-    FIX44::OrderCancelReplaceRequest makeReplace(const std::string &origClOrdId, const std::string &clOrdId, char side,
-                                                 double price, double qty)
+    FIX50SP2::OrderCancelReplaceRequest makeReplace(const std::string &origClOrdId, const std::string &clOrdId,
+                                                    char side, double price, double qty)
     {
-        FIX44::OrderCancelReplaceRequest msg;
+        FIX50SP2::OrderCancelReplaceRequest msg;
         msg.set(FIX::OrigClOrdID(origClOrdId));
         msg.set(FIX::ClOrdID(clOrdId));
         msg.set(FIX::Side(side));
@@ -287,9 +287,9 @@ protected:
         return orderOf(clOrdId, fixSid_);
     }
 
-    FIX44::OrderCancelRequest makeCancel(const std::string &origClOrdId, const std::string &clOrdId, char side)
+    FIX50SP2::OrderCancelRequest makeCancel(const std::string &origClOrdId, const std::string &clOrdId, char side)
     {
-        FIX44::OrderCancelRequest msg;
+        FIX50SP2::OrderCancelRequest msg;
         msg.set(FIX::OrigClOrdID(origClOrdId));
         msg.set(FIX::ClOrdID(clOrdId));
         msg.set(FIX::Side(side));
@@ -309,7 +309,7 @@ protected:
     std::unique_ptr<TaskManager> taskMgr_;
     std::unique_ptr<FixGateway> gateway_;
 
-    const FIX::SessionID fixSid_{ "FIX.4.4", "TRADER_A", "ORDER_PROCESSOR", "" };
+    const FIX::SessionID fixSid_{ "FIXT.1.1", "TRADER_A", "ORDER_PROCESSOR", "" };
 };
 
 // =============================================================================
@@ -415,7 +415,7 @@ TEST_F(FixEndToEndTest, CancelOrder_ViaFix_Completes)
     EXPECT_EQ(NEW_ORDSTATUS, order->status_);
 
     FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
-    FIX44::OrderCancelRequest cancelMsg;
+    FIX50SP2::OrderCancelRequest cancelMsg;
     cancelMsg.set(FIX::OrigClOrdID("FIX-CNL-001"));
     cancelMsg.set(FIX::ClOrdID("FIX-CNL-002"));
     cancelMsg.set(FIX::Side(FIX::Side_BUY));
@@ -451,7 +451,7 @@ TEST_F(FixEndToEndTest, CancelOfAFilledOrder_ViaFix_IsRefusedToTheSender)
     ASSERT_NE(nullptr, sell);
     ASSERT_EQ(FILLED_ORDSTATUS, sell->status_);
 
-    FIX44::OrderCancelRequest cancelMsg;
+    FIX50SP2::OrderCancelRequest cancelMsg;
     cancelMsg.set(FIX::OrigClOrdID("FIX-CNL-S1"));
     cancelMsg.set(FIX::ClOrdID("FIX-CNL-S2"));
     cancelMsg.set(FIX::Side(FIX::Side_SELL));
@@ -593,7 +593,7 @@ TEST_F(FixEndToEndTest, TwoSessions_CanUseTheSameClOrdId)
 {
     // FIX scopes a ClOrdID to the client that sent it. The engine refused the second order as a duplicate (#67), and
     // before that crashed on it.
-    const FIX::SessionID otherSid{ "FIX.4.4", "TRADER_B", "ORDER_PROCESSOR", "" };
+    const FIX::SessionID otherSid{ "FIXT.1.1", "TRADER_B", "ORDER_PROCESSOR", "" };
     gateway_->onMessage(makeNOS("SAME-1", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0800, 100), fixSid_);
     waitForProcessing();
     gateway_->onMessage(makeNOS("SAME-1", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0900, 100), otherSid);
@@ -619,7 +619,7 @@ TEST_F(FixEndToEndTest, AnotherSessionsCancelAndReplace_ViaFix_DoNotReachTheEngi
 {
     // Before #71 any session could cancel or replace an order whose ClOrdID it knew or guessed. The gateway answers
     // them as for an unknown order, and the engine never sees them.
-    const FIX::SessionID otherSid{ "FIX.4.4", "TRADER_B", "ORDER_PROCESSOR", "" };
+    const FIX::SessionID otherSid{ "FIXT.1.1", "TRADER_B", "ORDER_PROCESSOR", "" };
     gateway_->onMessage(makeNOS("MINE-1", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0800, 100), fixSid_);
     waitForProcessing();
     OrderEntry *mine = orderOf("MINE-1");

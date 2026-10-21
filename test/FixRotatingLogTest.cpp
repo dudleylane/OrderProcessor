@@ -27,7 +27,7 @@ namespace
 {
 namespace fs = std::filesystem;
 
-const char SESSION[] = "FIX.4.4-ORDER_PROCESSOR-CLIENT_A";
+const char SESSION[] = "FIXT.1.1-ORDER_PROCESSOR-CLIENT_A";
 
 class FixRotatingLogTest : public ::testing::Test
 {
@@ -47,13 +47,13 @@ protected:
     {
         std::istringstream cfg(
             "[DEFAULT]\nConnectionType=acceptor\nFileLogPath=" + dir_.string() + "\n" + extra +
-            "\n[SESSION]\nBeginString=FIX.4.4\nSenderCompID=ORDER_PROCESSOR\nTargetCompID=CLIENT_A\n");
+            "\n[SESSION]\nBeginString=FIXT.1.1\nSenderCompID=ORDER_PROCESSOR\nTargetCompID=CLIENT_A\n");
         return FIX::SessionSettings(cfg);
     }
 
     static FIX::SessionID session()
     {
-        return FIX::SessionID("FIX.4.4", "ORDER_PROCESSOR", "CLIENT_A");
+        return FIX::SessionID("FIXT.1.1", "ORDER_PROCESSOR", "CLIENT_A");
     }
 
     static std::string read(const fs::path &file)
@@ -98,10 +98,10 @@ TEST_F(FixRotatingLogTest, LinesAreWrittenAsFileLogWritesThem)
     // format syntax, and its SOH separators stay as they are.
     App::FixRotatingLogFactory factory(settings());
     std::unique_ptr<FIX::Log> log(factory.create(session()));
-    log->onIncoming("8=FIX.4.4\x01"
+    log->onIncoming("8=FIXT.1.1\x01"
                     "35=0\x01"
                     "58={not a format}\x01");
-    log->onOutgoing("8=FIX.4.4\x01"
+    log->onOutgoing("8=FIXT.1.1\x01"
                     "35=1\x01");
     log->onEvent("Created session {x}");
     log.reset();
@@ -109,11 +109,11 @@ TEST_F(FixRotatingLogTest, LinesAreWrittenAsFileLogWritesThem)
     const std::string stamp = R"(\d{8}-\d{2}:\d{2}:\d{2}\.\d{3} : )";
     const std::string messages = read(dir_ / (std::string(SESSION) + ".messages.log"));
     EXPECT_TRUE(std::regex_match(messages, std::regex(stamp +
-                                                      "8=FIX\\.4\\.4\x01"
+                                                      "8=FIXT\\.1\\.1\x01"
                                                       "35=0\x01"
                                                       "58=\\{not a format\\}\x01\n" +
                                                       stamp +
-                                                      "8=FIX\\.4\\.4\x01"
+                                                      "8=FIXT\\.1\\.1\x01"
                                                       "35=1\x01\n")))
         << messages;
     const std::string events = read(dir_ / (std::string(SESSION) + ".event.log"));
