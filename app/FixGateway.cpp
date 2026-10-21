@@ -22,6 +22,7 @@
 #include <quickfix/Exceptions.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
+#include <quickfix/fixt11/Reject.h>
 
 using namespace COP;
 using namespace COP::App;
@@ -35,9 +36,11 @@ std::atomic<u64> containedExceptions{ 0 };
 
 /// Longest prefix of an inbound message that goes into the log.
 const size_t MAX_LOGGED_MESSAGE = 256;
-/// OrdRejReason (103) value 0, "Broker / Exchange option" in FIX 4.4. QuickFIX names it OrdRejReason_BROKER_CREDIT,
-/// its FIX 4.2 meaning. The engine's reject reasons are free text, so every reject goes out with this code and the
-/// reason itself in Text (58).
+/// Longest prefix of one of its fields that goes into the log
+const size_t MAX_LOGGED_VALUE = 32;
+/// OrdRejReason (103) value 0, "Broker / Exchange option" in FIX 5.0 SP2, as in 4.4. QuickFIX names it
+/// OrdRejReason_BROKER_CREDIT, its FIX 4.2 meaning. The engine's reject reasons are free text, so every reject goes out
+/// with this code and the reason itself in Text (58).
 const int ORD_REJ_REASON_BROKER_OPTION = 0;
 
 /// Why a cancel was refused, for Text (58). The words match App::cancelRejectReason(), which WebSocket clients get;
@@ -217,8 +220,24 @@ void FixGateway::fromAdmin(const FIX::Message &msg, const FIX::SessionID &sid)
     // QuickFIX calls this with a Logon before it accepts it, and refuses the Logon if this throws RejectLogon: it answers
     // with a Logout carrying the text, and disconnects (#147). Before #147 nothing was checked here.
     const FIX::Header &header = msg.getHeader();
-    if ((nullptr == credentials_) || !header.isSetField(FIX::FIELD::MsgType) ||
-        (FIX::MsgType_Logon != header.getField(FIX::FIELD::MsgType)))
+    if (!header.isSetField(FIX::FIELD::MsgType) || (FIX::MsgType_Logon != header.getField(FIX::FIELD::MsgType)))
+    {
+        return;
+    }
+    // The session checks the counterparty's messages against the dictionary of the version its Logon names in
+    // DefaultApplVerID (1137), and has FIX 5.0 SP2's alone: with any other it would check them against none
+    // (#377). QuickFIX refuses a Logon without one itself.
+    const std::string version =
+        msg.isSetField(FIX::FIELD::DefaultApplVerID) ? msg.getField(FIX::FIELD::DefaultApplVerID) : "";
+    if (FIX::ApplVerID_FIX50_SP2 != version)
+    {
+        aux::ExchLogger::instance()->warn("FIX logon refused for " + sid.toString() +
+                                          ": its DefaultApplVerID (1137) is '" + version.substr(0, MAX_LOGGED_VALUE) +
+                                          "', not 9, FIX 5.0 SP2 (#377)");
+        throw FIX::RejectLogon("Logon refused: this acceptor speaks FIX 5.0 SP2 alone, so DefaultApplVerID (1137) must "
+                               "be 9");
+    }
+    if (nullptr == credentials_)
     {
         return;
     }
@@ -248,11 +267,29 @@ void FixGateway::fromAdmin(const FIX::Message &msg, const FIX::SessionID &sid)
 
 void FixGateway::fromApp(const FIX::Message &msg, const FIX::SessionID &sid)
 {
+    // A message may name its own version in ApplVerID (1128), and the session checked it against that version's
+    // dictionary: against none, for any version but FIX 5.0 SP2 (#377)
+    FIX::ApplVerID applVerId;
+    if (msg.getHeader().getFieldIfSet(applVerId) && (FIX::ApplVerID_FIX50_SP2 != applVerId.getValue()))
+    {
+        rejectApplVerId(msg, sid);
+        return;
+    }
     // QuickFIX calls this on the session's own thread and handles only FIX::Exception there: anything else
     // leaves the thread and terminates the server (#36). Contain it and reject the one message instead.
     try
     {
         dispatch(msg, sid);
+    }
+    catch (const FIX::FieldNotFound &ex)
+    {
+        // A field a handler needs that FIX 5.0 SP2 doesn't require, such as a cancel's OrigClOrdID (41). Answered as
+        // QuickFIX answers it, but here: QuickFIX's BusinessMessageReject carries DefaultApplVerID (1137) on a FIXT
+        // session, which that message doesn't have, so a counterparty that validates refused it (#377,
+        // dudleylane/quickfix#173).
+        rejectMessage(msg, sid, FIX::BusinessRejectReason_CONDITIONALLY_REQUIRED_FIELD_MISSING,
+                      std::string(FIX::BusinessRejectReason_CONDITIONALLY_REQUIRED_FIELD_MISSING_TEXT) + " (" +
+                          std::to_string(ex.field) + ")");
     }
     catch (const FIX::Exception &)
     {
@@ -284,7 +321,7 @@ void FixGateway::rejectMessage(const FIX::Message &msg, const FIX::SessionID &si
 {
     try
     {
-        FIX44::BusinessMessageReject reject;
+        FIX50SP2::BusinessMessageReject reject;
         FIX::MsgSeqNum seqNum;
         if (msg.getHeader().getFieldIfSet(seqNum))
         {
@@ -310,13 +347,38 @@ void FixGateway::rejectMessage(const FIX::Message &msg, const FIX::SessionID &si
     }
 }
 
+void FixGateway::rejectApplVerId(const FIX::Message &msg, const FIX::SessionID &sid)
+{
+    const std::string version = msg.getHeader().getField(FIX::FIELD::ApplVerID);
+    aux::ExchLogger::instance()->warn("FIX: " + sid.toString() + " sent a message of ApplVerID (1128) '" +
+                                      version.substr(0, MAX_LOGGED_VALUE) + "', not 9: refused (#377)");
+    try
+    {
+        // A session-level Reject, as QuickFIX sends for a message its dictionary refuses, with FIXT.1.1's reason for
+        // this one, which QuickFIX has no exception for
+        FIX::MsgSeqNum seqNum;
+        msg.getHeader().getField(seqNum);
+        FIXT11::Reject reject(FIX::RefSeqNum(seqNum.getValue()));
+        reject.set(FIX::RefTagID(FIX::FIELD::ApplVerID));
+        reject.set(FIX::RefMsgType(msg.getHeader().getField(FIX::FIELD::MsgType)));
+        reject.set(FIX::RefApplVerID(version));
+        reject.set(FIX::SessionRejectReason(FIX::SessionRejectReason_INVALID_UNSUPPORTED_APPLICATION_VERSION));
+        reject.set(FIX::Text("Unsupported Application Version: FIX 5.0 SP2, ApplVerID 9, alone"));
+        FIX::Session::sendToTarget(reject, sid);
+    }
+    catch (const std::exception &ex)
+    {
+        aux::ExchLogger::instance()->error(std::string("FixGateway: could not send the reject: ") + ex.what());
+    }
+}
+
 void FixGateway::refuseOrder(const FIX::Message &msg, const FIX::SessionID &sid, int ordRejReason,
                              const std::string &text)
 {
     try
     {
         // Its ExecID comes from the shared generator, as an engine reject's does (#81)
-        FIX44::ExecutionReport report =
+        FIX50SP2::ExecutionReport report =
             buildOrderRefusal(msg, ordRejReason, text, IdTGenerator::instance()->getId().id_);
         FIX::Session::sendToTarget(report, sid);
     }
@@ -329,7 +391,7 @@ void FixGateway::refuseOrder(const FIX::Message &msg, const FIX::SessionID &sid,
 void FixGateway::dispatch(const FIX::Message &msg, const FIX::SessionID &sid)
 {
     // Build the handler's message type from the generic message rather than casting to it. The session hands
-    // over a FIX::Message; FIX44::MessageCracker::crack() takes a FIX44::Message, so it received a temporary
+    // over a FIX::Message; FIX50SP2::MessageCracker::crack() takes a FIX50SP2::Message, so it received a temporary
     // copy and cast that to NewOrderSingle and the rest, types it is not: undefined behaviour on every inbound
     // message, which UBSan reports. Constructing the typed message costs the same single copy.
     FIX::MsgType msgType;
@@ -337,24 +399,27 @@ void FixGateway::dispatch(const FIX::Message &msg, const FIX::SessionID &sid)
     const std::string &type = msgType.getValue();
     if (FIX::MsgType_NewOrderSingle == type)
     {
-        onMessage(FIX44::NewOrderSingle(msg), sid);
+        onMessage(FIX50SP2::NewOrderSingle(msg), sid);
     }
     else if (FIX::MsgType_NewOrderMultileg == type)
     {
-        onMessage(FIX44::NewOrderMultileg(msg), sid);
+        onMessage(FIX50SP2::NewOrderMultileg(msg), sid);
     }
     else if (FIX::MsgType_OrderCancelRequest == type)
     {
-        onMessage(FIX44::OrderCancelRequest(msg), sid);
+        onMessage(FIX50SP2::OrderCancelRequest(msg), sid);
     }
     else if (FIX::MsgType_OrderCancelReplaceRequest == type)
     {
-        onMessage(FIX44::OrderCancelReplaceRequest(msg), sid);
+        onMessage(FIX50SP2::OrderCancelReplaceRequest(msg), sid);
     }
     else
     {
-        // as the cracker's default handler did; QuickFIX answers with the reject for an unsupported type
-        throw FIX::UnsupportedMessageType();
+        // Answered as QuickFIX answers the cracker's UnsupportedMessageType, but here, as fromApp() answers a missing
+        // field: QuickFIX's BusinessMessageReject carries 1137, which a counterparty that validates refuses (#377,
+        // dudleylane/quickfix#173)
+        rejectMessage(msg, sid, FIX::BusinessRejectReason_UNSUPPORTED_MESSAGE_TYPE,
+                      FIX::BusinessRejectReason_UNSUPPORTED_MESSAGE_TYPE_TEXT);
     }
 }
 
@@ -362,7 +427,7 @@ void FixGateway::dispatch(const FIX::Message &msg, const FIX::SessionID &sid)
 // Inbound message handlers
 // =============================================================================
 
-void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionID &sid)
+void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::SessionID &sid)
 {
     FIX::ClOrdID clOrdId;
     msg.get(clOrdId);
@@ -574,7 +639,7 @@ void FixGateway::onMessage(const FIX44::NewOrderSingle &msg, const FIX::SessionI
 //       Leg 2 (far):  LegSymbol, LegPrice (forward), LegSettlDate (T+N),
 //                     LegSide opposite to root Side
 // =============================================================================
-void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::SessionID &sid)
+void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::SessionID &sid)
 {
     FIX::ClOrdID clOrdId;
     msg.get(clOrdId);
@@ -617,7 +682,7 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
     DateTimeT nearSettlDate = 0, farSettlDate = 0;
     std::string legSymbol;
 
-    FIX44::NewOrderMultileg::NoLegs legGroup;
+    FIX50SP2::NewOrderMultileg::NoLegs legGroup;
     for (int i = 1; i <= 2; ++i)
     {
         msg.getGroup(i, legGroup);
@@ -792,7 +857,7 @@ void FixGateway::onMessage(const FIX44::NewOrderMultileg &msg, const FIX::Sessio
     inQueues_->push(sourceStr, evt);
 }
 
-void FixGateway::onMessage(const FIX44::OrderCancelRequest &msg, const FIX::SessionID &sid)
+void FixGateway::onMessage(const FIX50SP2::OrderCancelRequest &msg, const FIX::SessionID &sid)
 {
     FIX::OrigClOrdID origClOrdId;
     msg.get(origClOrdId);
@@ -811,7 +876,7 @@ void FixGateway::onMessage(const FIX44::OrderCancelRequest &msg, const FIX::Sess
         Queues::CancelRejectEvent unknown; // UNKNOWN_ORDER, with no order status
         try
         {
-            FIX44::OrderCancelReject reject = buildCancelReject(unknown, "NONE", clOrdId.getString(), origClOrdStr);
+            FIX50SP2::OrderCancelReject reject = buildCancelReject(unknown, "NONE", clOrdId.getString(), origClOrdStr);
             FIX::Session::sendToTarget(reject, sid);
         }
         catch (const std::exception &ex)
@@ -828,7 +893,7 @@ void FixGateway::onMessage(const FIX44::OrderCancelRequest &msg, const FIX::Sess
     inQueues_->push(sourceStr, evt);
 }
 
-void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FIX::SessionID &sid)
+void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const FIX::SessionID &sid)
 {
     FIX::OrigClOrdID origClOrdId;
     msg.get(origClOrdId);
@@ -845,7 +910,7 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
         // Answered here, as a cancel of an unknown order is (#73), quoting the request's own ClOrdIDs
         try
         {
-            FIX44::OrderCancelReject reject = buildUnknownReplaceReject(clOrdId.getString(), origClOrdStr);
+            FIX50SP2::OrderCancelReject reject = buildUnknownReplaceReject(clOrdId.getString(), origClOrdStr);
             FIX::Session::sendToTarget(reject, sid);
         }
         catch (const std::exception &ex)
@@ -880,7 +945,7 @@ void FixGateway::onMessage(const FIX44::OrderCancelReplaceRequest &msg, const FI
         refusal.reason_ = reason;
         try
         {
-            FIX44::OrderCancelReject reject = buildReplaceReject(refusal, origOrderId, origStatus);
+            FIX50SP2::OrderCancelReject reject = buildReplaceReject(refusal, origOrderId, origStatus);
             FIX::Session::sendToTarget(reject, sid);
         }
         catch (const std::exception &ex)
@@ -1096,18 +1161,19 @@ void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntr
         sid = it->second;
     }
 
-    FIX44::ExecutionReport report = buildExecutionReport(exec, order, requestClOrdId);
+    FIX50SP2::ExecutionReport report = buildExecutionReport(exec, order, requestClOrdId);
     FIX::Session::sendToTarget(report, sid);
 }
 
-FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
-                                                        const std::string &requestClOrdId)
+FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
+                                                           const std::string &requestClOrdId)
 {
-    FIX44::ExecutionReport report(
+    FIX50SP2::ExecutionReport report(
         FIX::OrderID(std::to_string(order.orderId_.id_)), FIX::ExecID(std::to_string(exec->execId_.id_)),
         FIX::ExecType(fromExecType(exec->type_)), FIX::OrdStatus(fromOrdStatus(exec->orderStatus_)),
-        FIX::Side(fromSide(order.side_)), FIX::LeavesQty(order.leavesQty_), FIX::CumQty(order.cumQty_),
-        FIX::AvgPx(order.avgPx_));
+        FIX::Side(fromSide(order.side_)), FIX::LeavesQty(order.leavesQty_), FIX::CumQty(order.cumQty_));
+    // Optional since FIX 5.0, so no longer the constructor's, but every report of the Order State Changes has it
+    report.set(FIX::AvgPx(order.avgPx_));
 
     // The client's own ClOrdIDs, without the session's key they are stored under (#71)
     const std::string source = sourceOf(order);
@@ -1142,7 +1208,7 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
     {
         report.set(FIX::ExecRestatementReason(FIX::ExecRestatementReason_GT_RENEWAL));
     }
-    // A GT order's figures for the business day, once it has traded on an earlier one, as FIX 4.4 defines them (#244)
+    // A GT order's figures for the business day, once it has traded on an earlier one, as FIX defines them (#244)
     if ((DAY_TIF != order.tif_) && (IOC_TIF != order.tif_) && (FOK_TIF != order.tif_) &&
         (order.dayCumQty_ < order.cumQty_))
     {
@@ -1185,7 +1251,7 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
     // TradeLinkID so clients can correlate near+far reports for the same swap.
     if (exec->execLegType_ != SINGLE_LEG)
     {
-        FIX44::ExecutionReport::NoLegs legGroup;
+        FIX50SP2::ExecutionReport::NoLegs legGroup;
 
         legGroup.set(FIX::LegSymbol(order.instrument_.get().symbol_));
 
@@ -1207,9 +1273,9 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
         if (auto *trade = dynamic_cast<const TradeExecEntry *>(exec))
         {
             legGroup.set(FIX::LegLastPx(trade->lastPx_));
-            // LegLastQty (tag 1418) has no typed class in QuickFIX's FIX 4.4 headers,
-            // use untyped setField instead
-            legGroup.setField(1418, std::to_string(trade->lastQty_));
+            // LegLastQty (1418), in FIX 5.0 SP2's leg group: FIX 4.4 had no such field, so a client checking a report
+            // against its dictionary refused it there
+            legGroup.set(FIX::LegLastQty(trade->lastQty_));
         }
 
         // A LocalMktDate, YYYYMMDD: it used to be the engine's milliseconds, which no FIX client could read (#198)
@@ -1220,8 +1286,9 @@ FIX44::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *ex
 
         report.addGroup(legGroup);
 
-        // TradeLinkID (820), which has no typed class in FIX 4.4's headers: the same on a side's near and far reports, so
-        // a client pairs them (#199). It was "<orderId>-<transactTime>", and each report stamps its own time.
+        // TradeLinkID (820): the same on a side's near and far reports, so a client pairs them (#199). It was
+        // "<orderId>-<transactTime>", and each report stamps its own time. FIX 5.0 SP2's ExecutionReport doesn't have
+        // it, as 4.4's didn't, so a client checking a swap's report against its dictionary refuses it (#378).
         report.setField(820, std::to_string(exec->tradeLink_));
     }
 
@@ -1263,7 +1330,7 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
             {
                 origStatus = fromOrdStatus(evnt.origStatus_);
             }
-            FIX44::OrderCancelReject reject = buildReplaceReject(shown, origOrderId, origStatus);
+            FIX50SP2::OrderCancelReject reject = buildReplaceReject(shown, origOrderId, origStatus);
             FIX::Session::sendToTarget(reject, sid);
         }
         else
@@ -1271,7 +1338,7 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
             // The order was never stored, so its reject has no execution of its own. Its ExecID still comes from the
             // shared id generator, whose saved limit keeps it from repeating after a restart, as execution ids don't
             // (#81); a counter of the gateway's own started again at R1 in every run.
-            FIX44::ExecutionReport report = buildOrderReject(shown, IdTGenerator::instance()->getId().id_);
+            FIX50SP2::ExecutionReport report = buildOrderReject(shown, IdTGenerator::instance()->getId().id_);
             FIX::Session::sendToTarget(report, sid);
         }
     }
@@ -1281,12 +1348,13 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
     }
 }
 
-FIX44::ExecutionReport FixGateway::buildOrderReject(const Queues::OrderRejectEvent &evnt, u64 execId)
+FIX50SP2::ExecutionReport FixGateway::buildOrderReject(const Queues::OrderRejectEvent &evnt, u64 execId)
 {
     // The order was never stored, so it has no OrderID; its reject still needs an ExecID of its own
-    FIX44::ExecutionReport report(FIX::OrderID("NONE"), FIX::ExecID("R" + std::to_string(execId)),
-                                  FIX::ExecType(FIX::ExecType_REJECTED), FIX::OrdStatus(FIX::OrdStatus_REJECTED),
-                                  FIX::Side(fromSide(evnt.side_)), FIX::LeavesQty(0), FIX::CumQty(0), FIX::AvgPx(0));
+    FIX50SP2::ExecutionReport report(FIX::OrderID("NONE"), FIX::ExecID("R" + std::to_string(execId)),
+                                     FIX::ExecType(FIX::ExecType_REJECTED), FIX::OrdStatus(FIX::OrdStatus_REJECTED),
+                                     FIX::Side(fromSide(evnt.side_)), FIX::LeavesQty(0), FIX::CumQty(0));
+    report.set(FIX::AvgPx(0)); // as buildExecutionReport() sends it
     if (!evnt.clOrderId_.empty())
     {
         report.set(FIX::ClOrdID(evnt.clOrderId_));
@@ -1303,8 +1371,8 @@ FIX44::ExecutionReport FixGateway::buildOrderReject(const Queues::OrderRejectEve
     return report;
 }
 
-FIX44::ExecutionReport FixGateway::buildOrderRefusal(const FIX::Message &order, int ordRejReason,
-                                                     const std::string &text, u64 execId)
+FIX50SP2::ExecutionReport FixGateway::buildOrderRefusal(const FIX::Message &order, int ordRejReason,
+                                                        const std::string &text, u64 execId)
 {
     Queues::OrderRejectEvent refusal;
     FIX::ClOrdID clOrdId;
@@ -1318,7 +1386,7 @@ FIX44::ExecutionReport FixGateway::buildOrderRefusal(const FIX::Message &order, 
         refusal.symbol_ = symbol.getValue();
     }
     refusal.reason_ = text;
-    FIX44::ExecutionReport report = buildOrderReject(refusal, execId);
+    FIX50SP2::ExecutionReport report = buildOrderReject(refusal, execId);
     report.set(FIX::OrdRejReason(ordRejReason));
     // Side and OrderQty as they were sent: the engine's own types may not hold them
     FIX::Side side;
@@ -1333,20 +1401,22 @@ FIX44::ExecutionReport FixGateway::buildOrderRefusal(const FIX::Message &order, 
     return report;
 }
 
-FIX44::OrderCancelReject FixGateway::buildReplaceReject(const Queues::OrderRejectEvent &evnt,
-                                                        const std::string &origOrderId, char origStatus)
+FIX50SP2::OrderCancelReject FixGateway::buildReplaceReject(const Queues::OrderRejectEvent &evnt,
+                                                           const std::string &origOrderId, char origStatus)
 {
-    FIX44::OrderCancelReject reject(FIX::OrderID(origOrderId), FIX::ClOrdID(evnt.clOrderId_),
-                                    FIX::OrigClOrdID(evnt.origClOrderId_), FIX::OrdStatus(origStatus),
-                                    FIX::CxlRejResponseTo(FIX::CxlRejResponseTo_ORDER_CANCEL_REPLACE_REQUEST));
+    FIX50SP2::OrderCancelReject reject(FIX::OrderID(origOrderId), FIX::ClOrdID(evnt.clOrderId_),
+                                       FIX::OrdStatus(origStatus),
+                                       FIX::CxlRejResponseTo(FIX::CxlRejResponseTo_ORDER_CANCEL_REPLACE_REQUEST));
+    // Optional since FIX 5.0, and still sent: it names the order the request was for
+    reject.set(FIX::OrigClOrdID(evnt.origClOrderId_));
     reject.set(FIX::CxlRejReason(evnt.duplicateClOrderId_ ? FIX::CxlRejReason_DUPLICATE_CL_ORD_ID
                                                           : cxlRejReasonFor(evnt.refusal_)));
     reject.set(FIX::Text(evnt.reason_));
     return reject;
 }
 
-FIX44::OrderCancelReject FixGateway::buildUnknownReplaceReject(const std::string &clOrdId,
-                                                               const std::string &origClOrdId)
+FIX50SP2::OrderCancelReject FixGateway::buildUnknownReplaceReject(const std::string &clOrdId,
+                                                                  const std::string &origClOrdId)
 {
     Queues::OrderRejectEvent unknown;
     unknown.replacement_ = true;
@@ -1357,23 +1427,23 @@ FIX44::OrderCancelReject FixGateway::buildUnknownReplaceReject(const std::string
     return buildReplaceReject(unknown, "NONE", FIX::OrdStatus_REJECTED);
 }
 
-FIX44::OrderCancelReject FixGateway::buildCancelReject(const Queues::CancelRejectEvent &evnt,
-                                                       const std::string &orderId, const std::string &clOrdId,
-                                                       const std::string &origClOrdId)
+FIX50SP2::OrderCancelReject FixGateway::buildCancelReject(const Queues::CancelRejectEvent &evnt,
+                                                          const std::string &orderId, const std::string &clOrdId,
+                                                          const std::string &origClOrdId)
 {
     const char status =
         (INVALID_ORDSTATUS == evnt.ordStatus_) ? FIX::OrdStatus_REJECTED : fromOrdStatus(evnt.ordStatus_);
-    FIX44::OrderCancelReject reject(FIX::OrderID(orderId), FIX::ClOrdID(clOrdId), FIX::OrigClOrdID(origClOrdId),
-                                    FIX::OrdStatus(status),
-                                    FIX::CxlRejResponseTo(FIX::CxlRejResponseTo_ORDER_CANCEL_REQUEST));
+    FIX50SP2::OrderCancelReject reject(FIX::OrderID(orderId), FIX::ClOrdID(clOrdId), FIX::OrdStatus(status),
+                                       FIX::CxlRejResponseTo(FIX::CxlRejResponseTo_ORDER_CANCEL_REQUEST));
+    reject.set(FIX::OrigClOrdID(origClOrdId)); // optional since FIX 5.0, as for a replace
     reject.set(FIX::CxlRejReason(cxlRejReasonFor(evnt.reason_)));
     reject.set(FIX::Text(cancelRejectText(evnt)));
     return reject;
 }
 
-FIX44::OrderCancelReject FixGateway::buildEngineCancelReject(const Queues::CancelRejectEvent &evnt,
-                                                             const std::string &orderId,
-                                                             const std::string &orderClOrdId)
+FIX50SP2::OrderCancelReject FixGateway::buildEngineCancelReject(const Queues::CancelRejectEvent &evnt,
+                                                                const std::string &orderId,
+                                                                const std::string &orderClOrdId)
 {
     const std::string &clOrdId = evnt.requestClOrdId_.empty() ? orderClOrdId : evnt.requestClOrdId_;
     return buildCancelReject(evnt, orderId, clOrdId, orderClOrdId);
@@ -1408,7 +1478,7 @@ void FixGateway::sendCancelReject(const Queues::CancelRejectEvent &evnt, const s
     }
     try
     {
-        FIX44::OrderCancelReject reject = buildEngineCancelReject(evnt, orderId, clOrdId);
+        FIX50SP2::OrderCancelReject reject = buildEngineCancelReject(evnt, orderId, clOrdId);
         FIX::Session::sendToTarget(reject, sid);
     }
     catch (const std::exception &ex)
@@ -1442,7 +1512,7 @@ void FixGateway::sendBusinessReject(const IdT &refOrderId, const std::string &re
         }
         target = it->second;
     }
-    FIX44::BusinessMessageReject reject;
+    FIX50SP2::BusinessMessageReject reject;
     reject.set(FIX::RefMsgType("D")); // NewOrderSingle/NewOrderMultileg
     reject.set(FIX::BusinessRejectReason(FIX::BusinessRejectReason_OTHER));
     reject.set(FIX::Text(reason));
@@ -1667,9 +1737,9 @@ char FixGateway::fromOrdStatus(OrderStatus s)
     case REJECTED_ORDSTATUS:
         return FIX::OrdStatus_REJECTED;
     case REPLACED_ORDSTATUS:
-        // FIX 4.4 has no Replaced status: 39=5 is not in its dictionary, so a validating client refuses a message
-        // that carries it. A replaced order is closed, its quantity moved to the replacement, which has its own
-        // acknowledgement (#74); a cancel or replace that names it later gets 102=0 and this.
+        // 39=5, Replaced, has been out of use since FIX 4.4, though QuickFIX's FIX 5.0 SP2 dictionary lists it: a
+        // replace is told by ExecType 5 alone. A replaced order is closed, its quantity moved to the replacement, which
+        // has its own acknowledgement (#74); a cancel or replace that names it later gets 102=0 and this.
         return FIX::OrdStatus_CANCELED;
     case PENDINGNEW_ORDSTATUS:
         return FIX::OrdStatus_PENDING_NEW;

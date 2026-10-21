@@ -66,7 +66,7 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 │                           EXTERNAL SYSTEMS                                   │
 │           ┌──────────────┐                    ┌──────────────┐               │
 │           │  FIX Clients  │                    │  WS Clients   │               │
-│           │  (FIX 4.4)   │                    │  (JSON/WS)   │               │
+│           │ (FIX 5.0SP2) │                    │  (JSON/WS)   │               │
 │           └──────┬───────┘                    └──────┬───────┘               │
 │                  │                                    │                       │
 │           ┌──────▼───────┐                    ┌──────▼───────┐               │
@@ -465,7 +465,7 @@ COP (Concurrent Order Processor)
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────┐       │
 │  │              FixGateway                               │       │
-│  │  Implements: FIX::Application + FIX44::MessageCracker │       │
+│  │  Implements: FIX::Application, FIX 5.0 SP2 / FIXT.1.1 │       │
 │  │                                                       │       │
 │  │  INBOUND:                                             │       │
 │  │    NewOrderSingle (35=D)  → OrderEvent                │       │
@@ -475,8 +475,8 @@ COP (Concurrent Order Processor)
 │  │           IncomingQueues::push()                       │       │
 │  │                                                       │       │
 │  │  OUTBOUND:                                            │       │
-│  │    ExecutionEntry → FIX44::ExecutionReport (35=8)     │       │
-│  │    CancelReject   → FIX44::OrderCancelReject (35=9)   │       │
+│  │    ExecutionEntry → FIX50SP2::ExecutionReport (35=8)  │       │
+│  │    CancelReject   → FIX50SP2::OrderCancelReject (35=9)│       │
 │  │                    ↓                                   │       │
 │  │           Session::sendToTarget()                      │       │
 │  └──────────────────────────────────────────────────────┘       │
@@ -524,6 +524,7 @@ COP (Concurrent Order Processor)
 | `FixEndToEndTest.cpp` | `FixEndToEndTest.*` | Full order lifecycle via FIX |
 | `FixGatewayTest.cpp` | `FixEnumTest.*` | Enum conversion round-trips |
 | `FixGatewayTest.cpp` | `FixGatewayInboundTest.*` | FIX message translation |
+| `FixGatewayTest.cpp` | `FixtSessionTest.*` | A real FIXT.1.1 session from `config/fix.cfg`: what it sends, validated with FIX 5.0 SP2 |
 | `FixGatewayTest.cpp` | `MultiOutQueuesTest.*` | Fan-out adapter |
 | `FixRotatingLogTest.cpp` | `FixRotatingLogTest.*` | The FIX log's files rotate and stay bounded (#160) |
 | `FixCredentialsTest.cpp` | `FixCredentialsTest.*` | The FIX credentials file, and its PBKDF2 password hashes (#147) |

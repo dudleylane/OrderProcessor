@@ -13,8 +13,8 @@
 #ifdef BUILD_FIX
 
 // QuickFIX headers MUST come before any <flat_map> include (see FixGateway.h)
-#include <quickfix/fix44/NewOrderSingle.h>
-#include <quickfix/fix44/ExecutionReport.h>
+#include <quickfix/fix50sp2/NewOrderSingle.h>
+#include <quickfix/fix50sp2/ExecutionReport.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
 #include "FixGateway.h"
@@ -55,7 +55,7 @@ using test::DummyOrderSaver;
 namespace
 {
 
-const FIX::SessionID BENCH_SID("FIX.4.4", "BENCH_CLIENT", "ORDER_PROCESSOR", "");
+const FIX::SessionID BENCH_SID("FIXT.1.1", "BENCH_CLIENT", "ORDER_PROCESSOR", "");
 
 // =============================================================================
 // Null OutQueues — discards events (minimal overhead for isolation)
@@ -158,10 +158,10 @@ public:
     SourceIdT clearingId_;
 };
 
-FIX44::NewOrderSingle makeBenchNOS(const std::string &clOrdId, char side, char ordType, double price, double qty)
+FIX50SP2::NewOrderSingle makeBenchNOS(const std::string &clOrdId, char side, char ordType, double price, double qty)
 {
     FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
-    FIX44::NewOrderSingle msg;
+    FIX50SP2::NewOrderSingle msg;
     msg.set(FIX::ClOrdID(clOrdId));
     msg.set(FIX::Side(side));
     msg.set(FIX::TransactTime(now));
@@ -274,7 +274,7 @@ static void BM_FixExecReportConstruction(benchmark::State &state)
     int i = 0;
     for (auto _ : state)
     {
-        FIX44::ExecutionReport report;
+        FIX50SP2::ExecutionReport report;
         report.set(FIX::OrderID(std::to_string(++i)));
         report.set(FIX::ExecID(std::to_string(i + 100000)));
         report.set(FIX::ExecType(FIX::ExecType_TRADE));

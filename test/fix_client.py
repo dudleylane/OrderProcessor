@@ -1,10 +1,10 @@
 """fix_client.py: what the scripts that run a real FIX server share (FixResendTest.py, FixLogonTest.py, FixTlsTest.py).
 
-  - Client: a FIX 4.4 client on a raw socket, which sends what it is told to and keeps every message it reads; over
-    TLS when given an ssl.SSLContext (#228).
+  - Client: a FIXT.1.1 client on a raw socket, which logs on for FIX 5.0 SP2 (#377), sends what it is told to
+    and keeps every message it reads; over TLS when given an ssl.SSLContext (#228).
   - Server: the server on a new, seeded data directory, with this branch's config/fix.cfg (only its paths and port
-    changed, and any settings given added) and a credentials file for the counterparties given, as the server needs
-    since #147; serving TLS when given a certificate and key (#228).
+    changed, its dictionaries read from config/spec, and any settings given added) and a credentials file for the
+    counterparties given, as the server needs since #147; serving TLS when given a certificate and key (#228).
   - hash_password(): a password as the credentials file stores it, made with Python's own PBKDF2, so the server's is
     checked against an independent implementation.
   - expect() and problems: each check's line, and the ones that failed.
@@ -21,6 +21,8 @@ import tempfile
 import time
 
 SOH = '\x01'
+# ApplVerID's value for FIX 5.0 SP2, which a FIXT.1.1 Logon gives as its DefaultApplVerID (1137)
+FIX50SP2 = '9'
 problems = []
 
 
@@ -49,14 +51,17 @@ def hash_password(password, iterations=1000):
 
 
 class Client:
-    """A FIX 4.4 client on a raw socket: it sends what it is told to, and keeps every message it reads. With tls, an
-    ssl.SSLContext, it talks TLS, checking the server's certificate against the name localhost (#228); the handshake's
-    ssl.SSLError, if any, comes from here."""
+    """A FIXT.1.1 client on a raw socket: it sends what it is told to, and keeps every message it reads. Its
+    application messages carry no ApplVerID (1128), so they are FIX 5.0 SP2's, the version its Logon names. With tls,
+    an ssl.SSLContext, it talks TLS, checking the server's certificate against the name localhost (#228); the
+    handshake's ssl.SSLError, if any, comes from here. begin_string makes it a client of another version, such as
+    FIX.4.4, the gateway's before #377."""
 
-    def __init__(self, port, sender, seq=1, tls=None):
+    def __init__(self, port, sender, seq=1, tls=None, begin_string='FIXT.1.1'):
         sock = socket.create_connection(('127.0.0.1', port), timeout=10)
         self.sock = tls.wrap_socket(sock, server_hostname='localhost') if tls else sock
         self.sender = sender
+        self.begin_string = begin_string
         self.seq = seq
         self.buf = b''
         self.received = []
@@ -66,14 +71,16 @@ class Client:
                   ('52', now())] + body
         self.seq += 1
         payload = ''.join(f'{tag}={value}{SOH}' for tag, value in fields)
-        msg = f'8=FIX.4.4{SOH}9={len(payload)}{SOH}{payload}'
+        msg = f'8={self.begin_string}{SOH}9={len(payload)}{SOH}{payload}'
         self.sock.sendall(f'{msg}10={sum(msg.encode()) % 256:03d}{SOH}'.encode())
 
-    def logon(self, username, password, reset=True):
+    def logon(self, username, password, reset=True, appl_ver_id=FIX50SP2):
         """Sends a Logon with Username (553) and Password (554), each left out when empty (#147); reset asks both sides
-        to start again from sequence number 1 (141=Y)"""
+        to start again from sequence number 1 (141=Y). Its DefaultApplVerID (1137), FIX 5.0 SP2's unless appl_ver_id
+        says otherwise, is the version of what the session sends after it."""
         fields = [('98', '0'), ('108', '30')] + ([('141', 'Y')] if reset else [])
         fields += [(tag, value) for tag, value in (('553', username), ('554', password)) if value]
+        fields.append(('1137', appl_ver_id))
         self.send('A', fields)
 
     def read_until(self, wanted, seconds=20):
@@ -119,20 +126,25 @@ class Client:
         self.sock.close()
 
 
-def write_cfg(source, work, port, dictionary, extra=None):
-    """This branch's settings, with their paths and port moved into work, and extra's settings added. They name no
-    session: the credentials do."""
+def write_cfg(source, work, port, spec, extra=None):
+    """This branch's settings, with their paths and port moved into work, each dictionary the file of its name in spec,
+    this branch's config/spec, and extra's settings added. They name no session: the credentials do."""
     overrides = {'FileStorePath': os.path.join(work, 'fix-store'), 'FileLogPath': os.path.join(work, 'fix-log'),
-                 'SocketAcceptPort': str(port), 'DataDictionary': dictionary}
+                 'SocketAcceptPort': str(port)}
+    dictionaries = {'TransportDataDictionary', 'AppDataDictionary'}  # FIXT.1.1's and FIX 5.0 SP2's
     lines = []
     with open(source) as cfg:
         for line in cfg:
-            key = line.split('=', 1)[0].strip()
+            key, _, value = line.partition('=')
+            key = key.strip()
             if '=' in line and key in overrides:
                 line = f'{key}={overrides.pop(key)}\n'
+            elif '=' in line and key in dictionaries:
+                dictionaries.remove(key)
+                line = f'{key}={os.path.join(spec, os.path.basename(value.strip()))}\n'
             lines.append(line if line.endswith('\n') else line + '\n')
-    if overrides:
-        sys.exit(f'{source} has no {", ".join(sorted(overrides))}')
+    if overrides or dictionaries:
+        sys.exit(f'{source} has no {", ".join(sorted(set(overrides) | dictionaries))}')
     lines += [f'{key}={value}\n' for key, value in (extra or {}).items()]  # into [DEFAULT], the file's only section
     path = os.path.join(work, 'fix.cfg')
     with open(path, 'w') as cfg:
@@ -156,8 +168,8 @@ class Server:
     TLS (#228). On leaving, it stops the server, shows the end of its log if a check failed, and removes the
     directory."""
 
-    def __init__(self, server, seed, cfg, dictionary, counterparties, tls=None, settings=None):
-        self.server, self.seed, self.cfg, self.dictionary = server, seed, cfg, dictionary
+    def __init__(self, server, seed, cfg, spec, counterparties, tls=None, settings=None):
+        self.server, self.seed, self.cfg, self.spec = server, seed, cfg, spec
         self.counterparties = counterparties
         self.tls = tls
         self.settings = settings
@@ -175,7 +187,7 @@ class Server:
         self.fix_port = free_port()
         tls = ['--fix-tls-cert', self.tls[0], '--fix-tls-key', self.tls[1]] if self.tls else []
         return [self.server, '--port', str(free_port()), '--data-dir', self.data,
-                '--fix-cfg', write_cfg(self.cfg, self.work, self.fix_port, self.dictionary, self.settings)] + tls + [
+                '--fix-cfg', write_cfg(self.cfg, self.work, self.fix_port, self.spec, self.settings)] + tls + [
                 '--fix-credentials', write_credentials(self.work, self.counterparties)]
 
     def __enter__(self):

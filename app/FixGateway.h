@@ -10,13 +10,13 @@
 #include <oneapi/tbb/spin_rw_mutex.h>
 #include <quickfix/SessionID.h>
 #include <quickfix/Session.h>
-#include <quickfix/fix44/NewOrderSingle.h>
-#include <quickfix/fix44/NewOrderMultileg.h>
-#include <quickfix/fix44/OrderCancelRequest.h>
-#include <quickfix/fix44/OrderCancelReplaceRequest.h>
-#include <quickfix/fix44/ExecutionReport.h>
-#include <quickfix/fix44/OrderCancelReject.h>
-#include <quickfix/fix44/BusinessMessageReject.h>
+#include <quickfix/fix50sp2/NewOrderSingle.h>
+#include <quickfix/fix50sp2/NewOrderMultileg.h>
+#include <quickfix/fix50sp2/OrderCancelRequest.h>
+#include <quickfix/fix50sp2/OrderCancelReplaceRequest.h>
+#include <quickfix/fix50sp2/ExecutionReport.h>
+#include <quickfix/fix50sp2/OrderCancelReject.h>
+#include <quickfix/fix50sp2/BusinessMessageReject.h>
 #include <quickfix/Group.h>
 #include "QueuesDef.h"
 #include "DataModelDef.h"
@@ -46,7 +46,7 @@ public:
 
     /// Who may log on, and what each counterparty may trade (#147), which the gateway checks from now on: set it before the
     /// acceptor starts. Throws std::runtime_error if it lists an account the data directory doesn't have. Without it, as
-    /// in tests, every Logon is accepted and an order trades the account it names.
+    /// in tests, every Logon of FIX 5.0 SP2 is accepted and an order trades the account it names.
     void setCredentials(const FixCredentials *credentials);
 
     // Application interface
@@ -59,10 +59,10 @@ public:
     void fromApp(const FIX::Message &, const FIX::SessionID &) override;
 
     // Inbound handlers, called by fromApp() for the message types it dispatches
-    void onMessage(const FIX44::NewOrderSingle &, const FIX::SessionID &);
-    void onMessage(const FIX44::NewOrderMultileg &, const FIX::SessionID &);
-    void onMessage(const FIX44::OrderCancelRequest &, const FIX::SessionID &);
-    void onMessage(const FIX44::OrderCancelReplaceRequest &, const FIX::SessionID &);
+    void onMessage(const FIX50SP2::NewOrderSingle &, const FIX::SessionID &);
+    void onMessage(const FIX50SP2::NewOrderMultileg &, const FIX::SessionID &);
+    void onMessage(const FIX50SP2::OrderCancelRequest &, const FIX::SessionID &);
+    void onMessage(const FIX50SP2::OrderCancelReplaceRequest &, const FIX::SessionID &);
 
     // Outbound — called by FixOutQueues
     /// requestClOrdId is the ClOrdID of the cancel request a cancel's acknowledgement answers (#98); empty otherwise
@@ -98,6 +98,9 @@ private:
     void rejectContained(const FIX::Message &msg, const FIX::SessionID &sid, const char *what);
     /// answers the one message with a BusinessMessageReject to its sender, quoting its MsgSeqNum, MsgType and ClOrdID
     void rejectMessage(const FIX::Message &msg, const FIX::SessionID &sid, int reason, const std::string &text);
+    /// answers a message whose ApplVerID (1128) isn't FIX 5.0 SP2's with a Reject (35=3) to its sender: RefTagID 1128,
+    /// SessionRejectReason 18, invalid or unsupported application version
+    void rejectApplVerId(const FIX::Message &msg, const FIX::SessionID &sid);
     /// refuses a new order to its sender with buildOrderRefusal()'s ExecutionReport, before the engine sees it (#145)
     void refuseOrder(const FIX::Message &msg, const FIX::SessionID &sid, int ordRejReason, const std::string &text);
     /// Reads a settlement date field from fields, the order msg or one of its legs, if set, as a LocalMktDate (#198).
@@ -165,42 +168,44 @@ public:
     /// session. Public and static so that tests can check it without a FIX session. A replacement's REPLACE report
     /// (150=5) also names the order it replaced in OrigClOrdID (41). A cancel's acknowledgement names the cancel
     /// request in ClOrdID (11), when requestClOrdId gives it, and the cancelled order in OrigClOrdID (41) (#98).
-    static FIX44::ExecutionReport buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
-                                                       const std::string &requestClOrdId = std::string());
-    /// Whether a FIX client gets this report. FIX acknowledges a replace once, with the replacement's report; the
-    /// replaced order's own REPLACE report is not sent, since FIX 4.4 has no Replaced status (#74).
+    static FIX50SP2::ExecutionReport buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
+                                                          const std::string &requestClOrdId = std::string());
+    /// Whether a FIX client gets this report. FIX acknowledges a replace once, with the replacement's report, as the
+    /// Order State Changes scenarios do (C.1.a); the replaced order's own REPLACE report is not sent, since its status,
+    /// OrdStatus 5 (Replaced), has been out of use since FIX 4.4 (#74).
     static bool reportsOverFix(const ExecutionEntry *exec);
     /// The ExecutionReport (35=8) rejecting a new order the engine refused without storing it (#67): OrderID NONE,
     /// ExecID R<execId>, 150=8, 39=8, OrdRejReason 6 when its ClOrdID is already in use (else 0), and the reason in
     /// Text (58). sendOrderReject() draws execId from the shared id generator, so it doesn't repeat after a restart
     /// (#81).
-    static FIX44::ExecutionReport buildOrderReject(const Queues::OrderRejectEvent &evnt, u64 execId);
+    static FIX50SP2::ExecutionReport buildOrderReject(const Queues::OrderRejectEvent &evnt, u64 execId);
     /// The ExecutionReport (35=8) refusing a new order the gateway rejects itself, before the engine sees it (#145): as
     /// buildOrderReject() builds one, with the order's ClOrdID, Symbol, and its Side and OrderQty as they were sent,
     /// ordRejReason in OrdRejReason (103) and text in Text (58)
-    static FIX44::ExecutionReport buildOrderRefusal(const FIX::Message &order, int ordRejReason,
-                                                    const std::string &text, u64 execId);
+    static FIX50SP2::ExecutionReport buildOrderRefusal(const FIX::Message &order, int ordRejReason,
+                                                       const std::string &text, u64 execId);
     /// The OrderCancelReject (35=9) answering a cancel/replace request the engine refused (#67, #74): 434=2,
     /// CxlRejReason 6 when the replacement's ClOrdID is already in use, else from the engine's reason as for a cancel
     /// (0 too late, 1 unknown order, 3 a cancel or replace pending, 99 other), and the reason in Text (58). origOrderId
     /// and origStatus describe the order it was to replace.
-    static FIX44::OrderCancelReject buildReplaceReject(const Queues::OrderRejectEvent &evnt,
-                                                       const std::string &origOrderId, char origStatus);
+    static FIX50SP2::OrderCancelReject buildReplaceReject(const Queues::OrderRejectEvent &evnt,
+                                                          const std::string &origOrderId, char origStatus);
     /// The gateway's own answer to a cancel/replace request whose OrigClOrdID names no order (#74): 434=2, 102=1,
     /// OrderID NONE, OrdStatus 8, and the request's ClOrdIDs
-    static FIX44::OrderCancelReject buildUnknownReplaceReject(const std::string &clOrdId,
-                                                              const std::string &origClOrdId);
+    static FIX50SP2::OrderCancelReject buildUnknownReplaceReject(const std::string &clOrdId,
+                                                                 const std::string &origClOrdId);
     /// The OrderCancelReject (35=9) refusing a cancel request (#73): 434=1, CxlRejReason from the engine's reason (0 too
     /// late, 1 unknown order, 3 a replace pending, 99 other), the order's OrdStatus (8 when the order is unknown), and
     /// why in Text (58), with clOrdId in ClOrdID (11) and origClOrdId in OrigClOrdID (41).
-    static FIX44::OrderCancelReject buildCancelReject(const Queues::CancelRejectEvent &evnt, const std::string &orderId,
-                                                      const std::string &clOrdId, const std::string &origClOrdId);
+    static FIX50SP2::OrderCancelReject buildCancelReject(const Queues::CancelRejectEvent &evnt,
+                                                         const std::string &orderId, const std::string &clOrdId,
+                                                         const std::string &origClOrdId);
     /// The OrderCancelReject for a cancel the engine refused, given the order it named: ClOrdID (11) is the cancel
     /// request's own, which the engine carries back since #98, and OrigClOrdID (41) the order's; an event without the
     /// request's ClOrdID falls back to the order's in 11, as before.
-    static FIX44::OrderCancelReject buildEngineCancelReject(const Queues::CancelRejectEvent &evnt,
-                                                            const std::string &orderId,
-                                                            const std::string &orderClOrdId);
+    static FIX50SP2::OrderCancelReject buildEngineCancelReject(const Queues::CancelRejectEvent &evnt,
+                                                               const std::string &orderId,
+                                                               const std::string &orderClOrdId);
 };
 
 } // namespace App

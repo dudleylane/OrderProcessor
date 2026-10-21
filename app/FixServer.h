@@ -61,7 +61,8 @@ public:
     /// the settings already have one; a session the credentials don't name is refused, since nobody could log on to it.
     /// With tls's files the acceptor is ThreadedSSLSocketAcceptor, and serves TLS only, with the protocols FixTls.h
     /// says (#228); without them it is ThreadedSocketAcceptor, plain TCP, and it warns. Throws if a file can't be used,
-    /// or the credentials name an account the data directory doesn't have.
+    /// a session isn't FIXT.1.1's with FIX 5.0 SP2 and both of their dictionaries (#377), or the credentials name
+    /// an account the data directory doesn't have.
     void start(const std::string &configFile, const std::string &credentialsFile, const FixTlsFiles &tls = {});
 
     /// Stop the FIX acceptor gracefully.

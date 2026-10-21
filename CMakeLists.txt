@@ -241,22 +241,22 @@ if(BUILD_APP)
             add_test(NAME FixClientRecoversMissedReports
                      COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixResendTest.py
                              $<TARGET_FILE:orderProcessorServer> $<TARGET_FILE:seedData>
-                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec/FIX44.xml)
+                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec)
             # Only a counterparty with its Username and Password logs on, and it trades only its accounts (#147)
             add_test(NAME FixLogonNeedsCredentials
                      COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixLogonTest.py
                              $<TARGET_FILE:orderProcessorServer> $<TARGET_FILE:seedData>
-                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec/FIX44.xml)
+                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec)
             # An order the gateway refuses is answered to its sender, and to nobody else (#189)
             add_test(NAME FixRefusalsReachOnlyTheirSender
                      COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixRefusalTest.py
                              $<TARGET_FILE:orderProcessorServer> $<TARGET_FILE:seedData>
-                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec/FIX44.xml)
+                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec)
             # With --fix-tls-cert and --fix-tls-key, FIX serves TLS only; without them it warns (#228)
             add_test(NAME FixServesTlsOnly
                      COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixTlsTest.py
                              $<TARGET_FILE:orderProcessorServer> $<TARGET_FILE:seedData>
-                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec/FIX44.xml)
+                             ${CMAKE_CURRENT_SOURCE_DIR}/config/fix.cfg ${CMAKE_CURRENT_SOURCE_DIR}/config/spec)
         endif()
     endif()
 endif()

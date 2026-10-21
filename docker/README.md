@@ -42,6 +42,7 @@ CLIENT_A   client_a   pbkdf2-sha256$600000$<salt>$<key>     TRADING-1,TRADING-2
 - **Readable by others.** The file holds only hashes, so it may be, and it must be: the server runs as `oms` (uid 10001), and rootless podman shows a file only its owner may read as root's, which `oms` can't read.
 - **Changes.** Add or change a line, then `docker compose restart oms-server`.
 - **TLS.** The acceptor serves TLS only (#228), with the stack's certificate and key (see [TLS](#tls)), so a password doesn't cross the network in the clear. A counterparty's client connects with TLS 1.2 or 1.3 and checks the certificate's name against the host it connects to.
+- **Version.** A counterparty speaks FIX 5.0 SP2 over FIXT.1.1 (#377): BeginString `FIXT.1.1`, and DefaultApplVerID (1137) 9 in its Logon. A Logon of another version is refused: one of FIXT.1.1 with a Logout, one of FIX.4.4 by closing the connection, unanswered. The acceptor spoke FIX 4.4 before; its store and log files in the data volume's `fix-store` and `fix-log` are named by BeginString, so the `FIX.4.4-*` ones are no longer read, and may be removed.
 
 ## Services
 
