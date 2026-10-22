@@ -62,11 +62,37 @@ merged() { # base merged_at run_event run_conclusion job_conclusion annotation_t
         '{total_count: 1, workflow_runs: [{id: $id, event: $event, status: "completed", conclusion: $conclusion,
           head_sha: $head, path: ".github/workflows/build-test.yml", run_attempt: 1, html_url: $url}]}')"
     answer "repos/$repo/actions/runs/$run/jobs?per_page=100" "$(jq -n --argjson id "$run" --arg conclusion "$5" \
-        '{total_count: 2, jobs: [{id: ($id * 10 + 1), name: "Tested tree", status: "completed", conclusion: "success"},
-          {id: ($id * 10 + 2), name: "Release build + ctest", status: "completed", conclusion: $conclusion}]}')"
+        '{total_count: 2, jobs: [
+          {id: ($id * 10 + 1), name: "Tested tree", run_attempt: 1, status: "completed", conclusion: "success"},
+          {id: ($id * 10 + 2), name: "Release build + ctest", run_attempt: 1, status: "completed",
+           conclusion: $conclusion}]}')"
     answer "repos/$repo/check-runs/${run}1/annotations?per_page=100" "$(jq -n --arg title "$6" --arg tree "$7" \
         '[{path: ".github", start_line: 1, end_line: 1, annotation_level: "notice", title: $title, message: $tree,
           raw_details: ""}]')"
+}
+# Then re-runs of that run's failed job alone, as `gh run rerun --failed` makes (#389): each attempt after the first
+# lists the jobs it didn't run as copies of the previous attempt's, and a copy of Tested tree has no annotations.
+# Attempt a's jobs are run * 10 + 2a - 1 (Tested tree) and run * 10 + 2a.
+rerun_failed() { # attempts [run]
+    local attempts=$1 run=${2:-101} a runs
+    local endpoint="repos/$repo/actions/runs/$run/jobs?per_page=100"
+    runs="$answers/$(printf '%s' "$runs_endpoint" | tr -c 'A-Za-z0-9._-' '_')"
+    jq --argjson last "$attempts" '.workflow_runs[0].run_attempt = $last' "$runs" > "$runs.new" \
+        && mv "$runs.new" "$runs"
+    answer "$endpoint" "$(jq -n --argjson run "$run" --argjson last "$attempts" '{total_count: 2, jobs: [
+        {id: ($run * 10 + 2 * $last - 1), name: "Tested tree", run_attempt: $last, status: "completed",
+         conclusion: "success"},
+        {id: ($run * 10 + 2 * $last), name: "Release build + ctest", run_attempt: $last, status: "completed",
+         conclusion: "success"}]}')"
+    answer "$endpoint&filter=all" "$(jq -n --argjson run "$run" --argjson last "$attempts" '{total_count: (2 * $last),
+        jobs: [range(1; $last + 1) as $a
+          | {id: ($run * 10 + 2 * $a - 1), name: "Tested tree", run_attempt: $a, status: "completed",
+             conclusion: "success"},
+            {id: ($run * 10 + 2 * $a), name: "Release build + ctest", run_attempt: $a, status: "completed",
+             conclusion: (if $a == $last then "success" else "failure" end)}]}')"
+    for (( a = 2; a <= attempts; a++ )); do
+        answer "repos/$repo/check-runs/$((run * 10 + 2 * a - 1))/annotations?per_page=100" '[]'
+    done
 }
 new_case() { answers=$(mktemp -d -p "$work"); : > "$work/gh.log"; }
 
@@ -109,6 +135,12 @@ expect_said() { # text: the script's output has it
     cat "$work/stdout"
     failures=$((failures + 1))
 }
+expect_not_asked() { # text: no call to gh had it
+    ! grep -qF -- "$1" "$work/gh.log" && return
+    echo "FAIL: gh was asked for $1"
+    cat "$work/gh.log"
+    failures=$((failures + 1))
+}
 
 new_case
 expect true "a pull request's run records its tree and runs" pull_request master
@@ -149,6 +181,7 @@ new_case
 merged master '"2026-10-18T08:28:00Z"' pull_request success success "Already tested" "$tree"
 expect true "the run has no 'Tested tree' record" push master
 expect_said "(#7's run 101 recorded no tree)"
+expect_not_asked "filter=all"
 new_case
 merged feature/fx-swap-support '"2026-10-18T09:49:31Z"' pull_request success success "Tested tree" "$tree"
 expect true "the pull request was merged into the other branch" push master
@@ -197,6 +230,54 @@ answer_at "repos/$repo/check-runs/1011/annotations?per_page=100" 2 '[]'
 expect false "the run's record is listed only at the third ask" push master
 expect_asked 3
 expect_said "has recorded this tree yet (#7's run 101 recorded no tree) (ask 2 of 5)"
+
+# A re-run of a run's failed job alone lists Tested tree as a copy with no record (#389). Every attempt checks out the
+# run's commit, so the record is the one the newest earlier attempt's Tested tree made
+new_case
+merged master '"2026-10-22T07:49:02Z"' pull_request success success "Tested tree" "$tree"
+rerun_failed 2
+expect false "the pull request's run passed on a re-run of its failed job" push master
+expect_asked 1
+expect_said "::notice title=Already tested::pull request #7's run https://github.com/$repo/actions/runs/101 passed on \
+this tree, $tree, as its attempt 1 recorded (attempt 2 re-ran only some of its jobs)"
+new_case
+merged master '"2026-10-22T07:49:02Z"' pull_request success success "Tested tree" "$tree"
+rerun_failed 3
+expect false "the run passed on a second re-run of its failed job" push master
+expect_said "as its attempt 1 recorded (attempt 3 re-ran only some of its jobs)"
+new_case
+merged master '"2026-10-22T07:49:02Z"' pull_request success success "Tested tree" "$other"
+rerun_failed 2
+expect true "the run passed on a re-run of its failed job, and its first attempt tested another tree" push master
+expect_asked 5
+expect_said "(#7's run 101 recorded no tree in attempt 2, and attempt 1 recorded $other)"
+new_case
+merged master '"2026-10-22T07:49:02Z"' pull_request success success "Tested tree" "$tree"
+rerun_failed 2
+answer "repos/$repo/check-runs/1013/annotations?per_page=100" "$(jq -n --arg tree "$other" \
+    '[{path: ".github", start_line: 1, end_line: 1, annotation_level: "notice", title: "Tested tree", message: $tree,
+      raw_details: ""}]')"
+expect true "the re-run ran Tested tree again, and it recorded another tree" push master
+expect_said "(#7's run 101 recorded $other)"
+expect_not_asked "filter=all"
+new_case
+merged master '"2026-10-22T07:49:02Z"' pull_request success success "Tested tree" "$tree"
+rerun_failed 2
+rm -f "$answers/repos_${repo//\//_}_actions_runs_101_jobs_per_page_100_filter_all"
+expect true "a re-run's earlier attempts can't be listed" push master
+expect_said "(#7's run 101 recorded no tree in attempt 2, and its earlier attempts' jobs can't be listed)"
+new_case
+merged master '"2026-10-22T07:49:02Z"' pull_request success success "Tested tree" "$tree"
+rerun_failed 2
+rm -f "$answers/repos_${repo//\//_}_check-runs_1011_annotations_per_page_100"
+expect true "the first attempt's record can't be read" push master
+expect_said "(#7's run 101 recorded no tree in attempt 2, and job 1011's annotations (attempt 1) can't be read)"
+new_case
+merged master '"2026-10-22T07:49:02Z"' pull_request success success "Tested tree" "$tree"
+rerun_failed 2
+answer "repos/$repo/check-runs/1011/annotations?per_page=100" '[]'
+expect true "no attempt of the re-run run recorded a tree" push master
+expect_said "(#7's run 101 recorded no tree in any of its 2 attempts)"
 
 # Two pull requests have the commit: the first one's run tested another tree, the second one's this tree
 new_case
