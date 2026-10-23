@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Each workflow's tested-tree job (#314), against canned API answers in the shapes GitHub's API returns. A push may skip
 # the jobs only when a pull request merged into its branch has a run of the workflow in which every job passed and which
-# recorded the push's tree; anything else, a failed call among them, must run them, after asking again (#331, #357)
-# and saying what it found.
+# recorded the push's tree; anything else, a failed call among them, must run them, after asking again (#331, #357,
+# #392) and saying what it found.
 # usage: CiTestedTreeTest.sh <scripts/ci-tested-tree.sh>
 set -u
 SCRIPT=$(realpath -e -- "$1") || { echo "no script $1"; exit 1; }
@@ -26,7 +26,8 @@ runs_endpoint+="?head_sha=$head&event=pull_request&status=success&per_page=100"
 
 # A gh that answers `gh api <endpoint>` from $FAKE_GH_DIR, and fails as GitHub's 404 does for an endpoint it has no
 # answer for. It notes each call, and whether gh was given a token and a configuration directory of its own. An answer
-# can change between calls: <answer>.<n>, where there is one, answers the endpoint's nth call.
+# can change between calls: <answer>.<n>, where there is one, answers the endpoint's nth call, and <answer>.<n>.fail
+# fails it, as GitHub's HTTP 500s did (#392).
 mkdir "$work/bin"
 cat > "$work/bin/gh" << 'EOF'
 #!/usr/bin/env bash
@@ -38,6 +39,7 @@ fi
 [[ $# -eq 2 && "$1" == api ]] || { echo "gh: unexpected arguments: $*" >&2; exit 1; }
 answer="$FAKE_GH_DIR/$(printf '%s' "$2" | tr -c 'A-Za-z0-9._-' '_')"
 n=$(grep -cxF "call $*" "$FAKE_GH_LOG")
+[[ -f "$answer.$n.fail" ]] && { echo "unexpected end of JSON input" >&2; exit 1; }
 [[ -f "$answer.$n" ]] && answer="$answer.$n"
 [[ -f "$answer" ]] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
 cat "$answer"
@@ -49,6 +51,9 @@ answer() { # endpoint json: the fake gh's answer for the endpoint
 }
 answer_at() { # endpoint n json: the fake gh's answer for the endpoint's nth call only
     printf '%s\n' "$3" > "$answers/$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_').$2"
+}
+fail_at() { # endpoint n: the fake gh fails the endpoint's nth call, as GitHub's HTTP 500s did (#392)
+    : > "$answers/$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_').$2.fail"
 }
 # The answers for a pull request merged into a base, whose run of build-test.yml recorded a tree
 merged() { # base merged_at run_event run_conclusion job_conclusion annotation_title annotation_tree [number head run]
@@ -194,7 +199,8 @@ expect true "a push no pull request has" push master
 expect_asked 5
 new_case
 expect true "the pull requests can't be listed" push master
-expect_asked 1
+expect_asked 5
+expect_said "run=true: can't list the pull requests that have $sha, asked 5 times, 0 s apart"
 new_case
 merged master '"2026-10-18T08:28:00Z"' pull_request success success "Tested tree" "$tree"
 rm -f "$answers/repos_${repo//\//_}_check-runs_1011_annotations_per_page_100"
@@ -230,6 +236,20 @@ answer_at "repos/$repo/check-runs/1011/annotations?per_page=100" 2 '[]'
 expect false "the run's record is listed only at the third ask" push master
 expect_asked 3
 expect_said "has recorded this tree yet (#7's run 101 recorded no tree) (ask 2 of 5)"
+
+# For about two hours GitHub failed many calls listing a commit's pull requests (#392): a failed call, or an answer
+# that can't be read, is asked again
+new_case
+merged master '"2026-10-22T17:27:44Z"' pull_request success success "Tested tree" "$tree"
+fail_at "repos/$repo/commits/$sha/pulls" 1
+expect false "the pull requests can be listed only at the second ask" push master
+expect_asked 2
+expect_said "Can't list the pull requests that have $sha (ask 1 of 5): asking again in 0 s"
+new_case
+answer "repos/$repo/commits/$sha/pulls" '{"message": "Server Error"}'
+expect true "the pull requests' answer can't be read" push master
+expect_asked 5
+expect_said "run=true: can't read the pull requests that have $sha, asked 5 times, 0 s apart"
 
 # A re-run of a run's failed job alone lists Tested tree as a copy with no record (#389). Every attempt checks out the
 # run's commit, so the record is the one the newest earlier attempt's Tested tree made
