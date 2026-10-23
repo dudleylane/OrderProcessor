@@ -17,12 +17,14 @@
 #     one the newest earlier attempt's Tested tree made. A latest attempt that recorded a tree is taken at its word.
 #   - GitHub's answers settle some seconds after a merge, and a push's first job can ask before then: it linked a
 #     rebase merge's commit to its pull request late (#331), and once answered without a pull request's passing run,
-#     or its record, until later (#357). So until a passing run that recorded this tree turns up, the whole lookup is
-#     asked again, five asks in all, six seconds apart, before the push runs everything. Each ask that finds none
-#     says what it found. TESTED_TREE_RETRY_DELAY sets the seconds between asks (the test sets 0).
-#   - Anything else runs them (run=true): any other event, a failed call listing the commit's pull requests, and,
-#     after the five asks, no such pull request, a run that didn't pass, a different tree, no record in any attempt
-#     or another failed call. The reason says what the last ask found.
+#     or its record, until later (#357). Its calls can fail for a while too: for about two hours it answered many of
+#     those listing a commit's pull requests with HTTP 500 (#392). So until a passing run that recorded this tree turns
+#     up, the whole lookup is asked again, a failed call included, five asks in all, six seconds apart, before the push
+#     runs everything. Each ask that finds none says what it found. TESTED_TREE_RETRY_DELAY sets the seconds between
+#     asks (the test sets 0).
+#   - Anything else runs them (run=true): any other event, and, after the five asks, no such pull request, a run that
+#     didn't pass, a different tree, no record in any attempt or a failed call. The reason says what the last ask
+#     found.
 #
 # It writes run=true or run=false to $GITHUB_OUTPUT and exits 0. The workflows run every job when this one fails, so a
 # failure here costs runner time, never coverage.
@@ -133,11 +135,14 @@ look() { # number head: decides run=false if one of the pull request's runs of t
 }
 
 for (( ask = 1; ; ask++ )); do
-    pulls=$(gh api "repos/$repo/commits/$sha/pulls") || decide true "can't list the pull requests that have $sha"
-    merged=$(jq -r --arg branch "$branch" \
-        '.[] | select(.merged_at != null and .base.ref == $branch) | "\(.number) \(.head.sha)"' <<< "$pulls") \
-        || decide true "can't read the pull requests that have $sha"
-    if [[ -z "$merged" ]]; then
+    if ! pulls=$(gh api "repos/$repo/commits/$sha/pulls"); then
+        waiting="Can't list the pull requests that have $sha"
+        reason="can't list the pull requests that have $sha, asked $asks times, $delay s apart"
+    elif ! merged=$(jq -r --arg branch "$branch" \
+        '.[] | select(.merged_at != null and .base.ref == $branch) | "\(.number) \(.head.sha)"' <<< "$pulls"); then
+        waiting="Can't read the pull requests that have $sha"
+        reason="can't read the pull requests that have $sha, asked $asks times, $delay s apart"
+    elif [[ -z "$merged" ]]; then
         waiting="No pull request merged into $branch has $sha yet"
         reason="no pull request merged into $branch has $sha, asked $asks times, $delay s apart"
     else
