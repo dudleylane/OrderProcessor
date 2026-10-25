@@ -1174,6 +1174,12 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
         FIX::Side(fromSide(order.side_)), FIX::LeavesQty(order.leavesQty_), FIX::CumQty(order.cumQty_));
     // Optional since FIX 5.0, so no longer the constructor's, but every report of the Order State Changes has it
     report.set(FIX::AvgPx(order.avgPx_));
+    // OrderQty (38) too, or a closed order's quantity can't be read from its reports once LeavesQty is 0 (#384). A
+    // replacement's is its own. Read without the order's lock, as the other quantities are: it never changes once the
+    // order is stored, since a replace stores a new order (#74). Written as the whole number it is, the bytes QuickFIX
+    // writes for the double: its conversion, to 15 significant digits, falls back to bignum arithmetic for these
+    // values, about 2,900 instructions a field.
+    report.setField(FIX::FIELD::OrderQty, std::to_string(order.orderQty_));
 
     // The client's own ClOrdIDs, without the session's key they are stored under (#71)
     const std::string source = sourceOf(order);

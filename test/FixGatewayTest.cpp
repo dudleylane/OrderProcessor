@@ -1767,6 +1767,51 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_CarriesTheOrdersAvgPx)
     EXPECT_DOUBLE_EQ(10.25, avgPx.getValue());
 }
 
+TEST_F(FixGatewayInboundTest, ExecutionReport_CarriesTheOrdersOrderQty)
+{
+    // OrderQty (38) on every report of a stored order (#384), as on every report of the Order State Changes. Not
+    // required in FIX 5.0 SP2, it was sent only on the rejects of orders the gateway never stored. Without it, a
+    // closed order's quantity can't be worked out from the report: here 40 of 100 traded, and the rest was cancelled.
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    order->orderQty_ = 100;
+    order->cumQty_ = 40;
+    order->leavesQty_ = 0;
+    auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+    auto cancel = makeReport<ExecutionEntry>(CANCEL_EXECTYPE, CANCELED_ORDSTATUS);
+    auto reject = makeReport<RejectExecEntry>(REJECT_EXECTYPE, REJECTED_ORDSTATUS);
+    auto expiry = makeReport<ExecutionEntry>(EXPIRED_EXECTYPE, EXPIRED_ORDSTATUS);
+    const std::vector<const ExecutionEntry *> reports = { &ack, &trade, &cancel, &reject, &expiry };
+    for (const ExecutionEntry *exec : reports)
+    {
+        FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(exec, *order);
+        FIX::OrderQty orderQty;
+        ASSERT_TRUE(report.isSet(orderQty)) << "ExecType " << report.getField(FIX::FIELD::ExecType);
+        report.get(orderQty);
+        EXPECT_DOUBLE_EQ(100.0, orderQty.getValue()) << "ExecType " << report.getField(FIX::FIELD::ExecType);
+    }
+
+    // Written as a whole number, the same bytes QuickFIX writes for the double, up to the largest quantity
+    for (const QuantityT qty : { QuantityT{ 1 }, QuantityT{ 77 }, std::numeric_limits<QuantityT>::max() })
+    {
+        order->orderQty_ = qty;
+        FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&ack, *order);
+        EXPECT_EQ(FIX::DoubleConvertor::convert(static_cast<double>(qty)), report.getField(FIX::FIELD::OrderQty));
+    }
+
+    // A replacement's report carries the replacement's quantity, which the replace may have changed (#74)
+    auto replacement = createCorrectOrder(instrumentId1_);
+    assignClOrderId(replacement.get());
+    replacement->orderQty_ = 150;
+    auto replace = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, PARTFILL_ORDSTATUS);
+    FIX50SP2::ExecutionReport replaced = FixGateway::buildExecutionReport(&replace, *replacement);
+    FIX::OrderQty replacedQty;
+    ASSERT_TRUE(replaced.isSet(replacedQty));
+    replaced.get(replacedQty);
+    EXPECT_DOUBLE_EQ(150.0, replacedQty.getValue());
+}
+
 TEST_F(FixGatewayInboundTest, ExecutionReport_TradeCarriesItsTradeDate)
 {
     // TradeDate (75), a LocalMktDate: the business day the trade counts in, YYYYMMDD, as the engine keeps it (#258). The
@@ -2809,6 +2854,12 @@ TEST_F(FixtSessionTest, EveryKindOfExecutionReportIsTaken)
     reports += 4;
     EXPECT_EQ(reports, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText();
     expectEverythingSentIsTaken();
+    // Each with the order's OrderQty (38), as a counterparty reads it (#384)
+    for (const FIX::Message &sent : sentOfType(FIX::MsgType_ExecutionReport))
+    {
+        EXPECT_EQ(std::to_string(order->orderQty_), fieldOf(sent, FIX::FIELD::OrderQty))
+            << "ExecType " << fieldOf(sent, FIX::FIELD::ExecType);
+    }
 }
 
 TEST_F(FixtSessionTest, ASwapsTradeReportIsRefusedForItsTradeLinkIdAlone)
