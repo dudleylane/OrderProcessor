@@ -531,6 +531,7 @@ COP (Concurrent Order Processor)
 | `FixRefusalTest.py` | `FixRefusalsReachOnlyTheirSender` (ctest) | A real server: an order the gateway refuses is answered to its sender alone (#189) |
 | `FixLogonTest.py` | `FixLogonNeedsCredentials` (ctest) | A real server: only a counterparty with its password logs on, and it trades only its accounts (#147) |
 | `FixResendTest.py` | `FixClientRecoversMissedReports` (ctest) | A real server: a client that reconnects gets back, with a ResendRequest, the reports it missed (#160) |
+| `FixGatewayBench.cpp` | `BM_FixBuildExecutionReport`, `BM_FixBuildSwapLegReport`, `BM_FixSendExecutionReport`, `BM_FixOrderAndAcknowledgement` | The gateway's ExecutionReport builder, for an outright trade and a swap leg's; a trade's report from `FixOutQueues::push` to a logged-on session from `config/fix.cfg`; and a new order through the gateway to the engine's queue followed by its acknowledgement to the session, without the engine between them (#395) |
 
 ---
 
@@ -1592,7 +1593,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | `OrderParamsLayoutBench.cpp` | Field layout optimization |
 | `ProcessorBench.cpp` | The real path: new order, match and cancel through a `Processor`, and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290) |
 | `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159) |
-| `FixGatewayBench.cpp` | The FIX gateway (`BUILD_FIX=ON`): enum conversion, NewOrderSingle translation, ExecutionReport construction, the fan-out, swap and single-leg matching, and a FIX order's fill end to end |
+| `FixGatewayBench.cpp` | The FIX gateway (`BUILD_FIX=ON`): enum conversion, NewOrderSingle translation, the gateway's ExecutionReport builder, a report's way to a logged-on session, and a new order with its acknowledgement (#395), the fan-out, swap and single-leg matching, and a FIX order's fill end to end |
 
 ---
 
