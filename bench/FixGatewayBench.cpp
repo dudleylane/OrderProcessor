@@ -4,7 +4,8 @@
  * Measures throughput of FIX protocol components:
  *   - Enum conversion (FIX↔COP)
  *   - FIX message translation (NewOrderSingle → OrderEntry)
- *   - ExecutionReport construction
+ *   - ExecutionReports: the gateway's builder, and a report's way to a logged-on session; a new order and its
+ *     acknowledgement, without the engine between them (#395)
  *   - MultiOutQueues fan-out overhead
  *   - FX Swap matching vs single-leg matching
  *   - End-to-end: FIX NOS → IncomingQueues → Processor → match → fill → OutQueues
@@ -15,15 +16,23 @@
 // QuickFIX headers MUST come before any <flat_map> include (see FixGateway.h)
 #include <quickfix/fix50sp2/NewOrderSingle.h>
 #include <quickfix/fix50sp2/ExecutionReport.h>
+#include <quickfix/fixt11/Logon.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
+#include <quickfix/NullStore.h>
+#include <quickfix/Session.h>
+#include <quickfix/SessionFactory.h>
+#include <quickfix/SessionSettings.h>
+#include <quickfix/Utility.h>
 #include "FixGateway.h"
+#include "FixOutQueues.h"
 #include "MultiOutQueues.h"
 
 #include <benchmark/benchmark.h>
 #include <oneapi/tbb/info.h>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <thread>
 
@@ -266,32 +275,274 @@ static void BM_FixNewOrderSingleTranslation(benchmark::State &state)
 BENCHMARK(BM_FixNewOrderSingleTranslation);
 
 // =============================================================================
-// 3. ExecutionReport Construction Benchmark
+// 3. ExecutionReports: the gateway's builder, and a report's way to its session (#395)
 // =============================================================================
+//
+// BM_FixExecReportConstruction, which these replace, set 12 fields of a report by hand: it timed QuickFIX, not the
+// gateway, so a change to FixGateway::buildExecutionReport couldn't be measured (#395).
 
-static void BM_FixExecReportConstruction(benchmark::State &state)
+namespace
 {
-    int i = 0;
+
+/// An order the session sent, stored as the gateway stores one: its source names the session, and its ClOrdID is under
+/// the session's key (#71). 40 of 100 are filled at 1.265, so its trade's report has every quantity one has.
+OrderEntry *storeBenchOrder(const FixBenchSetup &setup, const std::string &source, OrderType ordType)
+{
+    WideParamsDataStorage *wide = WideDataStorage::instance();
+    const std::string key = FixGateway::sessionClOrdId(source, "CLORD-001");
+    OrderEntry order(wide->add(new StringT(source)), wide->add(new StringT("Internal")),
+                     wide->add(new RawDataEntry(STRING_RAWDATATYPE, key.c_str(), static_cast<u32>(key.size()))),
+                     SourceIdT(), setup.instrId_, SourceIdT(), setup.clearingId_, wide->add(new ExecutionsT()));
+    order.side_ = BUY_SIDE;
+    order.ordType_ = ordType;
+    order.tif_ = DAY_TIF;
+    order.price_ = 1.265;
+    order.orderQty_ = 100;
+    order.cumQty_ = 40;
+    order.leavesQty_ = 60;
+    order.avgPx_ = 1.265;
+    if (FXSWAP_ORDERTYPE == ordType)
+    {
+        order.settlDate_ = 1793059200000;    // 2026-10-27, the near leg's
+        order.farSettlDate_ = 1795737600000; // 2026-11-27
+        order.farPrice_ = 1.266;
+    }
+    return OrderStorage::instance()->save(order, IdTGenerator::instance());
+}
+
+/// The order's fill of 40 at 1.265, on one of a swap's legs or on an outright order
+TradeExecEntry benchTrade(const OrderEntry &order, ExecLegType leg)
+{
+    TradeExecEntry trade;
+    trade.type_ = TRADE_EXECTYPE;
+    trade.orderStatus_ = PARTFILL_ORDSTATUS;
+    trade.orderId_ = order.orderId_;
+    trade.execId_ = IdTGenerator::instance()->getId();
+    trade.lastQty_ = 40;
+    trade.lastPx_ = 1.265;
+    trade.tradeDate_ = 20261025;
+    trade.execLegType_ = leg;
+    trade.tradeLink_ = 1;
+    return trade;
+}
+
+/// The engine's queue, as far as the gateway sees it: it frees the order or replacement it is handed, as the engine's
+/// queue does once it has dispatched one, and keeps nothing
+class DiscardingInQueues final : public Queues::InQueues
+{
+public:
+    void push(const std::string &, const OrderEvent &evnt) override
+    {
+        delete evnt.order_;
+    }
+    void push(const std::string &, const OrderCancelEvent &) override {}
+    void push(const std::string &, const OrderReplaceEvent &evnt) override
+    {
+        delete evnt.replacementOrder_;
+    }
+    void push(const std::string &, const OrderChangeStateEvent &) override {}
+    void push(const std::string &, const ProcessEvent &) override {}
+    void push(const std::string &, const TimerEvent &) override {}
+};
+
+/// config/fix.cfg's session with BENCH_CLIENT, logged on, as FixtSessionTest makes CLIENT_A's: what it sends goes to
+/// this Responder, which counts it and keeps nothing, and its store keeps nothing either
+class BenchSession final : public FIX::Responder
+{
+public:
+    explicit BenchSession(FIX::Application &application) : factory_(application, stores_, nullptr)
+    {
+        try
+        {
+            const std::filesystem::path config = std::filesystem::path(OP_SOURCE_DIR) / "config";
+            const FIX::SessionSettings cfg((config / "fix.cfg").string());
+            FIX::Dictionary settings;
+            for (const auto &[key, value] : cfg.get())
+            {
+                // The session's times: a session that never ends has none
+                if ((FIX::string_toUpper(FIX::START_TIME) != key) && (FIX::string_toUpper(FIX::END_TIME) != key))
+                {
+                    settings.setString(key, value);
+                }
+            }
+            settings.setBool(FIX::NON_STOP_SESSION, true);
+            for (const char *dictionary : { FIX::TRANSPORT_DATA_DICTIONARY, FIX::APP_DATA_DICTIONARY })
+            {
+                const std::filesystem::path file = std::filesystem::path(settings.getString(dictionary)).filename();
+                settings.setString(dictionary, (config / "spec" / file).string());
+            }
+            sid_ = FIX::SessionID(settings.getString(FIX::BEGINSTRING), settings.getString(FIX::SENDERCOMPID),
+                                  "BENCH_CLIENT");
+            session_ = factory_.create(sid_, settings);
+            session_->setResponder(this);
+
+            FIXT11::Logon logon(FIX::EncryptMethod(FIX::EncryptMethod_NONE_OTHER), FIX::HeartBtInt(30),
+                                FIX::DefaultApplVerID(FIX::ApplVerID_FIX50_SP2));
+            FIX::Header &header = logon.getHeader();
+            header.setField(FIX::BeginString(sid_.getBeginString().getValue()));
+            header.setField(FIX::SenderCompID(sid_.getTargetCompID().getValue()));
+            header.setField(FIX::TargetCompID(sid_.getSenderCompID().getValue()));
+            header.setField(FIX::MsgSeqNum(1));
+            header.setField(FIX::SendingTime(FIX::UtcTimeStamp::now()));
+            session_->next(logon.toString(), FIX::UtcTimeStamp::now());
+            if (!session_->isLoggedOn())
+            {
+                problem_ = "BENCH_CLIENT's Logon was refused";
+            }
+        }
+        catch (const std::exception &ex)
+        {
+            problem_ = std::string("no session from config/fix.cfg: ") + ex.what();
+        }
+    }
+    ~BenchSession() override
+    {
+        if (nullptr != session_)
+        {
+            factory_.destroy(session_); // before the gateway, its application
+        }
+    }
+    BenchSession(const BenchSession &) = delete;
+    BenchSession &operator=(const BenchSession &) = delete;
+
+    // FIX::Responder: the connection to BENCH_CLIENT
+    bool send(const std::string &) override
+    {
+        ++sent_;
+        return true;
+    }
+    void disconnect() override {}
+
+    /// Why there is no logged-on session; empty if there is one
+    const std::string &problem() const
+    {
+        return problem_;
+    }
+    const FIX::SessionID &sid() const
+    {
+        return sid_;
+    }
+    std::string source() const
+    {
+        return FixGateway::makeSourceString(sid_);
+    }
+    u64 sent() const
+    {
+        return sent_;
+    }
+
+private:
+    FIX::NullStoreFactory stores_;
+    FIX::SessionFactory factory_;
+    FIX::SessionID sid_;
+    FIX::Session *session_ = nullptr;
+    std::string problem_;
+    u64 sent_ = 0;
+};
+
+} // anonymous namespace
+
+/// The gateway's builder for an outright order's trade: what it reads from the order and the report, the enums it maps,
+/// the session's key it takes off the ClOrdID, and the fields a trade's report has
+static void BM_FixBuildExecutionReport(benchmark::State &state)
+{
+    FixBenchSetup setup;
+    const OrderEntry *order = storeBenchOrder(setup, FixGateway::makeSourceString(BENCH_SID), LIMIT_ORDERTYPE);
+    const TradeExecEntry trade = benchTrade(*order, SINGLE_LEG);
     for (auto _ : state)
     {
-        FIX50SP2::ExecutionReport report;
-        report.set(FIX::OrderID(std::to_string(++i)));
-        report.set(FIX::ExecID(std::to_string(i + 100000)));
-        report.set(FIX::ExecType(FIX::ExecType_TRADE));
-        report.set(FIX::OrdStatus(FIX::OrdStatus_FILLED));
-        report.set(FIX::Side(FIX::Side_BUY));
-        report.set(FIX::LeavesQty(0));
-        report.set(FIX::CumQty(100));
-        report.set(FIX::AvgPx(1.2650));
-        report.set(FIX::Symbol("BENCHFX"));
-        report.set(FIX::ClOrdID("CLORD-001"));
-        report.set(FIX::LastQty(100));
-        report.set(FIX::LastPx(1.2650));
+        FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
         benchmark::DoNotOptimize(report);
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_FixExecReportConstruction);
+BENCHMARK(BM_FixBuildExecutionReport);
+
+/// The same for a swap's near leg, whose report also has a NoLegs group and TradeLinkID (820)
+static void BM_FixBuildSwapLegReport(benchmark::State &state)
+{
+    FixBenchSetup setup;
+    const OrderEntry *order = storeBenchOrder(setup, FixGateway::makeSourceString(BENCH_SID), FXSWAP_ORDERTYPE);
+    const TradeExecEntry trade = benchTrade(*order, NEAR_LEG);
+    for (auto _ : state)
+    {
+        FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+        benchmark::DoNotOptimize(report);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_FixBuildSwapLegReport);
+
+/// A trade's report on its way from the transaction worker that publishes it to a logged-on session: FixOutQueues finds
+/// the order, the gateway finds its session and builds the report, and QuickFIX numbers it, writes it out and hands it
+/// to the connection
+static void BM_FixSendExecutionReport(benchmark::State &state)
+{
+    FixBenchSetup setup;
+    IncomingQueues inQueues;
+    FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    FixOutQueues outQueues(&gateway, OrderStorage::instance());
+    BenchSession session(gateway);
+    if (!session.problem().empty())
+    {
+        state.SkipWithError(session.problem().c_str());
+        return;
+    }
+    const OrderEntry *order = storeBenchOrder(setup, session.source(), LIMIT_ORDERTYPE);
+    TradeExecEntry trade = benchTrade(*order, SINGLE_LEG);
+    const ExecReportEvent evnt(&trade);
+    const std::string target;
+    const u64 before = session.sent();
+    for (auto _ : state)
+    {
+        outQueues.push(evnt, target);
+    }
+    if (session.sent() - before != static_cast<u64>(state.iterations()))
+    {
+        state.SkipWithError("the session wasn't sent a report on every iteration");
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_FixSendExecutionReport);
+
+/// A new order through the gateway to the engine's queue, then its acknowledgement through FixOutQueues to the session:
+/// what the session's thread and the transaction worker do for each order, without the engine's work between them. Its
+/// ClOrdID is a stored order's, so each iteration acknowledges that order, and the queue frees each new one.
+static void BM_FixOrderAndAcknowledgement(benchmark::State &state)
+{
+    FixBenchSetup setup;
+    DiscardingInQueues inQueues;
+    FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    FixOutQueues outQueues(&gateway, OrderStorage::instance());
+    BenchSession session(gateway);
+    if (!session.problem().empty())
+    {
+        state.SkipWithError(session.problem().c_str());
+        return;
+    }
+    const OrderEntry *order = storeBenchOrder(setup, session.source(), LIMIT_ORDERTYPE);
+    ExecutionEntry ack;
+    ack.type_ = NEW_EXECTYPE;
+    ack.orderStatus_ = NEW_ORDSTATUS;
+    ack.orderId_ = order->orderId_;
+    ack.execId_ = IdTGenerator::instance()->getId();
+    const ExecReportEvent evnt(&ack);
+    const std::string target;
+    const FIX50SP2::NewOrderSingle nos = makeBenchNOS("CLORD-001", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.2650, 100);
+    const u64 before = session.sent();
+    for (auto _ : state)
+    {
+        gateway.onMessage(nos, session.sid());
+        outQueues.push(evnt, target);
+    }
+    // The order goes to the queue, and only its acknowledgement to the session
+    if (session.sent() - before != static_cast<u64>(state.iterations()))
+    {
+        state.SkipWithError("the session wasn't sent one report an iteration");
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_FixOrderAndAcknowledgement);
 
 // =============================================================================
 // 4. MultiOutQueues Fan-Out Overhead
