@@ -247,6 +247,12 @@ SourceIdT addTestInstrument(const std::string &symbol)
     return WideDataStorage::instance()->add(instr);
 }
 
+/// A field's value, or "(not set)", so that a field that isn't there fails a comparison rather than throws
+std::string fieldOf(const FIX::FieldMap &fields, int tag)
+{
+    return fields.isSetField(tag) ? fields.getField(tag) : "(not set)";
+}
+
 // =============================================================================
 // Test Fixture
 // =============================================================================
@@ -382,6 +388,16 @@ protected:
         msg.set(FIX::Price(price));
         msg.set(FIX::OrderQty(qty));
         return msg;
+    }
+
+    /// The gateway's answer to a status request from fixSid_ for its buy of EURUSD with this ClOrdID (#383)
+    FIX50SP2::ExecutionReport statusOf(const std::string &clOrdId)
+    {
+        FIX50SP2::OrderStatusRequest msg;
+        msg.set(FIX::ClOrdID(clOrdId));
+        msg.set(FIX::Side(FIX::Side_BUY));
+        msg.set(FIX::Symbol("EURUSD"));
+        return gateway_->answerOrderStatus(msg, fixSid_);
     }
 
     /// A timeout fails here, as a timeout, not later as a wrong order state (#301)
@@ -894,6 +910,60 @@ TEST_F(FixEndToEndTest, ReplaceOfARefusedReplacement_IsAnsweredAsUnknownOnceRefu
     EXPECT_EQ(nullptr, orderOf("REF-Y"));
     EXPECT_EQ(nullptr, orderOf("REF-Z"));
     EXPECT_EQ(FILLED_ORDSTATUS, x->status_);
+}
+
+TEST_F(FixEndToEndTest, StatusRequests_FollowAnOrderThroughItsLife)
+{
+    // EP284's G.1.c through the engine (#383): Pending New until the order is acknowledged, then New and Partially
+    // Filled, each with the order's quantities; then, after Replace (Y,X), a request for X is answered with Y, naming
+    // X in OrigClOrdID (41), and one for Y with Y. The scenario replaces a filled order to raise its quantity, which the
+    // engine refuses (#74), so here the order is replaced while partly filled.
+    holdingInQueues_->hold();
+    gateway_->onMessage(makeNOS("LIFE-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    const FIX50SP2::ExecutionReport pendingNew = statusOf("LIFE-X");
+    holdingInQueues_->release();
+    waitForProcessing();
+    const FIX50SP2::ExecutionReport acknowledged = statusOf("LIFE-X");
+    gateway_->onMessage(makeNOS("LIFE-S", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 40), fixSid_);
+    waitForProcessing();
+    const FIX50SP2::ExecutionReport partlyFilled = statusOf("LIFE-X");
+    gateway_->onMessage(makeReplace("LIFE-X", "LIFE-Y", FIX::Side_BUY, 1.0850, 120), fixSid_);
+    waitForProcessing();
+    const FIX50SP2::ExecutionReport ofX = statusOf("LIFE-X");
+    const FIX50SP2::ExecutionReport ofY = statusOf("LIFE-Y");
+
+    OrderEntry *x = orderOf("LIFE-X");
+    OrderEntry *y = orderOf("LIFE-Y");
+    ASSERT_NE(nullptr, x);
+    ASSERT_NE(nullptr, y);
+    ASSERT_EQ(REPLACED_ORDSTATUS, x->status_);
+    const std::string xId = std::to_string(x->orderId_.id_);
+    const std::string yId = std::to_string(y->orderId_.id_);
+    struct Expected
+    {
+        const FIX50SP2::ExecutionReport &answer;
+        char ordStatus;
+        std::string orderId, clOrdId, origClOrdId, orderQty, cumQty, leavesQty;
+    };
+    for (const Expected &e :
+         { Expected{ pendingNew, FIX::OrdStatus_PENDING_NEW, "NONE", "LIFE-X", "(not set)", "100", "0", "100" },
+           Expected{ acknowledged, FIX::OrdStatus_NEW, xId, "LIFE-X", "(not set)", "100", "0", "100" },
+           Expected{ partlyFilled, FIX::OrdStatus_PARTIALLY_FILLED, xId, "LIFE-X", "(not set)", "100", "40", "60" },
+           Expected{ ofX, FIX::OrdStatus_PARTIALLY_FILLED, yId, "LIFE-Y", "LIFE-X", "120", "40", "80" },
+           Expected{ ofY, FIX::OrdStatus_PARTIALLY_FILLED, yId, "LIFE-Y", "(not set)", "120", "40", "80" } })
+    {
+        SCOPED_TRACE(e.clOrdId + " " + std::string(1, e.ordStatus));
+        EXPECT_EQ(std::string(1, FIX::ExecType_ORDER_STATUS), fieldOf(e.answer, FIX::FIELD::ExecType));
+        EXPECT_EQ("0", fieldOf(e.answer, FIX::FIELD::ExecID));
+        EXPECT_EQ(std::string(1, e.ordStatus), fieldOf(e.answer, FIX::FIELD::OrdStatus));
+        EXPECT_EQ(e.orderId, fieldOf(e.answer, FIX::FIELD::OrderID));
+        EXPECT_EQ(e.clOrdId, fieldOf(e.answer, FIX::FIELD::ClOrdID));
+        EXPECT_EQ(e.origClOrdId, fieldOf(e.answer, FIX::FIELD::OrigClOrdID));
+        EXPECT_EQ(e.orderQty, fieldOf(e.answer, FIX::FIELD::OrderQty));
+        EXPECT_EQ(e.cumQty, fieldOf(e.answer, FIX::FIELD::CumQty));
+        EXPECT_EQ(e.leavesQty, fieldOf(e.answer, FIX::FIELD::LeavesQty));
+        EXPECT_EQ("EURUSD", fieldOf(e.answer, FIX::FIELD::Symbol));
+    }
 }
 
 } // anonymous namespace

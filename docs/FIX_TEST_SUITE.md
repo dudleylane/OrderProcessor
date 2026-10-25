@@ -79,6 +79,7 @@ Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBo
 | `ReplaceSentBeforeItsOrderIsStored_ReplacesIt` | The same for a replace: the original is acknowledged, then replaced (#380) |
 | `ReplaceOfAReplacementNotYetStored_IsDecidedAgainstIt` | EP284's D.2.a: Replace (Y,X) and, at once, Replace (Z,Y) → the second waits for Y to be stored, then replaces it: X and Y REPLACED, Z NEW (#380) |
 | `ReplaceOfARefusedReplacement_IsAnsweredAsUnknownOnceRefused` | Replace (Y,X) of a filled order is refused, and Replace (Z,Y), sent at once, waits for that refusal, not for the timeout, and never reaches the engine; EP284's D.2.c would decide it against X (#398) |
+| `StatusRequests_FollowAnOrderThroughItsLife` | EP284's G.1.c through the engine: a status request (35=H) is answered 150=I with Pending New (39=A) while the engine's input holds the order, then New, then Partially Filled, with the order's quantities; after Replace (Y,X), one for X is answered with Y's state, ClOrdID Y and OrigClOrdID X, and one for Y with Y's (#383) |
 
 ---
 
@@ -424,6 +425,16 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `ASwapsTradeReportIsRefusedForItsTradeLinkIdAlone` | A swap leg's trade report is refused for TradeLinkID (820), which neither FIX 4.4's ExecutionReport nor FIX 5.0 SP2's has (#378), and for nothing else: its LegLastQty (1418) is in the NoLegs group, where FIX 5.0 SP2 has it |
 | `ARequestForAnOrderTheEngineHasntAnsweredIsRefusedAsPendingNew` | A cancel and a replace naming an order the session just sent, which the engine hasn't stored or refused when the wait (here 50 ms) ends, get a 35=9 with 102=99, OrderID NONE and OrdStatus A (Pending New), not 102=1: the order may yet be acknowledged (#380) |
 | `TheEnginesRefusalOfTheOrderEndsTheWaitOfARequestForIt` | A cancel waiting for its order, on a thread of its own as on a session's, is answered once the engine refuses the order: the order's 35=8 first, then the cancel's 35=9, 102=1 (#380) |
+| `AStatusRequestIsAnsweredWithTheOrdersStateAndQuantities` | A 35=H gets a 150=I with ExecID 0, the order's OrdStatus (New, Partially Filled, Filled), OrderQty, CumQty, LeavesQty and AvgPx, and the request's OrdStatusReqID (790), as EP284's G.1.c does from its row 5; the engine never sees it (#383) |
+| `AStatusRequestForAnOrderTheSessionDoesntHaveIsAnsweredAsUnknown` | EP284's G.1.a: an unknown ClOrdID, another session's ClOrdID or OrderID, and an OrderID that isn't an order number get 39=8, 103=5, OrderID NONE and no quantities (#383) |
+| `AStatusRequestForAnOrderNotYetAcknowledgedIsPendingNew` | EP284's G.1.c, rows 1 to 6: an order the session just sent is Pending New (39=A), with its OrderQty and nothing filled, before it is stored (OrderID NONE) and once stored until its acknowledgement is out; then New (#383) |
+| `AStatusRequestForAClOrdIdSentTwiceBeforeItsAnswerIsTheFirstOrders` | Two NewOrderSingles with one ClOrdID, both on their way: the second is a duplicate the engine refuses, and a status request is Pending New with the first one's OrderQty (#383) |
+| `AStatusRequestForAReplacedOrderIsAnsweredWithTheOrderThatReplacedIt` | EP284's G.1.c, rows 16 to 19: after Replace (Y,X), a request for X gets Y's state with ClOrdID Y and OrigClOrdID X, and one for Y gets Y's; before Y's acknowledgement is out, X is Pending Replace (39=E) with what it had left (#383) |
+| `AStatusRequestForAReplacementNotYetAcknowledgedIsItsOriginalPendingReplace` | A replacement the engine hasn't acknowledged, stored or not, is answered with its original's state, Pending Replace (39=E), ClOrdID Y and OrigClOrdID X, as G.1.c acknowledges a replace (row 14); a request for X says the same under X (#383) |
+| `AReplacementStoredBeforeTheGatewayWasMadeIsKnown` | A gateway made after the orders are restored, as at a restart, answers a request for a replaced order with its replacement (#383) |
+| `AStatusRequestNamesTheOrderByOrderIdAloneOrByBothIds` | OrderID (37) alone finds the order; 37 with ClOrdID (11) finds it when both name it, and an OrderID of another order's names none: 39=8, 103=5, with a Text saying why (#383) |
+| `AStatusRequestAlongAReplaceMayGiveTheOrderIdItsAnswerReports` | With 11 and 37 along a replace, 37 may be the OrderID the answer reports: X's for the replacement Y not yet acknowledged (its replace named X's), Y's for X once Y's acknowledgement gave it; another order's is still unknown (#383) |
+| `AStatusRequestThatNamesNoOrderIsRefusedReadably` | A 35=H with neither 11 nor 37, which FIX 5.0 SP2 allows, gets a BusinessMessageReject, 380=5, naming (11), and no 35=8 (#383) |
 
 ---
 
