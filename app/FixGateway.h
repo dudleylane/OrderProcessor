@@ -3,6 +3,11 @@
 #ifdef BUILD_FIX
 
 #include <quickfix/Application.h>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
@@ -40,9 +45,14 @@ namespace App
 class FixGateway : public FIX::Application
 {
 public:
+    /// How long a cancel or replace waits, by default, for the engine to store or refuse the order it names, when that
+    /// order was sent just before it (#380). The session's thread waits, and sends no heartbeat meanwhile: well under
+    /// config/fix.cfg's HeartBtInt, 30 s.
+    static constexpr std::chrono::milliseconds DEFAULT_ANSWER_WAIT{ 1000 };
+
     FixGateway(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
                Store::OrderDataStorage *orderStorage, SourceIdT defaultClearingId = SourceIdT(),
-               SourceIdT defaultAccountId = SourceIdT());
+               SourceIdT defaultAccountId = SourceIdT(), std::chrono::milliseconds answerWait = DEFAULT_ANSWER_WAIT);
 
     /// Who may log on, and what each counterparty may trade (#147), which the gateway checks from now on: set it before the
     /// acceptor starts. Throws std::runtime_error if it lists an account the data directory doesn't have. Without it, as
@@ -77,6 +87,10 @@ public:
 
     // Session lookup
     bool hasFixSession(const std::string &source) const;
+
+    /// How many cancel and replace requests are waiting now for the engine to store or refuse the order they name
+    /// (#380). Tests wait for one before they let the engine go on.
+    size_t waitingRequests() const;
 
     // Build source string from SessionID
     static std::string makeSourceString(const FIX::SessionID &sid);
@@ -115,6 +129,20 @@ private:
     /// failing that, the one stored under the ClOrdID alone if this session placed it, as an order stored before #71
     /// was. Another session's order is not found.
     OrderEntry *locateSessionOrder(const std::string &source, const std::string &clOrdId) const;
+    /// The order a cancel or replace from source names, as locateSessionOrder() finds it, once the engine has answered
+    /// it (#380). An order the session sent just before the request may not be stored yet: the request waits for the
+    /// engine to store or refuse it, up to answerWait_. When nothing is found, *unanswered says whether that is because
+    /// the engine still hasn't answered the order, rather than because no such order exists.
+    OrderEntry *locateAnsweredOrder(const std::string &source, const std::string &clOrdId, bool *unanswered);
+    /// Pushes evnt, the new order or replacement whose ClOrdID is stored under key, to the engine: unanswered until the
+    /// engine reports it or refuses it (#380)
+    template <typename Event> void pushUnanswered(const std::string &source, const std::string &key, const Event &evnt);
+    /// The engine has answered the order or replacement whose ClOrdID is stored under key: it sent its first report,
+    /// or refused it. Ends the wait of each request that names it.
+    void answered(std::string_view key);
+    /// Calls answered() for its key, unless that is empty, when it goes out of scope: once a report or a refusal is
+    /// out, or on a way out without one
+    class AnsweredOnExit;
 
     Queues::InQueues *inQueues_;
     Store::WideParamsDataStorage *wideData_;
@@ -129,6 +157,24 @@ private:
     SourceIdT defaultClearingId_;                 // pre-resolved clearing for FIX orders
     SourceIdT defaultAccountId_;                  // pre-resolved account for FIX orders that name none (#34)
     const FixCredentials *credentials_ = nullptr; // who may log on and what each may trade (#147); owned by FixServer
+
+    /// Hashes a key and a view of one alike, so that a report's ClOrdID is looked up without a copy
+    struct KeyHash
+    {
+        using is_transparent = void;
+        size_t operator()(std::string_view key) const noexcept
+        {
+            return std::hash<std::string_view>{}(key);
+        }
+    };
+    /// The new orders and replacements the gateway has sent the engine, and the engine hasn't yet stored and reported
+    /// or refused, by the key their ClOrdID is stored under (#380). A request that names one waits for its answer.
+    std::unordered_set<std::string, KeyHash, std::equal_to<>> unanswered_;
+    size_t waiting_ = 0;                         // requests waiting for an answer now
+    mutable std::mutex answersLock_;             // guards both
+    std::condition_variable answers_;            // notified on each answer
+    std::atomic<size_t> unansweredCount_{ 0 };   // unanswered_.size(), which the engine's reports read without the lock
+    const std::chrono::milliseconds answerWait_; // how long a request waits for its order's answer
 
 public:
     // FIX → internal enum conversions (public static for testability)
@@ -194,6 +240,11 @@ public:
     /// OrderID NONE, OrdStatus 8, and the request's ClOrdIDs
     static FIX50SP2::OrderCancelReject buildUnknownReplaceReject(const std::string &clOrdId,
                                                                  const std::string &origClOrdId);
+    /// The gateway's own answer to a cancel (responseTo 1) or a cancel/replace request (2) that names an order the
+    /// session sent just before it, and the engine still hadn't stored or refused when the request had waited for it
+    /// (#380): 102=99, OrderID NONE, OrdStatus A (Pending New), the request's ClOrdIDs, and why in Text (58)
+    static FIX50SP2::OrderCancelReject buildUnansweredOrderReject(char responseTo, const std::string &clOrdId,
+                                                                  const std::string &origClOrdId);
     /// The OrderCancelReject (35=9) refusing a cancel request (#73): 434=1, CxlRejReason from the engine's reason (0 too
     /// late, 1 unknown order, 3 a replace pending, 99 other), the order's OrdStatus (8 when the order is unknown), and
     /// why in Text (58), with clOrdId in ClOrdID (11) and origClOrdId in OrigClOrdID (41).

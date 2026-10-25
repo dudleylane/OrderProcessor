@@ -17,11 +17,17 @@
 #include <quickfix/FixValues.h>
 #include <quickfix/FixFields.h>
 #include "FixGateway.h"
+#include "FixOutQueues.h"
+#include "MultiOutQueues.h"
 
 #include <gtest/gtest.h>
 #include <atomic>
+#include <chrono>
 #include <deque>
 #include <mutex>
+#include <thread>
+#include <variant>
+#include <vector>
 
 #include "DataModelDef.h"
 #include "WideDataStorage.h"
@@ -131,6 +137,104 @@ private:
 };
 
 // =============================================================================
+// Holding InQueues: the engine's input, which a test can hold back (#380)
+// =============================================================================
+
+/// Passes what the gateway pushes on to the engine's queues, or, while held, keeps the new orders, cancels and replaces
+/// until the test lets them through: an order held so is one the engine hasn't stored yet, as when no event worker has
+/// reached it
+class HoldingInQueues : public Queues::InQueues
+{
+public:
+    explicit HoldingInQueues(Queues::InQueues *engine) : engine_(engine) {}
+    ~HoldingInQueues() override
+    {
+        // Never reached the engine, which would have freed them
+        for (Held &held : held_)
+        {
+            if (auto *order = std::get_if<OrderEvent>(&held.event))
+            {
+                delete order->order_;
+            }
+            else if (auto *replace = std::get_if<OrderReplaceEvent>(&held.event))
+            {
+                delete replace->replacementOrder_;
+            }
+        }
+    }
+
+    void hold()
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        holding_ = true;
+    }
+    /// Passes on what is held, in the order it came, and holds nothing more
+    void release()
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        holding_ = false;
+        for (Held &held : held_)
+        {
+            std::visit(
+                [&](const auto &evnt)
+                {
+                    engine_->push(held.source, evnt);
+                },
+                held.event);
+        }
+        held_.clear();
+    }
+
+    void push(const std::string &source, const OrderEvent &evnt) override
+    {
+        pushOrHold(source, evnt);
+    }
+    void push(const std::string &source, const OrderCancelEvent &evnt) override
+    {
+        pushOrHold(source, evnt);
+    }
+    void push(const std::string &source, const OrderReplaceEvent &evnt) override
+    {
+        pushOrHold(source, evnt);
+    }
+    void push(const std::string &source, const OrderChangeStateEvent &evnt) override
+    {
+        engine_->push(source, evnt);
+    }
+    void push(const std::string &source, const ProcessEvent &evnt) override
+    {
+        engine_->push(source, evnt);
+    }
+    void push(const std::string &source, const TimerEvent &evnt) override
+    {
+        engine_->push(source, evnt);
+    }
+
+private:
+    struct Held
+    {
+        std::string source;
+        std::variant<OrderEvent, OrderCancelEvent, OrderReplaceEvent> event;
+    };
+
+    template <typename Event> void pushOrHold(const std::string &source, const Event &evnt)
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (holding_)
+        {
+            held_.push_back(Held{ source, evnt });
+            return;
+        }
+        engine_->push(source, evnt);
+    }
+
+    Queues::InQueues *engine_;
+    std::mutex mtx_; // guards both, and keeps what is held ahead of what comes after it
+    bool holding_ = false;
+    std::vector<Held> held_;
+};
+
+// =============================================================================
 // Helper: add instrument to WideDataStorage
 // =============================================================================
 
@@ -177,7 +281,20 @@ protected:
         orderBook_->init(instruments);
 
         inQueues_ = std::make_unique<IncomingQueues>();
+        holdingInQueues_ = std::make_unique<HoldingInQueues>(inQueues_.get());
         outQueues_ = std::make_unique<CapturingOutQueues>();
+
+        // The FIX gateway, pushing to the engine's real IncomingQueues through the holding queues, and hearing the
+        // engine's reports, as the server's does through MultiOutQueues (main.cpp): a request waiting for its order
+        // learns from them that the order is stored or refused (#380). It sends nothing, having no session. A request
+        // that waits is ended by its order's answer, then, never by the minute's timeout.
+        gateway_ =
+            std::make_unique<FixGateway>(holdingInQueues_.get(), WideDataStorage::instance(), OrderStorage::instance(),
+                                         clearingId_, SourceIdT(), std::chrono::seconds(60));
+        fixOutQueues_ = std::make_unique<FixOutQueues>(gateway_.get(), OrderStorage::instance());
+        reports_ = std::make_unique<MultiOutQueues>();
+        reports_->addDelegate(outQueues_.get());
+        reports_->addDelegate(fixOutQueues_.get());
 
         TransactionMgrParams transParams(IdTGenerator::instance());
         transMgr_ = std::make_unique<TransactionMgr>();
@@ -185,7 +302,7 @@ protected:
 
         // Create processor pool
         ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
-                               outQueues_.get(), inQueues_.get(), transMgr_.get());
+                               reports_.get(), inQueues_.get(), transMgr_.get());
 
         TaskManagerParams tmparams;
         auto *evtProc = new Processor();
@@ -201,10 +318,6 @@ protected:
 
         TaskManager::init(0);
         taskMgr_ = std::make_unique<TaskManager>(tmparams);
-
-        // Create FIX gateway pointing at real IncomingQueues
-        gateway_ = std::make_unique<FixGateway>(inQueues_.get(), WideDataStorage::instance(), OrderStorage::instance(),
-                                                clearingId_);
     }
 
     void TearDown() override
@@ -218,7 +331,10 @@ protected:
         taskMgr_.reset();
         transMgr_->stop();
         transMgr_.reset();
+        reports_.reset();
+        fixOutQueues_.reset();
         outQueues_.reset();
+        holdingInQueues_.reset();
         inQueues_.reset();
         orderBook_.reset();
         gateway_.reset();
@@ -298,13 +414,54 @@ protected:
         return msg;
     }
 
+    /// Sends msg from fixSid_ on a thread of its own, as a session's thread would, while the engine's input is held, and
+    /// lets the input through once the request is waiting for its order (#380). Returns whether it waited.
+    template <typename Message> bool sendWhileHeld(const Message &msg)
+    {
+        std::thread client(
+            [&]
+            {
+                gateway_->onMessage(msg, fixSid_);
+            });
+        bool waited = false;
+        for (const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+             !waited && (std::chrono::steady_clock::now() < deadline);)
+        {
+            waited = (1u == gateway_->waitingRequests());
+            if (!waited)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        holdingInQueues_->release();
+        client.join();
+        return waited;
+    }
+
+    /// The ExecTypes of the reports of the order, in the order they went out
+    std::vector<ExecType> reportsOf(const OrderEntry &order) const
+    {
+        std::vector<ExecType> types;
+        for (const auto &r : outQueues_->reports())
+        {
+            if (order.orderId_ == r.orderId)
+            {
+                types.push_back(r.execType);
+            }
+        }
+        return types;
+    }
+
 protected:
     SourceIdT instrId_;
     SourceIdT clearingId_;
     DummyOrderSaver saver_;
     std::unique_ptr<OrderBookImpl> orderBook_;
     std::unique_ptr<IncomingQueues> inQueues_;
+    std::unique_ptr<HoldingInQueues> holdingInQueues_; // what the gateway pushes to, in front of inQueues_ (#380)
     std::unique_ptr<CapturingOutQueues> outQueues_;
+    std::unique_ptr<FixOutQueues> fixOutQueues_; // the engine's reports, to the gateway
+    std::unique_ptr<MultiOutQueues> reports_;    // the engine's reports, to both
     std::unique_ptr<TransactionMgr> transMgr_;
     std::unique_ptr<TaskManager> taskMgr_;
     std::unique_ptr<FixGateway> gateway_;
@@ -635,6 +792,108 @@ TEST_F(FixEndToEndTest, AnotherSessionsCancelAndReplace_ViaFix_DoNotReachTheEngi
     EXPECT_EQ(nullptr, orderOf("THEIRS-2", otherSid));
     EXPECT_TRUE(outQueues_->cancelRejects().empty());
     EXPECT_TRUE(outQueues_->orderRejects().empty());
+}
+
+// =============================================================================
+// A cancel or replace sent before its order is stored (#380)
+// =============================================================================
+
+TEST_F(FixEndToEndTest, CancelSentBeforeItsOrderIsStored_CancelsIt)
+{
+    // The gateway looked the order up as soon as the cancel came, and an order the engine hadn't stored yet was
+    // unknown: the cancel was refused, and the order was then acknowledged and rested in the book (#380). EP284's
+    // B.1.d and B.1.e cancel it.
+    holdingInQueues_->hold();
+    gateway_->onMessage(makeNOS("EARLY-1", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    ASSERT_EQ(nullptr, orderOf("EARLY-1")); // the engine hasn't seen it
+    EXPECT_TRUE(sendWhileHeld(makeCancel("EARLY-1", "EARLY-2", FIX::Side_BUY)));
+    waitForProcessing();
+
+    OrderEntry *order = orderOf("EARLY-1");
+    ASSERT_NE(nullptr, order);
+    EXPECT_EQ(CANCELED_ORDSTATUS, order->status_);
+    EXPECT_EQ(0u, order->leavesQty_);
+    // Acknowledged, then canceled, as B.1.e's order crosses its cancel
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, CANCEL_EXECTYPE }), reportsOf(*order));
+    EXPECT_TRUE(outQueues_->cancelRejects().empty());
+    EXPECT_EQ(0u, gateway_->waitingRequests());
+}
+
+TEST_F(FixEndToEndTest, ReplaceSentBeforeItsOrderIsStored_ReplacesIt)
+{
+    holdingInQueues_->hold();
+    gateway_->onMessage(makeNOS("EARLY-R1", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    ASSERT_EQ(nullptr, orderOf("EARLY-R1"));
+    EXPECT_TRUE(sendWhileHeld(makeReplace("EARLY-R1", "EARLY-R2", FIX::Side_BUY, 1.0840, 80)));
+    waitForProcessing();
+
+    OrderEntry *original = orderOf("EARLY-R1");
+    OrderEntry *replacement = orderOf("EARLY-R2");
+    ASSERT_NE(nullptr, original);
+    ASSERT_NE(nullptr, replacement);
+    EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
+    EXPECT_EQ(NEW_ORDSTATUS, replacement->status_);
+    EXPECT_DOUBLE_EQ(1.0840, replacement->price_);
+    EXPECT_EQ(80u, replacement->leavesQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, REPLACE_EXECTYPE }), reportsOf(*original));
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
+}
+
+TEST_F(FixEndToEndTest, ReplaceOfAReplacementNotYetStored_IsDecidedAgainstIt)
+{
+    // EP284's D.2.a: Replace (Y,X), then at once Replace (Z,Y), naming Y "on an 'optimistic' basis". The second waits
+    // for the engine to store Y, and is then decided against it: both are processed, in sequence.
+    gateway_->onMessage(makeNOS("CHAIN-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    ASSERT_NE(nullptr, orderOf("CHAIN-X"));
+
+    holdingInQueues_->hold();
+    gateway_->onMessage(makeReplace("CHAIN-X", "CHAIN-Y", FIX::Side_BUY, 1.0840, 80), fixSid_);
+    ASSERT_EQ(nullptr, orderOf("CHAIN-Y"));
+    EXPECT_TRUE(sendWhileHeld(makeReplace("CHAIN-Y", "CHAIN-Z", FIX::Side_BUY, 1.0830, 70)));
+    waitForProcessing();
+
+    OrderEntry *x = orderOf("CHAIN-X");
+    OrderEntry *y = orderOf("CHAIN-Y");
+    OrderEntry *z = orderOf("CHAIN-Z");
+    ASSERT_NE(nullptr, y);
+    ASSERT_NE(nullptr, z);
+    EXPECT_EQ(REPLACED_ORDSTATUS, x->status_);
+    EXPECT_EQ(REPLACED_ORDSTATUS, y->status_);
+    EXPECT_EQ(NEW_ORDSTATUS, z->status_);
+    EXPECT_DOUBLE_EQ(1.0830, z->price_);
+    EXPECT_EQ(70u, z->leavesQty_);
+    EXPECT_EQ(y->orderId_, z->origOrderId_);
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
+}
+
+TEST_F(FixEndToEndTest, ReplaceOfARefusedReplacement_IsAnsweredAsUnknownOnceRefused)
+{
+    // Replace (Y,X) of a filled order is refused, and Replace (Z,Y), sent at once, waits for that refusal rather than
+    // the timeout, and is then answered as unknown by the gateway: the engine never sees it. EP284's D.2.c decides it
+    // against X instead, which #398 is for.
+    gateway_->onMessage(makeNOS("REF-S", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    gateway_->onMessage(makeNOS("REF-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    OrderEntry *x = orderOf("REF-X");
+    ASSERT_NE(nullptr, x);
+    ASSERT_EQ(FILLED_ORDSTATUS, x->status_);
+
+    holdingInQueues_->hold();
+    gateway_->onMessage(makeReplace("REF-X", "REF-Y", FIX::Side_BUY, 1.0840, 100), fixSid_);
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_TRUE(sendWhileHeld(makeReplace("REF-Y", "REF-Z", FIX::Side_BUY, 1.0830, 100)));
+    // Ended by Y's refusal: the fixture's gateway would wait a minute
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(30));
+    waitForProcessing();
+
+    const auto rejects = outQueues_->orderRejects();
+    ASSERT_EQ(1u, rejects.size()); // Y's, and none for Z
+    EXPECT_EQ("REF-Y", FixGateway::clientView(rejects[0].first, rejects[0].second).clOrderId_);
+    EXPECT_EQ(nullptr, orderOf("REF-Y"));
+    EXPECT_EQ(nullptr, orderOf("REF-Z"));
+    EXPECT_EQ(FILLED_ORDSTATUS, x->status_);
 }
 
 } // anonymous namespace

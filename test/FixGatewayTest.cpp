@@ -45,6 +45,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace COP;
@@ -2493,10 +2494,31 @@ protected:
             const std::filesystem::path file = std::filesystem::path(settings.getString(dictionary)).filename();
             settings.setString(dictionary, (test::sourceRoot() / "config" / "spec" / file).string());
         }
+        settings_ = settings;
         sid_ = FIX::SessionID(settings.getString(FIX::BEGINSTRING), settings.getString(FIX::SENDERCOMPID), "CLIENT_A");
+        // A request that waits for its order is ended by the order's answer, then, never by the minute's timeout, unless
+        // a test makes it short (#380)
+        makeSession(std::chrono::seconds(60));
+    }
+
+    /// The gateway, whose requests wait up to answerWait for the order they name (#380), and CLIENT_A's session, of
+    /// which it is the application, made in place of those made before
+    void makeSession(std::chrono::milliseconds answerWait)
+    {
+        if (nullptr != session_)
+        {
+            factory_->destroy(session_);
+            session_ = nullptr;
+        }
+        factory_.reset();
+        gateway_ =
+            std::make_unique<FixGateway>(mockInQueues_.get(), WideDataStorage::instance(), OrderStorage::instance(),
+                                         defaultClearingId_, defaultAccountId_, answerWait);
         factory_ = std::make_unique<FIX::SessionFactory>(*gateway_, stores_, nullptr);
-        session_ = factory_->create(sid_, settings);
+        session_ = factory_->create(sid_, settings_);
         session_->setResponder(this);
+        sent_.clear();
+        nextSeqNum_ = 1;
     }
 
     void TearDown() override
@@ -2618,6 +2640,7 @@ protected:
     FIX::MemoryStoreFactory stores_;
     std::unique_ptr<FIX::SessionFactory> factory_;
     FIX::Session *session_ = nullptr;
+    FIX::Dictionary settings_; // config/fix.cfg's, for a session that never ends
     FIX::SessionID sid_;
     std::vector<std::string> sent_; // what the session sent, raw
     bool disconnected_ = false;
@@ -2882,6 +2905,103 @@ TEST_F(FixtSessionTest, ASwapsTradeReportIsRefusedForItsTradeLinkIdAlone)
     ASSERT_EQ(1u, sent_.size()) << sentText();
     EXPECT_EQ("Tag not defined for this message type: 820", refusalOf(sent_[0]));
     EXPECT_EQ(1u, parsed(sent_[0]).groupCount(FIX::FIELD::NoLegs));
+}
+
+TEST_F(FixtSessionTest, ARequestForAnOrderTheEngineHasntAnsweredIsRefusedAsPendingNew)
+{
+    // A cancel or a replace that names an order the session sent just before waits for the engine to store or refuse
+    // it (#380). If the engine still hasn't answered when the wait ends, the request is refused with the order Pending
+    // New (39=A), not as unknown: the order may yet be acknowledged.
+    makeSession(std::chrono::milliseconds(50));
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::unique_ptr<OrderEntry> pushed; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.reset(evt.order_);
+            }));
+    receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    ASSERT_NE(nullptr, pushed);
+    receive(makeCancelRequest("ORD-1", "CXL-1"));
+    receive(makeLimitReplace("ORD-1", "RPL-1"));
+
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(2u, rejects.size()) << sentText();
+    EXPECT_EQ("1", fieldOf(rejects[0], FIX::FIELD::CxlRejResponseTo));
+    EXPECT_EQ("CXL-1", fieldOf(rejects[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("Cancel rejected: the order isn't acknowledged yet", fieldOf(rejects[0], FIX::FIELD::Text));
+    EXPECT_EQ("2", fieldOf(rejects[1], FIX::FIELD::CxlRejResponseTo));
+    EXPECT_EQ("RPL-1", fieldOf(rejects[1], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("Replace refused: the order isn't acknowledged yet", fieldOf(rejects[1], FIX::FIELD::Text));
+    for (const FIX::Message &reject : rejects)
+    {
+        EXPECT_EQ("NONE", fieldOf(reject, FIX::FIELD::OrderID));
+        EXPECT_EQ("ORD-1", fieldOf(reject, FIX::FIELD::OrigClOrdID));
+        EXPECT_EQ(std::string(1, FIX::OrdStatus_PENDING_NEW), fieldOf(reject, FIX::FIELD::OrdStatus));
+        EXPECT_EQ(std::to_string(FIX::CxlRejReason_OTHER), fieldOf(reject, FIX::FIELD::CxlRejReason));
+    }
+    EXPECT_EQ(0u, gateway_->waitingRequests());
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, TheEnginesRefusalOfTheOrderEndsTheWaitOfARequestForIt)
+{
+    // A request waiting for its order is answered once the engine refuses the order: the order's rejection goes first,
+    // then the request's, as for an unknown order (#380)
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::unique_ptr<OrderEntry> pushed;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.reset(evt.order_);
+            }));
+    receive(makeNewOrderSingle("ORD-2", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    ASSERT_NE(nullptr, pushed);
+    sent_.clear();
+
+    // The cancel comes on the session's thread, which waits; the engine's refusal on one of its own
+    std::thread client(
+        [&]
+        {
+            receive(makeCancelRequest("ORD-2", "CXL-2"));
+        });
+    bool waited = false;
+    for (const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+         !waited && (std::chrono::steady_clock::now() < deadline);)
+    {
+        waited = (1u == gateway_->waitingRequests());
+        if (!waited)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    const std::string source = FixGateway::makeSourceString(sid_);
+    Queues::OrderRejectEvent refusal; // as the engine refuses an order it couldn't store, by its stored ClOrdID
+    refusal.clOrderId_ = FixGateway::sessionClOrdId(source, "ORD-2");
+    refusal.symbol_ = "aaa";
+    refusal.side_ = BUY_SIDE;
+    refusal.orderQty_ = 100;
+    refusal.reason_ = "Order refused: it could not be stored";
+    const auto start = std::chrono::steady_clock::now();
+    gateway_->sendOrderReject(refusal, source);
+    client.join();
+    EXPECT_TRUE(waited);
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(30)); // not the minute's timeout
+
+    ASSERT_EQ(2u, sent_.size()) << sentText();
+    const FIX::Message rejection = parsed(sent_[0]);
+    const FIX::Message cancelReject = parsed(sent_[1]);
+    EXPECT_EQ(FIX::MsgType_ExecutionReport, fieldOf(rejection.getHeader(), FIX::FIELD::MsgType));
+    EXPECT_EQ("ORD-2", fieldOf(rejection, FIX::FIELD::ClOrdID));
+    EXPECT_EQ(std::string(1, FIX::ExecType_REJECTED), fieldOf(rejection, FIX::FIELD::ExecType));
+    EXPECT_EQ(FIX::MsgType_OrderCancelReject, fieldOf(cancelReject.getHeader(), FIX::FIELD::MsgType));
+    EXPECT_EQ("CXL-2", fieldOf(cancelReject, FIX::FIELD::ClOrdID));
+    EXPECT_EQ("ORD-2", fieldOf(cancelReject, FIX::FIELD::OrigClOrdID));
+    EXPECT_EQ(std::to_string(FIX::CxlRejReason_UNKNOWN_ORDER), fieldOf(cancelReject, FIX::FIELD::CxlRejReason));
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_REJECTED), fieldOf(cancelReject, FIX::FIELD::OrdStatus));
+    expectEverythingSentIsTaken();
 }
 
 } // anonymous namespace
