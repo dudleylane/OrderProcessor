@@ -344,14 +344,15 @@ TradeExecEntry benchTrade(const OrderEntry &order, ExecLegType leg)
     return trade;
 }
 
-/// The engine's queue, as far as the gateway sees it: it frees the order or replacement it is handed, as the engine's
-/// queue does once it has dispatched one, and keeps nothing
-class DiscardingInQueues final : public Queues::InQueues
+/// The engine's queue, as far as the gateway sees it: it keeps the new order it is handed until take(), which the
+/// benchmark stores as the engine's event worker would, and frees a replacement, as the engine's queue frees what it has
+/// dispatched
+class KeepingInQueues final : public Queues::InQueues
 {
 public:
     void push(const std::string &, const OrderEvent &evnt) override
     {
-        delete evnt.order_;
+        order_.reset(evnt.order_);
     }
     void push(const std::string &, const OrderCancelEvent &) override {}
     void push(const std::string &, const OrderReplaceEvent &evnt) override
@@ -361,6 +362,15 @@ public:
     void push(const std::string &, const OrderChangeStateEvent &) override {}
     void push(const std::string &, const ProcessEvent &) override {}
     void push(const std::string &, const TimerEvent &) override {}
+
+    /// The new order last pushed, if one was pushed since the last take()
+    std::unique_ptr<OrderEntry> take()
+    {
+        return std::move(order_);
+    }
+
+private:
+    std::unique_ptr<OrderEntry> order_;
 };
 
 /// config/fix.cfg's session with BENCH_CLIENT, logged on, as FixtSessionTest makes CLIENT_A's: what it sends goes to
@@ -524,12 +534,14 @@ static void BM_FixSendExecutionReport(benchmark::State &state)
 BENCHMARK(BM_FixSendExecutionReport);
 
 /// A new order through the gateway to the engine's queue, then its acknowledgement through FixOutQueues to the session:
-/// what the session's thread and the transaction worker do for each order, without the engine's work between them. Its
-/// ClOrdID is a stored order's, so each iteration acknowledges that order, and the queue frees each new one.
+/// what the session's thread and the transaction worker do for each order, without the engine's work between them. Each
+/// order has a ClOrdID of its own, as a session's orders do, and is stored, untimed, as the engine's event worker stores
+/// one, so that its acknowledgement finds it; onMessage() and the push are timed by hand. Every order had CLORD-001, a
+/// stored order's ClOrdID, so each was a duplicate the engine refuses, acknowledged with the stored order's report (#402).
 static void BM_FixOrderAndAcknowledgement(benchmark::State &state)
 {
     FixBenchSetup setup;
-    DiscardingInQueues inQueues;
+    KeepingInQueues inQueues;
     FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
     FixOutQueues outQueues(&gateway, OrderStorage::instance());
     BenchSession session(gateway);
@@ -538,29 +550,46 @@ static void BM_FixOrderAndAcknowledgement(benchmark::State &state)
         state.SkipWithError(session.problem().c_str());
         return;
     }
-    const OrderEntry *order = storeBenchOrder(setup, session.source(), LIMIT_ORDERTYPE);
-    ExecutionEntry ack;
-    ack.type_ = NEW_EXECTYPE;
-    ack.orderStatus_ = NEW_ORDSTATUS;
-    ack.orderId_ = order->orderId_;
-    ack.execId_ = IdTGenerator::instance()->getId();
-    const ExecReportEvent evnt(&ack);
     const std::string target;
-    const FIX50SP2::NewOrderSingle nos = makeBenchNOS("CLORD-001", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.2650, 100);
     const u64 before = session.sent();
+    int ordNum = 0;
     for (auto _ : state)
     {
+        const FIX50SP2::NewOrderSingle nos =
+            makeBenchNOS("CLORD-" + std::to_string(++ordNum), FIX::Side_BUY, FIX::OrdType_LIMIT, 1.2650, 100);
+        auto start = std::chrono::steady_clock::now();
         gateway.onMessage(nos, session.sid());
+        const double sent = secondsSince(start);
+
+        // As the engine's event worker stores the order and accepts it
+        const std::unique_ptr<OrderEntry> pushed = inQueues.take();
+        OrderEntry *order =
+            (nullptr == pushed) ? nullptr : OrderStorage::instance()->save(*pushed, IdTGenerator::instance());
+        if (nullptr == order)
+        {
+            state.SkipWithError("the gateway's order wasn't pushed and stored");
+            break;
+        }
+        order->status_ = NEW_ORDSTATUS;
+        ExecutionEntry ack;
+        ack.type_ = NEW_EXECTYPE;
+        ack.orderStatus_ = NEW_ORDSTATUS;
+        ack.orderId_ = order->orderId_;
+        ack.execId_ = IdTGenerator::instance()->getId();
+        const ExecReportEvent evnt(&ack);
+
+        start = std::chrono::steady_clock::now();
         outQueues.push(evnt, target);
+        state.SetIterationTime(sent + secondsSince(start));
     }
     // The order goes to the queue, and only its acknowledgement to the session
-    if (session.sent() - before != static_cast<u64>(state.iterations()))
+    if (!state.error_occurred() && (session.sent() - before != static_cast<u64>(state.iterations())))
     {
         state.SkipWithError("the session wasn't sent one report an iteration");
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_FixOrderAndAcknowledgement);
+BENCHMARK(BM_FixOrderAndAcknowledgement)->UseManualTime();
 
 // =============================================================================
 // 4. MultiOutQueues Fan-Out Overhead
