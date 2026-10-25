@@ -60,7 +60,7 @@ A single test that submits two FIX orders (sell + buy limit) through the entire 
 **File:** `test/FixEndToEndTest.cpp`
 **Requires:** `BUILD_FIX=ON`
 
-Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBook. Orders enter via `FixGateway::onMessage()` and flow through the complete pipeline.
+Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBook. Orders enter via `FixGateway::onMessage()` and flow through the complete pipeline. The engine's reports go to the gateway too, through `MultiOutQueues` and `FixOutQueues` as in the server, and the gateway pushes through `HoldingInQueues`, which can hold the engine's input back so that an order isn't stored yet (#380).
 
 | Test | Description |
 |------|-------------|
@@ -75,6 +75,10 @@ Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBo
 | `MarketOrder_FillsImmediately` | Market order enters pipeline with correct type/side/qty |
 | `TwoSessions_CanUseTheSameClOrdId` | Two sessions each place ClOrdID `SAME-1` → both NEW, and each session's cancel finds its own order (#71) |
 | `AnotherSessionsCancelAndReplace_ViaFix_DoNotReachTheEngine` | A second session's cancel and replace naming the first session's ClOrdID → the order is untouched, and the engine sees neither (#71) |
+| `CancelSentBeforeItsOrderIsStored_CancelsIt` | A cancel sent while the engine's input holds its order waits for the order, which is then acknowledged and canceled (NEW, then CANCEL), as in EP284's B.1.d and B.1.e; it was refused as unknown, and the order rested (#380) |
+| `ReplaceSentBeforeItsOrderIsStored_ReplacesIt` | The same for a replace: the original is acknowledged, then replaced (#380) |
+| `ReplaceOfAReplacementNotYetStored_IsDecidedAgainstIt` | EP284's D.2.a: Replace (Y,X) and, at once, Replace (Z,Y) → the second waits for Y to be stored, then replaces it: X and Y REPLACED, Z NEW (#380) |
+| `ReplaceOfARefusedReplacement_IsAnsweredAsUnknownOnceRefused` | Replace (Y,X) of a filled order is refused, and Replace (Z,Y), sent at once, waits for that refusal, not for the timeout, and never reaches the engine; EP284's D.2.c would decide it against X (#398) |
 
 ---
 
@@ -418,6 +422,8 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `TheEnginesRefusalsAreTaken` | The engine's refusals as the gateway reports them: a new order and a replacement whose ClOrdID is in use, a cancel too late, a business reject |
 | `EveryKindOfExecutionReportIsTaken` | Every ExecType the gateway sends, a stop's release (150=L, #236) among them, and a trade, a correction, a cancel's acknowledgement and a replacement's report, each with the order's OrderQty (38) as a counterparty reads it (#384) |
 | `ASwapsTradeReportIsRefusedForItsTradeLinkIdAlone` | A swap leg's trade report is refused for TradeLinkID (820), which neither FIX 4.4's ExecutionReport nor FIX 5.0 SP2's has (#378), and for nothing else: its LegLastQty (1418) is in the NoLegs group, where FIX 5.0 SP2 has it |
+| `ARequestForAnOrderTheEngineHasntAnsweredIsRefusedAsPendingNew` | A cancel and a replace naming an order the session just sent, which the engine hasn't stored or refused when the wait (here 50 ms) ends, get a 35=9 with 102=99, OrderID NONE and OrdStatus A (Pending New), not 102=1: the order may yet be acknowledged (#380) |
+| `TheEnginesRefusalOfTheOrderEndsTheWaitOfARequestForIt` | A cancel waiting for its order, on a thread of its own as on a session's, is answered once the engine refuses the order: the order's 35=8 first, then the cancel's 35=9, 102=1 (#380) |
 
 ---
 

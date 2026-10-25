@@ -64,6 +64,12 @@ std::string rawText(const RawDataEntry &raw)
 {
     return ((nullptr != raw.data_) && (0 < raw.length_)) ? std::string(raw.data_, raw.length_) : std::string();
 }
+/// Whether a report can be its order's first (#380): a new order's acknowledgement or its rejection, or a replacement's
+/// report. The engine stores an order before it sends one of these, and sends every other report after one.
+bool canBeFirstReport(ExecType type)
+{
+    return (NEW_EXECTYPE == type) || (REJECT_EXECTYPE == type) || (REPLACE_EXECTYPE == type);
+}
 /// The session string an order came from, which prefixes the keys of its ClOrdIDs (#71); empty when it names none
 std::string sourceOf(const OrderEntry &order)
 {
@@ -101,9 +107,9 @@ std::string priceRefusal(const std::string &field, OrderType ordType)
 // =============================================================================
 
 FixGateway::FixGateway(Queues::InQueues *inQueues, WideParamsDataStorage *wideData, OrderDataStorage *orderStorage,
-                       SourceIdT defaultClearingId, SourceIdT defaultAccountId)
+                       SourceIdT defaultClearingId, SourceIdT defaultAccountId, std::chrono::milliseconds answerWait)
     : inQueues_(inQueues), wideData_(wideData), orderStorage_(orderStorage), defaultClearingId_(defaultClearingId),
-      defaultAccountId_(defaultAccountId)
+      defaultAccountId_(defaultAccountId), answerWait_(answerWait)
 {
 }
 
@@ -161,6 +167,111 @@ OrderEntry *FixGateway::locateSessionOrder(const std::string &source, const std:
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
     return (source == sourceOf(*order)) ? order : nullptr;
 }
+
+OrderEntry *FixGateway::locateAnsweredOrder(const std::string &source, const std::string &clOrdId, bool *unanswered)
+{
+    *unanswered = false;
+    if (OrderEntry *order = locateSessionOrder(source, clOrdId)) [[likely]]
+    {
+        return order;
+    }
+    // The order may be on its way: the session's thread hands an order to the engine, and an event worker stores it
+    // later, so a request sent right after its order could find nothing and was answered as unknown, though the order
+    // was then acknowledged and rested in the book (#380). The engine stores an order before it reports it, so once it
+    // has answered, the order is found or doesn't exist. Each look at the store is made without answersLock_, which
+    // the engine's threads take while they report.
+    const std::string key = sessionClOrdId(source, clOrdId);
+    bool sent = false;
+    {
+        std::lock_guard<std::mutex> lock(answersLock_);
+        sent = unanswered_.contains(key);
+    }
+    // Looked for again whether or not it's answered: answered since the first look, or stored and not yet reported
+    OrderEntry *order = locateSessionOrder(source, clOrdId);
+    if ((nullptr != order) || !sent)
+    {
+        return order;
+    }
+    {
+        std::unique_lock<std::mutex> lock(answersLock_);
+        ++waiting_;
+        *unanswered = !answers_.wait_for(lock, answerWait_,
+                                         [&]
+                                         {
+                                             return !unanswered_.contains(key);
+                                         });
+        --waiting_;
+    }
+    // Answered or not: stored and never reported, as when its booking's commit failed, it is found now
+    return locateSessionOrder(source, clOrdId);
+}
+
+template <typename Event>
+void FixGateway::pushUnanswered(const std::string &source, const std::string &key, const Event &evnt)
+{
+    // Before the push, so that the engine's answer, which comes after it, always finds the key: the queue's push and
+    // pop order the insert before the report that reads unansweredCount_
+    {
+        std::lock_guard<std::mutex> lock(answersLock_);
+        unanswered_.insert(key);
+        unansweredCount_.store(unanswered_.size(), std::memory_order_release);
+    }
+    try
+    {
+        inQueues_->push(source, evnt);
+    }
+    catch (...)
+    {
+        answered(key); // the engine never got it, so nothing else would
+        throw;
+    }
+}
+
+void FixGateway::answered(std::string_view key)
+{
+    // Without the lock while nothing is unanswered: a report of an order the gateway sent always finds its key, since
+    // the key went in before the order went to the engine (pushUnanswered())
+    if (0 == unansweredCount_.load(std::memory_order_acquire))
+    {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(answersLock_);
+        const auto it = unanswered_.find(key);
+        if (unanswered_.end() == it)
+        {
+            return;
+        }
+        unanswered_.erase(it);
+        unansweredCount_.store(unanswered_.size(), std::memory_order_release);
+    }
+    answers_.notify_all();
+}
+
+size_t FixGateway::waitingRequests() const
+{
+    std::lock_guard<std::mutex> lock(answersLock_);
+    return waiting_;
+}
+
+class FixGateway::AnsweredOnExit
+{
+public:
+    AnsweredOnExit(FixGateway &gateway, std::string_view key) : gateway_(gateway), key_(key) {}
+    ~AnsweredOnExit()
+    {
+        if (!key_.empty())
+        {
+            gateway_.answered(key_);
+        }
+    }
+    AnsweredOnExit(const AnsweredOnExit &) = delete;
+    AnsweredOnExit &operator=(const AnsweredOnExit &) = delete;
+
+private:
+    FixGateway &gateway_;
+    std::string_view key_;
+};
 
 // =============================================================================
 // Application callbacks
@@ -625,7 +736,7 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
     }
 
     Queues::OrderEvent evt(order);
-    inQueues_->push(sourceStr, evt);
+    pushUnanswered(sourceStr, clOrdStr, evt); // a cancel sent at once waits for it (#380)
 }
 
 // =============================================================================
@@ -854,7 +965,7 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
     order->lastUpdateTime_ = order->creationTime_;
 
     Queues::OrderEvent evt(order);
-    inQueues_->push(sourceStr, evt);
+    pushUnanswered(sourceStr, clOrdStr, evt); // as for NewOrderSingle (#380)
 }
 
 void FixGateway::onMessage(const FIX50SP2::OrderCancelRequest &msg, const FIX::SessionID &sid)
@@ -864,19 +975,25 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelRequest &msg, const FIX::S
     FIX::ClOrdID clOrdId;
     msg.get(clOrdId);
 
-    // Only the session's own orders: another session's is answered as unknown, without saying that it exists (#71)
+    // Only the session's own orders: another session's is answered as unknown, without saying that it exists (#71).
+    // One the session sent just before is waited for (#380).
     const std::string sourceStr = makeSourceString(sid);
     std::string origClOrdStr = origClOrdId.getString();
-    OrderEntry *order = locateSessionOrder(sourceStr, origClOrdStr);
+    bool unanswered = false;
+    OrderEntry *order = locateAnsweredOrder(sourceStr, origClOrdStr, &unanswered);
     if (!order)
     {
-        aux::ExchLogger::instance()->error("FIX: Cancel - order not found: " + origClOrdStr);
+        aux::ExchLogger::instance()->error("FIX: Cancel - order not found: " + origClOrdStr +
+                                           (unanswered ? ", nor answered by the engine yet (#380)" : ""));
         // Answered here rather than by the engine, which only rejects an unknown order id (#57): here the request's
         // own ClOrdID is known, so the reject can quote it (#73)
         Queues::CancelRejectEvent unknown; // UNKNOWN_ORDER, with no order status
         try
         {
-            FIX50SP2::OrderCancelReject reject = buildCancelReject(unknown, "NONE", clOrdId.getString(), origClOrdStr);
+            FIX50SP2::OrderCancelReject reject =
+                unanswered ? buildUnansweredOrderReject(FIX::CxlRejResponseTo_ORDER_CANCEL_REQUEST, clOrdId.getString(),
+                                                        origClOrdStr)
+                           : buildCancelReject(unknown, "NONE", clOrdId.getString(), origClOrdStr);
             FIX::Session::sendToTarget(reject, sid);
         }
         catch (const std::exception &ex)
@@ -900,17 +1017,22 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
     FIX::ClOrdID clOrdId;
     msg.get(clOrdId);
 
-    // Only the session's own orders, as for a cancel (#71)
+    // Only the session's own orders, as for a cancel (#71), waiting for one the session sent just before (#380)
     const std::string sourceStr = makeSourceString(sid);
     std::string origClOrdStr = origClOrdId.getString();
-    OrderEntry *existing = locateSessionOrder(sourceStr, origClOrdStr);
+    bool unanswered = false;
+    OrderEntry *existing = locateAnsweredOrder(sourceStr, origClOrdStr, &unanswered);
     if (!existing)
     {
-        aux::ExchLogger::instance()->error("FIX: Replace - order not found: " + origClOrdStr);
+        aux::ExchLogger::instance()->error("FIX: Replace - order not found: " + origClOrdStr +
+                                           (unanswered ? ", nor answered by the engine yet (#380)" : ""));
         // Answered here, as a cancel of an unknown order is (#73), quoting the request's own ClOrdIDs
         try
         {
-            FIX50SP2::OrderCancelReject reject = buildUnknownReplaceReject(clOrdId.getString(), origClOrdStr);
+            FIX50SP2::OrderCancelReject reject =
+                unanswered ? buildUnansweredOrderReject(FIX::CxlRejResponseTo_ORDER_CANCEL_REPLACE_REQUEST,
+                                                        clOrdId.getString(), origClOrdStr)
+                           : buildUnknownReplaceReject(clOrdId.getString(), origClOrdStr);
             FIX::Session::sendToTarget(reject, sid);
         }
         catch (const std::exception &ex)
@@ -1072,9 +1194,10 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
             .count());
 
-    // The queue owns the replacement once pushed (#74)
+    // The queue owns the replacement once pushed (#74). A replace sent at once that names the replacement waits for it,
+    // and is then decided against it, as in EP284's D.2.a (#380).
     Queues::OrderReplaceEvent evt(existing->orderId_, replacement.release());
-    inQueues_->push(sourceStr, evt);
+    pushUnanswered(sourceStr, clOrdStr, evt);
 }
 
 // =============================================================================
@@ -1147,6 +1270,20 @@ void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntr
     {
         return; // the replacement's report acknowledges the replace (#74)
     }
+    // An order's first report tells a request waiting for the order that it's stored (#380). It does so once the report
+    // is out, so that the gateway's own answer to the request can't go out first, and on every way out of here: in
+    // tests, too, that have no session. A trade's report, like every other that can't be its order's first, reads
+    // nothing, and none does while no order is unanswered.
+    std::string_view key;
+    if (canBeFirstReport(exec->type_) && (0 < unansweredCount_.load(std::memory_order_acquire)))
+    {
+        const RawDataEntry &clOrdId = order.clOrderId_.get();
+        if (nullptr != clOrdId.data_)
+        {
+            key = std::string_view(clOrdId.data_, clOrdId.length_);
+        }
+    }
+    const AnsweredOnExit answer(*this, key);
 
     std::string source = order.source_.get();
 
@@ -1303,6 +1440,9 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
 
 void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std::string &source)
 {
+    // The refusal answers the order or replacement for a request waiting for it (#380), once it's out, as a report does.
+    // evnt names the ClOrdID as it is stored, under the session's key.
+    const AnsweredOnExit answer(*this, evnt.clOrderId_);
     FIX::SessionID sid;
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, false);
@@ -1431,6 +1571,20 @@ FIX50SP2::OrderCancelReject FixGateway::buildUnknownReplaceReject(const std::str
     unknown.refusal_ = Queues::CancelRejectEvent::UNKNOWN_ORDER;
     unknown.reason_ = "Replace refused: unknown order";
     return buildReplaceReject(unknown, "NONE", FIX::OrdStatus_REJECTED);
+}
+
+FIX50SP2::OrderCancelReject FixGateway::buildUnansweredOrderReject(char responseTo, const std::string &clOrdId,
+                                                                   const std::string &origClOrdId)
+{
+    FIX50SP2::OrderCancelReject reject(FIX::OrderID("NONE"), FIX::ClOrdID(clOrdId),
+                                       FIX::OrdStatus(FIX::OrdStatus_PENDING_NEW), FIX::CxlRejResponseTo(responseTo));
+    reject.set(FIX::OrigClOrdID(origClOrdId)); // optional since FIX 5.0, as for the other rejects
+    reject.set(FIX::CxlRejReason(FIX::CxlRejReason_OTHER));
+    // In the words of the gateway's other answers to each: "Cancel rejected: unknown order", "Replace refused: ..."
+    reject.set(FIX::Text(
+        std::string(FIX::CxlRejResponseTo_ORDER_CANCEL_REQUEST == responseTo ? "Cancel rejected" : "Replace refused") +
+        ": the order isn't acknowledged yet"));
+    return reject;
 }
 
 FIX50SP2::OrderCancelReject FixGateway::buildCancelReject(const Queues::CancelRejectEvent &evnt,
