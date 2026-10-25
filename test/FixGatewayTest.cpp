@@ -3004,6 +3004,388 @@ TEST_F(FixtSessionTest, TheEnginesRefusalOfTheOrderEndsTheWaitOfARequestForIt)
     expectEverythingSentIsTaken();
 }
 
+// =============================================================================
+// OrderStatusRequest (35=H), as EP284's section G answers one (#383)
+// =============================================================================
+
+/// An OrderStatusRequest for the session's buy of "aaa", naming the order by ClOrdID (11), OrderID (37), both, or
+/// neither, as given, with reqId as its OrdStatusReqID (790) if not empty
+FIX50SP2::OrderStatusRequest makeStatusRequest(const std::string &clOrdId, const std::string &orderId = std::string(),
+                                               const std::string &reqId = std::string())
+{
+    FIX50SP2::OrderStatusRequest msg;
+    if (!clOrdId.empty())
+    {
+        msg.set(FIX::ClOrdID(clOrdId));
+    }
+    if (!orderId.empty())
+    {
+        msg.set(FIX::OrderID(orderId));
+    }
+    if (!reqId.empty())
+    {
+        msg.set(FIX::OrdStatusReqID(reqId));
+    }
+    msg.set(FIX::Symbol("aaa"));
+    msg.set(FIX::Side(FIX::Side_BUY));
+    return msg;
+}
+
+/// Fails unless status is an answer to a status request, ExecType Order Status (150=I) with ExecID 0, which says
+/// ordStatus of the order orderId, with these quantities
+void expectStatus(const FIX::Message &status, char ordStatus, const std::string &orderId, QuantityT orderQty,
+                  QuantityT cumQty, QuantityT leavesQty)
+{
+    EXPECT_EQ(std::string(1, FIX::ExecType_ORDER_STATUS), fieldOf(status, FIX::FIELD::ExecType));
+    EXPECT_EQ("0", fieldOf(status, FIX::FIELD::ExecID));
+    EXPECT_EQ(std::string(1, ordStatus), fieldOf(status, FIX::FIELD::OrdStatus));
+    EXPECT_EQ(orderId, fieldOf(status, FIX::FIELD::OrderID));
+    EXPECT_EQ(std::to_string(orderQty), fieldOf(status, FIX::FIELD::OrderQty));
+    EXPECT_EQ(std::to_string(cumQty), fieldOf(status, FIX::FIELD::CumQty));
+    EXPECT_EQ(std::to_string(leavesQty), fieldOf(status, FIX::FIELD::LeavesQty));
+    EXPECT_EQ(std::string(1, FIX::Side_BUY), fieldOf(status, FIX::FIELD::Side));
+    EXPECT_EQ("aaa", fieldOf(status, FIX::FIELD::Symbol));
+}
+
+/// Gives a stored order the state a test describes
+void setState(OrderEntry *order, OrderStatus status, QuantityT orderQty, QuantityT cumQty, QuantityT leavesQty)
+{
+    order->status_ = status;
+    order->orderQty_ = orderQty;
+    order->cumQty_ = cumQty;
+    order->leavesQty_ = leavesQty;
+}
+
+TEST_F(FixtSessionTest, AStatusRequestIsAnsweredWithTheOrdersStateAndQuantities)
+{
+    // EP284's G.1.c from its row 5: an ExecutionReport of ExecType Order Status (150=I), with ExecID 0, as FIX gives
+    // every one, the order's OrdStatus and quantities, and the request's OrdStatusReqID (790) when it has one
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0); // the engine never hears of it
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1");
+    const std::string orderId = std::to_string(order->orderId_.id_);
+    setState(order, NEW_ORDSTATUS, 100, 0, 100);
+    receive(makeStatusRequest("ORD-1", "", "STATUS-1"));
+    setState(order, PARTFILL_ORDSTATUS, 100, 40, 60);
+    order->avgPx_ = 10.5;
+    receive(makeStatusRequest("ORD-1"));
+    setState(order, FILLED_ORDSTATUS, 100, 100, 0);
+    receive(makeStatusRequest("ORD-1"));
+
+    const std::vector<FIX::Message> answers = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(3u, answers.size()) << sentText();
+    expectStatus(answers[0], FIX::OrdStatus_NEW, orderId, 100, 0, 100);
+    EXPECT_EQ("STATUS-1", fieldOf(answers[0], FIX::FIELD::OrdStatusReqID));
+    expectStatus(answers[1], FIX::OrdStatus_PARTIALLY_FILLED, orderId, 100, 40, 60);
+    EXPECT_EQ("10.5", fieldOf(answers[1], FIX::FIELD::AvgPx));
+    EXPECT_EQ("(not set)", fieldOf(answers[1], FIX::FIELD::OrdStatusReqID));
+    expectStatus(answers[2], FIX::OrdStatus_FILLED, orderId, 100, 100, 0);
+    for (const FIX::Message &answer : answers)
+    {
+        EXPECT_EQ("ORD-1", fieldOf(answer, FIX::FIELD::ClOrdID));
+        EXPECT_EQ("(not set)", fieldOf(answer, FIX::FIELD::OrigClOrdID));
+        EXPECT_EQ("(not set)", fieldOf(answer, FIX::FIELD::OrdRejReason));
+    }
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AStatusRequestForAnOrderTheSessionDoesntHaveIsAnsweredAsUnknown)
+{
+    // EP284's G.1.a: OrdStatus Rejected (39=8), OrdRejReason unknown order (103=5), OrderID NONE and no quantities. An
+    // order of another session's is unknown to this one, as for a cancel (#71), by either id, and so is an OrderID that
+    // isn't an order number.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *theirs = saveOrderOf(OTHER_SID, "ORD-B");
+    receive(makeStatusRequest("NO-SUCH"));
+    receive(makeStatusRequest("ORD-B"));
+    receive(makeStatusRequest("", std::to_string(theirs->orderId_.id_)));
+    receive(makeStatusRequest("", "ORD-B"));
+
+    const std::vector<FIX::Message> answers = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(4u, answers.size()) << sentText();
+    for (const FIX::Message &answer : answers)
+    {
+        expectStatus(answer, FIX::OrdStatus_REJECTED, "NONE", 0, 0, 0);
+        EXPECT_EQ(std::to_string(FIX::OrdRejReason_UNKNOWN_ORDER), fieldOf(answer, FIX::FIELD::OrdRejReason));
+        EXPECT_EQ("Unknown order", fieldOf(answer, FIX::FIELD::Text));
+    }
+    EXPECT_EQ("NO-SUCH", fieldOf(answers[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("ORD-B", fieldOf(answers[1], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("(not set)", fieldOf(answers[2], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("(not set)", fieldOf(answers[3], FIX::FIELD::ClOrdID));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AStatusRequestForAnOrderNotYetAcknowledgedIsPendingNew)
+{
+    // EP284's G.1.c, rows 1 to 6: a status request sent right after its order, before the engine acknowledges it, is
+    // answered Pending New (39=A), with the OrderQty the order was sent with and nothing filled: before the engine
+    // stores it, with no OrderID yet, and once stored, until its acknowledgement is out. Then New.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::unique_ptr<OrderEntry> pushed; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.reset(evt.order_);
+            }));
+    receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    ASSERT_NE(nullptr, pushed);
+    receive(makeStatusRequest("ORD-1"));
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1"); // as the engine stores it
+    setState(order, NEW_ORDSTATUS, 100, 0, 100);
+    receive(makeStatusRequest("ORD-1"));
+    auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    ack.orderId_ = order->orderId_;
+    gateway_->sendExecutionReport(&ack, *order);
+    receive(makeStatusRequest("ORD-1"));
+
+    const std::string orderId = std::to_string(order->orderId_.id_);
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(4u, reports.size()) << sentText();
+    expectStatus(reports[0], FIX::OrdStatus_PENDING_NEW, "NONE", 100, 0, 100);
+    expectStatus(reports[1], FIX::OrdStatus_PENDING_NEW, orderId, 100, 0, 100);
+    EXPECT_EQ(std::string(1, FIX::ExecType_NEW), fieldOf(reports[2], FIX::FIELD::ExecType));
+    expectStatus(reports[3], FIX::OrdStatus_NEW, orderId, 100, 0, 100);
+    for (const FIX::Message &report : reports)
+    {
+        EXPECT_EQ("ORD-1", fieldOf(report, FIX::FIELD::ClOrdID));
+    }
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AStatusRequestForAClOrdIdSentTwiceBeforeItsAnswerIsTheFirstOrders)
+{
+    // A NewOrderSingle that repeats a ClOrdID still on its way is a duplicate, which the engine refuses: until the
+    // engine answers, a status request is answered Pending New with the first order's OrderQty
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::vector<std::unique_ptr<OrderEntry>> pushed; // never reach an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .Times(2)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.emplace_back(evt.order_);
+            }));
+    receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 300));
+    ASSERT_EQ(2u, pushed.size());
+    receive(makeStatusRequest("ORD-1"));
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(1u, reports.size()) << sentText();
+    expectStatus(reports[0], FIX::OrdStatus_PENDING_NEW, "NONE", 100, 0, 100);
+    EXPECT_EQ("ORD-1", fieldOf(reports[0], FIX::FIELD::ClOrdID));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AStatusRequestForAReplacedOrderIsAnsweredWithTheOrderThatReplacedIt)
+{
+    // EP284's G.1.c, rows 16 to 19: after Replace (Y,X), a status request for X is answered with Y's state, naming Y in
+    // ClOrdID (11) and X in OrigClOrdID (41) "to allow tie back", and one for Y with Y's. Until Y's acknowledgement is
+    // out, the replace is still pending for the client: X, Pending Replace (39=E), with what it had left.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, REPLACED_ORDSTATUS, 100, 40, 0); // as a replace leaves it
+    OrderEntry *y = saveOrderOf(sid_, "ORD-Y");
+    y->origOrderId_ = x->orderId_;
+    y->origClOrderId_ = x->clOrderId_;
+    setState(y, PARTFILL_ORDSTATUS, 120, 40, 80);
+    receive(makeStatusRequest("ORD-X"));
+    auto ack = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, PARTFILL_ORDSTATUS);
+    ack.orderId_ = y->orderId_;
+    ack.origOrderId_ = x->orderId_;
+    gateway_->sendExecutionReport(&ack, *y);
+    receive(makeStatusRequest("ORD-X"));
+    receive(makeStatusRequest("ORD-Y"));
+
+    const std::string xId = std::to_string(x->orderId_.id_);
+    const std::string yId = std::to_string(y->orderId_.id_);
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(4u, reports.size()) << sentText();
+    expectStatus(reports[0], FIX::OrdStatus_PENDING_REPLACE, xId, 100, 40, 60);
+    EXPECT_EQ("ORD-X", fieldOf(reports[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("(not set)", fieldOf(reports[0], FIX::FIELD::OrigClOrdID));
+    EXPECT_EQ(std::string(1, FIX::ExecType_REPLACED), fieldOf(reports[1], FIX::FIELD::ExecType));
+    expectStatus(reports[2], FIX::OrdStatus_PARTIALLY_FILLED, yId, 120, 40, 80);
+    EXPECT_EQ("ORD-Y", fieldOf(reports[2], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("ORD-X", fieldOf(reports[2], FIX::FIELD::OrigClOrdID));
+    expectStatus(reports[3], FIX::OrdStatus_PARTIALLY_FILLED, yId, 120, 40, 80);
+    EXPECT_EQ("ORD-Y", fieldOf(reports[3], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("(not set)", fieldOf(reports[3], FIX::FIELD::OrigClOrdID));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AStatusRequestForAReplacementNotYetAcknowledgedIsItsOriginalPendingReplace)
+{
+    // A replacement the engine hasn't acknowledged, stored or not: the replace is pending, so the answer is its
+    // original's state, Pending Replace (39=E), under the replacement's ClOrdID and naming the original's, as EP284's
+    // G.1.c acknowledges a replace (row 14). A request for the original says the same under its own ClOrdID.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, PARTFILL_ORDSTATUS, 100, 40, 60);
+    std::unique_ptr<OrderEntry> replacement; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                replacement.reset(evt.replacementOrder_);
+            }));
+    receive(makeLimitReplace("ORD-X", "ORD-Y"));
+    ASSERT_NE(nullptr, replacement);
+    receive(makeStatusRequest("ORD-Y"));
+    OrderEntry *y = saveOrderOf(sid_, "ORD-Y"); // as the engine stores it, and replaces X
+    y->origOrderId_ = x->orderId_;
+    y->origClOrderId_ = x->clOrderId_;
+    setState(y, PARTFILL_ORDSTATUS, 200, 40, 160);
+    setState(x, REPLACED_ORDSTATUS, 100, 40, 0);
+    receive(makeStatusRequest("ORD-Y"));
+    receive(makeStatusRequest("ORD-X"));
+
+    const std::string xId = std::to_string(x->orderId_.id_);
+    const std::vector<FIX::Message> answers = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(3u, answers.size()) << sentText();
+    for (const FIX::Message &answer : answers)
+    {
+        expectStatus(answer, FIX::OrdStatus_PENDING_REPLACE, xId, 100, 40, 60);
+    }
+    for (size_t i : { 0u, 1u })
+    {
+        EXPECT_EQ("ORD-Y", fieldOf(answers[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ("ORD-X", fieldOf(answers[i], FIX::FIELD::OrigClOrdID));
+    }
+    EXPECT_EQ("ORD-X", fieldOf(answers[2], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("(not set)", fieldOf(answers[2], FIX::FIELD::OrigClOrdID));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AReplacementStoredBeforeTheGatewayWasMadeIsKnown)
+{
+    // The server restores its orders before it makes the gateway, which learns from them which order replaced which:
+    // a status request for an order replaced before a restart is answered with its replacement, as for one since
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, REPLACED_ORDSTATUS, 100, 0, 0);
+    OrderEntry *y = saveOrderOf(sid_, "ORD-Y");
+    y->origOrderId_ = x->orderId_;
+    y->origClOrderId_ = x->clOrderId_;
+    setState(y, NEW_ORDSTATUS, 150, 0, 150);
+    makeSession(std::chrono::seconds(60)); // a gateway made after them, as at a restart
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    receive(makeStatusRequest("ORD-X"));
+
+    const std::vector<FIX::Message> answers = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(1u, answers.size()) << sentText();
+    expectStatus(answers[0], FIX::OrdStatus_NEW, std::to_string(y->orderId_.id_), 150, 0, 150);
+    EXPECT_EQ("ORD-Y", fieldOf(answers[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("ORD-X", fieldOf(answers[0], FIX::FIELD::OrigClOrdID));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AStatusRequestNamesTheOrderByOrderIdAloneOrByBothIds)
+{
+    // FIX 5.0 SP2's OrderStatusRequest may name the order by OrderID (37) alone. Naming it by both, they must name the
+    // same order: an OrderID of another order's names none, and is answered as unknown, saying why.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *one = saveOrderOf(sid_, "ORD-1");
+    setState(one, NEW_ORDSTATUS, 100, 0, 100);
+    OrderEntry *two = saveOrderOf(sid_, "ORD-2");
+    setState(two, NEW_ORDSTATUS, 50, 0, 50);
+    const std::string oneId = std::to_string(one->orderId_.id_);
+    receive(makeStatusRequest("", oneId));
+    receive(makeStatusRequest("ORD-1", oneId));
+    receive(makeStatusRequest("ORD-1", std::to_string(two->orderId_.id_)));
+
+    const std::vector<FIX::Message> answers = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(3u, answers.size()) << sentText();
+    for (size_t i : { 0u, 1u })
+    {
+        expectStatus(answers[i], FIX::OrdStatus_NEW, oneId, 100, 0, 100);
+        EXPECT_EQ("ORD-1", fieldOf(answers[i], FIX::FIELD::ClOrdID));
+    }
+    expectStatus(answers[2], FIX::OrdStatus_REJECTED, "NONE", 0, 0, 0);
+    EXPECT_EQ("ORD-1", fieldOf(answers[2], FIX::FIELD::ClOrdID));
+    EXPECT_EQ(std::to_string(FIX::OrdRejReason_UNKNOWN_ORDER), fieldOf(answers[2], FIX::FIELD::OrdRejReason));
+    EXPECT_THAT(fieldOf(answers[2], FIX::FIELD::Text), testing::HasSubstr("OrderID (37)"));
+    EXPECT_THAT(fieldOf(answers[2], FIX::FIELD::Text), testing::HasSubstr("ClOrdID (11) ORD-1"));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AStatusRequestAlongAReplaceMayGiveTheOrderIdItsAnswerReports)
+{
+    // Along a replace, the OrderID (37) given with the ClOrdID (11) may be the one the answer reports: the original's,
+    // which the client's replace named, for the replacement not yet acknowledged, and the replacement's, which its
+    // acknowledgement gave, for the original. Another order's names neither.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, PARTFILL_ORDSTATUS, 100, 40, 60);
+    OrderEntry *other = saveOrderOf(sid_, "ORD-O");
+    setState(other, NEW_ORDSTATUS, 10, 0, 10);
+    const std::string xId = std::to_string(x->orderId_.id_);
+    const std::string otherId = std::to_string(other->orderId_.id_);
+    std::unique_ptr<OrderEntry> replacement; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                replacement.reset(evt.replacementOrder_);
+            }));
+    receive(makeLimitReplace("ORD-X", "ORD-Y"));
+    ASSERT_NE(nullptr, replacement);
+    receive(makeStatusRequest("ORD-Y", xId));
+    receive(makeStatusRequest("ORD-Y", otherId));
+    OrderEntry *y = saveOrderOf(sid_, "ORD-Y"); // as the engine stores it, and replaces X
+    y->origOrderId_ = x->orderId_;
+    y->origClOrderId_ = x->clOrderId_;
+    setState(y, PARTFILL_ORDSTATUS, 200, 40, 160);
+    setState(x, REPLACED_ORDSTATUS, 100, 40, 0);
+    auto ack = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, PARTFILL_ORDSTATUS);
+    ack.orderId_ = y->orderId_;
+    ack.origOrderId_ = x->orderId_;
+    gateway_->sendExecutionReport(&ack, *y);
+    const std::string yId = std::to_string(y->orderId_.id_);
+    receive(makeStatusRequest("ORD-X", yId));
+    receive(makeStatusRequest("ORD-X", xId));
+    receive(makeStatusRequest("ORD-X", otherId));
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(6u, reports.size()) << sentText();
+    expectStatus(reports[0], FIX::OrdStatus_PENDING_REPLACE, xId, 100, 40, 60);
+    EXPECT_EQ("ORD-Y", fieldOf(reports[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("ORD-X", fieldOf(reports[0], FIX::FIELD::OrigClOrdID));
+    EXPECT_EQ(std::string(1, FIX::ExecType_REPLACED), fieldOf(reports[2], FIX::FIELD::ExecType));
+    for (size_t i : { 3u, 4u })
+    {
+        expectStatus(reports[i], FIX::OrdStatus_PARTIALLY_FILLED, yId, 200, 40, 160);
+        EXPECT_EQ("ORD-Y", fieldOf(reports[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ("ORD-X", fieldOf(reports[i], FIX::FIELD::OrigClOrdID));
+    }
+    for (size_t i : { 1u, 5u })
+    {
+        expectStatus(reports[i], FIX::OrdStatus_REJECTED, "NONE", 0, 0, 0);
+        EXPECT_EQ(std::to_string(FIX::OrdRejReason_UNKNOWN_ORDER), fieldOf(reports[i], FIX::FIELD::OrdRejReason));
+        EXPECT_THAT(fieldOf(reports[i], FIX::FIELD::Text), testing::HasSubstr("OrderID (37) " + otherId));
+    }
+    EXPECT_EQ("ORD-Y", fieldOf(reports[1], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("ORD-X", fieldOf(reports[5], FIX::FIELD::ClOrdID));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AStatusRequestThatNamesNoOrderIsRefusedReadably)
+{
+    // FIX 5.0 SP2 requires neither ClOrdID (11) nor OrderID (37), and the gateway needs one: a BusinessMessageReject,
+    // conditionally required field missing (380=5), naming ClOrdID, as for a cancel without its OrigClOrdID
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    receive(makeStatusRequest(""));
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_BusinessMessageReject);
+    ASSERT_EQ(1u, rejects.size()) << sentText();
+    EXPECT_EQ(std::to_string(FIX::BusinessRejectReason_CONDITIONALLY_REQUIRED_FIELD_MISSING),
+              fieldOf(rejects[0], FIX::FIELD::BusinessRejectReason));
+    EXPECT_EQ(FIX::MsgType_OrderStatusRequest, fieldOf(rejects[0], FIX::FIELD::RefMsgType));
+    EXPECT_THAT(fieldOf(rejects[0], FIX::FIELD::Text), testing::HasSubstr("(11)"));
+    EXPECT_TRUE(sentOfType(FIX::MsgType_ExecutionReport).empty()) << sentText();
+    expectEverythingSentIsTaken();
+}
+
 } // anonymous namespace
 
 #endif // BUILD_FIX

@@ -19,6 +19,7 @@
 #include <quickfix/fix50sp2/NewOrderMultileg.h>
 #include <quickfix/fix50sp2/OrderCancelRequest.h>
 #include <quickfix/fix50sp2/OrderCancelReplaceRequest.h>
+#include <quickfix/fix50sp2/OrderStatusRequest.h>
 #include <quickfix/fix50sp2/ExecutionReport.h>
 #include <quickfix/fix50sp2/OrderCancelReject.h>
 #include <quickfix/fix50sp2/BusinessMessageReject.h>
@@ -73,6 +74,19 @@ public:
     void onMessage(const FIX50SP2::NewOrderMultileg &, const FIX::SessionID &);
     void onMessage(const FIX50SP2::OrderCancelRequest &, const FIX::SessionID &);
     void onMessage(const FIX50SP2::OrderCancelReplaceRequest &, const FIX::SessionID &);
+    /// Answered on the session's thread with answerOrderStatus()'s report: a status request only reads, so nothing
+    /// reaches the engine (#383)
+    void onMessage(const FIX50SP2::OrderStatusRequest &, const FIX::SessionID &);
+
+    /// The ExecutionReport answering an OrderStatusRequest (35=H) from sid (#383), as EP284's section G answers one:
+    /// ExecType Order Status (150=I), ExecID 0, and the state of the order the request names among the session's, by
+    /// ClOrdID (11), OrderID (37), or both, which must name the same order. Another session's order is unknown, as for a
+    /// cancel (#71). An unknown order gets OrdStatus Rejected (39=8) with OrdRejReason 5 (G.1.a). One the session sent
+    /// that the engine hasn't acknowledged yet is Pending New (39=A, G.1.c), and a replacement not yet acknowledged is
+    /// its original, Pending Replace (39=E). A replaced order is answered with the order that replaced it, naming the
+    /// one requested in OrigClOrdID (41), as G.1.c does. OrdStatusReqID (790) is echoed. Throws FIX::FieldNotFound for a
+    /// request that names no order by either field. Public so that tests can check it without a session.
+    FIX50SP2::ExecutionReport answerOrderStatus(const FIX50SP2::OrderStatusRequest &msg, const FIX::SessionID &sid);
 
     // Outbound — called by FixOutQueues
     /// requestClOrdId is the ClOrdID of the cancel request a cancel's acknowledgement answers (#98); empty otherwise
@@ -129,17 +143,46 @@ private:
     /// failing that, the one stored under the ClOrdID alone if this session placed it, as an order stored before #71
     /// was. Another session's order is not found.
     OrderEntry *locateSessionOrder(const std::string &source, const std::string &clOrdId) const;
+    /// What the gateway keeps of a new order or replacement it sent the engine, until the engine answers it (#380)
+    struct Unanswered
+    {
+        QuantityT orderQty = 0; // its OrderQty (38), which a status request's Pending New reports (#383)
+        std::string origKey;    // a replacement's: the key of the order it replaces; empty for a new order
+    };
+    /// The order a request from source names by ClOrdID, as locateSessionOrder() finds it, and, in *pending, what the
+    /// gateway keeps of it while the engine hasn't answered it, without waiting (#383). Looked for, its record read, and
+    /// looked for again: stored since the first look, it is found by the second.
+    OrderEntry *locateReceivedOrder(const std::string &source, const std::string &clOrdId,
+                                    std::optional<Unanswered> *pending) const;
     /// The order a cancel or replace from source names, as locateSessionOrder() finds it, once the engine has answered
     /// it (#380). An order the session sent just before the request may not be stored yet: the request waits for the
     /// engine to store or refuse it, up to answerWait_. When nothing is found, *unanswered says whether that is because
     /// the engine still hasn't answered the order, rather than because no such order exists.
     OrderEntry *locateAnsweredOrder(const std::string &source, const std::string &clOrdId, bool *unanswered);
     /// Pushes evnt, the new order or replacement whose ClOrdID is stored under key, to the engine: unanswered until the
-    /// engine reports it or refuses it (#380)
-    template <typename Event> void pushUnanswered(const std::string &source, const std::string &key, const Event &evnt);
+    /// engine reports it or refuses it (#380), and kept meanwhile as record says
+    template <typename Event>
+    void pushUnanswered(const std::string &source, const std::string &key, Unanswered record, const Event &evnt);
+    /// What the gateway keeps of the order or replacement whose ClOrdID is stored under key, if the engine hasn't
+    /// answered it yet (#383)
+    std::optional<Unanswered> unansweredOf(std::string_view key) const;
     /// The engine has answered the order or replacement whose ClOrdID is stored under key: it sent its first report,
     /// or refused it. Ends the wait of each request that names it.
     void answered(std::string_view key);
+    /// A replacement of a FIX order: a status request that names the order it replaced is answered with it from now on
+    /// (#383). Nothing for any other order.
+    void learnReplacement(const OrderEntry &replacement);
+    /// The order that replaced the one whose ClOrdID is stored under key, or nothing when none did, or its report isn't
+    /// out yet (#383)
+    OrderEntry *replacementOf(std::string_view key) const;
+    /// How many replacements the gateway knows of, which no chain of them can be longer than (#383)
+    size_t knownReplacements() const;
+    /// The answer to a status request for an order the engine has stored, read under its lock (#383). requested is the
+    /// ClOrdID the request named, or empty; pending, what the gateway keeps of the order while the engine hasn't
+    /// answered it.
+    FIX50SP2::ExecutionReport answerStoredOrder(const OrderEntry &order, const std::string &source,
+                                                const std::string &requested,
+                                                const std::optional<Unanswered> &pending) const;
     /// Calls answered() for its key, unless that is empty, when it goes out of scope: once a report or a refusal is
     /// out, or on a way out without one
     class AnsweredOnExit;
@@ -169,12 +212,17 @@ private:
     };
     /// The new orders and replacements the gateway has sent the engine, and the engine hasn't yet stored and reported
     /// or refused, by the key their ClOrdID is stored under (#380). A request that names one waits for its answer.
-    std::unordered_set<std::string, KeyHash, std::equal_to<>> unanswered_;
+    std::unordered_map<std::string, Unanswered, KeyHash, std::equal_to<>> unanswered_;
     size_t waiting_ = 0;                         // requests waiting for an answer now
     mutable std::mutex answersLock_;             // guards both
     std::condition_variable answers_;            // notified on each answer
     std::atomic<size_t> unansweredCount_{ 0 };   // unanswered_.size(), which the engine's reports read without the lock
     const std::chrono::milliseconds answerWait_; // how long a request waits for its order's answer
+
+    /// The key of the order that replaced each replaced FIX order, by the key of the one it replaced (#383): learned
+    /// from each replacement's report, and at startup from the orders stored. Kept for good, as the orders are.
+    std::unordered_map<std::string, std::string, KeyHash, std::equal_to<>> replacements_;
+    mutable std::mutex replacementsLock_; // guards it; taken with no other lock held
 
 public:
     // FIX → internal enum conversions (public static for testability)

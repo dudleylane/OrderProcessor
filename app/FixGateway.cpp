@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -75,6 +76,91 @@ std::string sourceOf(const OrderEntry &order)
 {
     return (SourceIdT() != order.source_.getId()) ? order.source_.get() : std::string();
 }
+/// How every FIX session's source string begins (FixGateway::makeSourceString()), so how a FIX order's source does
+constexpr std::string_view FIX_SOURCE_PREFIX{ "FIX:" };
+/// The order number an OrderID (37) names, as the gateway sends it (#58); nothing for anything else
+std::optional<u64> toOrderNumber(const std::string &text)
+{
+    u64 number = 0;
+    const char *end = text.data() + text.size();
+    const auto [at, error] = std::from_chars(text.data(), end, number);
+    return ((std::errc() == error) && (end == at)) ? std::optional<u64>(number) : std::nullopt;
+}
+/// What a status answer reports of a stored order (#383): the fields a transaction worker changes, read together under
+/// the order's lock. Its ClOrdIDs and instrument never change once it is stored.
+struct OrderSeen
+{
+    u64 number = 0; // its OrderID (37)
+    OrderStatus status = INVALID_ORDSTATUS;
+    Side side = INVALID_SIDE;
+    TimeInForce tif = INVALID_TIF;
+    QuantityT orderQty = 0;
+    QuantityT cumQty = 0;
+    QuantityT leavesQty = 0;
+    QuantityT dayOrderQty = 0;
+    QuantityT dayCumQty = 0;
+    PriceT avgPx = 0;
+    PriceT dayAvgPx = 0;
+    DateTimeT expireTime = 0;
+};
+OrderSeen seenOf(const OrderEntry &order)
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(order.entryMutex_, false);
+    return OrderSeen{ order.orderId_.id_, order.status_, order.side_,      order.tif_,
+                      order.orderQty_,    order.cumQty_, order.leavesQty_, order.dayOrderQty_,
+                      order.dayCumQty_,   order.avgPx_,  order.dayAvgPx_,  order.expireTime_ };
+}
+/// What an order had left to trade when a replace of it is pending (#383): a replace zeroes the original's LeavesQty
+/// once the engine decides it, before the replacement is acknowledged
+QuantityT leavesWhileReplacing(const OrderSeen &order)
+{
+    return (REPLACED_ORDSTATUS == order.status) ? order.orderQty - order.cumQty : order.leavesQty;
+}
+/// An ExecutionReport of ExecType Order Status (150=I), answering a status request (#383): ExecID 0, as FIX gives
+/// every one, and the quantities, as any other report of the gateway's has them
+FIX50SP2::ExecutionReport orderStatusReport(const std::string &orderId, char ordStatus, char side, QuantityT orderQty,
+                                            QuantityT cumQty, QuantityT leavesQty, PriceT avgPx)
+{
+    FIX50SP2::ExecutionReport report(FIX::OrderID(orderId), FIX::ExecID("0"), FIX::ExecType(FIX::ExecType_ORDER_STATUS),
+                                     FIX::OrdStatus(ordStatus), FIX::Side(side), FIX::LeavesQty(leavesQty),
+                                     FIX::CumQty(cumQty));
+    report.set(FIX::AvgPx(avgPx));
+    report.setField(FIX::FIELD::OrderQty, std::to_string(orderQty));
+    report.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    return report;
+}
+/// The status answer for a stored order, as seen, in ordStatus with leavesQty, under the ClOrdIDs given (#383). The
+/// order's fields as buildExecutionReport() writes them, and no leg group: a swap's status is its order's.
+FIX50SP2::ExecutionReport storedOrderStatusReport(const OrderEntry &order, const OrderSeen &seen, char ordStatus,
+                                                  QuantityT leavesQty, const std::string &clOrdId,
+                                                  const std::string &origClOrdId)
+{
+    FIX50SP2::ExecutionReport report =
+        orderStatusReport(std::to_string(seen.number), ordStatus, FixGateway::fromSide(seen.side), seen.orderQty,
+                          seen.cumQty, leavesQty, seen.avgPx);
+    if (!clOrdId.empty())
+    {
+        report.set(FIX::ClOrdID(clOrdId));
+    }
+    if (!origClOrdId.empty())
+    {
+        report.set(FIX::OrigClOrdID(origClOrdId));
+    }
+    report.set(FIX::Symbol(order.instrument_.get().symbol_));
+    // A GT order's figures for the business day, once it has traded on an earlier one (#244), and a GTD order's expiry
+    // (#240)
+    if ((DAY_TIF != seen.tif) && (IOC_TIF != seen.tif) && (FOK_TIF != seen.tif) && (seen.dayCumQty < seen.cumQty))
+    {
+        report.set(FIX::DayOrderQty(seen.dayOrderQty));
+        report.set(FIX::DayCumQty(seen.dayCumQty));
+        report.set(FIX::DayAvgPx(seen.dayAvgPx));
+    }
+    if ((GTD_TIF == seen.tif) && (0 != seen.expireTime))
+    {
+        report.set(FIX::ExpireTime(FixGateway::toUtcTimeStamp(seen.expireTime), 3));
+    }
+    return report;
+}
 /// CxlRejReason (102) for the engine's reason, the same for a refused cancel (434=1) and a refused replace (434=2)
 int cxlRejReasonFor(Queues::CancelRejectEvent::Reason reason)
 {
@@ -111,11 +197,19 @@ FixGateway::FixGateway(Queues::InQueues *inQueues, WideParamsDataStorage *wideDa
     : inQueues_(inQueues), wideData_(wideData), orderStorage_(orderStorage), defaultClearingId_(defaultClearingId),
       defaultAccountId_(defaultAccountId), answerWait_(answerWait)
 {
+    // The replacements stored, which the server restored before it made the gateway: a status request that names an
+    // order replaced before this run is answered with its replacement, as for one replaced since (#383)
+    orderStorage_->forEachOrder(
+        [this](const IdT &, const OrderEntry &order)
+        {
+            learnReplacement(order);
+        });
 }
 
 std::string FixGateway::makeSourceString(const FIX::SessionID &sid)
 {
-    return "FIX:" + sid.getSenderCompID().getString() + "->" + sid.getTargetCompID().getString();
+    return std::string(FIX_SOURCE_PREFIX) + sid.getSenderCompID().getString() + "->" +
+           sid.getTargetCompID().getString();
 }
 
 std::string FixGateway::sessionClOrdId(const std::string &source, const std::string &clOrdId)
@@ -168,6 +262,20 @@ OrderEntry *FixGateway::locateSessionOrder(const std::string &source, const std:
     return (source == sourceOf(*order)) ? order : nullptr;
 }
 
+OrderEntry *FixGateway::locateReceivedOrder(const std::string &source, const std::string &clOrdId,
+                                            std::optional<Unanswered> *pending) const
+{
+    // The order may be on its way: the session's thread hands an order to the engine, and an event worker stores it
+    // later (#380). The engine stores an order before it reports it, and the gateway keeps its key from before it hands
+    // the order over until the engine answers: so a key the gateway doesn't keep is of an order never sent, or one
+    // stored. The order is looked for again after the key is read: answered since the first look, or stored and not yet
+    // reported, it is found then. Each look at the store is made without answersLock_, which the engine's threads take
+    // while they report.
+    OrderEntry *order = locateSessionOrder(source, clOrdId);
+    *pending = unansweredOf(sessionClOrdId(source, clOrdId));
+    return (nullptr != order) ? order : locateSessionOrder(source, clOrdId);
+}
+
 OrderEntry *FixGateway::locateAnsweredOrder(const std::string &source, const std::string &clOrdId, bool *unanswered)
 {
     *unanswered = false;
@@ -175,23 +283,15 @@ OrderEntry *FixGateway::locateAnsweredOrder(const std::string &source, const std
     {
         return order;
     }
-    // The order may be on its way: the session's thread hands an order to the engine, and an event worker stores it
-    // later, so a request sent right after its order could find nothing and was answered as unknown, though the order
-    // was then acknowledged and rested in the book (#380). The engine stores an order before it reports it, so once it
-    // has answered, the order is found or doesn't exist. Each look at the store is made without answersLock_, which
-    // the engine's threads take while they report.
-    const std::string key = sessionClOrdId(source, clOrdId);
-    bool sent = false;
-    {
-        std::lock_guard<std::mutex> lock(answersLock_);
-        sent = unanswered_.contains(key);
-    }
-    // Looked for again whether or not it's answered: answered since the first look, or stored and not yet reported
-    OrderEntry *order = locateSessionOrder(source, clOrdId);
-    if ((nullptr != order) || !sent)
+    // A request sent right after its order could find nothing and was answered as unknown, though the order was then
+    // acknowledged and rested in the book (#380): one the engine hasn't answered is waited for
+    std::optional<Unanswered> pending;
+    OrderEntry *order = locateReceivedOrder(source, clOrdId, &pending);
+    if ((nullptr != order) || !pending)
     {
         return order;
     }
+    const std::string key = sessionClOrdId(source, clOrdId);
     {
         std::unique_lock<std::mutex> lock(answersLock_);
         ++waiting_;
@@ -207,13 +307,15 @@ OrderEntry *FixGateway::locateAnsweredOrder(const std::string &source, const std
 }
 
 template <typename Event>
-void FixGateway::pushUnanswered(const std::string &source, const std::string &key, const Event &evnt)
+void FixGateway::pushUnanswered(const std::string &source, const std::string &key, Unanswered record, const Event &evnt)
 {
     // Before the push, so that the engine's answer, which comes after it, always finds the key: the queue's push and
-    // pop order the insert before the report that reads unansweredCount_
+    // pop order the insert before the report that reads unansweredCount_. A key already there is that of an order
+    // still on its way with the same ClOrdID, which this one repeats and the engine refuses as a duplicate: its record
+    // stays.
     {
         std::lock_guard<std::mutex> lock(answersLock_);
-        unanswered_.insert(key);
+        unanswered_.try_emplace(key, std::move(record));
         unansweredCount_.store(unanswered_.size(), std::memory_order_release);
     }
     try
@@ -248,10 +350,64 @@ void FixGateway::answered(std::string_view key)
     answers_.notify_all();
 }
 
+std::optional<FixGateway::Unanswered> FixGateway::unansweredOf(std::string_view key) const
+{
+    // Without the lock while nothing is unanswered: a key the session's own thread put in, before it pushed the order,
+    // is still there until the engine's answer takes it out, and the count says so
+    if (0 == unansweredCount_.load(std::memory_order_acquire))
+    {
+        return std::nullopt;
+    }
+    std::lock_guard<std::mutex> lock(answersLock_);
+    const auto it = unanswered_.find(key);
+    return (unanswered_.end() == it) ? std::nullopt : std::optional<Unanswered>(it->second);
+}
+
 size_t FixGateway::waitingRequests() const
 {
     std::lock_guard<std::mutex> lock(answersLock_);
     return waiting_;
+}
+
+void FixGateway::learnReplacement(const OrderEntry &replacement)
+{
+    // A replacement names the order it replaced by its stored ClOrdID (#74), and only a FIX order is ever asked for
+    // by a FIX session. A WebSocket replace of a FIX order keeps the FIX source, so it is learned too.
+    if ((SourceIdT() == replacement.origClOrderId_.getId()) || (SourceIdT() == replacement.clOrderId_.getId()) ||
+        !sourceOf(replacement).starts_with(FIX_SOURCE_PREFIX))
+    {
+        return;
+    }
+    std::string replaced = rawText(replacement.origClOrderId_.get());
+    std::string key = rawText(replacement.clOrderId_.get());
+    if (replaced.empty() || key.empty())
+    {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(replacementsLock_);
+    replacements_.insert_or_assign(std::move(replaced), std::move(key));
+}
+
+OrderEntry *FixGateway::replacementOf(std::string_view key) const
+{
+    std::string replacementKey;
+    {
+        std::lock_guard<std::mutex> lock(replacementsLock_);
+        const auto it = replacements_.find(key);
+        if (replacements_.end() == it)
+        {
+            return nullptr;
+        }
+        replacementKey = it->second;
+    }
+    RawDataEntry rawKey(STRING_RAWDATATYPE, replacementKey.c_str(), static_cast<u32>(replacementKey.size()));
+    return orderStorage_->locateByClOrderId(rawKey);
+}
+
+size_t FixGateway::knownReplacements() const
+{
+    std::lock_guard<std::mutex> lock(replacementsLock_);
+    return replacements_.size();
 }
 
 class FixGateway::AnsweredOnExit
@@ -524,6 +680,10 @@ void FixGateway::dispatch(const FIX::Message &msg, const FIX::SessionID &sid)
     {
         onMessage(FIX50SP2::OrderCancelReplaceRequest(msg), sid);
     }
+    else if (FIX::MsgType_OrderStatusRequest == type)
+    {
+        onMessage(FIX50SP2::OrderStatusRequest(msg), sid);
+    }
     else
     {
         // Answered as QuickFIX answers the cracker's UnsupportedMessageType, but here, as fromApp() answers a missing
@@ -735,8 +895,9 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
         order->settlDate_ = settlDate;       // SettlDate (64), the near leg's
     }
 
+    // A cancel sent at once waits for it (#380), and a status request reports it Pending New (#383)
     Queues::OrderEvent evt(order);
-    pushUnanswered(sourceStr, clOrdStr, evt); // a cancel sent at once waits for it (#380)
+    pushUnanswered(sourceStr, clOrdStr, Unanswered{ order->orderQty_, std::string() }, evt);
 }
 
 // =============================================================================
@@ -965,7 +1126,7 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
     order->lastUpdateTime_ = order->creationTime_;
 
     Queues::OrderEvent evt(order);
-    pushUnanswered(sourceStr, clOrdStr, evt); // as for NewOrderSingle (#380)
+    pushUnanswered(sourceStr, clOrdStr, Unanswered{ order->orderQty_, std::string() }, evt); // as for NewOrderSingle
 }
 
 void FixGateway::onMessage(const FIX50SP2::OrderCancelRequest &msg, const FIX::SessionID &sid)
@@ -1195,9 +1356,179 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
             .count());
 
     // The queue owns the replacement once pushed (#74). A replace sent at once that names the replacement waits for it,
-    // and is then decided against it, as in EP284's D.2.a (#380).
+    // and is then decided against it, as in EP284's D.2.a (#380); a status request for it reports its original,
+    // Pending Replace (#383).
+    Unanswered record{ replacement->orderQty_, rawText(existing->clOrderId_.get()) };
     Queues::OrderReplaceEvent evt(existing->orderId_, replacement.release());
-    pushUnanswered(sourceStr, clOrdStr, evt);
+    pushUnanswered(sourceStr, clOrdStr, std::move(record), evt);
+}
+
+void FixGateway::onMessage(const FIX50SP2::OrderStatusRequest &msg, const FIX::SessionID &sid)
+{
+    FIX50SP2::ExecutionReport report = answerOrderStatus(msg, sid);
+    try
+    {
+        FIX::Session::sendToTarget(report, sid);
+    }
+    catch (const std::exception &ex)
+    {
+        aux::ExchLogger::instance()->error(std::string("FixGateway: could not send the order status: ") + ex.what());
+    }
+}
+
+FIX50SP2::ExecutionReport FixGateway::answerOrderStatus(const FIX50SP2::OrderStatusRequest &msg,
+                                                        const FIX::SessionID &sid)
+{
+    FIX::ClOrdID clOrdId;
+    const bool byClOrdId = msg.getFieldIfSet(clOrdId);
+    FIX::OrderID orderId;
+    const bool byOrderId = msg.getFieldIfSet(orderId);
+    if (!byClOrdId && !byOrderId)
+    {
+        // FIX 5.0 SP2 requires neither, and the gateway needs one: answered as fromApp() answers a missing field (380=5)
+        throw FIX::FieldNotFound(FIX::FIELD::ClOrdID);
+    }
+
+    // The session's own orders alone, as for a cancel (#71): by its ClOrdID, as the client knows an order from the
+    // start, or else by the OrderID the gateway gave it
+    const std::string source = makeSourceString(sid);
+    std::optional<Unanswered> pending;
+    OrderEntry *order = nullptr;
+    if (byClOrdId)
+    {
+        order = locateReceivedOrder(source, clOrdId.getString(), &pending);
+    }
+    else if (const std::optional<u64> number = toOrderNumber(orderId.getString()))
+    {
+        // An order number two orders have, as only a data directory from before #58 can hold, names neither
+        order = orderStorage_->locateByOrderNumber(*number);
+        if ((nullptr != order) && (source != sourceOf(*order)))
+        {
+            order = nullptr;
+        }
+        if (nullptr != order)
+        {
+            pending = unansweredOf(rawText(order->clOrderId_.get()));
+        }
+    }
+
+    // The status of an order no one can name: OrdStatus Rejected, unknown order, OrderID NONE, the request's ClOrdID,
+    // Side and Symbol, and no quantities (EP284's G.1.a)
+    FIX::Side side;
+    msg.get(side);
+    const auto unknown = [&](const std::string &text)
+    {
+        FIX50SP2::ExecutionReport report =
+            orderStatusReport("NONE", FIX::OrdStatus_REJECTED, side.getValue(), 0, 0, 0, 0);
+        report.set(FIX::OrdRejReason(FIX::OrdRejReason_UNKNOWN_ORDER));
+        report.set(FIX::Text(text));
+        return report;
+    };
+    std::optional<FIX50SP2::ExecutionReport> answer;
+    if (nullptr != order)
+    {
+        answer = answerStoredOrder(*order, source, byClOrdId ? clOrdId.getString() : std::string(), pending);
+    }
+    else if (pending && !pending->origKey.empty())
+    {
+        // A replacement the engine hasn't stored yet: the replace is pending, so its original is reported, under the
+        // replacement's ClOrdID and naming the original's, as EP284's G.1.c acknowledges one (row 14)
+        RawDataEntry rawKey(STRING_RAWDATATYPE, pending->origKey.c_str(), static_cast<u32>(pending->origKey.size()));
+        if (const OrderEntry *original = orderStorage_->locateByClOrderId(rawKey))
+        {
+            const OrderSeen seen = seenOf(*original);
+            answer =
+                storedOrderStatusReport(*original, seen, FIX::OrdStatus_PENDING_REPLACE, leavesWhileReplacing(seen),
+                                        clOrdId.getString(), clientClOrdId(pending->origKey, source));
+        }
+    }
+    if (!answer && pending)
+    {
+        // Received, and not yet stored: Pending New, with the quantity it was sent with (G.1.c), and no OrderID yet
+        answer = orderStatusReport("NONE", FIX::OrdStatus_PENDING_NEW, side.getValue(), pending->orderQty, 0,
+                                   pending->orderQty, 0);
+    }
+    // Named by both, they must name the same order: the OrderID (37) is that of the order the ClOrdID names, or the one
+    // the answer reports for it along a replace, which the client has from the replace it sent or from the
+    // acknowledgement of it. A new order the engine hasn't stored has none yet.
+    if (answer && byClOrdId && byOrderId && (orderId.getString() != answer->getField(FIX::FIELD::OrderID)) &&
+        ((nullptr == order) || (orderId.getString() != std::to_string(order->orderId_.id_))))
+    {
+        answer = unknown("Unknown order: OrderID (37) " + orderId.getString() + " is not the order of ClOrdID (11) " +
+                         clOrdId.getString());
+    }
+    if (!answer)
+    {
+        answer = unknown("Unknown order");
+    }
+    // An order the request names but the store doesn't have goes by the request's ClOrdID and Symbol, and every answer
+    // carries the request's OrdStatusReqID (790), which ties it to the request
+    if (byClOrdId && !answer->isSetField(FIX::FIELD::ClOrdID))
+    {
+        answer->set(clOrdId);
+    }
+    FIX::Symbol symbol;
+    if (!answer->isSetField(FIX::FIELD::Symbol) && msg.getFieldIfSet(symbol))
+    {
+        answer->set(symbol);
+    }
+    FIX::OrdStatusReqID reqId;
+    if (msg.getFieldIfSet(reqId))
+    {
+        answer->set(reqId);
+    }
+    return *answer;
+}
+
+FIX50SP2::ExecutionReport FixGateway::answerStoredOrder(const OrderEntry &order, const std::string &source,
+                                                        const std::string &requested,
+                                                        const std::optional<Unanswered> &pending) const
+{
+    const std::string key = rawText(order.clOrderId_.get());
+    const std::string asked = requested.empty() ? clientClOrdId(key, source) : requested;
+    if (pending && !pending->origKey.empty())
+    {
+        // A replacement the engine has stored and not yet acknowledged: still pending for the client, so its original,
+        // Pending Replace, as for one not stored yet
+        RawDataEntry rawKey(STRING_RAWDATATYPE, pending->origKey.c_str(), static_cast<u32>(pending->origKey.size()));
+        if (const OrderEntry *original = orderStorage_->locateByClOrderId(rawKey))
+        {
+            const OrderSeen seen = seenOf(*original);
+            return storedOrderStatusReport(*original, seen, FIX::OrdStatus_PENDING_REPLACE, leavesWhileReplacing(seen),
+                                           asked, clientClOrdId(pending->origKey, source));
+        }
+    }
+    const OrderSeen seen = seenOf(order);
+    if (pending)
+    {
+        // Stored, and not yet acknowledged, nor durable until its booking commits: Pending New (G.1.c). Nothing has
+        // traded yet: the order's first transaction sends its acknowledgement before it applies a fill.
+        return storedOrderStatusReport(order, seen, FIX::OrdStatus_PENDING_NEW, seen.leavesQty, asked, std::string());
+    }
+    // A replaced order is answered with the order working in its place, naming the one asked for in OrigClOrdID (41),
+    // as EP284's G.1.c answers a status request for X after Replace (Y,X): the replacements are followed, no more of
+    // them than the gateway knows of
+    const OrderEntry *described = &order;
+    std::string describedKey = key;
+    OrderSeen describedSeen = seen;
+    for (size_t followed = 0; REPLACED_ORDSTATUS == describedSeen.status; ++followed)
+    {
+        const OrderEntry *next = (followed < knownReplacements()) ? replacementOf(describedKey) : nullptr;
+        if (nullptr == next)
+        {
+            // Replaced, and its replacement's report isn't out yet: the replace is still pending for the client
+            const std::string clOrd = clientClOrdId(describedKey, source);
+            return storedOrderStatusReport(*described, describedSeen, FIX::OrdStatus_PENDING_REPLACE,
+                                           leavesWhileReplacing(describedSeen), clOrd,
+                                           (clOrd == asked) ? std::string() : asked);
+        }
+        described = next;
+        describedKey = rawText(next->clOrderId_.get());
+        describedSeen = seenOf(*next);
+    }
+    const std::string clOrd = clientClOrdId(describedKey, source);
+    return storedOrderStatusReport(*described, describedSeen, fromOrdStatus(describedSeen.status),
+                                   describedSeen.leavesQty, clOrd, (clOrd == asked) ? std::string() : asked);
 }
 
 // =============================================================================
@@ -1284,6 +1615,14 @@ void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntr
         }
     }
     const AnsweredOnExit answer(*this, key);
+
+    // A replacement's report (the original's isn't sent): a status request that names the order it replaced is answered
+    // with it from now on (#383). Learned before the report goes out, so that a request the client sends on reading it
+    // finds it, and for an order of a session no longer configured too, which nothing is sent to.
+    if (REPLACE_EXECTYPE == exec->type_)
+    {
+        learnReplacement(order);
+    }
 
     std::string source = order.source_.get();
 

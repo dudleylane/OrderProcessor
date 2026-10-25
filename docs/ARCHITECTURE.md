@@ -471,6 +471,7 @@ COP (Concurrent Order Processor)
 │  │    NewOrderSingle (35=D)  → OrderEvent                │       │
 │  │    OrderCancelRequest (35=F) → OrderCancelEvent       │       │
 │  │    OrderCancelReplaceRequest (35=G) → OrderReplaceEvent│      │
+│  │    OrderStatusRequest (35=H) → answered here (#383)   │       │
 │  │                    ↓                                   │       │
 │  │           IncomingQueues::push()                       │       │
 │  │                                                       │       │
