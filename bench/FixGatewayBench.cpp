@@ -8,7 +8,7 @@
  *     acknowledgement, without the engine between them (#395)
  *   - MultiOutQueues fan-out overhead
  *   - FX Swap matching vs single-leg matching
- *   - End-to-end: FIX NOS → IncomingQueues → Processor → match → fill → OutQueues
+ *   - End-to-end: FIX NOS → IncomingQueues → Processor → match → fill → OutQueues, and FixOutQueues to the gateway
  */
 
 #ifdef BUILD_FIX
@@ -204,6 +204,13 @@ bool waitForPool(const TaskManager &taskMgr, const CountingOutQueues &outQueues,
     return true;
 }
 
+/// The time since start, for SetIterationTime() in a benchmark registered with UseManualTime(), as OrderMatchingBench
+/// times by hand (#305): pausing the timer instead reads the thread's CPU clock, about 1.5 us a pause and resume
+double secondsSince(std::chrono::steady_clock::time_point start)
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
 } // anonymous namespace
 
 // =============================================================================
@@ -257,22 +264,33 @@ BENCHMARK(BM_FixEnumToCurrency);
 // 2. FIX Message Translation Benchmark
 // =============================================================================
 
+/// The gateway's handling of a new order, onMessage() alone, timed by hand. Each order is then answered, untimed, as
+/// the engine answers every order: here by its refusal, since none is stored, which the gateway takes with no session to
+/// send it to. An order never answered stays in the gateway's record of the orders it has sent (#380), which grew by a
+/// key an iteration, where production's holds only the orders on their way (#400).
 static void BM_FixNewOrderSingleTranslation(benchmark::State &state)
 {
     FixBenchSetup setup;
     IncomingQueues inQueues;
     FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    const std::string source = FixGateway::makeSourceString(BENCH_SID);
 
     int ordNum = 0;
     for (auto _ : state)
     {
         std::string clOrdId = "BENCH-" + std::to_string(++ordNum);
         auto msg = makeBenchNOS(clOrdId, FIX::Side_BUY, FIX::OrdType_LIMIT, 1.2650, 100);
+        const auto start = std::chrono::steady_clock::now();
         gateway.onMessage(msg, BENCH_SID);
+        state.SetIterationTime(secondsSince(start));
+
+        OrderRejectEvent answer;
+        answer.clOrderId_ = FixGateway::sessionClOrdId(source, clOrdId); // as the engine names it, stored (#71)
+        gateway.sendOrderReject(answer, source);
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_FixNewOrderSingleTranslation);
+BENCHMARK(BM_FixNewOrderSingleTranslation)->UseManualTime();
 
 // =============================================================================
 // 3. ExecutionReports: the gateway's builder, and a report's way to its session (#395)
@@ -800,12 +818,23 @@ static void BM_FixEndToEndFillCycle(benchmark::State &state)
     auto inQueues = std::make_unique<IncomingQueues>();
     auto outQueues = std::make_unique<CountingOutQueues>();
 
+    // The engine's reports go to the gateway too, after the counting queue, as main.cpp sends them to the WebSocket
+    // server's queues and then to FIX's. No session is logged on, so the gateway sends nothing; but each order's first
+    // report answers the order, as in production. Unanswered, every order stayed in the gateway's record of the orders
+    // it has sent (#380), which grew by two keys a cycle (#400).
+    auto gateway = std::make_unique<FixGateway>(inQueues.get(), WideDataStorage::instance(), OrderStorage::instance(),
+                                                setup.clearingId_);
+    auto fixOutQueues = std::make_unique<FixOutQueues>(gateway.get(), OrderStorage::instance());
+    auto reports = std::make_unique<MultiOutQueues>();
+    reports->addDelegate(outQueues.get());
+    reports->addDelegate(fixOutQueues.get());
+
     TransactionMgrParams transParams(IdTGenerator::instance());
     auto transMgr = std::make_unique<TransactionMgr>();
     transMgr->init(transParams);
 
     ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook.get(), inQueues.get(),
-                           outQueues.get(), inQueues.get(), transMgr.get());
+                           reports.get(), inQueues.get(), transMgr.get());
 
     TaskManagerParams tmparams;
     auto *evtProc = new Processor();
@@ -821,9 +850,6 @@ static void BM_FixEndToEndFillCycle(benchmark::State &state)
 
     TaskManager::init(0);
     auto taskMgr = std::make_unique<TaskManager>(tmparams);
-
-    auto gateway = std::make_unique<FixGateway>(inQueues.get(), WideDataStorage::instance(), OrderStorage::instance(),
-                                                setup.clearingId_);
 
     u64 reportsDue = 0;
     int ordNum = 0;
@@ -866,6 +892,8 @@ static void BM_FixEndToEndFillCycle(benchmark::State &state)
     transMgr->detach();
     taskMgr.reset();
     transMgr.reset();
+    reports.reset();
+    fixOutQueues.reset();
     outQueues.reset();
     inQueues.reset();
     orderBook.reset();
