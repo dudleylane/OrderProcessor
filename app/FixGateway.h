@@ -154,6 +154,13 @@ private:
     /// looked for again: stored since the first look, it is found by the second.
     OrderEntry *locateReceivedOrder(const std::string &source, const std::string &clOrdId,
                                     std::optional<Unanswered> *pending) const;
+    /// The order the session sent with the ClOrdID stored under key, as the engine's own duplicate check finds one
+    /// (#382): the one stored under key, and in *pending what the gateway keeps of it while the engine hasn't answered
+    /// it. The record is read before the store: the engine answers an order after it stores it, and the answer takes
+    /// its key out of the record, so an order the record no longer has is in the store, if the engine stored it. Read
+    /// the other way round, an order answered between the two looks would be in neither. An order stored before #71,
+    /// under its ClOrdID alone, isn't looked for, as the engine doesn't look for it.
+    OrderEntry *locateSentOrder(const std::string &key, std::optional<Unanswered> *pending) const;
     /// The order a cancel or replace from source names, as locateSessionOrder() finds it, once the engine has answered
     /// it (#380). An order the session sent just before the request may not be stored yet: the request waits for the
     /// engine to store or refuse it, up to answerWait_. When nothing is found, *unanswered says whether that is because
@@ -179,10 +186,25 @@ private:
     size_t knownReplacements() const;
     /// The answer to a status request for an order the engine has stored, read under its lock (#383). requested is the
     /// ClOrdID the request named, or empty; pending, what the gateway keeps of the order while the engine hasn't
-    /// answered it.
+    /// answered it. followReplacements: a replaced order is answered with the order working in its place, as G.1.c
+    /// answers one; else with its own state (#382). Either way it is Pending Replace until its replacement's report is
+    /// out.
     FIX50SP2::ExecutionReport answerStoredOrder(const OrderEntry &order, const std::string &source,
-                                                const std::string &requested,
-                                                const std::optional<Unanswered> &pending) const;
+                                                const std::string &requested, const std::optional<Unanswered> &pending,
+                                                bool followReplacements) const;
+    /// What a status request for clOrdId is answered with, for the order a lookup found and what the gateway keeps of
+    /// it, pending (#383); nothing when neither is there. side is the request's, for an order the engine hasn't stored.
+    /// followReplacements as for answerStoredOrder().
+    std::optional<FIX50SP2::ExecutionReport> answerReceivedOrder(const OrderEntry *order,
+                                                                 const std::optional<Unanswered> &pending,
+                                                                 const std::string &source, const std::string &clOrdId,
+                                                                 char side, bool followReplacements) const;
+    /// Answers a new order msg from sid whose ClOrdID the session has sent before, before the engine sees it (#382),
+    /// and returns true. Sent again, PossResend (97) Y, it gets that order's state, as a status request for it does
+    /// (EP284's F.1.b); otherwise it is refused as a duplicate with that order's status (F.1.a). Returns false, having
+    /// sent nothing, for a ClOrdID the session hasn't sent. key is the ClOrdID under the session's key.
+    bool answerRepeatedOrder(const FIX::Message &msg, const FIX::SessionID &sid, const std::string &source,
+                             const std::string &key, const std::string &clOrdId, char side);
     /// Calls answered() for its key, unless that is empty, when it goes out of scope: once a report or a refusal is
     /// out, or on a way out without one
     class AnsweredOnExit;
@@ -271,8 +293,14 @@ public:
     /// The ExecutionReport (35=8) rejecting a new order the engine refused without storing it (#67): OrderID NONE,
     /// ExecID R<execId>, 150=8, 39=8, OrdRejReason 6 when its ClOrdID is already in use (else 0), and the reason in
     /// Text (58). sendOrderReject() draws execId from the shared id generator, so it doesn't repeat after a restart
-    /// (#81).
+    /// (#81). For a ClOrdID in use by an order the store has, it sends buildDuplicateReject()'s instead (#382).
     static FIX50SP2::ExecutionReport buildOrderReject(const Queues::OrderRejectEvent &evnt, u64 execId);
+    /// The ExecutionReport (35=8) refusing a new order whose ClOrdID an order of its session's has, as EP284's F.1.a
+    /// combines one (#382): status, that order's status report, as a reject, with ExecID R<execId>, ExecType Rejected
+    /// (150=8), OrdRejReason 6 (duplicate order) and reason in Text (58). Its OrdStatus, OrderID and quantities stay
+    /// that order's.
+    static FIX50SP2::ExecutionReport buildDuplicateReject(FIX50SP2::ExecutionReport status, const std::string &reason,
+                                                          u64 execId);
     /// The ExecutionReport (35=8) refusing a new order the gateway rejects itself, before the engine sees it (#145): as
     /// buildOrderReject() builds one, with the order's ClOrdID, Symbol, and its Side and OrderQty as they were sent,
     /// ordRejReason in OrdRejReason (103) and text in Text (58)

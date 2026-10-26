@@ -3154,28 +3154,62 @@ TEST_F(FixtSessionTest, AStatusRequestForAnOrderNotYetAcknowledgedIsPendingNew)
     expectEverythingSentIsTaken();
 }
 
-TEST_F(FixtSessionTest, AStatusRequestForAClOrdIdSentTwiceBeforeItsAnswerIsTheFirstOrders)
+/// Fails unless reject refuses a new order as a duplicate, as EP284's F.1.a combines one (#382): ExecType Rejected
+/// (150=8) with an ExecID of its own, OrdRejReason duplicate order (103=6) and why in Text, under the ClOrdID clOrdId,
+/// with the status of the order orderId, which has that ClOrdID: its ordStatus and quantities, not the refused order's
+void expectDuplicateReject(const FIX::Message &reject, const std::string &clOrdId, char ordStatus,
+                           const std::string &orderId, QuantityT orderQty, QuantityT cumQty, QuantityT leavesQty)
 {
-    // A NewOrderSingle that repeats a ClOrdID still on its way is a duplicate, which the engine refuses: until the
-    // engine answers, a status request is answered Pending New with the first order's OrderQty
+    EXPECT_EQ(std::string(1, FIX::ExecType_REJECTED), fieldOf(reject, FIX::FIELD::ExecType));
+    EXPECT_THAT(fieldOf(reject, FIX::FIELD::ExecID), testing::StartsWith("R"));
+    EXPECT_EQ(std::to_string(FIX::OrdRejReason_DUPLICATE_ORDER), fieldOf(reject, FIX::FIELD::OrdRejReason));
+    EXPECT_EQ("Order refused: ClOrdID " + clOrdId + " is already in use", fieldOf(reject, FIX::FIELD::Text));
+    EXPECT_EQ(clOrdId, fieldOf(reject, FIX::FIELD::ClOrdID));
+    EXPECT_EQ(std::string(1, ordStatus), fieldOf(reject, FIX::FIELD::OrdStatus));
+    EXPECT_EQ(orderId, fieldOf(reject, FIX::FIELD::OrderID));
+    EXPECT_EQ(std::to_string(orderQty), fieldOf(reject, FIX::FIELD::OrderQty));
+    EXPECT_EQ(std::to_string(cumQty), fieldOf(reject, FIX::FIELD::CumQty));
+    EXPECT_EQ(std::to_string(leavesQty), fieldOf(reject, FIX::FIELD::LeavesQty));
+    EXPECT_EQ(std::string(1, FIX::Side_BUY), fieldOf(reject, FIX::FIELD::Side));
+    EXPECT_EQ("aaa", fieldOf(reject, FIX::FIELD::Symbol));
+}
+
+TEST_F(FixtSessionTest, ANewOrderThatRepeatsAClOrdIdStillOnItsWayIsRefusedAsPendingNew)
+{
+    // A new order that repeats the ClOrdID of one the engine hasn't acknowledged is refused at once as a duplicate, with
+    // the first order's status, Pending New (39=A) with its OrderQty, and no OrderID until the engine stores it (#382).
+    // It never reaches the engine, where it was refused as a duplicate or, stored first, refused the first order. A
+    // status request is answered with the first order meanwhile (#383), then New once its acknowledgement is out.
     ASSERT_NO_FATAL_FAILURE(logOn());
-    std::vector<std::unique_ptr<OrderEntry>> pushed; // never reach an engine
+    std::unique_ptr<OrderEntry> pushed; // never reaches an engine
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
-        .Times(2)
-        .WillRepeatedly(Invoke(
+        .WillOnce(Invoke(
             [&](const std::string &, const OrderEvent &evt)
             {
-                pushed.emplace_back(evt.order_);
+                pushed.reset(evt.order_);
             }));
     receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    ASSERT_NE(nullptr, pushed);
     receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 300));
-    ASSERT_EQ(2u, pushed.size());
+    receive(makeStatusRequest("ORD-1"));
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1"); // as the engine stores the first
+    setState(order, NEW_ORDSTATUS, 100, 0, 100);
+    receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 300));
+    auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    ack.orderId_ = order->orderId_;
+    gateway_->sendExecutionReport(&ack, *order);
     receive(makeStatusRequest("ORD-1"));
 
+    const std::string orderId = std::to_string(order->orderId_.id_);
     const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
-    ASSERT_EQ(1u, reports.size()) << sentText();
-    expectStatus(reports[0], FIX::OrdStatus_PENDING_NEW, "NONE", 100, 0, 100);
-    EXPECT_EQ("ORD-1", fieldOf(reports[0], FIX::FIELD::ClOrdID));
+    ASSERT_EQ(5u, reports.size()) << sentText();
+    expectDuplicateReject(reports[0], "ORD-1", FIX::OrdStatus_PENDING_NEW, "NONE", 100, 0, 100);
+    expectStatus(reports[1], FIX::OrdStatus_PENDING_NEW, "NONE", 100, 0, 100);
+    expectDuplicateReject(reports[2], "ORD-1", FIX::OrdStatus_PENDING_NEW, orderId, 100, 0, 100);
+    EXPECT_EQ(std::string(1, FIX::ExecType_NEW), fieldOf(reports[3], FIX::FIELD::ExecType));
+    expectStatus(reports[4], FIX::OrdStatus_NEW, orderId, 100, 0, 100);
+    EXPECT_EQ("ORD-1", fieldOf(reports[1], FIX::FIELD::ClOrdID));
+    EXPECT_NE(fieldOf(reports[0], FIX::FIELD::ExecID), fieldOf(reports[2], FIX::FIELD::ExecID));
     expectEverythingSentIsTaken();
 }
 
@@ -3383,6 +3417,137 @@ TEST_F(FixtSessionTest, AStatusRequestThatNamesNoOrderIsRefusedReadably)
     EXPECT_EQ(FIX::MsgType_OrderStatusRequest, fieldOf(rejects[0], FIX::FIELD::RefMsgType));
     EXPECT_THAT(fieldOf(rejects[0], FIX::FIELD::Text), testing::HasSubstr("(11)"));
     EXPECT_TRUE(sentOfType(FIX::MsgType_ExecutionReport).empty()) << sentText();
+    expectEverythingSentIsTaken();
+}
+
+// =============================================================================
+// A new order whose ClOrdID the session has sent, as EP284's F.1 answers one (#382)
+// =============================================================================
+
+/// msg, marked PossResend (97) Y, as a message that may have been sent before, or N
+template <typename Message> Message withPossResend(Message msg, bool possResend)
+{
+    msg.getHeader().setField(FIX::PossResend(possResend));
+    return msg;
+}
+
+TEST_F(FixtSessionTest, ANewOrderThatRepeatsAWorkingOrdersClOrdIdIsRefusedWithThatOrdersState)
+{
+    // EP284's F.1.a: a new order whose ClOrdID a working order of the session's has is refused as a duplicate order
+    // (103=6), and the reject carries the working order's status: its OrderID, Partially Filled, 10000/1000/9000, not
+    // the refused order's 15000. A NewOrderMultileg is refused the same way. The gateway refuses them: the engine never
+    // sees them.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    OrderEntry *order = saveOrderOf(sid_, "X");
+    setState(order, PARTFILL_ORDSTATUS, 10000, 1000, 9000);
+    receive(makeNewOrderSingle("X", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 15000));
+    receive(makeFxSwap("X"));
+
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(2u, rejects.size()) << sentText();
+    for (const FIX::Message &reject : rejects)
+    {
+        expectDuplicateReject(reject, "X", FIX::OrdStatus_PARTIALLY_FILLED, std::to_string(order->orderId_.id_), 10000,
+                              1000, 9000);
+    }
+    EXPECT_NE(fieldOf(rejects[0], FIX::FIELD::ExecID), fieldOf(rejects[1], FIX::FIELD::ExecID));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ANewOrderSentAgainWithPossResendIsAnsweredWithItsState)
+{
+    // EP284's F.1.b: once X has been received, X sent again with PossResend (97) Y is answered with X's state, ExecType
+    // Order Status (150=I), as a status request for it is (row 4); X again without PossResend, or with it N, is refused
+    // as a duplicate with X's status (row 6); and Y with PossResend Y, which the session hasn't sent, is a new order
+    // (rows 7 and 8)
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::unique_ptr<OrderEntry> pushed; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.reset(evt.order_);
+            }));
+    OrderEntry *order = saveOrderOf(sid_, "X");
+    setState(order, NEW_ORDSTATUS, 10000, 0, 10000);
+    receive(withPossResend(makeNewOrderSingle("X", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 10000), true));
+    receive(makeNewOrderSingle("X", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 20000));
+    receive(withPossResend(makeNewOrderSingle("X", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 20000), false));
+    receive(withPossResend(makeNewOrderSingle("Y", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 15000), true));
+
+    const std::string orderId = std::to_string(order->orderId_.id_);
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(3u, reports.size()) << sentText();
+    expectStatus(reports[0], FIX::OrdStatus_NEW, orderId, 10000, 0, 10000);
+    EXPECT_EQ("X", fieldOf(reports[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("(not set)", fieldOf(reports[0], FIX::FIELD::OrdRejReason));
+    expectDuplicateReject(reports[1], "X", FIX::OrdStatus_NEW, orderId, 10000, 0, 10000);
+    expectDuplicateReject(reports[2], "X", FIX::OrdStatus_NEW, orderId, 10000, 0, 10000);
+    ASSERT_NE(nullptr, pushed);
+    const RawDataEntry &clOrd = pushed->clOrderId_.get();
+    EXPECT_EQ(FixGateway::sessionClOrdId(FixGateway::makeSourceString(sid_), "Y"),
+              std::string(clOrd.data_, clOrd.length_));
+    EXPECT_EQ(15000u, pushed->orderQty_);
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ANewOrderThatRepeatsTheClOrdIdOfAReplacedOrderIsRefusedWithThatOrdersState)
+{
+    // The reject goes by the refused order's ClOrdID, so it carries the status of the order that has that ClOrdID, its
+    // own, and not that of the order that replaced it, which a status request is answered with (#383): Pending Replace
+    // (39=E) until the replacement's acknowledgement is out, then 39=4, as the gateway reports a replaced order (#74).
+    // PossResend Y is answered as that status request is.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    OrderEntry *x = saveOrderOf(sid_, "X");
+    setState(x, REPLACED_ORDSTATUS, 100, 40, 0); // as a replace leaves it
+    OrderEntry *y = saveOrderOf(sid_, "Y");
+    y->origOrderId_ = x->orderId_;
+    y->origClOrderId_ = x->clOrderId_;
+    setState(y, PARTFILL_ORDSTATUS, 120, 40, 80);
+    receive(makeNewOrderSingle("X", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 300));
+    auto ack = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, PARTFILL_ORDSTATUS);
+    ack.orderId_ = y->orderId_;
+    ack.origOrderId_ = x->orderId_;
+    gateway_->sendExecutionReport(&ack, *y); // from which the gateway learns that Y replaced X (#383)
+    receive(makeNewOrderSingle("X", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 300));
+    receive(withPossResend(makeNewOrderSingle("X", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100), true));
+
+    const std::string xId = std::to_string(x->orderId_.id_);
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(4u, reports.size()) << sentText();
+    expectDuplicateReject(reports[0], "X", FIX::OrdStatus_PENDING_REPLACE, xId, 100, 40, 60);
+    EXPECT_EQ(std::string(1, FIX::ExecType_REPLACED), fieldOf(reports[1], FIX::FIELD::ExecType));
+    expectDuplicateReject(reports[2], "X", FIX::OrdStatus_CANCELED, xId, 100, 40, 0);
+    expectStatus(reports[3], FIX::OrdStatus_PARTIALLY_FILLED, std::to_string(y->orderId_.id_), 120, 40, 80);
+    EXPECT_EQ("Y", fieldOf(reports[3], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("X", fieldOf(reports[3], FIX::FIELD::OrigClOrdID));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, TheEnginesRefusalOfADuplicateCarriesTheStateOfTheOrderThatHasItsClOrdId)
+{
+    // The gateway refuses a session's duplicates before the engine sees them (#382), and the engine refuses one it gets
+    // as a duplicate (#67): that refusal also carries the state of the order that has the ClOrdID, as F.1.a combines
+    // them, read from the store alone, since the gateway's record of what it sent would be the duplicate's own
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *order = saveOrderOf(sid_, "X");
+    setState(order, PARTFILL_ORDSTATUS, 10000, 1000, 9000);
+    const std::string source = FixGateway::makeSourceString(sid_);
+    Queues::OrderRejectEvent refusal; // as Processor::rejectUnstoredOrder() makes it, by the stored ClOrdID
+    refusal.clOrderId_ = FixGateway::sessionClOrdId(source, "X");
+    refusal.symbol_ = "aaa";
+    refusal.side_ = BUY_SIDE;
+    refusal.orderQty_ = 15000;
+    refusal.duplicateClOrderId_ = true;
+    refusal.reason_ = "Order refused: ClOrdID " + refusal.clOrderId_ + " is already in use";
+    gateway_->sendOrderReject(refusal, source);
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(1u, reports.size()) << sentText();
+    expectDuplicateReject(reports[0], "X", FIX::OrdStatus_PARTIALLY_FILLED, std::to_string(order->orderId_.id_), 10000,
+                          1000, 9000);
     expectEverythingSentIsTaken();
 }
 
