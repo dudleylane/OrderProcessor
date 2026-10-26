@@ -462,6 +462,19 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 
 ---
 
+## 21. FixBenchmarksFindTheirConfig — Where the Session Benchmarks Read Their Config
+
+**File:** `test/FixBenchConfigTest.sh`, a ctest
+**Requires:** `BUILD_FIX=ON`, `BUILD_BENCHMARKS=ON`, Python 3
+
+Runs `BM_FixSendExecutionReport` once, in a scratch directory, for each of five settings of `OP_BENCH_CONFIG_DIR`, which `scripts/benchmark-regression.sh` sets to the copy of `config/` saved with a baseline (#415):
+- unset, or set but empty, the benchmark reads `config/` in the tree it was built from, and runs;
+- naming a copy of `config/`, it reads the copy, and runs;
+- naming a directory without `fix.cfg`, it stops with an error that names the file it tried;
+- naming a directory with `fix.cfg` but no `spec/`, it stops with an error that names the dictionary it tried, so the dictionaries come from the same directory as the settings.
+
+---
+
 ## Test Architecture
 
 ```

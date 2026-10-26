@@ -33,7 +33,8 @@ if(BUILD_FIX)
     target_include_directories(orderProcessorBench PRIVATE
         ${CMAKE_SOURCE_DIR}/app)
     # The session BM_FixSendExecutionReport and BM_FixOrderAndAcknowledgement send through reads config/fix.cfg and its
-    # dictionaries from this tree, as FixtSessionTest's does: the benchmarks run in a scratch directory (#395)
+    # dictionaries from this tree, as FixtSessionTest's does: the benchmarks run in a scratch directory (#395). A
+    # comparison hands a baseline the copy saved with it instead, in OP_BENCH_CONFIG_DIR (#415)
     target_compile_definitions(orderProcessorBench PRIVATE
         OP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 endif()

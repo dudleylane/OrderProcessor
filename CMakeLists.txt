@@ -176,6 +176,13 @@ if(BUILD_TESTS)
     add_test(NAME CpuBusyDecides
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/CpuBusyTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/cpu-busy.sh)
+
+    # A benchmark comparison's baseline and the config it reads (#415), with stub benchmark binaries. It needs python3,
+    # as the script does: without it the test is skipped.
+    add_test(NAME BenchmarkBaselineKeepsItsConfig
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/BenchmarkBaselineTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/benchmark-regression.sh)
+    set_tests_properties(BenchmarkBaselineKeepsItsConfig PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 if(BUILD_BENCHMARKS)
@@ -203,6 +210,14 @@ if(BUILD_BENCHMARKS)
     if(BUILD_FIX)
         target_link_libraries(orderProcessorBench PRIVATE quickfix::quickfix OpenSSL::Crypto)
         target_compile_definitions(orderProcessorBench PRIVATE BUILD_FIX)
+        if(BUILD_TESTS)
+            # The FIX session benchmarks read their config from OP_BENCH_CONFIG_DIR when it is set, and from this tree's
+            # config/ otherwise (#415). It needs python3: without it the test is skipped.
+            add_test(NAME FixBenchmarksFindTheirConfig
+                     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/FixBenchConfigTest.sh
+                             $<TARGET_FILE:orderProcessorBench> ${CMAKE_CURRENT_SOURCE_DIR}/config)
+            set_tests_properties(FixBenchmarksFindTheirConfig PROPERTIES SKIP_RETURN_CODE 77)
+        endif()
     endif()
 endif()
 
