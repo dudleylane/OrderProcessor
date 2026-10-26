@@ -416,6 +416,66 @@ size_t FixGateway::knownReplacements() const
     return replacements_.size();
 }
 
+void FixGateway::learnRefusal(const std::string &source, const std::string &clOrdId, const std::string &origClOrdId)
+{
+    if (clOrdId.empty() || origClOrdId.empty())
+    {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(refusalsLock_);
+    Refusals &refused = refusals_[source];
+    // A ClOrdID refused again names the order its latest replace was for, and keeps its place among the oldest
+    if (!refused.originals.insert_or_assign(clOrdId, origClOrdId).second)
+    {
+        return;
+    }
+    refused.oldestFirst.push_back(clOrdId);
+    if (REFUSALS_KEPT < refused.oldestFirst.size())
+    {
+        refused.originals.erase(refused.oldestFirst.front());
+        refused.oldestFirst.pop_front();
+    }
+}
+
+void FixGateway::forgetRefusal(const std::string &source, const std::string &clOrdId)
+{
+    std::lock_guard<std::mutex> lock(refusalsLock_);
+    const auto refused = refusals_.find(source);
+    if ((refusals_.end() != refused) && (0 != refused->second.originals.erase(clOrdId)))
+    {
+        std::erase(refused->second.oldestFirst, clOrdId);
+    }
+}
+
+OrderEntry *FixGateway::locateRefusedOriginal(const std::string &source, std::string *clOrdId) const
+{
+    std::string original;
+    {
+        std::lock_guard<std::mutex> lock(refusalsLock_);
+        const auto refused = refusals_.find(source);
+        if (refusals_.end() == refused)
+        {
+            return nullptr;
+        }
+        const auto it = refused->second.originals.find(*clOrdId);
+        if (refused->second.originals.end() == it)
+        {
+            return nullptr;
+        }
+        original = it->second;
+    }
+    // One step reaches it: a replacement is decided against an order stored when it is, and one decided against a
+    // refused replacement's original names that original itself
+    OrderEntry *order = locateSessionOrder(source, original);
+    if (nullptr != order)
+    {
+        aux::ExchLogger::instance()->note("FIX: " + *clOrdId + " is a refused replacement; decided against " +
+                                          original + ", the order it was to replace (#398)");
+        *clOrdId = std::move(original);
+    }
+    return order;
+}
+
 class FixGateway::AnsweredOnExit
 {
 public:
@@ -648,6 +708,12 @@ void FixGateway::rejectApplVerId(const FIX::Message &msg, const FIX::SessionID &
 void FixGateway::refuseOrder(const FIX::Message &msg, const FIX::SessionID &sid, int ordRejReason,
                              const std::string &text)
 {
+    // Its ClOrdID, if a refused replacement had it, names no order now (#398)
+    FIX::ClOrdID clOrdId;
+    if (msg.getFieldIfSet(clOrdId))
+    {
+        forgetRefusal(makeSourceString(sid), clOrdId.getValue());
+    }
     try
     {
         // Its ExecID comes from the shared generator, as an engine reject's does (#81)
@@ -1156,11 +1222,16 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelRequest &msg, const FIX::S
     msg.get(clOrdId);
 
     // Only the session's own orders: another session's is answered as unknown, without saying that it exists (#71).
-    // One the session sent just before is waited for (#380).
+    // One the session sent just before is waited for (#380), and a refused replacement names the order it was to
+    // replace (#398).
     const std::string sourceStr = makeSourceString(sid);
     std::string origClOrdStr = origClOrdId.getString();
     bool unanswered = false;
     OrderEntry *order = locateAnsweredOrder(sourceStr, origClOrdStr, &unanswered);
+    if (!order && !unanswered)
+    {
+        order = locateRefusedOriginal(sourceStr, &origClOrdStr);
+    }
     if (!order)
     {
         aux::ExchLogger::instance()->error("FIX: Cancel - order not found: " + origClOrdStr +
@@ -1197,11 +1268,17 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
     FIX::ClOrdID clOrdId;
     msg.get(clOrdId);
 
-    // Only the session's own orders, as for a cancel (#71), waiting for one the session sent just before (#380)
+    // Only the session's own orders, as for a cancel (#71), waiting for one the session sent just before (#380). A
+    // refused replacement names the order it was to replace, which the request is decided against, and its answers
+    // name in OrigClOrdID (41), as EP284's D.2.c's (Z,X) (#398).
     const std::string sourceStr = makeSourceString(sid);
     std::string origClOrdStr = origClOrdId.getString();
     bool unanswered = false;
     OrderEntry *existing = locateAnsweredOrder(sourceStr, origClOrdStr, &unanswered);
+    if (!existing && !unanswered)
+    {
+        existing = locateRefusedOriginal(sourceStr, &origClOrdStr);
+    }
     if (!existing)
     {
         aux::ExchLogger::instance()->error("FIX: Replace - order not found: " + origClOrdStr +
@@ -1237,9 +1314,14 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
     }
 
     // A request the gateway refuses itself gets an OrderCancelReject (102=99) that says why, quoting its ClOrdIDs; one
-    // whose ClOrdID is in use, 102=6, as the engine's refusal of it does (#403)
+    // whose ClOrdID is in use, 102=6, as the engine's refusal of it does (#403). The replacement is remembered as
+    // refused, as the engine's refusals are (#398), but for a ClOrdID in use, which names another order.
     auto refuse = [&](const std::string &reason, bool duplicate = false)
     {
+        if (!duplicate)
+        {
+            learnRefusal(sourceStr, clOrdId.getString(), origClOrdStr);
+        }
         Queues::OrderRejectEvent refusal;
         refusal.replacement_ = true;
         refusal.duplicateClOrderId_ = duplicate;
@@ -1870,6 +1952,21 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
     // The refusal answers the order or replacement for a request waiting for it (#380), once it's out, as a report does.
     // evnt names the ClOrdID as it is stored, under the session's key.
     const AnsweredOnExit answer(*this, evnt.clOrderId_);
+    // A refused replacement is remembered before the refusal goes out and the requests waiting for it wake, logged on or
+    // not: a cancel or replace that names it is decided against its original (#398). A refused new order's ClOrdID, if
+    // a refused replacement had it, names no order now. Not for a ClOrdID in use, which names another order, nor for
+    // another source's: every refusal comes here.
+    if (!evnt.duplicateClOrderId_ && source.starts_with(FIX_SOURCE_PREFIX))
+    {
+        if (evnt.replacement_)
+        {
+            learnRefusal(source, clientClOrdId(evnt.clOrderId_, source), clientClOrdId(evnt.origClOrderId_, source));
+        }
+        else
+        {
+            forgetRefusal(source, clientClOrdId(evnt.clOrderId_, source));
+        }
+    }
     FIX::SessionID sid;
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, false);
