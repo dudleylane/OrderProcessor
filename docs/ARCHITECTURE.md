@@ -533,6 +533,7 @@ COP (Concurrent Order Processor)
 | `FixLogonTest.py` | `FixLogonNeedsCredentials` (ctest) | A real server: only a counterparty with its password logs on, and it trades only its accounts (#147) |
 | `FixResendTest.py` | `FixClientRecoversMissedReports` (ctest) | A real server: a client that reconnects gets back, with a ResendRequest, the reports it missed (#160) |
 | `FixGatewayBench.cpp` | `BM_FixBuildExecutionReport`, `BM_FixBuildSwapLegReport`, `BM_FixSendExecutionReport`, `BM_FixOrderAndAcknowledgement` | The gateway's ExecutionReport builder, for an outright trade and a swap leg's; a trade's report from `FixOutQueues::push` to a logged-on session from `config/fix.cfg`; and a new order through the gateway to the engine's queue followed by its acknowledgement to the session, without the engine between them (#395), each order with a ClOrdID of its own (#402) |
+| `FixBenchConfigTest.sh` | `FixBenchmarksFindTheirConfig` (ctest, with `BUILD_BENCHMARKS=ON`) | The session benchmarks read `fix.cfg` and its dictionaries from `OP_BENCH_CONFIG_DIR` when it is set, as a benchmark comparison sets it to the copy saved with its baseline, and from `config/` in their tree otherwise; a directory without them fails, naming what it lacks (#415) |
 
 ---
 
@@ -1525,7 +1526,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Server (`app/`)** | `ClientMessageParserTest.cpp`, `JsonSerializerTest.cpp`, `WsSessionTest.cpp`, `WsServerLimitsTest.cpp`, `WsAuthTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `SeedDataArgsTest.cpp`; the ctest scripts `ServerThatCannotStartExits` and `SeedDataIfEmptySeedsOnlyADirectoryWithoutInstruments`, and `SeedDataRunsCleanly`; with `BUILD_FUZZ=ON`, `test/fuzz/` | `SessionManagerBench.cpp` |
 | **PostgreSQL** | `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`; with `BUILD_PG=ON`, `PGWriteBehindTest.cpp`, whose integration cases need `PG_CONNECTION_STRING` | - |
 | **CI runner** | the ctest script `JobStartedHookDecides` (`JobStartedHookTest.sh`): the job-started hook's verdicts, a fork's pull request and anything Dependabot sent refused (#143, #168); the ctest script `CiTestedTreeDecides` (`CiTestedTreeTest.sh`): when the push of a merge may skip the jobs its pull request's run passed (#314) | - |
-| **Other** | `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `FiltersTest.cpp`, `SubscriptionTest.cpp`, `IdTGeneratorTest.cpp`, `LoggerTest.cpp`; the ctest script `CpuBusyDecides` (`CpuBusyTest.sh`): the CPUs a pinned benchmark comparison watches, and the busiest of them (#406) | - |
+| **Other** | `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `FiltersTest.cpp`, `SubscriptionTest.cpp`, `IdTGeneratorTest.cpp`, `LoggerTest.cpp`; the ctest script `CpuBusyDecides` (`CpuBusyTest.sh`): the CPUs a pinned benchmark comparison watches, and the busiest of them (#406); the ctest script `BenchmarkBaselineKeepsItsConfig` (`BenchmarkBaselineTest.sh`): a saved baseline keeps a copy of the `config/` its binary reads, a comparison hands it that copy, and a benchmark that fails in the first round stops a comparison there (#415) | - |
 
 ### 9.2 State Machine Tests
 
@@ -1581,8 +1582,8 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | **This branch's** | `EnumCouplingTest.cpp`, `FxSwapTest.cpp`, and with `BUILD_FIX=ON`: `FixCredentialsTest.cpp`, `FixEndToEndTest.cpp`, `FixFullPipelineTest.cpp`, `FixGatewayTest.cpp`, `FixRotatingLogTest.cpp`, `FixTlsTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
-| **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh`, `CpuBusyTest.sh` |
-| **FIX ctest scripts** (`BUILD_FIX=ON`) | `FixLogonTest.py`, `FixRefusalTest.py`, `FixResendTest.py`, `FixTlsTest.py`, and the client they share, `fix_client.py` |
+| **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh`, `CpuBusyTest.sh`, `BenchmarkBaselineTest.sh` |
+| **FIX ctest scripts** (`BUILD_FIX=ON`) | `FixLogonTest.py`, `FixRefusalTest.py`, `FixResendTest.py`, `FixTlsTest.py`, and the client they share, `fix_client.py`; with `BUILD_BENCHMARKS=ON` too, `FixBenchConfigTest.sh` |
 | **Fuzzing** | `fuzz/fuzz_client_message.cpp`, `fuzz/standalone_main.cpp`, `fuzz/corpus/` (`BUILD_FUZZ=ON`) |
 
 ### 10.3 Benchmark Files

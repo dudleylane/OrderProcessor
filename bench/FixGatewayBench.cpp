@@ -32,6 +32,7 @@
 #include <oneapi/tbb/info.h>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <thread>
@@ -373,16 +374,29 @@ private:
     std::unique_ptr<OrderEntry> order_;
 };
 
-/// config/fix.cfg's session with BENCH_CLIENT, logged on, as FixtSessionTest makes CLIENT_A's: what it sends goes to
-/// this Responder, which counts it and keeps nothing, and its store keeps nothing either
+/// The directory BenchSession reads fix.cfg and its dictionaries from: OP_BENCH_CONFIG_DIR when it is set and not
+/// empty, as benchmark-regression.sh sets it to the copy saved with a baseline (#415), and otherwise config/ in the tree
+/// this binary was built from (#395). Nothing else in the benchmarks reads a source tree.
+std::filesystem::path benchConfigDir()
+{
+    const char *dir = std::getenv("OP_BENCH_CONFIG_DIR");
+    if ((nullptr != dir) && ('\0' != *dir))
+    {
+        return dir;
+    }
+    return std::filesystem::path(OP_SOURCE_DIR) / "config";
+}
+
+/// fix.cfg's session with BENCH_CLIENT, logged on, as FixtSessionTest makes CLIENT_A's: what it sends goes to this
+/// Responder, which counts it and keeps nothing, and its store keeps nothing either
 class BenchSession final : public FIX::Responder
 {
 public:
     explicit BenchSession(FIX::Application &application) : factory_(application, stores_, nullptr)
     {
+        const std::filesystem::path config = benchConfigDir();
         try
         {
-            const std::filesystem::path config = std::filesystem::path(OP_SOURCE_DIR) / "config";
             const FIX::SessionSettings cfg((config / "fix.cfg").string());
             FIX::Dictionary settings;
             for (const auto &[key, value] : cfg.get())
@@ -420,7 +434,7 @@ public:
         }
         catch (const std::exception &ex)
         {
-            problem_ = std::string("no session from config/fix.cfg: ") + ex.what();
+            problem_ = "no session from " + (config / "fix.cfg").string() + ": " + ex.what();
         }
     }
     ~BenchSession() override

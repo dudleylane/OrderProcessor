@@ -46,6 +46,14 @@
 # end, and run more iterations the faster they get: one full pass reached 26 GB on a
 # 30 GB laptop before #125.
 #
+# A binary reads some files from the source tree it was built from: the FIX session
+# benchmarks on feature/fx-swap-support read config/fix.cfg and its dictionaries
+# there (#395). By the time a comparison runs, the baseline's tree may be gone, or at
+# another commit. So --update-baseline also copies the tree's config/ beside the
+# baseline, as <baseline>.config, and a comparison hands that copy to the baseline in
+# OP_BENCH_CONFIG_DIR, while the current build reads its own tree (#415). A benchmark
+# that reports an error in the first round stops the comparison there.
+#
 # Exit codes: 0 = no benchmark got slower by more than the threshold, 1 = at least
 # one did, 2 = usage/setup error, or a benchmark failed to run, 3 = inconclusive:
 # the machine was too busy to judge
@@ -224,6 +232,13 @@ describe_compiler() {
     "${compiler:-${CXX:-c++}}" --version 2>/dev/null | head -1
 }
 
+# The source tree the build was configured from, whose config/ the binary reads (#415)
+build_source_dir() {
+    local dir
+    dir=$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$BUILD_DIR/CMakeCache.txt" 2>/dev/null || true)
+    echo "${dir:-$PROJECT_ROOT}"
+}
+
 # --- Step 1: Build ---
 if $DO_BUILD; then
     echo "=== Clean Release Build ==="
@@ -243,13 +258,27 @@ fi
 
 # --- Step 2: Save the baseline, if asked ---
 if $UPDATE_BASELINE; then
-    # The binary links only system libraries, so a copy keeps working after rebuilds.
+    # The binary links only system libraries, so a copy keeps working after rebuilds. The files it reads from its source
+    # tree don't come with it: a copy of the tree's config/ goes beside it (#415). Without a config/ (master), any copy
+    # an earlier save left at this path goes, so a comparison never hands the binary another tree's.
+    SOURCE_DIR=$(build_source_dir)
     cp "$BENCH_EXE" "$BASELINE.tmp"
+    rm -rf -- "${BASELINE:?}.config.tmp"
+    if [[ -d "$SOURCE_DIR/config" ]]; then
+        cp -R -- "$SOURCE_DIR/config" "$BASELINE.config.tmp"
+    fi
     mv "$BASELINE.tmp" "$BASELINE"
+    rm -rf -- "${BASELINE:?}.config"
+    if [[ -d "$BASELINE.config.tmp" ]]; then
+        mv -- "$BASELINE.config.tmp" "$BASELINE.config"
+    fi
     {
         echo "commit:    $(describe_commit)"
         echo "compiler:  $(describe_compiler)"
         echo "saved:     $(date -u +%Y-%m-%dT%H:%M:%SZ) on $(uname -n)"
+        if [[ -d "$BASELINE.config" ]]; then
+            echo "config:    $BASELINE.config, a copy of $SOURCE_DIR/config"
+        fi
     } > "$BASELINE.info"
     echo "=== Baseline Saved ==="
     echo "Saved $BENCH_EXE as $BASELINE"
@@ -362,6 +391,9 @@ echo "  binary:    $BASELINE"
 if [[ -f "$BASELINE.info" ]]; then
     sed 's/^/  /' "$BASELINE.info"
 fi
+if [[ ! -d "$BASELINE.config" && -d "$(build_source_dir)/config" ]]; then
+    echo "  config:    none saved with it (#415): it reads config/ from the tree it was built in, if that is still there"
+fi
 echo "  matches:   $BEFORE_COUNT benchmark(s)"
 echo "--- after (current build) ---"
 echo "  binary:    $BENCH_EXE"
@@ -420,12 +452,25 @@ settle() {
     SETTLE_AT=$(cut -d' ' -f1 /proc/loadavg)
 }
 
+# Where each side reads its source tree's config/ (#415): the baseline the copy saved with it, if there is one, and the
+# current build its own tree. Whatever OP_BENCH_CONFIG_DIR the caller has set reaches neither.
+BEFORE_ENV=(env -u OP_BENCH_CONFIG_DIR)
+if [[ -d "$BASELINE.config" ]]; then
+    BEFORE_ENV=(env "OP_BENCH_CONFIG_DIR=$BASELINE.config")
+fi
+AFTER_ENV=(env -u OP_BENCH_CONFIG_DIR)
+
 # Leaves the run's starting load, its wait and its own duration in r<round>-<side>.load, for the report.
 run_side() {  # round, side, binary
     local out="$WORK/r$1-$2.json" log="$WORK/r$1-$2.log" began
+    local -a side_env=("${AFTER_ENV[@]}")
+    if [[ before == "$2" ]]; then
+        side_env=("${BEFORE_ENV[@]}")
+    fi
     settle
     began=$(date +%s)
-    if ! ( cd "$WORK" && limit_memory && "${LAUNCH[@]}" "$3" "${BENCH_ARGS[@]}" "--benchmark_out=$out" ) > "$log" 2>&1; then
+    if ! ( cd "$WORK" && limit_memory && "${side_env[@]}" "${LAUNCH[@]}" "$3" "${BENCH_ARGS[@]}" "--benchmark_out=$out" ) \
+        > "$log" 2>&1; then
         echo "ERROR: the $2 binary failed in round $1. The last lines of its output:" >&2
         tail -n 20 "$log" >&2
         if (( MEMORY_CAP_GIB > 0 )) && grep -q -E 'bad_alloc|Cannot allocate memory|out of memory' "$log"; then
@@ -435,6 +480,33 @@ run_side() {  # round, side, binary
         exit 2
     fi
     echo "$SETTLE_AT $SETTLE_WAITED $(( $(date +%s) - began )) $SETTLE_BUSIEST" > "$WORK/r$1-$2.load"
+}
+
+# A benchmark that can't run (a file it reads missing, a setup that fails) reports an error in every round. After the
+# first round this prints each one that did, and fails, so the comparison stops there rather than after every round
+# (#415).
+first_round_errors() {
+    python3 - "$WORK/r1-before.json" "$WORK/r1-after.json" <<'PYEOF'
+import json, sys
+
+errors = {}
+for side, path in zip(('before', 'after'), sys.argv[1:]):
+    try:
+        with open(path) as f:
+            report = json.load(f)
+    except (OSError, ValueError) as e:
+        errors[f'(the {side} run)'] = f'its report could not be read: {e}'
+        continue
+    for b in report.get('benchmarks', []):
+        if b.get('error_occurred'):
+            errors.setdefault(b.get('run_name', b['name']), f"{side}: {b.get('error_message') or 'error'}")
+if errors:
+    print(f"\n*** ERROR: {len(errors)} benchmark(s) did not produce a measurement in round 1, "
+          "so the comparison stops there ***")
+    for name in sorted(errors):
+        print(f"  ! {name}: {errors[name]}")
+    sys.exit(1)
+PYEOF
 }
 
 for (( r = 1; r <= ROUNDS; r++ )); do
@@ -457,6 +529,9 @@ for (( r = 1; r <= ROUNDS; r++ )); do
     if (( r == 1 )); then
         eta=$(( (took * (ROUNDS - 1) + 59) / 60 ))
         echo "  round 1/$ROUNDS: $starts; ${took} s of runs (about $eta min more, and the waits)"
+        if ! first_round_errors; then
+            exit 2
+        fi
     else
         echo "  round $r/$ROUNDS: $starts; ${took} s of runs"
     fi
