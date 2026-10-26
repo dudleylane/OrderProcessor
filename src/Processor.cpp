@@ -817,24 +817,24 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
                "Replace refused: the order's stop was already reached, so its stopPx can't change", false);
         return;
     }
-    if (replacement.orderQty_ <= original->cumQty_)
-    {
-        refuse(CancelRejectEvent::OTHER,
-               "Replace refused: quantity " + std::to_string(replacement.orderQty_) + " is not above the " +
-                   std::to_string(original->cumQty_) + " already filled",
-               false);
-        return;
-    }
-    replacement.leavesQty_ = replacement.orderQty_ - original->cumQty_;
-    // What it had left to trade when the day began, from its own quantity (#244): FIX's OrderQty - (CumQty - DayCumQty)
-    replacement.dayOrderQty_ = replacement.orderQty_ - (replacement.cumQty_ - replacement.dayCumQty_);
     std::string invalid;
     if (!replacement.isValid(&invalid))
     {
         refuse(CancelRejectEvent::OTHER, "Replace refused: " + invalid, false);
         return;
     }
-    if (noMarket)
+    // A quantity at or below what the original has filled cancels the rest of it: the replacement takes the filled
+    // quantity, with nothing left to trade, as FIX amends it (EP284 C.3.b and C.3.c, #381). Asked after isValid, so
+    // that a quantity of 0 is refused rather than amended into a cancel.
+    if (replacement.orderQty_ < original->cumQty_)
+    {
+        replacement.orderQty_ = original->cumQty_;
+    }
+    replacement.leavesQty_ = replacement.orderQty_ - original->cumQty_;
+    // What it had left to trade when the day began, from its own quantity (#244): FIX's OrderQty - (CumQty - DayCumQty)
+    replacement.dayOrderQty_ = replacement.orderQty_ - (replacement.cumQty_ - replacement.dayCumQty_);
+    // One with nothing left trades nothing, so it needs no market
+    if (noMarket && (0 < replacement.leavesQty_))
     {
         refuse(CancelRejectEvent::OTHER, "Replace refused: there is no market for this instrument", false);
         return;
@@ -895,7 +895,8 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
     // Everything either machine checks is checked above, so neither can refuse. If one did, the machine swallowed the
     // error and the status shows it.
     if ((REPLACED_ORDSTATUS != original->status_) ||
-        ((NEW_ORDSTATUS != stored->status_) && (PARTFILL_ORDSTATUS != stored->status_))) [[unlikely]]
+        ((NEW_ORDSTATUS != stored->status_) && (PARTFILL_ORDSTATUS != stored->status_) &&
+         (FILLED_ORDSTATUS != stored->status_))) [[unlikely]]
     {
         aux::ExchLogger::instance()->error("Processor: a replace that passed its checks did not complete");
     }
