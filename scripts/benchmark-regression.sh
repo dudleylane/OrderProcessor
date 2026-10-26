@@ -30,7 +30,10 @@
 #     one, to be under --settle-busy percent busy (20) over a one-second sample
 #     (#406). The load average can't say which CPUs its load is on: a job pinned to
 #     CPUs 1-3 held it near 2 while it saturated three of the four cores that 2-5
-#     covers. The report gives each run's busiest watched CPU.
+#     covers. The report gives each run's busiest watched CPU. A run that starts
+#     with one still at --settle-busy or more, once the wait is up, shares its
+#     cores with something else: the verdict is INCONCLUSIVE, and the report names
+#     the run (#422).
 #   - The rounds in which the baseline ran first, and the rounds in which it ran
 #     second, give two estimates of each benchmark's change. When they disagree by
 #     more than 25 points on more than a quarter of the benchmarks, the machine was
@@ -56,7 +59,7 @@
 #
 # Exit codes: 0 = no benchmark got slower by more than the threshold, 1 = at least
 # one did, 2 = usage/setup error, or a benchmark failed to run, 3 = inconclusive:
-# the machine was too busy to judge
+# the machine was too busy to judge, by the two estimates or by a run's busy start
 
 set -euo pipefail
 
@@ -137,7 +140,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --settle-max SECONDS Wait at most SECONDS for that, then run anyway (default: 600;"
             echo "                       0 never waits)"
             echo "  --settle-busy PCT    With --pinned, also wait until each pinned CPU and each"
-            echo "                       hyperthread sibling of one is under PCT percent busy (default: 20)"
+            echo "                       hyperthread sibling of one is under PCT percent busy (default: 20);"
+            echo "                       a run that starts with one at PCT or more makes it INCONCLUSIVE"
             echo "  --min-time NS        Report, but never fail on, a benchmark faster than NS"
             echo "                       nanoseconds (default: 200)"
             echo "  -h, --help           Show this help"
@@ -678,7 +682,7 @@ def main():
         for side in ('before', 'after'):
             with open(os.path.join(work, f'r{r}-{side}.load')) as f:
                 started_at, waited, _, cpu, busy = f.read().split()
-                loads.append((float(started_at), int(waited), cpu, int(busy)))
+                loads.append((float(started_at), int(waited), cpu, int(busy), r, side))
     full = sum(1 for x in loads if settle_max and x[1] >= settle_max)
     lo, hi = min(x[0] for x in loads), max(x[0] for x in loads)
     line = f"\nThe {len(loads)} runs started at one-minute loads {lo:.2f}..{hi:.2f}"
@@ -687,20 +691,27 @@ def main():
         if watched:
             line += f", or a watched CPU {settle_busy}% busy or more"
     print(line)
+    busy_starts = []
     if watched:
-        # Ahead of any verdict, as the load is: whether a busy start makes a comparison inconclusive awaits a ruling
-        # (#406), so for now the report says so and the verdict stands
         busy = [x[3] for x in loads]
-        worst = max(loads, key=lambda x: x[3])
-        line = f"Their busiest watched CPU (of {watched}) was {min(busy)}..{max(busy)}% busy as they started"
-        over = sum(1 for b in busy if b >= settle_busy)
-        if over:
-            line += (f"; {over} of them started with one at {settle_busy}% or more (CPU {worst[2]} at {worst[3]}% "
-                     f"at the worst), so something else ran on their cores: re-run before trusting this verdict")
-        print(line)
+        print(f"Their busiest watched CPU (of {watched}) was {min(busy)}..{max(busy)}% busy as they started")
+        busy_starts = [x for x in loads if x[3] >= settle_busy]
+        if busy_starts:
+            print(f"\nStarted with a watched CPU {settle_busy}% busy or more ({len(busy_starts)}):")
+            for _, _, cpu, pct, r, side in busy_starts:
+                print(f"  round {r}, {side}: CPU {cpu} {pct}% busy")
+    # Too busy to judge, ahead of FAIL and PASS: a run that started with a watched CPU busy, once its wait was up,
+    # shared its cores with something else (#422, as ruled), and two halves that disagree say the same of the rounds
+    inconclusive = False
+    if busy_starts:
+        print(f"\n*** INCONCLUSIVE: {len(busy_starts)} of the {len(loads)} runs started with a watched CPU "
+              f"{settle_busy}% busy or more: something else ran on their cores. Re-run when it is quieter ***")
+        inconclusive = True
     if len(noisy) > NOISY_SHARE * len(rows):
         print(f"\n*** INCONCLUSIVE: the two halves differ by more than {NOISE * 100:.0f} points on {len(noisy)} of "
               f"{len(rows)} benchmarks: the machine was too busy to judge. Re-run when it is quieter ***")
+        inconclusive = True
+    if inconclusive:
         return 3
     if regressions:
         print(f"\n*** FAIL: {len(regressions)} benchmark(s) slower by more than {threshold_pct:.1f}% ***")
