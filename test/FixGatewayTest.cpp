@@ -3129,6 +3129,38 @@ TEST_F(FixtSessionTest, EveryKindOfExecutionReportIsTaken)
     }
 }
 
+TEST_F(FixtSessionTest, AReplacementAmendedToWhatItsOriginalFilledIsReportedFilled)
+{
+    // EP284's C.3.b and C.3.c: a replace to a quantity at or below what the order has filled cancels the rest of it
+    // (#381). The replacement's report is Replaced (150=5) and Filled (39=2), with OrderQty amended to CumQty, which can
+    // be above the one asked for, and LeavesQty 0. Here C.3.c's: 70 asked for, 80 filled.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *order = saveOrderOf(sid_, "ORD-2");
+    const std::string origKey = FixGateway::sessionClOrdId(FixGateway::makeSourceString(sid_), "ORD-1");
+    order->origClOrderId_ = WideDataStorage::instance()->add(
+        new RawDataEntry(STRING_RAWDATATYPE, origKey.c_str(), static_cast<u32>(origKey.size())));
+    order->orderQty_ = 80;
+    order->cumQty_ = 80;
+    order->leavesQty_ = 0;
+    order->avgPx_ = 10.5;
+    auto replacement = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, FILLED_ORDSTATUS);
+    replacement.orderId_ = order->orderId_;
+    replacement.origOrderId_ = IdT(6, 1);
+    gateway_->sendExecutionReport(&replacement, *order);
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(1u, reports.size()) << sentText();
+    expectEverythingSentIsTaken();
+    EXPECT_EQ(std::string(1, FIX::ExecType_REPLACED), fieldOf(reports[0], FIX::FIELD::ExecType));
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_FILLED), fieldOf(reports[0], FIX::FIELD::OrdStatus));
+    EXPECT_EQ("80", fieldOf(reports[0], FIX::FIELD::OrderQty));
+    EXPECT_EQ("80", fieldOf(reports[0], FIX::FIELD::CumQty));
+    EXPECT_EQ("0", fieldOf(reports[0], FIX::FIELD::LeavesQty));
+    EXPECT_EQ("ORD-2", fieldOf(reports[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("ORD-1", fieldOf(reports[0], FIX::FIELD::OrigClOrdID));
+    EXPECT_EQ("(not set)", fieldOf(reports[0], FIX::FIELD::WorkingIndicator)) << "a New order's alone (#387)";
+}
+
 TEST_F(FixtSessionTest, ASwapsTradeReportIsRefusedForItsTradeLinkIdAlone)
 {
     // FIX 5.0 SP2 has LegLastQty (1418) in the report's NoLegs group, where FIX 4.4 had no such field. TradeLinkID

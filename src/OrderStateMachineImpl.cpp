@@ -364,8 +364,12 @@ void OrdStateImpl::processAccept(OrderEntry *orderData, OrdState::onReplace cons
         assert(orderData->farSettlDate_ > orderData->settlDate_);
     }
 
-    // A held stop's replacement is held too, and a released one's is matched as its type trades (#223)
-    addBooking(orderData, evnt.transaction_);
+    // A held stop's replacement is held too, and a released one's is matched as its type trades (#223). One amended to
+    // what its original had filled has nothing left to trade (#381), so it is neither matched nor booked.
+    if (0 < orderData->leavesQty_)
+    {
+        addBooking(orderData, evnt.transaction_);
+    }
 }
 
 void OrdStateImpl::processReject(OrderEntry *orderData, OrdState::onRplOrderRejected const &evnt)

@@ -71,6 +71,7 @@ Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBo
 | `CancelOfAFilledOrder_ViaFix_IsRefusedToTheSender` | Cancel of a filled order → refused (too late) to the sending session, with the order's status (#73) |
 | `ReplaceOrder_ViaFix_Completes` | FIX OrderCancelReplaceRequest → original REPLACED, replacement NEW under the request's ClOrdID, one REPLACE report each |
 | `ReplaceOfAFilledOrder_ViaFix_IsRefusedToTheSender` | Replace of a filled order → refused (too late) to the sending session, with the request's ClOrdIDs |
+| `ReplaceToBelowWhatIsFilled_ViaFix_FillsTheReplacement` | EP284's C.3.c: Replace (Y,X) to 30 of a buy of 100 with 40 filled → X REPLACED, Y FILLED with OrderQty amended up to 40 and nothing left, one REPLACE report, no reject; a status request for X or Y gets Y's state, and a sell at the price rests (#381) |
 | `SourceStringPreserved` | Order source tracks back to `"FIX:TRADER_A->ORDER_PROCESSOR"` |
 | `MarketOrder_FillsImmediately` | Market order enters pipeline with correct type/side/qty |
 | `TwoSessions_CanUseTheSameClOrdId` | Two sessions each place ClOrdID `SAME-1` → both NEW, and each session's cancel finds its own order (#71) |
@@ -434,6 +435,7 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `TheGatewaysOwnRefusalsAreTaken` | The gateway's refusal of an unknown symbol (35=8), and of a cancel and a replace of an unknown order (35=9) |
 | `TheEnginesRefusalsAreTaken` | The engine's refusals as the gateway reports them: a new order and a replacement whose ClOrdID is in use, a cancel too late, a business reject |
 | `EveryKindOfExecutionReportIsTaken` | Every ExecType the gateway sends, a stop's release (150=L, #236) among them, and a trade, a correction, a cancel's acknowledgement and a replacement's report, each with the order's OrderQty (38) as a counterparty reads it (#384) |
+| `AReplacementAmendedToWhatItsOriginalFilledIsReportedFilled` | EP284's C.3.b and C.3.c: the report of a replacement amended to what its original filled is taken, 150=5 and 39=2 with OrderQty its CumQty, LeavesQty 0, both ClOrdIDs and no WorkingIndicator (#381) |
 | `ASwapsTradeReportIsRefusedForItsTradeLinkIdAlone` | A swap leg's trade report is refused for TradeLinkID (820), which neither FIX 4.4's ExecutionReport nor FIX 5.0 SP2's has (#378), and for nothing else: its LegLastQty (1418) is in the NoLegs group, where FIX 5.0 SP2 has it |
 | `ARequestForAnOrderTheEngineHasntAnsweredIsRefusedAsPendingNew` | A cancel and a replace naming an order the session just sent, which the engine hasn't stored or refused when the wait (here 50 ms) ends, get a 35=9 with 102=99, OrderID NONE and OrdStatus A (Pending New), not 102=1: the order may yet be acknowledged (#380) |
 | `TheEnginesRefusalOfTheOrderEndsTheWaitOfARequestForIt` | A cancel waiting for its order, on a thread of its own as on a session's, is answered once the engine refuses the order: the order's 35=8 first, then the cancel's 35=9, 102=1 (#380) |

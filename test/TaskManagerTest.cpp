@@ -1309,8 +1309,58 @@ TEST_F(TaskManagerTest, ReplaceOfAPartiallyFilledOrderKeepsItsFills)
     EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
 }
 
-TEST_F(TaskManagerTest, ReplaceToAQuantityNotAboveWhatIsFilledIsRefused)
+TEST_F(TaskManagerTest, ReplaceToWhatIsFilledFillsTheReplacement)
 {
+    // A replace to the quantity already filled cancels the rest of the order, as FIX does (EP284 C.3.b, #381). It was
+    // refused.
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    pushOrder(SELL_SIDE, 10.0, 40, "seller");
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *original = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, original);
+    ASSERT_EQ(PARTFILL_ORDSTATUS, original->status_);
+
+    OrderEntry *replacement = makeReplacement(*original, 10.0, 40);
+    RawDataEntry replacementId = replacement->clOrderId_.get();
+    inQueues_->push("buyer", OrderReplaceEvent(original->orderId_, replacement));
+    EXPECT_TRUE(waitUntilIdle(*manager));
+
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
+    EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
+    EXPECT_EQ(0u, original->leavesQty_);
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live) << "the replacement was not stored";
+    EXPECT_EQ(FILLED_ORDSTATUS, live->status_);
+    EXPECT_EQ(40u, live->orderQty_);
+    EXPECT_EQ(40u, live->cumQty_);
+    EXPECT_EQ(0u, live->leavesQty_);
+    EXPECT_EQ(original->executions_.getId(), live->executions_.getId());
+    const auto liveReports = outQueues_->reportsFor(live->orderId_);
+    ASSERT_EQ(1u, liveReports.size());
+    EXPECT_EQ(REPLACE_EXECTYPE, liveReports[0].type);
+    EXPECT_EQ(FILLED_ORDSTATUS, liveReports[0].status);
+    EXPECT_EQ(original->orderId_, liveReports[0].origOrderId);
+    const auto originalReports = outQueues_->reportsFor(original->orderId_);
+    ASSERT_FALSE(originalReports.empty());
+    EXPECT_EQ(REPLACE_EXECTYPE, originalReports.back().type);
+    EXPECT_EQ(REPLACED_ORDSTATUS, originalReports.back().status);
+
+    // Neither in the book nor matched: a sell at its price rests
+    EXPECT_FALSE(orderBook_->getTop(instrumentId1_, BUY_SIDE).isValid());
+    RawDataEntry sellId = pushOrder(SELL_SIDE, 10.0, 10, "seller");
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(sellId);
+    ASSERT_NE(nullptr, sell);
+    EXPECT_EQ(NEW_ORDSTATUS, sell->status_);
+    EXPECT_EQ(10u, sell->leavesQty_);
+    EXPECT_EQ(40u, live->cumQty_);
+    EXPECT_EQ(0, manager->tasksFailed());
+}
+
+TEST_F(TaskManagerTest, ReplaceBelowWhatIsFilledIsAmendedToIt)
+{
+    // Below what is filled, the replacement takes the filled quantity, above the one asked for (EP284 C.3.c, #381)
     auto manager = createTaskManager(1, 1);
     RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
     pushOrder(SELL_SIDE, 10.0, 40, "seller");
@@ -1318,22 +1368,81 @@ TEST_F(TaskManagerTest, ReplaceToAQuantityNotAboveWhatIsFilledIsRefused)
     OrderEntry *original = OrderStorage::instance()->locateByClOrderId(buyId);
     ASSERT_NE(nullptr, original);
 
-    OrderEntry *replacement = makeReplacement(*original, 10.0, 40);
+    OrderEntry *replacement = makeReplacement(*original, 10.0, 30);
     RawDataEntry replacementId = replacement->clOrderId_.get();
-    inQueues_->push("requester", OrderReplaceEvent(original->orderId_, replacement));
+    inQueues_->push("buyer", OrderReplaceEvent(original->orderId_, replacement));
     EXPECT_TRUE(waitUntilIdle(*manager));
 
-    auto rejects = outQueues_->orderRejects();
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
+    EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live) << "the replacement was not stored";
+    EXPECT_EQ(FILLED_ORDSTATUS, live->status_);
+    EXPECT_EQ(40u, live->orderQty_);
+    EXPECT_EQ(40u, live->cumQty_);
+    EXPECT_EQ(0u, live->leavesQty_);
+    // FIX's DayOrderQty, OrderQty - (CumQty - DayCumQty): every fill was today's (#244)
+    EXPECT_EQ(40u, live->dayOrderQty_);
+    const auto liveReports = outQueues_->reportsFor(live->orderId_);
+    ASSERT_EQ(1u, liveReports.size());
+    EXPECT_EQ(REPLACE_EXECTYPE, liveReports[0].type);
+    EXPECT_EQ(FILLED_ORDSTATUS, liveReports[0].status);
+    EXPECT_EQ(0, manager->tasksFailed());
+}
+
+TEST_F(TaskManagerTest, ACancelOfAReplacementFilledFromTheStartIsTooLate)
+{
+    // A replacement filled from the start books nothing, yet its booking mark clears with its transaction's enqueue
+    // (#83), so a cancel of it isn't held waiting: it finds the order filled
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    pushOrder(SELL_SIDE, 10.0, 40, "seller");
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *original = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, original);
+    OrderEntry *replacement = makeReplacement(*original, 10.0, 40);
+    RawDataEntry replacementId = replacement->clOrderId_.get();
+    inQueues_->push("buyer", OrderReplaceEvent(original->orderId_, replacement));
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live) << "the replacement was not stored";
+    ASSERT_EQ(FILLED_ORDSTATUS, live->status_);
+    ASSERT_FALSE(live->bookingPending_.load()) << "a cancel of the replacement would wait for a booking forever";
+
+    inQueues_->push("buyer", OrderCancelEvent(live->orderId_, "too late"));
+    EXPECT_TRUE(waitUntilIdle(*manager));
+
+    const auto rejects = outQueues_->cancelRejects();
     ASSERT_EQ(1u, rejects.size());
-    EXPECT_EQ("requester", rejects[0].second);
-    EXPECT_TRUE(rejects[0].first.replacement_);
-    EXPECT_EQ(CancelRejectEvent::OTHER, rejects[0].first.refusal_);
-    EXPECT_EQ(PARTFILL_ORDSTATUS, rejects[0].first.origStatus_);
-    EXPECT_EQ("Replace refused: quantity 40 is not above the 40 already filled", rejects[0].first.reason_);
-    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByClOrderId(replacementId))
-        << "a refused replacement was stored";
-    EXPECT_EQ(PARTFILL_ORDSTATUS, original->status_);
-    EXPECT_EQ(60u, original->leavesQty_);
+    EXPECT_EQ(live->orderId_, rejects[0].first.id_);
+    EXPECT_EQ(CancelRejectEvent::TOO_LATE, rejects[0].first.reason_);
+    EXPECT_EQ(FILLED_ORDSTATUS, rejects[0].first.ordStatus_);
+    EXPECT_EQ(FILLED_ORDSTATUS, live->status_);
+}
+
+TEST_F(TaskManagerTest, AMarketReplacementWithNothingLeftNeedsNoMarket)
+{
+    // A market replacement with nothing to trade with is refused, unless it has nothing left to trade (#381)
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry buyId = pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    pushOrder(SELL_SIDE, 10.0, 40, "seller");
+    EXPECT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *original = OrderStorage::instance()->locateByClOrderId(buyId);
+    ASSERT_NE(nullptr, original);
+    ASSERT_FALSE(orderBook_->getTop(instrumentId1_, SELL_SIDE).isValid()) << "the sell should have traded in full";
+
+    OrderEntry *replacement = makeReplacement(*original, 10.0, 40);
+    replacement->ordType_ = MARKET_ORDERTYPE;
+    RawDataEntry replacementId = replacement->clOrderId_.get();
+    inQueues_->push("buyer", OrderReplaceEvent(original->orderId_, replacement));
+    EXPECT_TRUE(waitUntilIdle(*manager));
+
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
+    EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live) << "the replacement was not stored";
+    EXPECT_EQ(FILLED_ORDSTATUS, live->status_);
+    EXPECT_EQ(0u, live->leavesQty_);
 }
 
 TEST_F(TaskManagerTest, ReplaceOfAFilledOrderIsRefusedAsTooLate)

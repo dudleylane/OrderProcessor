@@ -735,6 +735,63 @@ TEST_F(FixEndToEndTest, ReplaceOfAFilledOrder_ViaFix_IsRefusedToTheSender)
     EXPECT_EQ(nullptr, orderOf("FIX-RPL-S2"));
 }
 
+TEST_F(FixEndToEndTest, ReplaceToBelowWhatIsFilled_ViaFix_FillsTheReplacement)
+{
+    // EP284's C.3.c: a replace asks for less than the order has filled, a fill having crossed it. That cancels the rest
+    // of the order: the replacement is Filled, its OrderQty amended up to CumQty, with nothing left to trade. Before
+    // #381 the engine refused the replace (102=99), and the order traded on.
+    gateway_->onMessage(makeNOS("FIX-RPF-S1", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 40), fixSid_);
+    waitForProcessing();
+    gateway_->onMessage(makeNOS("FIX-RPF-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    OrderEntry *original = orderOf("FIX-RPF-X");
+    ASSERT_NE(nullptr, original);
+    ASSERT_EQ(PARTFILL_ORDSTATUS, original->status_);
+    ASSERT_EQ(40u, original->cumQty_);
+
+    gateway_->onMessage(makeReplace("FIX-RPF-X", "FIX-RPF-Y", FIX::Side_BUY, 1.0850, 30), fixSid_);
+    waitForProcessing();
+
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
+    EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
+    OrderEntry *replacement = orderOf("FIX-RPF-Y");
+    ASSERT_NE(nullptr, replacement);
+    EXPECT_EQ(FILLED_ORDSTATUS, replacement->status_);
+    EXPECT_EQ(40u, replacement->orderQty_);
+    EXPECT_EQ(40u, replacement->cumQty_);
+    EXPECT_EQ(0u, replacement->leavesQty_);
+    int replacementFilled = 0;
+    for (const auto &r : outQueues_->reports())
+    {
+        replacementFilled += ((replacement->orderId_ == r.orderId) && (REPLACE_EXECTYPE == r.execType) &&
+                              (FILLED_ORDSTATUS == r.orderStatus))
+                                 ? 1
+                                 : 0;
+    }
+    EXPECT_EQ(1, replacementFilled);
+    // A status request for either ClOrdID is answered with the replacement (#383): Filled, with nothing left
+    const std::string yId = std::to_string(replacement->orderId_.id_);
+    for (const std::string clOrdId : { "FIX-RPF-X", "FIX-RPF-Y" })
+    {
+        SCOPED_TRACE(clOrdId);
+        const FIX50SP2::ExecutionReport answer = statusOf(clOrdId);
+        EXPECT_EQ(std::string(1, FIX::OrdStatus_FILLED), fieldOf(answer, FIX::FIELD::OrdStatus));
+        EXPECT_EQ(yId, fieldOf(answer, FIX::FIELD::OrderID));
+        EXPECT_EQ("FIX-RPF-Y", fieldOf(answer, FIX::FIELD::ClOrdID));
+        EXPECT_EQ("40", fieldOf(answer, FIX::FIELD::OrderQty));
+        EXPECT_EQ("40", fieldOf(answer, FIX::FIELD::CumQty));
+        EXPECT_EQ("0", fieldOf(answer, FIX::FIELD::LeavesQty));
+    }
+
+    // The order trades no more: a sell at its price rests
+    gateway_->onMessage(makeNOS("FIX-RPF-S2", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 10), fixSid_);
+    waitForProcessing();
+    OrderEntry *sell = orderOf("FIX-RPF-S2");
+    ASSERT_NE(nullptr, sell);
+    EXPECT_EQ(NEW_ORDSTATUS, sell->status_);
+    EXPECT_EQ(40u, replacement->cumQty_);
+}
+
 TEST_F(FixEndToEndTest, SourceStringPreserved)
 {
     // Submit via FIX — verify order's source matches the FIX session
