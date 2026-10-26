@@ -160,6 +160,13 @@ if(BUILD_TESTS)
     add_test(NAME CpuBusyDecides
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/CpuBusyTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/cpu-busy.sh)
+
+    # A benchmark comparison's baseline and the config it reads (#415), with stub benchmark binaries. It needs python3,
+    # as the script does: without it the test is skipped.
+    add_test(NAME BenchmarkBaselineKeepsItsConfig
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/BenchmarkBaselineTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/benchmark-regression.sh)
+    set_tests_properties(BenchmarkBaselineKeepsItsConfig PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 if(BUILD_BENCHMARKS)
