@@ -60,7 +60,7 @@ A single test that submits two FIX orders (sell + buy limit) through the entire 
 **File:** `test/FixEndToEndTest.cpp`
 **Requires:** `BUILD_FIX=ON`
 
-Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBook. Orders enter via `FixGateway::onMessage()` and flow through the complete pipeline. The engine's reports go to the gateway too, through `MultiOutQueues` and `FixOutQueues` as in the server, and the gateway pushes through `HoldingInQueues`, which can hold the engine's input back so that an order isn't stored yet (#380). `CapturingOutQueues` builds each report as the gateway builds one for a session, as it goes out, and keeps its WorkingIndicator (636) (#387).
+Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBook. Orders enter via `FixGateway::onMessage()` and flow through the complete pipeline. The engine's reports go to the gateway too, through `MultiOutQueues` and `FixOutQueues` as in the server, and the gateway pushes through `HoldingInQueues`, which can hold the engine's input back so that an order isn't stored yet (#380). `CapturingOutQueues` builds each report as the gateway builds one for a session, as it goes out, and keeps its WorkingIndicator (636) (#387) and LeavesQty (151) (#386).
 
 | Test | Description |
 |------|-------------|
@@ -86,6 +86,7 @@ Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBo
 | `DuplicateClOrdId_IsRefusedBeforeTheEngine` | EP284's F.1.a through the engine: a new order that repeats the ClOrdID of a partly filled order is refused by the gateway and never handed on (the engine's input, held, holds nothing, and the engine refuses nothing), and a status request meanwhile is answered with the partly filled order's state, 39=1 with 100/40/60; it was Pending New until the engine refused the repeat (#382) |
 | `ReplaceWithTheClOrdIdOfAnOrderOnItsWay_IsRefusedBeforeTheEngine` | Replace (K,X) while a new order K is held in the engine's input → the gateway refuses the replace and never hands it on (the input holds the new order alone); K is stored, X untouched, and the engine refuses nothing, where with two event processors the replacement could have been stored and K refused (#403) |
 | `StopOrder_IsNotWorkingUntilATradeReleasesIt` | EP284's E.1.f through the engine: a buy stop, held off the book, is acknowledged with WorkingIndicator (636) N; a trade at its stop, whose buy is held back until that acknowledgement is out, releases it, 150=L with 636 Y, and it buys at the market. The orders booked at once are acknowledged with 636 Y, and no trade report has one (#387) |
+| `AnOrderTheEngineCloses_IsReportedWithNoLeaves` | An IOC for 100 that trades 40, whose rest the engine cancels, and a DAY order at its day's end (a `TimerEvent` pushed as the expiry scheduler sends one) → reported Canceled (150=4) and Expired (150=C) with LeavesQty (151) 0, as after a client's cancel, and a status request finds each with OrderQty 100, its CumQty and LeavesQty 0; they were reported with what they hadn't traded, 60 and 100 (#386) |
 
 ---
 
