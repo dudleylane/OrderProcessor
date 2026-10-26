@@ -1997,6 +1997,51 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_CarriesTheOrdersOrderQty)
     EXPECT_DOUBLE_EQ(150.0, replacedQty.getValue());
 }
 
+/// The bytes QuickFIX writes for a quantity as the double its QTY fields take (#396)
+std::string qtyAsDouble(QuantityT qty)
+{
+    return FIX::DoubleConvertor::convert(static_cast<double>(qty));
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_EveryQuantityIsTheBytesQuickFixWritesForTheDouble)
+{
+    // Each quantity a report carries is written as the whole number it is (#396), not through the double QuickFIX's QTY
+    // fields take, with the bytes that double would give. A GT order's trade on a later day carries six, and a swap
+    // leg's trade LegLastQty (1418) as well: each a value of its own, so that none is written in another's place, and
+    // among them 0 and the largest quantity, to which those below 1 wrap round. Day figures go out only while DayCumQty
+    // is below CumQty.
+    for (const QuantityT qty : { QuantityT{ 1 }, QuantityT{ 77 }, std::numeric_limits<QuantityT>::max() })
+    {
+        auto order = createCorrectOrder(instrumentId1_);
+        assignClOrderId(order.get());
+        order->tif_ = GTC_TIF;
+        order->cumQty_ = qty;
+        order->dayCumQty_ = qty - 1;
+        order->orderQty_ = qty - 2;
+        order->leavesQty_ = qty - 3;
+        order->dayOrderQty_ = qty - 4;
+        auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+        trade.lastQty_ = qty - 5;
+        const FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+        const std::vector<std::pair<int, QuantityT>> expected = {
+            { FIX::FIELD::CumQty, order->cumQty_ },           { FIX::FIELD::DayCumQty, order->dayCumQty_ },
+            { FIX::FIELD::OrderQty, order->orderQty_ },       { FIX::FIELD::LeavesQty, order->leavesQty_ },
+            { FIX::FIELD::DayOrderQty, order->dayOrderQty_ }, { FIX::FIELD::LastQty, trade.lastQty_ }
+        };
+        for (const auto &[tag, value] : expected)
+        {
+            EXPECT_EQ(qtyAsDouble(value), report.getField(tag)) << "tag " << tag << ", " << value;
+        }
+
+        trade.execLegType_ = NEAR_LEG;
+        const FIX50SP2::ExecutionReport legReport = FixGateway::buildExecutionReport(&trade, *order);
+        ASSERT_EQ(1u, legReport.groupCount(FIX::FIELD::NoLegs));
+        FIX50SP2::ExecutionReport::NoLegs leg;
+        legReport.getGroup(1, leg);
+        EXPECT_EQ(qtyAsDouble(trade.lastQty_), leg.getField(FIX::FIELD::LegLastQty)) << trade.lastQty_;
+    }
+}
+
 TEST_F(FixGatewayInboundTest, ExecutionReport_TradeCarriesItsTradeDate)
 {
     // TradeDate (75), a LocalMktDate: the business day the trade counts in, YYYYMMDD, as the engine keeps it (#258). The
@@ -2263,6 +2308,21 @@ TEST(FixOrderRejectTest, AnOrderTheGatewayRefusesGetsAnExecutionReportRejectQuot
     FIX::Text text;
     report.get(text);
     EXPECT_EQ(why, text.getValue());
+}
+
+TEST(FixOrderRejectTest, AnOrderRejectsQuantitiesAreTheBytesQuickFixWritesForTheDouble)
+{
+    // As every report's are (#396): OrderQty (38) as the engine refused it, and LeavesQty and CumQty of 0, written as
+    // the whole numbers they are, with the bytes QuickFIX writes for the doubles its QTY fields take
+    for (const QuantityT qty : { QuantityT{ 1 }, QuantityT{ 77 }, std::numeric_limits<QuantityT>::max() })
+    {
+        Queues::OrderRejectEvent refused = makeOrderReject(false);
+        refused.orderQty_ = qty;
+        const FIX50SP2::ExecutionReport reject = FixGateway::buildOrderReject(refused, 41);
+        EXPECT_EQ(qtyAsDouble(qty), reject.getField(FIX::FIELD::OrderQty)) << qty;
+        EXPECT_EQ(qtyAsDouble(0), reject.getField(FIX::FIELD::LeavesQty));
+        EXPECT_EQ(qtyAsDouble(0), reject.getField(FIX::FIELD::CumQty));
+    }
 }
 
 TEST(FixOrderRejectTest, DuplicateReplacementGetsAnOrderCancelReject)
@@ -3270,6 +3330,30 @@ TEST_F(FixtSessionTest, AStatusRequestIsAnsweredWithTheOrdersStateAndQuantities)
         EXPECT_EQ("(not set)", fieldOf(answer, FIX::FIELD::OrigClOrdID));
         EXPECT_EQ("(not set)", fieldOf(answer, FIX::FIELD::OrdRejReason));
     }
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AStatusAnswersQuantitiesAreTheBytesQuickFixWritesForTheDouble)
+{
+    // A status answer's quantities are written as the whole numbers they are (#396), with the bytes QuickFIX writes for
+    // the doubles its QTY fields take, up to the largest quantity. A GT order that traded on an earlier day has five:
+    // OrderQty, CumQty and LeavesQty, and its figures for the day, DayOrderQty and DayCumQty (#244).
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1");
+    const QuantityT most = std::numeric_limits<QuantityT>::max();
+    setState(order, PARTFILL_ORDSTATUS, most, most - 1, 1);
+    order->tif_ = GTC_TIF;
+    order->dayOrderQty_ = most - 2;
+    order->dayCumQty_ = 0;
+    receive(makeStatusRequest("ORD-1"));
+
+    const std::vector<FIX::Message> answers = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(1u, answers.size()) << sentText();
+    EXPECT_EQ(qtyAsDouble(most), fieldOf(answers[0], FIX::FIELD::OrderQty));
+    EXPECT_EQ(qtyAsDouble(most - 1), fieldOf(answers[0], FIX::FIELD::CumQty));
+    EXPECT_EQ(qtyAsDouble(1), fieldOf(answers[0], FIX::FIELD::LeavesQty));
+    EXPECT_EQ(qtyAsDouble(most - 2), fieldOf(answers[0], FIX::FIELD::DayOrderQty));
+    EXPECT_EQ(qtyAsDouble(0), fieldOf(answers[0], FIX::FIELD::DayCumQty));
     expectEverythingSentIsTaken();
 }
 

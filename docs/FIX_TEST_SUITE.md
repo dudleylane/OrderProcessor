@@ -183,6 +183,7 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ExecutionReport_TradeCarriesLastQtyAndLastPx` | Trade → 150=F, LastQty (32), LastPx (31) |
 | `ExecutionReport_CarriesTheOrdersAvgPx` | The order's AvgPx (6), which FIX 5.0 SP2 doesn't require and FIX 4.4 did (#377) |
 | `ExecutionReport_CarriesTheOrdersOrderQty` | The order's OrderQty (38) on its acknowledgement, a trade, a cancel, a reject and an expiry, closed with LeavesQty 0 as well as open, written as a whole number, the bytes QuickFIX writes for the double, up to the largest quantity; a replacement's report, the replacement's own quantity (#384) |
+| `ExecutionReport_EveryQuantityIsTheBytesQuickFixWritesForTheDouble` | Each quantity of a GT order's trade on a later day, OrderQty, CumQty, LeavesQty, LastQty, DayOrderQty and DayCumQty, and a swap leg's LegLastQty (1418), written as the whole number it is, the bytes QuickFIX writes for the double, from 0 up to the largest quantity (#396) |
 | `ExecutionReport_TradeCarriesItsTradeDate` | Trade → TradeDate (75), the business day it counts in, `YYYYMMDD`; a trade in no day has none (#258) |
 | `ExecutionReport_CorrectionIsTradeCorrect` | Correction → 150=G, not NEW |
 | `ExecutionReport_AStopsReleaseIsTriggeredAndNew` | A stop's release → 150=L, 39=0, its ClOrdID, no 103 or LastQty (#236) |
@@ -214,6 +215,7 @@ Pure unit tests for the messages that answer a new order or a replacement the en
 | `RefusedReplaceSaysWhyAsARefusedCancelDoes` | The engine's reason maps to CxlRejReason as for a cancel; a ClOrdID in use still says 6 (#74) |
 | `ReplaceOfAnUnknownOrderIsRejectedAsUnknown` | The gateway's own answer to an unknown OrigClOrdID → 102=1, OrderID NONE, 39=8, and the request's ClOrdIDs (#74) |
 | `AnOrderTheGatewayRefusesGetsAnExecutionReportRejectQuotingItsQuantityAsSent` | An order the gateway refuses before the engine sees it → 150=8, 39=8, OrderID NONE, its OrderQty (38) as the client sent it, OrdRejReason 13 (incorrect quantity) and why in Text (58) (#145) |
+| `AnOrderRejectsQuantitiesAreTheBytesQuickFixWritesForTheDouble` | A refused order's OrderQty (38), and its LeavesQty and CumQty of 0, written as whole numbers, the bytes QuickFIX writes for the doubles, up to the largest quantity (#396) |
 
 ---
 
@@ -436,6 +438,7 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `ARequestForAnOrderTheEngineHasntAnsweredIsRefusedAsPendingNew` | A cancel and a replace naming an order the session just sent, which the engine hasn't stored or refused when the wait (here 50 ms) ends, get a 35=9 with 102=99, OrderID NONE and OrdStatus A (Pending New), not 102=1: the order may yet be acknowledged (#380) |
 | `TheEnginesRefusalOfTheOrderEndsTheWaitOfARequestForIt` | A cancel waiting for its order, on a thread of its own as on a session's, is answered once the engine refuses the order: the order's 35=8 first, then the cancel's 35=9, 102=1 (#380) |
 | `AStatusRequestIsAnsweredWithTheOrdersStateAndQuantities` | A 35=H gets a 150=I with ExecID 0, the order's OrdStatus (New, Partially Filled, Filled), OrderQty, CumQty, LeavesQty and AvgPx, and the request's OrdStatusReqID (790), as EP284's G.1.c does from its row 5; the engine never sees it (#383) |
+| `AStatusAnswersQuantitiesAreTheBytesQuickFixWritesForTheDouble` | A status answer's OrderQty, CumQty and LeavesQty, and a GT order's DayOrderQty and DayCumQty, written as whole numbers, the bytes QuickFIX writes for the doubles, up to the largest quantity (#396) |
 | `AStatusRequestForAnOrderTheSessionDoesntHaveIsAnsweredAsUnknown` | EP284's G.1.a: an unknown ClOrdID, another session's ClOrdID or OrderID, and an OrderID that isn't an order number get 39=8, 103=5, OrderID NONE and no quantities (#383) |
 | `AStatusRequestForAnOrderNotYetAcknowledgedIsPendingNew` | EP284's G.1.c, rows 1 to 6: an order the session just sent is Pending New (39=A), with its OrderQty and nothing filled, before it is stored (OrderID NONE) and once stored until its acknowledgement is out; then New (#383) |
 | `ANewOrderThatRepeatsAClOrdIdStillOnItsWayIsRefusedAsPendingNew` | A NewOrderSingle that repeats the ClOrdID of one the engine hasn't acknowledged is refused by the gateway at once, never reaching the engine: 150=8, 103=6, with the first order's Pending New (39=A) and OrderQty, OrderID NONE until the first is stored, then its OrderID; a status request meanwhile is the first order's Pending New, then New once its acknowledgement is out (#382; it was #383's `AStatusRequestForAClOrdIdSentTwiceBeforeItsAnswerIsTheFirstOrders`, where the engine refused the repeat) |
