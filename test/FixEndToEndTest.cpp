@@ -1003,6 +1003,36 @@ TEST_F(FixEndToEndTest, DuplicateClOrdId_IsRefusedBeforeTheEngine)
     EXPECT_EQ(60u, x->leavesQty_);
 }
 
+TEST_F(FixEndToEndTest, ReplaceWithTheClOrdIdOfAnOrderOnItsWay_IsRefusedBeforeTheEngine)
+{
+    // Replace (K,X) while a new order K is still on its way, held in the engine's input. The gateway refuses the replace
+    // itself, as a ClOrdID in use (102=6), and never hands it on (#403). Before, both reached the engine, and with two
+    // or more event processors the replacement could be stored first and the new order refused. Here K is stored and X
+    // is untouched, and the engine refuses nothing. The gateway's own refusal goes to a session, which this fixture
+    // has none of: FixtSessionTest.AReplaceWhoseClOrdIdIsInUseIsRefusedBeforeTheEngine reads it.
+    gateway_->onMessage(makeNOS("RIU-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    holdingInQueues_->hold();
+    gateway_->onMessage(makeNOS("RIU-K", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0840, 50), fixSid_);
+    gateway_->onMessage(makeReplace("RIU-X", "RIU-K", FIX::Side_BUY, 1.0830, 80), fixSid_);
+    EXPECT_EQ(1u, holdingInQueues_->held()) << "the new order alone";
+    holdingInQueues_->release();
+    waitForProcessing();
+
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
+    OrderEntry *x = orderOf("RIU-X");
+    ASSERT_NE(nullptr, x);
+    EXPECT_EQ(NEW_ORDSTATUS, x->status_);
+    EXPECT_DOUBLE_EQ(1.0850, x->price_);
+    EXPECT_EQ(100u, x->orderQty_);
+    OrderEntry *k = orderOf("RIU-K");
+    ASSERT_NE(nullptr, k);
+    EXPECT_EQ(NEW_ORDSTATUS, k->status_);
+    EXPECT_DOUBLE_EQ(1.0840, k->price_);
+    EXPECT_EQ(50u, k->orderQty_);
+    EXPECT_FALSE(k->origOrderId_.isValid()) << "the new order, not a replacement";
+}
+
 } // anonymous namespace
 
 #endif // BUILD_FIX
