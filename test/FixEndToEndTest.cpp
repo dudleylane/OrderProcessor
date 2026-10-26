@@ -889,11 +889,11 @@ TEST_F(FixEndToEndTest, ReplaceOfAReplacementNotYetStored_IsDecidedAgainstIt)
     EXPECT_TRUE(outQueues_->orderRejects().empty());
 }
 
-TEST_F(FixEndToEndTest, ReplaceOfARefusedReplacement_IsAnsweredAsUnknownOnceRefused)
+TEST_F(FixEndToEndTest, ReplaceOfARefusedReplacement_IsDecidedAgainstTheOrderItWasToReplace)
 {
-    // Replace (Y,X) of a filled order is refused, and Replace (Z,Y), sent at once, waits for that refusal rather than
-    // the timeout, and is then answered as unknown by the gateway: the engine never sees it. EP284's D.2.c decides it
-    // against X instead, which #398 is for.
+    // EP284's D.2.c: Replace (Y,X) of a filled order is refused, and Replace (Z,Y), sent at once, waits for that
+    // refusal rather than the timeout, and is then decided against X, the order Y was to replace (#398): the engine
+    // refuses it too, as too late, naming X. Before #398 the gateway answered it as unknown, and the engine never saw it.
     gateway_->onMessage(makeNOS("REF-S", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
     waitForProcessing();
     gateway_->onMessage(makeNOS("REF-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
@@ -911,11 +911,78 @@ TEST_F(FixEndToEndTest, ReplaceOfARefusedReplacement_IsAnsweredAsUnknownOnceRefu
     waitForProcessing();
 
     const auto rejects = outQueues_->orderRejects();
-    ASSERT_EQ(1u, rejects.size()); // Y's, and none for Z
-    EXPECT_EQ("REF-Y", FixGateway::clientView(rejects[0].first, rejects[0].second).clOrderId_);
+    ASSERT_EQ(2u, rejects.size()); // Y's, then Z's
+    const OrderRejectEvent y = FixGateway::clientView(rejects[0].first, rejects[0].second);
+    const OrderRejectEvent z = FixGateway::clientView(rejects[1].first, rejects[1].second);
+    EXPECT_EQ("REF-Y", y.clOrderId_);
+    EXPECT_EQ("REF-X", y.origClOrderId_);
+    EXPECT_EQ("REF-Z", z.clOrderId_);
+    EXPECT_EQ("REF-X", z.origClOrderId_) << "decided against X, not Y";
+    EXPECT_TRUE(z.replacement_);
+    EXPECT_EQ(CancelRejectEvent::TOO_LATE, z.refusal_);
+    EXPECT_EQ(FILLED_ORDSTATUS, z.origStatus_);
     EXPECT_EQ(nullptr, orderOf("REF-Y"));
     EXPECT_EQ(nullptr, orderOf("REF-Z"));
     EXPECT_EQ(FILLED_ORDSTATUS, x->status_);
+    EXPECT_EQ(0u, gateway_->waitingRequests());
+}
+
+TEST_F(FixEndToEndTest, ReplaceOfARefusedReplacement_CanReplaceTheOrderItWasToReplace)
+{
+    // Decided against X, the replace that names a refused replacement is decided as any replace of X is (#398):
+    // Replace (Y,X) changes the side, which the engine refuses, and Replace (Z,Y), sent at once, waits for that
+    // refusal and then replaces X. The change it asked for is made, where before #398 it was answered as unknown.
+    gateway_->onMessage(makeNOS("RRR-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0840, 100), fixSid_);
+    waitForProcessing();
+    OrderEntry *x = orderOf("RRR-X");
+    ASSERT_NE(nullptr, x);
+    ASSERT_EQ(NEW_ORDSTATUS, x->status_);
+
+    holdingInQueues_->hold();
+    gateway_->onMessage(makeReplace("RRR-X", "RRR-Y", FIX::Side_SELL, 1.0840, 100), fixSid_);
+    EXPECT_TRUE(sendWhileHeld(makeReplace("RRR-Y", "RRR-Z", FIX::Side_BUY, 1.0830, 80)));
+    waitForProcessing();
+
+    const auto rejects = outQueues_->orderRejects();
+    ASSERT_EQ(1u, rejects.size()); // Y's alone
+    const OrderRejectEvent y = FixGateway::clientView(rejects[0].first, rejects[0].second);
+    EXPECT_EQ("RRR-Y", y.clOrderId_);
+    EXPECT_EQ(CancelRejectEvent::OTHER, y.refusal_);
+    EXPECT_EQ(nullptr, orderOf("RRR-Y"));
+    OrderEntry *z = orderOf("RRR-Z");
+    ASSERT_NE(nullptr, z);
+    EXPECT_EQ(REPLACED_ORDSTATUS, x->status_);
+    EXPECT_EQ(NEW_ORDSTATUS, z->status_);
+    EXPECT_EQ(x->orderId_, z->origOrderId_);
+    EXPECT_DOUBLE_EQ(1.0830, z->price_);
+    EXPECT_EQ(80u, z->leavesQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, REPLACE_EXECTYPE }), reportsOf(*x));
+}
+
+TEST_F(FixEndToEndTest, CancelOfARefusedReplacement_CancelsTheOrderItWasToReplace)
+{
+    // A cancel that names a refused replacement is decided against the order it was to replace, as a replace is
+    // (#398): OrigClOrdID is "the last non rejected" ClOrdID for both. Replace (Y,X) is refused, and a cancel that
+    // names Y, sent at once, waits for that refusal and then cancels X.
+    gateway_->onMessage(makeNOS("CRR-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0840, 100), fixSid_);
+    waitForProcessing();
+    OrderEntry *x = orderOf("CRR-X");
+    ASSERT_NE(nullptr, x);
+    ASSERT_EQ(NEW_ORDSTATUS, x->status_);
+
+    holdingInQueues_->hold();
+    gateway_->onMessage(makeReplace("CRR-X", "CRR-Y", FIX::Side_SELL, 1.0840, 100), fixSid_);
+    EXPECT_TRUE(sendWhileHeld(makeCancel("CRR-Y", "CRR-C", FIX::Side_BUY)));
+    waitForProcessing();
+
+    const auto rejects = outQueues_->orderRejects();
+    ASSERT_EQ(1u, rejects.size()); // Y's
+    EXPECT_EQ("CRR-Y", FixGateway::clientView(rejects[0].first, rejects[0].second).clOrderId_);
+    EXPECT_EQ(nullptr, orderOf("CRR-Y"));
+    EXPECT_EQ(CANCELED_ORDSTATUS, x->status_);
+    EXPECT_EQ(0u, x->leavesQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, CANCEL_EXECTYPE }), reportsOf(*x));
+    EXPECT_TRUE(outQueues_->cancelRejects().empty());
 }
 
 TEST_F(FixEndToEndTest, StatusRequests_FollowAnOrderThroughItsLife)

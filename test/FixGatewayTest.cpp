@@ -257,6 +257,26 @@ protected:
         return msg;
     }
 
+    /// Hands the gateway the engine's refusal of sid's replacement clOrdId of the order origClOrdId, or of its new order
+    /// clOrdId when origClOrdId is empty, as the engine names them, under the session's key (#398)
+    void engineRefuses(const FIX::SessionID &sid, const std::string &clOrdId, const std::string &origClOrdId = "")
+    {
+        const std::string source = FixGateway::makeSourceString(sid);
+        Queues::OrderRejectEvent refusal;
+        refusal.replacement_ = !origClOrdId.empty();
+        refusal.clOrderId_ = FixGateway::sessionClOrdId(source, clOrdId);
+        if (refusal.replacement_)
+        {
+            refusal.origClOrderId_ = FixGateway::sessionClOrdId(source, origClOrdId);
+        }
+        refusal.symbol_ = "aaa";
+        refusal.side_ = BUY_SIDE;
+        refusal.orderQty_ = 70;
+        refusal.refusal_ = CancelRejectEvent::OTHER;
+        refusal.reason_ = refusal.replacement_ ? "Replace refused" : "Order refused";
+        gateway_->sendOrderReject(refusal, source);
+    }
+
 protected:
     std::unique_ptr<MockInQueues> mockInQueues_;
     std::unique_ptr<FixGateway> gateway_;
@@ -1365,6 +1385,102 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_AnExpireTimeTheRulesRefuse_IsNotQue
     auto day = makeLimitReplace("ORD-DAY", "RPL-3");
     day.set(FIX::ExpireTime(FixGateway::toUtcTimeStamp(anHourAhead())));
     gateway_->onMessage(day, TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_ASessionsNewestRefusedReplacementsAreRemembered)
+{
+    // A replace that names a refused replacement is decided against the order it was to replace (#398), for each
+    // session's newest REFUSALS_KEPT refusals: one more forgets the session's oldest, which is then an unknown order, as
+    // before #398. Another session's refusals forget none of this session's.
+    OrderEntry *x = saveOrderOf(TEST_SID, "ORD-X");
+    ASSERT_NE(nullptr, x);
+    // Remembered, though there is no session to send the refusals to
+    for (size_t i = 0; i <= FixGateway::REFUSALS_KEPT; ++i)
+    {
+        engineRefuses(TEST_SID, "RPL-" + std::to_string(i), "ORD-X");
+    }
+    for (size_t i = 0; i <= FixGateway::REFUSALS_KEPT; ++i)
+    {
+        engineRefuses(OTHER_SID, "RPL-" + std::to_string(i), "ORD-X");
+    }
+    std::vector<IdT> replaced;
+    std::vector<std::unique_ptr<OrderEntry>> replacements; // never reach an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .Times(2)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                replaced.push_back(evt.id_);
+                replacements.emplace_back(evt.replacementOrder_);
+            }));
+    gateway_->onMessage(makeLimitReplace("RPL-0", "NEW-0"), TEST_SID); // forgotten
+    gateway_->onMessage(makeLimitReplace("RPL-1", "NEW-1"), TEST_SID); // the oldest remembered
+    gateway_->onMessage(makeLimitReplace("RPL-" + std::to_string(FixGateway::REFUSALS_KEPT), "NEW-2"), TEST_SID);
+    ASSERT_EQ(2u, replaced.size());
+    const std::string xKey = FixGateway::sessionClOrdId(FixGateway::makeSourceString(TEST_SID), "ORD-X");
+    for (size_t i = 0; i < replaced.size(); ++i)
+    {
+        EXPECT_EQ(x->orderId_, replaced[i]);
+        const RawDataEntry &origClOrd = replacements[i]->origClOrderId_.get();
+        EXPECT_EQ(xKey, std::string(origClOrd.data_, origClOrd.length_));
+    }
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_ARefusalCountsAmongTheNewestFromWhenItWasLastRefused)
+{
+    // A ClOrdID refused as a replacement, then for a new order, which forgets it, and then as a replacement again
+    // counts among the session's newest REFUSALS_KEPT from that last refusal (#398): REFUSALS_KEPT - 1 refusals after
+    // it, it is still remembered
+    OrderEntry *x = saveOrderOf(TEST_SID, "ORD-X");
+    ASSERT_NE(nullptr, x);
+    engineRefuses(TEST_SID, "RPL-Y", "ORD-X");
+    engineRefuses(TEST_SID, "RPL-Y");
+    engineRefuses(TEST_SID, "RPL-Y", "ORD-X");
+    for (size_t i = 1; i < FixGateway::REFUSALS_KEPT; ++i)
+    {
+        engineRefuses(TEST_SID, "RPL-" + std::to_string(i), "ORD-X");
+    }
+    std::vector<IdT> replaced;
+    std::unique_ptr<OrderEntry> replacement; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                replaced.push_back(evt.id_);
+                replacement.reset(evt.replacementOrder_);
+            }));
+    gateway_->onMessage(makeLimitReplace("RPL-Y", "NEW-Y"), TEST_SID);
+    ASSERT_EQ(1u, replaced.size());
+    EXPECT_EQ(x->orderId_, replaced[0]);
+}
+
+TEST_F(FixGatewayInboundTest, ReplaceRequest_ARefusalForAClOrdIdInUseTakesNoPlaceAmongTheNewest)
+{
+    // The gateway's refusal of a replace whose ClOrdID is in use (102=6, #403) isn't remembered (#398): that ClOrdID
+    // names another order. Remembered, it would take a place among the session's newest REFUSALS_KEPT, and the oldest
+    // refusal would be forgotten one refusal early. A request that names the ClOrdID finds the order that has it first,
+    // so the place is what shows it.
+    OrderEntry *x = saveOrderOf(TEST_SID, "ORD-X");
+    ASSERT_NE(nullptr, x);
+    ASSERT_NE(nullptr, saveOrderOf(TEST_SID, "ORD-P"));
+    std::vector<IdT> replaced;
+    std::unique_ptr<OrderEntry> replacement; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                replaced.push_back(evt.id_);
+                replacement.reset(evt.replacementOrder_);
+            }));
+    engineRefuses(TEST_SID, "RPL-0", "ORD-X");
+    gateway_->onMessage(makeLimitReplace("ORD-X", "ORD-P"), TEST_SID); // refused: ORD-P is in use
+    for (size_t i = 1; i < FixGateway::REFUSALS_KEPT; ++i)
+    {
+        engineRefuses(TEST_SID, "RPL-" + std::to_string(i), "ORD-X");
+    }
+    gateway_->onMessage(makeLimitReplace("RPL-0", "NEW-0"), TEST_SID); // the oldest of REFUSALS_KEPT
+    ASSERT_EQ(1u, replaced.size());
+    EXPECT_EQ(x->orderId_, replaced[0]);
 }
 
 TEST(FixSessionTimeTest, ASessionsDayEndsAt1700NewYork)
@@ -3600,6 +3716,202 @@ TEST_F(FixtSessionTest, AReplaceWhoseClOrdIdIsInUseIsRefusedBeforeTheEngine)
     EXPECT_EQ("(not set)", fieldOf(reports[0], FIX::FIELD::OrigClOrdID));
     expectStatus(reports[1], FIX::OrdStatus_PENDING_NEW, "NONE", 70, 0, 70);
     EXPECT_EQ(PARTFILL_ORDSTATUS, x->status_);
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ARequestThatNamesARefusedReplacementIsDecidedAgainstItsOriginal)
+{
+    // EP284's D.2.c: Replace (Y,X) is refused, and a replace that names Y, the last ClOrdID not refused when the client
+    // sent it, is decided against X, the order Y was to replace (#398): handed to the engine as a replace of X, or
+    // refused by the gateway naming X in OrigClOrdID (41). A cancel that names Y cancels X. The gateway's refusals are
+    // remembered, and the engine's.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, PARTFILL_ORDSTATUS, 100, 40, 60);
+    const std::string source = FixGateway::makeSourceString(sid_);
+    std::vector<IdT> replaced;
+    std::vector<std::unique_ptr<OrderEntry>> replacements; // never reach an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .Times(2)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                replaced.push_back(evt.id_);
+                replacements.emplace_back(evt.replacementOrder_);
+            }));
+    std::vector<OrderCancelEvent> cancels;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderCancelEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderCancelEvent &evt)
+            {
+                cancels.push_back(evt);
+            }));
+
+    auto unknownSymbol = makeLimitReplace("ORD-X", "ORD-Y");
+    unknownSymbol.set(FIX::Symbol("NO-SUCH"));
+    receive(unknownSymbol);                      // refused by the gateway
+    receive(makeLimitReplace("ORD-Y", "ORD-Z")); // a replace of X
+    auto noPrice = makeLimitReplace("ORD-Y", "ORD-W");
+    noPrice.set(FIX::Price(0));
+    receive(noPrice);                             // refused by the gateway, as a replace of X
+    receive(makeCancelRequest("ORD-Y", "CXL-Y")); // a cancel of X
+    engineRefuses(sid_, "ORD-R", "ORD-X");
+    receive(makeLimitReplace("ORD-R", "ORD-Q")); // a replace of X
+
+    ASSERT_EQ(2u, replaced.size());
+    const std::vector<std::string> replacedBy{ "ORD-Z", "ORD-Q" };
+    for (size_t i = 0; i < replaced.size(); ++i)
+    {
+        SCOPED_TRACE(replacedBy[i]);
+        EXPECT_EQ(x->orderId_, replaced[i]);
+        const RawDataEntry &clOrd = replacements[i]->clOrderId_.get();
+        EXPECT_EQ(FixGateway::sessionClOrdId(source, replacedBy[i]), std::string(clOrd.data_, clOrd.length_));
+        const RawDataEntry &origClOrd = replacements[i]->origClOrderId_.get();
+        EXPECT_EQ(FixGateway::sessionClOrdId(source, "ORD-X"), std::string(origClOrd.data_, origClOrd.length_));
+    }
+    ASSERT_EQ(1u, cancels.size());
+    EXPECT_EQ(x->orderId_, cancels[0].id_);
+    EXPECT_EQ("CXL-Y", cancels[0].requestClOrdId_);
+
+    const std::vector<std::string> refused{ "ORD-Y", "ORD-W", "ORD-R" };
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(refused.size(), rejects.size()) << sentText();
+    for (size_t i = 0; i < rejects.size(); ++i)
+    {
+        SCOPED_TRACE(refused[i]);
+        EXPECT_EQ(refused[i], fieldOf(rejects[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ("ORD-X", fieldOf(rejects[i], FIX::FIELD::OrigClOrdID));
+        EXPECT_EQ(std::to_string(x->orderId_.id_), fieldOf(rejects[i], FIX::FIELD::OrderID));
+        EXPECT_EQ(std::to_string(FIX::CxlRejReason_OTHER), fieldOf(rejects[i], FIX::FIELD::CxlRejReason));
+    }
+    EXPECT_EQ(PARTFILL_ORDSTATUS, x->status_);
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ARefusalForAClOrdIdInUseIsNotRemembered)
+{
+    // A replacement refused because its ClOrdID is in use (102=6) names another order by it, so a request that names
+    // that ClOrdID isn't decided against the order the replacement was to replace (#398). Refused so by the engine, or
+    // by the gateway while the new order with the ClOrdID was on its way and was then refused itself, the ClOrdID is
+    // answered as an unknown order (102=1), as before #398.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, PARTFILL_ORDSTATUS, 100, 40, 60);
+    const std::string source = FixGateway::makeSourceString(sid_);
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderCancelEvent &>())).Times(0);
+    std::unique_ptr<OrderEntry> pushed; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.reset(evt.order_);
+            }));
+
+    Queues::OrderRejectEvent byEngine; // the engine's refusal of Replace (D,X), whose ClOrdID was in use
+    byEngine.replacement_ = true;
+    byEngine.duplicateClOrderId_ = true;
+    byEngine.clOrderId_ = FixGateway::sessionClOrdId(source, "ORD-D");
+    byEngine.origClOrderId_ = FixGateway::sessionClOrdId(source, "ORD-X");
+    byEngine.refusal_ = CancelRejectEvent::OTHER;
+    byEngine.reason_ = "Replace refused: ClOrdID ORD-D is already in use";
+    gateway_->sendOrderReject(byEngine, source);
+    receive(makeLimitReplace("ORD-D", "ORD-E"));
+    receive(makeNewOrderSingle("ORD-P", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 70)); // on its way
+    ASSERT_NE(nullptr, pushed);
+    receive(makeLimitReplace("ORD-X", "ORD-P")); // refused by the gateway, ORD-P being in use (#403)
+    engineRefuses(sid_, "ORD-P");                // and the new order by the engine
+    receive(makeCancelRequest("ORD-P", "CXL-P"));
+
+    struct Expected
+    {
+        std::string clOrdId, origClOrdId, orderId;
+        int cxlRejReason;
+    };
+    const std::string xId = std::to_string(x->orderId_.id_);
+    const std::vector<Expected> expected{ { "ORD-D", "ORD-X", xId, FIX::CxlRejReason_DUPLICATE_CL_ORD_ID },
+                                          { "ORD-E", "ORD-D", "NONE", FIX::CxlRejReason_UNKNOWN_ORDER },
+                                          { "ORD-P", "ORD-X", xId, FIX::CxlRejReason_DUPLICATE_CL_ORD_ID },
+                                          { "CXL-P", "ORD-P", "NONE", FIX::CxlRejReason_UNKNOWN_ORDER } };
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(expected.size(), rejects.size()) << sentText();
+    for (size_t i = 0; i < rejects.size(); ++i)
+    {
+        SCOPED_TRACE(expected[i].clOrdId);
+        EXPECT_EQ(expected[i].clOrdId, fieldOf(rejects[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ(expected[i].origClOrdId, fieldOf(rejects[i], FIX::FIELD::OrigClOrdID));
+        EXPECT_EQ(expected[i].orderId, fieldOf(rejects[i], FIX::FIELD::OrderID));
+        EXPECT_EQ(std::to_string(expected[i].cxlRejReason), fieldOf(rejects[i], FIX::FIELD::CxlRejReason));
+    }
+    EXPECT_EQ(std::string(1, FIX::CxlRejResponseTo_ORDER_CANCEL_REQUEST),
+              fieldOf(rejects[3], FIX::FIELD::CxlRejResponseTo));
+    ASSERT_EQ(1u, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText(); // the new order's refusal
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ARefusedReplacementsClOrdIdNamesWhatItWasLastSentFor)
+{
+    // A ClOrdID names what the session sent it for last (#398). A refused replacement's, sent again for a new order that
+    // is refused too, by the gateway or by the engine, names no order: a request that names it is answered as unknown
+    // (102=1), not decided against the order the replace was for. Sent again for another replace that is refused, it
+    // names the order that replace was for.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, PARTFILL_ORDSTATUS, 100, 40, 60);
+    OrderEntry *v = saveOrderOf(sid_, "ORD-V");
+    setState(v, NEW_ORDSTATUS, 50, 0, 50);
+    const std::string source = FixGateway::makeSourceString(sid_);
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderCancelEvent &>())).Times(0);
+    std::vector<IdT> replaced;
+    std::vector<std::unique_ptr<OrderEntry>> replacements; // never reach an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                replaced.push_back(evt.id_);
+                replacements.emplace_back(evt.replacementOrder_);
+            }));
+    std::unique_ptr<OrderEntry> pushed; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.reset(evt.order_);
+            }));
+    auto refusedReplace = [&](const std::string &origClOrdId, const std::string &clOrdId)
+    {
+        auto replace = makeLimitReplace(origClOrdId, clOrdId);
+        replace.set(FIX::Symbol("NO-SUCH")); // refused by the gateway
+        receive(replace);
+    };
+
+    refusedReplace("ORD-X", "ORD-Y1");
+    receive(makeNewOrderSingle("ORD-Y1", "NO-SUCH", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 70)); // the gateway's
+    receive(makeLimitReplace("ORD-Y1", "ORD-Z1"));
+    refusedReplace("ORD-X", "ORD-Y2");
+    receive(makeNewOrderSingle("ORD-Y2", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 70));
+    ASSERT_NE(nullptr, pushed);
+    engineRefuses(sid_, "ORD-Y2");
+    receive(makeCancelRequest("ORD-Y2", "CXL-Y2"));
+    refusedReplace("ORD-X", "ORD-Y3");
+    refusedReplace("ORD-V", "ORD-Y3");
+    receive(makeLimitReplace("ORD-Y3", "ORD-Z3")); // a replace of V
+
+    ASSERT_EQ(1u, replaced.size());
+    EXPECT_EQ(v->orderId_, replaced[0]);
+    const RawDataEntry &origClOrd = replacements[0]->origClOrderId_.get();
+    EXPECT_EQ(FixGateway::sessionClOrdId(source, "ORD-V"), std::string(origClOrd.data_, origClOrd.length_));
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(6u, rejects.size()) << sentText(); // Y1, Z1, Y2, the cancel, and Y3 twice
+    for (size_t i : { 1u, 3u })
+    {
+        SCOPED_TRACE(fieldOf(rejects[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ("NONE", fieldOf(rejects[i], FIX::FIELD::OrderID));
+        EXPECT_EQ(std::to_string(FIX::CxlRejReason_UNKNOWN_ORDER), fieldOf(rejects[i], FIX::FIELD::CxlRejReason));
+    }
+    EXPECT_EQ("ORD-Y1", fieldOf(rejects[1], FIX::FIELD::OrigClOrdID));
+    EXPECT_EQ("ORD-Y2", fieldOf(rejects[3], FIX::FIELD::OrigClOrdID));
+    ASSERT_EQ(2u, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText(); // the new orders' refusals
     expectEverythingSentIsTaken();
 }
 

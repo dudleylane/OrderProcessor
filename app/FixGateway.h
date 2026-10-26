@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -50,6 +51,10 @@ public:
     /// order was sent just before it (#380). The session's thread waits, and sends no heartbeat meanwhile: well under
     /// config/fix.cfg's HeartBtInt, 30 s.
     static constexpr std::chrono::milliseconds DEFAULT_ANSWER_WAIT{ 1000 };
+    /// How many of a session's refused replacements the gateway remembers, its newest (#398). A request that names one
+    /// comes within about a round trip of the refusal, so a session would have to have this many more refused meanwhile
+    /// for it to be forgotten, and answered as an unknown order.
+    static constexpr size_t REFUSALS_KEPT = 1024;
 
     FixGateway(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
                Store::OrderDataStorage *orderStorage, SourceIdT defaultClearingId = SourceIdT(),
@@ -184,6 +189,18 @@ private:
     OrderEntry *replacementOf(std::string_view key) const;
     /// How many replacements the gateway knows of, which no chain of them can be longer than (#383)
     size_t knownReplacements() const;
+    /// A replacement the session source sent was refused, by the engine or by the gateway: a cancel or replace that
+    /// names it is decided from now on against the order it was to replace, origClOrdId (#398). Both ClOrdIDs as the
+    /// client sent them.
+    void learnRefusal(const std::string &source, const std::string &clOrdId, const std::string &origClOrdId);
+    /// A new order the session source sent as clOrdId was refused, by the engine or by the gateway: a ClOrdID names what
+    /// the session used it for last, so one a refused replacement had names no order now (#398)
+    void forgetRefusal(const std::string &source, const std::string &clOrdId);
+    /// The order a cancel or replace from source is decided against when it names, as *clOrdId, a replacement that was
+    /// refused: the order that replacement was to replace, "the last non rejected ClOrdID", as EP284's D.2.c decides
+    /// one (#398). *clOrdId is then that order's ClOrdID, which the request's answers name in OrigClOrdID (41). Nothing,
+    /// and *clOrdId as it was, for a ClOrdID of no refused replacement.
+    OrderEntry *locateRefusedOriginal(const std::string &source, std::string *clOrdId) const;
     /// The answer to a status request for an order the engine has stored, read under its lock (#383). requested is the
     /// ClOrdID the request named, or empty; pending, what the gateway keeps of the order while the engine hasn't
     /// answered it. followReplacements: a replaced order is answered with the order working in its place, as G.1.c
@@ -245,6 +262,16 @@ private:
     /// from each replacement's report, and at startup from the orders stored. Kept for good, as the orders are.
     std::unordered_map<std::string, std::string, KeyHash, std::equal_to<>> replacements_;
     mutable std::mutex replacementsLock_; // guards it; taken with no other lock held
+
+    /// A session's refused replacements (#398): the ClOrdID of the order each was to replace, by its own, and its own
+    /// oldest first, so that the oldest is forgotten past REFUSALS_KEPT. As the client sent them.
+    struct Refusals
+    {
+        std::unordered_map<std::string, std::string> originals;
+        std::deque<std::string> oldestFirst;
+    };
+    std::unordered_map<std::string, Refusals> refusals_; // by source
+    mutable std::mutex refusalsLock_;                    // guards it; taken with no other lock held
 
 public:
     // FIX → internal enum conversions (public static for testability)
