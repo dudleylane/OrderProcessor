@@ -260,6 +260,8 @@ Options: `--threshold N` (default 5%), `--rounds N` (default 6), `--repetitions 
 
 Pin to a range of cores, not one: the TaskManager benchmarks need worker threads (#120). A comparison runs the suite twice per round, so use `--filter` to pick the benchmarks your change touches. The run prints the machine, kernel, CPU, governor, compiler and both commits, and warns when the CPU governor or missing real-time privileges make the numbers noisy. Save a new baseline after any toolchain, kernel or hardware change.
 
+A binary can read files from the source tree it was built from: on `feature/fx-swap-support`, the FIX session benchmarks read `config/fix.cfg` and its dictionaries there. That tree may be gone, or at another commit, by the time a comparison runs. So `--update-baseline` also saves a copy of the tree's `config/` beside the baseline, as `<baseline>.config`, and a comparison hands the copy to the baseline in `OP_BENCH_CONFIG_DIR`, while the current build reads its own tree (#415). A benchmark that reports an error in the first round stops the comparison there, with exit 2, rather than after every round.
+
 Each run's address space is capped, at half of RAM by default. Many benchmarks keep what every iteration creates until they end, and run more iterations the faster they get, so a benchmark that keeps more than expected fails with exit 2 instead of pushing the machine into swap. Use `--memory-cap 0` with a sanitizer build, which reserves a huge address space up front.
 
 ### Performance Results (Release Build)
