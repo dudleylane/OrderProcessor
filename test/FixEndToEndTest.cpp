@@ -184,6 +184,12 @@ public:
         }
         held_.clear();
     }
+    /// How many events it holds now
+    size_t held()
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return held_.size();
+    }
 
     void push(const std::string &source, const OrderEvent &evnt) override
     {
@@ -964,6 +970,37 @@ TEST_F(FixEndToEndTest, StatusRequests_FollowAnOrderThroughItsLife)
         EXPECT_EQ(e.leavesQty, fieldOf(e.answer, FIX::FIELD::LeavesQty));
         EXPECT_EQ("EURUSD", fieldOf(e.answer, FIX::FIELD::Symbol));
     }
+}
+
+TEST_F(FixEndToEndTest, DuplicateClOrdId_IsRefusedBeforeTheEngine)
+{
+    // EP284's F.1.a through the engine (#382): X acknowledged and partly filled, then a new order with X's ClOrdID. The
+    // gateway refuses it itself and never hands it on: the engine's input, held, holds nothing, and the engine refuses
+    // nothing. A status request for X meanwhile is answered with X's state, where the repeat's ClOrdID had looked
+    // unanswered until the engine refused it, and X was Pending New (#383).
+    gateway_->onMessage(makeNOS("DUP-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    gateway_->onMessage(makeNOS("DUP-S", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 40), fixSid_);
+    waitForProcessing();
+    holdingInQueues_->hold();
+    gateway_->onMessage(makeNOS("DUP-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 150), fixSid_);
+    EXPECT_EQ(0u, holdingInQueues_->held());
+    const FIX50SP2::ExecutionReport status = statusOf("DUP-X");
+    holdingInQueues_->release();
+    waitForProcessing();
+
+    OrderEntry *x = orderOf("DUP-X");
+    ASSERT_NE(nullptr, x);
+    EXPECT_EQ(std::string(1, FIX::ExecType_ORDER_STATUS), fieldOf(status, FIX::FIELD::ExecType));
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_PARTIALLY_FILLED), fieldOf(status, FIX::FIELD::OrdStatus));
+    EXPECT_EQ(std::to_string(x->orderId_.id_), fieldOf(status, FIX::FIELD::OrderID));
+    EXPECT_EQ("100", fieldOf(status, FIX::FIELD::OrderQty));
+    EXPECT_EQ("40", fieldOf(status, FIX::FIELD::CumQty));
+    EXPECT_EQ("60", fieldOf(status, FIX::FIELD::LeavesQty));
+    EXPECT_TRUE(outQueues_->orderRejects().empty());
+    EXPECT_EQ(PARTFILL_ORDSTATUS, x->status_);
+    EXPECT_EQ(100u, x->orderQty_);
+    EXPECT_EQ(60u, x->leavesQty_);
 }
 
 } // anonymous namespace
