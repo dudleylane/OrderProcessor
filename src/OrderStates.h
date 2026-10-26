@@ -174,6 +174,7 @@ struct Filled : public boost::msm::front::state<>
     }
 
     template <class FSM> void on_entry(onTradeExecution const &, FSM &);
+    template <class FSM> void on_entry(onReplace const &, FSM &);
 };
 
 struct Expired : public boost::msm::front::state<>
