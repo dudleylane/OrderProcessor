@@ -3551,6 +3551,58 @@ TEST_F(FixtSessionTest, TheEnginesRefusalOfADuplicateCarriesTheStateOfTheOrderTh
     expectEverythingSentIsTaken();
 }
 
+TEST_F(FixtSessionTest, AReplaceWhoseClOrdIdIsInUseIsRefusedBeforeTheEngine)
+{
+    // Replace (Y,X) with a Y the session already uses, for an order stored or still on its way, or X's own, is refused at
+    // once with an OrderCancelReject, 434=2 and CxlRejReason 102=6, describing X, as the engine refuses it (#403). It
+    // never reaches the engine. Left to the engine, the replacement held Y in the record until that refusal, and a
+    // status request for Y was answered with X, Pending Replace (39=E): here each is answered with the order that has Y.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    std::unique_ptr<OrderEntry> pushed; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.reset(evt.order_);
+            }));
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, PARTFILL_ORDSTATUS, 100, 40, 60);
+    OrderEntry *stored = saveOrderOf(sid_, "ORD-S");
+    setState(stored, NEW_ORDSTATUS, 50, 0, 50);
+    receive(makeNewOrderSingle("ORD-P", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 70));
+    ASSERT_NE(nullptr, pushed);
+    const std::vector<std::string> inUse{ "ORD-S", "ORD-P", "ORD-X" }; // stored, on its way, the original's own
+    for (const std::string &clOrdId : inUse)
+    {
+        receive(makeLimitReplace("ORD-X", clOrdId));
+    }
+    receive(makeStatusRequest("ORD-S"));
+    receive(makeStatusRequest("ORD-P"));
+
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(inUse.size(), rejects.size()) << sentText();
+    for (size_t i = 0; i < rejects.size(); ++i)
+    {
+        SCOPED_TRACE(inUse[i]);
+        EXPECT_EQ(inUse[i], fieldOf(rejects[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ(std::string(1, FIX::CxlRejResponseTo_ORDER_CANCEL_REPLACE_REQUEST),
+                  fieldOf(rejects[i], FIX::FIELD::CxlRejResponseTo));
+        EXPECT_EQ(std::to_string(FIX::CxlRejReason_DUPLICATE_CL_ORD_ID), fieldOf(rejects[i], FIX::FIELD::CxlRejReason));
+        EXPECT_EQ("Replace refused: ClOrdID " + inUse[i] + " is already in use", fieldOf(rejects[i], FIX::FIELD::Text));
+        EXPECT_EQ("ORD-X", fieldOf(rejects[i], FIX::FIELD::OrigClOrdID));
+        EXPECT_EQ(std::to_string(x->orderId_.id_), fieldOf(rejects[i], FIX::FIELD::OrderID));
+        EXPECT_EQ(std::string(1, FIX::OrdStatus_PARTIALLY_FILLED), fieldOf(rejects[i], FIX::FIELD::OrdStatus));
+    }
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(2u, reports.size()) << sentText();
+    expectStatus(reports[0], FIX::OrdStatus_NEW, std::to_string(stored->orderId_.id_), 50, 0, 50);
+    EXPECT_EQ("(not set)", fieldOf(reports[0], FIX::FIELD::OrigClOrdID));
+    expectStatus(reports[1], FIX::OrdStatus_PENDING_NEW, "NONE", 70, 0, 70);
+    EXPECT_EQ(PARTFILL_ORDSTATUS, x->status_);
+    expectEverythingSentIsTaken();
+}
+
 } // anonymous namespace
 
 #endif // BUILD_FIX

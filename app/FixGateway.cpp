@@ -317,10 +317,8 @@ template <typename Event>
 void FixGateway::pushUnanswered(const std::string &source, const std::string &key, Unanswered record, const Event &evnt)
 {
     // Before the push, so that the engine's answer, which comes after it, always finds the key: the queue's push and
-    // pop order the insert before the report that reads unansweredCount_. A key already there is that of an order or
-    // replacement still on its way, whose ClOrdID a replacement repeats, and the first one's record stays: the engine
-    // refuses as a duplicate whichever of the two its event workers save second (#403). A new order that repeats one is
-    // answered before it gets here (#382).
+    // pop order the insert before the report that reads unansweredCount_. The key is never there already: a new order
+    // or a replace whose ClOrdID the session uses, stored or on its way, is answered before it gets here (#382, #403).
     {
         std::lock_guard<std::mutex> lock(answersLock_);
         unanswered_.try_emplace(key, std::move(record));
@@ -1238,11 +1236,13 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
         origStatus = fromOrdStatus(existing->status_);
     }
 
-    // A request the gateway refuses itself gets an OrderCancelReject (102=99) that says why, quoting its ClOrdIDs
-    auto refuse = [&](const std::string &reason)
+    // A request the gateway refuses itself gets an OrderCancelReject (102=99) that says why, quoting its ClOrdIDs; one
+    // whose ClOrdID is in use, 102=6, as the engine's refusal of it does (#403)
+    auto refuse = [&](const std::string &reason, bool duplicate = false)
     {
         Queues::OrderRejectEvent refusal;
         refusal.replacement_ = true;
+        refusal.duplicateClOrderId_ = duplicate;
         refusal.clOrderId_ = clOrdId.getString();
         refusal.origClOrderId_ = origClOrdStr;
         refusal.refusal_ = Queues::CancelRejectEvent::OTHER;
@@ -1361,6 +1361,16 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
     replacement->orderId_ = IdT();
     replacement->origClOrderId_ = replacement->clOrderId_;
     const std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
+    // A ClOrdID the session already uses, for an order stored or still on its way, is refused here, as the engine
+    // refuses it (#67) and the gateway a new order's (#382). Left to the engine, the replacement held the key in the
+    // record until then: a status request for it was answered with the replace's original, and of two on their way
+    // with the key, the later could be stored and the earlier refused (#403).
+    std::optional<Unanswered> pending;
+    if ((nullptr != locateSentOrder(clOrdStr, &pending)) || pending)
+    {
+        refuse("Replace refused: ClOrdID " + clOrdId.getString() + " is already in use", true);
+        return;
+    }
     // In the replacement's own record, as WsSession's replace does (#192)
     replacement->clOrderId_ = WideDataStorage::instance()->addUnsaved(
         new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size())));

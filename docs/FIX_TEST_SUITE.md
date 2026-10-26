@@ -81,6 +81,7 @@ Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBo
 | `ReplaceOfARefusedReplacement_IsAnsweredAsUnknownOnceRefused` | Replace (Y,X) of a filled order is refused, and Replace (Z,Y), sent at once, waits for that refusal, not for the timeout, and never reaches the engine; EP284's D.2.c would decide it against X (#398) |
 | `StatusRequests_FollowAnOrderThroughItsLife` | EP284's G.1.c through the engine: a status request (35=H) is answered 150=I with Pending New (39=A) while the engine's input holds the order, then New, then Partially Filled, with the order's quantities; after Replace (Y,X), one for X is answered with Y's state, ClOrdID Y and OrigClOrdID X, and one for Y with Y's (#383) |
 | `DuplicateClOrdId_IsRefusedBeforeTheEngine` | EP284's F.1.a through the engine: a new order that repeats the ClOrdID of a partly filled order is refused by the gateway and never handed on (the engine's input, held, holds nothing, and the engine refuses nothing), and a status request meanwhile is answered with the partly filled order's state, 39=1 with 100/40/60; it was Pending New until the engine refused the repeat (#382) |
+| `ReplaceWithTheClOrdIdOfAnOrderOnItsWay_IsRefusedBeforeTheEngine` | Replace (K,X) while a new order K is held in the engine's input → the gateway refuses the replace and never hands it on (the input holds the new order alone); K is stored, X untouched, and the engine refuses nothing, where with two event processors the replacement could have been stored and K refused (#403) |
 
 ---
 
@@ -201,7 +202,7 @@ Pure unit tests for the messages that answer a new order or a replacement the en
 | `TheSenderSeesItsOwnClOrdIdsInAnOrderReject` | The engine's event names ClOrdIDs under the session's key → the client gets its own, in 11, 41 and Text (58) (#71) |
 | `AnOrderRejectsExecIdIsTheIdItIsGiven` | The ExecID comes from the shared id generator, so it doesn't repeat after a restart (#81) |
 | `OrderRefusedForAnotherReasonUsesTheBrokerOptionCode` | Refused for another reason → OrdRejReason 0 |
-| `DuplicateReplacementGetsAnOrderCancelReject` | A replacement whose ClOrdID is in use → 35=9, 434=2, 102=6, and the order it was to replace |
+| `DuplicateReplacementGetsAnOrderCancelReject` | A replacement whose ClOrdID is in use → 35=9, 434=2, 102=6, and the order it was to replace. Since #403 the gateway sends this itself for a session's replace, before the engine sees it (`AReplaceWhoseClOrdIdIsInUseIsRefusedBeforeTheEngine`) |
 | `RefusedReplaceSaysWhyAsARefusedCancelDoes` | The engine's reason maps to CxlRejReason as for a cancel; a ClOrdID in use still says 6 (#74) |
 | `ReplaceOfAnUnknownOrderIsRejectedAsUnknown` | The gateway's own answer to an unknown OrigClOrdID → 102=1, OrderID NONE, 39=8, and the request's ClOrdIDs (#74) |
 | `AnOrderTheGatewayRefusesGetsAnExecutionReportRejectQuotingItsQuantityAsSent` | An order the gateway refuses before the engine sees it → 150=8, 39=8, OrderID NONE, its OrderQty (38) as the client sent it, OrdRejReason 13 (incorrect quantity) and why in Text (58) (#145) |
@@ -440,6 +441,7 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `ANewOrderSentAgainWithPossResendIsAnsweredWithItsState` | EP284's F.1.b: X sent again with PossResend (97) Y is answered with X's state, 150=I, as a status request is (row 4); X without PossResend, or with it N, is refused as a duplicate with X's status (row 6); Y with PossResend Y, which the session hasn't sent, is a new order and reaches the engine (rows 7 and 8) (#382) |
 | `ANewOrderThatRepeatsTheClOrdIdOfAReplacedOrderIsRefusedWithThatOrdersState` | A new order with the ClOrdID of X, which Y replaced, is refused with X's own status, not Y's: Pending Replace (39=E) with what X had left until the replacement's acknowledgement is out, then 39=4 with LeavesQty 0; with PossResend Y it is answered as a status request for X is, with Y's state, ClOrdID Y and OrigClOrdID X (#382) |
 | `TheEnginesRefusalOfADuplicateCarriesTheStateOfTheOrderThatHasItsClOrdId` | The engine's refusal of a duplicate (#67), which a session's orders no longer reach, carries the state of the order that has the ClOrdID, read from the store alone, as F.1.a combines them (#382) |
+| `AReplaceWhoseClOrdIdIsInUseIsRefusedBeforeTheEngine` | Replace (Y,X) with a Y the session uses, for a stored order, one on its way, or X's own → 35=9, 434=2, 102=6, Text, OrderID and status of X, never pushed; a status request for Y is then answered with the order that has it, New or Pending New, not with X Pending Replace (#403) |
 
 ---
 
