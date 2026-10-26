@@ -492,6 +492,7 @@ TEST_F(StateMachineTest, New_To_DoneForDay_OnFinished)
 
     OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
+    ord->leavesQty_ = ord->orderQty_; // as the gateways make an order
 
     // Apply finish for day
     onFinished finish;
@@ -502,6 +503,21 @@ TEST_F(StateMachineTest, New_To_DoneForDay_OnFinished)
 
     p.processEvent(finish);
     p.checkStates("DoneForDay", "NoCnlReplace");
+    // Done for the day, it trades no more, so its LeavesQty is 0, as a closed order's is (#386)
+    EXPECT_EQ(0u, ord->leavesQty_);
+    trCntxt.clear();
+
+    // A new day books it again with what it hasn't filled: all of it, so it is New, not PartFill
+    onNewDay newDay;
+    newDay.orderId_ = ord->orderId_;
+    newDay.generator_ = IdTGenerator::instance();
+    newDay.transaction_ = &trCntxt;
+    newDay.orderStorage_ = OrderStorage::instance();
+
+    p.processEvent(newDay);
+    p.checkStates("New", "NoCnlReplace");
+    EXPECT_EQ(77u, ord->leavesQty_);
+    EXPECT_TRUE(trCntxt.isOperationEnqueued(ADD_ORDERBOOK_TROPERATION));
 }
 
 // =============================================================================

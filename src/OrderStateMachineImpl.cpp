@@ -113,6 +113,13 @@ bool alreadyStored(const OrderEntry *order, const OrderEntry *received, OrderDat
     return true;
 }
 
+/// What an order done for the day, or suspended, has left to trade when it trades again: what it hasn't filled. Done
+/// for the day, it has no leaves (#386), and a suspended one keeps them, so they are worked out again for both.
+QuantityT leavesToRestore(const OrderEntry &order)
+{
+    return (order.orderQty_ > order.cumQty_) ? (order.orderQty_ - order.cumQty_) : 0;
+}
+
 } // namespace
 
 void OrderStatePersistence::serialize(std::string &msg) const
@@ -384,6 +391,8 @@ void OrdStateImpl::processExpire(OrderEntry *orderData, OrdState::onRplOrderExpi
     {
         throw std::runtime_error("Unable to locate original order for OrderReplaceExpire!");
     }
+    // An expired replacement has nothing left to fill: a closed order's LeavesQty is 0, whatever closed it (#386)
+    orderData->leavesQty_ = 0;
 
     // read lock on original order during field access
     oneapi::tbb::spin_rw_mutex::scoped_lock origLock(origOrder->entryMutex_, false);
@@ -520,6 +529,11 @@ void OrdStateImpl::processExpire(OrderEntry *orderData, OrdState::onExpired cons
     {
         addUnbooking(*orderData, evnt.transaction_);
     }
+    // Nothing is left to fill. A closed order's LeavesQty is 0, whatever closed it: the engine, as here, or its client
+    // (#386). Set at once, as a cancel sets it (#73): the removal above runs in a transaction of its own, after any
+    // match enqueued before it, and the matcher passes by an order with no leaves. With its leaves, the expired order
+    // was taken by such a match, whose trade the state machine dropped: the matching order traded with nothing.
+    orderData->leavesQty_ = 0;
 }
 
 void OrdStateImpl::processFinished(OrderEntry *orderData, OrdState::onFinished const &evnt)
@@ -529,21 +543,26 @@ void OrdStateImpl::processFinished(OrderEntry *orderData, OrdState::onFinished c
     {
         addUnbooking(*orderData, evnt.transaction_);
     }
+    // Done for the day, the order trades no more, so its LeavesQty is 0, as a closed order's is (#386). A new day or a
+    // resume gives it back what it hasn't filled (leavesToRestore()).
+    orderData->leavesQty_ = 0;
 }
 
+// Whether it has filled nothing, not whether its leaves are its quantity: done for the day, it has none (#386)
 bool OrdStateImpl::processNotExecuted(OrderEntry *orderData, OrdState::onNewDay const &)
 {
     assert(nullptr != orderData);
-    return orderData->leavesQty_ == orderData->orderQty_;
+    return 0 == orderData->cumQty_;
 }
 bool OrdStateImpl::processNotExecuted(OrderEntry *orderData, OrdState::onContinue const &)
 {
     assert(nullptr != orderData);
-    return orderData->leavesQty_ == orderData->orderQty_;
+    return 0 == orderData->cumQty_;
 }
 void OrdStateImpl::processRestored(OrderEntry *orderData, OrdState::onNewDay const &evnt)
 {
     assert(nullptr != orderData);
+    orderData->leavesQty_ = leavesToRestore(*orderData);
     if (0 < orderData->leavesQty_)
     {
         // Only a resting order is done for the day, never one matched as a market order
@@ -566,6 +585,7 @@ void OrdStateImpl::processContinued(OrderEntry *orderData, OrdState::onContinue 
 {
     assert(nullptr != orderData);
 
+    orderData->leavesQty_ = leavesToRestore(*orderData);
     if (0 < orderData->leavesQty_)
     {
         addBooking(orderData, evnt.transaction_);
@@ -595,6 +615,9 @@ void OrdStateImpl::processCanceled(OrderEntry *orderData, OrdState::onInternalCa
     {
         addUnbooking(*orderData, evnt.transaction_);
     }
+    // What an IOC, FOK or market order couldn't trade at once is canceled, not left: its LeavesQty is 0, as after its
+    // client's cancel (#386)
+    orderData->leavesQty_ = 0;
 }
 
 void OrdStateImpl::processReplaced(OrderEntry *orderData, OrdState::onExecReplace const &evnt)
