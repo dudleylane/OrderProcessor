@@ -1748,6 +1748,74 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_AStopsReleaseIsTriggeredAndNew)
     EXPECT_FALSE(report.isSetField(FIX::FIELD::LastQty));
 }
 
+/// WorkingIndicator (636) of the report the gateway builds for exec on order, or "(not set)"
+std::string workingIndicatorOf(const ExecutionEntry &exec, const OrderEntry &order)
+{
+    const FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&exec, order);
+    return report.isSetField(FIX::FIELD::WorkingIndicator) ? report.getField(FIX::FIELD::WorkingIndicator)
+                                                           : std::string("(not set)");
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_WorkingIndicatorSaysWhetherANewOrderIsInTheBook)
+{
+    // EP284's E.1.f (#387): a New order held off the book, a stop or stop limit whose stop hasn't been reached, is
+    // acknowledged with WorkingIndicator (636) N, and so restated at a business day's start; its release (150=L) says Y.
+    // A New order booked at once says Y, which E.1.f's state diagram takes as it takes no 636. A report of any other
+    // status has none.
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    const auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    const auto restated = makeReport<ExecutionEntry>(RESTATED_EXECTYPE, NEW_ORDSTATUS);
+    const auto release = makeReport<ExecutionEntry>(TRIGGERED_EXECTYPE, NEW_ORDSTATUS);
+    order->ordType_ = LIMIT_ORDERTYPE;
+    EXPECT_EQ("Y", workingIndicatorOf(ack, *order));
+    order->ordType_ = MARKET_ORDERTYPE;
+    EXPECT_EQ("Y", workingIndicatorOf(ack, *order));
+    for (const OrderType held : { STOP_ORDERTYPE, STOPLIMIT_ORDERTYPE })
+    {
+        SCOPED_TRACE(held);
+        order->ordType_ = held;
+        order->stopTriggered_ = false;
+        EXPECT_EQ("N", workingIndicatorOf(ack, *order));
+        EXPECT_EQ("N", workingIndicatorOf(restated, *order));
+        order->stopTriggered_ = true; // as its release leaves it
+        EXPECT_EQ("Y", workingIndicatorOf(release, *order));
+        EXPECT_EQ("Y", workingIndicatorOf(restated, *order));
+    }
+    order->stopTriggered_ = false;
+    order->ordType_ = STOP_ORDERTYPE;
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+    trade.lastQty_ = 40;
+    trade.lastPx_ = 10.5;
+    EXPECT_EQ("(not set)", workingIndicatorOf(trade, *order));
+    auto reject = makeReport<RejectExecEntry>(REJECT_EXECTYPE, REJECTED_ORDSTATUS);
+    reject.rejectReason_ = "There is no market for this instrument!";
+    EXPECT_EQ("(not set)", workingIndicatorOf(reject, *order));
+    EXPECT_EQ("(not set)", workingIndicatorOf(makeReport<ExecutionEntry>(CANCEL_EXECTYPE, CANCELED_ORDSTATUS), *order));
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_AReplacementsWorkingIndicatorFollowsWhatItIs)
+{
+    // A replace is acknowledged with the replacement's report (150=5), New if nothing has filled, which says whether the
+    // replacement is in the book (#387). A held stop's replacement that is a stop order too is held (N); one that is a
+    // limit order is booked at once (Y); a released stop's replacement that is a stop order stays released (Y), as
+    // Processor::process(onReplace) carries stopTriggered_ over to a stop replacement alone (#223).
+    auto replacement = createCorrectOrder(instrumentId1_);
+    assignClOrderId(replacement.get());
+    auto ack = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, NEW_ORDSTATUS);
+    ack.origOrderId_ = IdT(6, 1);
+    replacement->ordType_ = STOP_ORDERTYPE;
+    replacement->stopTriggered_ = false;
+    EXPECT_EQ("N", workingIndicatorOf(ack, *replacement));
+    replacement->ordType_ = LIMIT_ORDERTYPE; // a held stop replaced by a limit order: never released, so not held
+    EXPECT_EQ("Y", workingIndicatorOf(ack, *replacement));
+    replacement->ordType_ = STOPLIMIT_ORDERTYPE;
+    replacement->stopTriggered_ = true;
+    EXPECT_EQ("Y", workingIndicatorOf(ack, *replacement));
+    auto partFilled = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, PARTFILL_ORDSTATUS);
+    EXPECT_EQ("(not set)", workingIndicatorOf(partFilled, *replacement));
+}
+
 TEST_F(FixGatewayInboundTest, ExecutionReport_AGtdOrdersReportCarriesItsExpireTime)
 {
     // ExpireTime (126), to the millisecond, on a GTD order's reports, and on no other's (#240)
@@ -3912,6 +3980,64 @@ TEST_F(FixtSessionTest, ARefusedReplacementsClOrdIdNamesWhatItWasLastSentFor)
     EXPECT_EQ("ORD-Y1", fieldOf(rejects[1], FIX::FIELD::OrigClOrdID));
     EXPECT_EQ("ORD-Y2", fieldOf(rejects[3], FIX::FIELD::OrigClOrdID));
     ASSERT_EQ(2u, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText(); // the new orders' refusals
+    expectEverythingSentIsTaken();
+}
+
+// =============================================================================
+// WorkingIndicator (636), as EP284's E.1.f sends it (#387)
+// =============================================================================
+
+TEST_F(FixtSessionTest, AHeldStopSaysItIsNotWorkingUntilItsRelease)
+{
+    // A stop order held off the book is acknowledged with WorkingIndicator N, and its release (150=L) says Y. What else
+    // describes the order while it is New says the same: a status answer, and the refusal of a new order that repeats
+    // its ClOrdID (#382), which carries its state. A limit order, in the book at once, says Y, and an order that has
+    // traded has no 636. A counterparty that validates takes each.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    OrderEntry *stop = saveOrderOf(sid_, "STOP-1");
+    stop->ordType_ = STOP_ORDERTYPE;
+    stop->stopPx_ = 10.5;
+    setState(stop, NEW_ORDSTATUS, 100, 0, 100);
+    const std::string stopId = std::to_string(stop->orderId_.id_);
+    const auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    gateway_->sendExecutionReport(&ack, *stop);
+    receive(makeStatusRequest("STOP-1"));
+    receive(makeNewOrderSingle("STOP-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    stop->stopTriggered_ = true; // as its release leaves it
+    const auto release = makeReport<ExecutionEntry>(TRIGGERED_EXECTYPE, NEW_ORDSTATUS);
+    gateway_->sendExecutionReport(&release, *stop);
+    receive(makeStatusRequest("STOP-1"));
+    OrderEntry *limit = saveOrderOf(sid_, "LMT-1");
+    setState(limit, NEW_ORDSTATUS, 100, 0, 100);
+    gateway_->sendExecutionReport(&ack, *limit);
+    receive(makeStatusRequest("LMT-1"));
+    setState(limit, PARTFILL_ORDSTATUS, 100, 40, 60);
+    receive(makeStatusRequest("LMT-1"));
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(8u, reports.size()) << sentText();
+    // The held stop: its acknowledgement, a status answer and a duplicate's refusal
+    EXPECT_EQ(std::string(1, FIX::ExecType_NEW), fieldOf(reports[0], FIX::FIELD::ExecType));
+    EXPECT_EQ("N", fieldOf(reports[0], FIX::FIELD::WorkingIndicator));
+    expectStatus(reports[1], FIX::OrdStatus_NEW, stopId, 100, 0, 100);
+    EXPECT_EQ("N", fieldOf(reports[1], FIX::FIELD::WorkingIndicator));
+    expectDuplicateReject(reports[2], "STOP-1", FIX::OrdStatus_NEW, stopId, 100, 0, 100);
+    EXPECT_EQ("N", fieldOf(reports[2], FIX::FIELD::WorkingIndicator));
+    // Its release, and a status answer after it
+    EXPECT_EQ(std::string(1, FIX::ExecType_TRIGGERED_OR_ACTIVATED_BY_SYSTEM),
+              fieldOf(reports[3], FIX::FIELD::ExecType));
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_NEW), fieldOf(reports[3], FIX::FIELD::OrdStatus));
+    EXPECT_EQ("Y", fieldOf(reports[3], FIX::FIELD::WorkingIndicator));
+    expectStatus(reports[4], FIX::OrdStatus_NEW, stopId, 100, 0, 100);
+    EXPECT_EQ("Y", fieldOf(reports[4], FIX::FIELD::WorkingIndicator));
+    // The limit order: its acknowledgement, a status answer, and one once it has traded
+    EXPECT_EQ(std::string(1, FIX::ExecType_NEW), fieldOf(reports[5], FIX::FIELD::ExecType));
+    EXPECT_EQ("Y", fieldOf(reports[5], FIX::FIELD::WorkingIndicator));
+    expectStatus(reports[6], FIX::OrdStatus_NEW, std::to_string(limit->orderId_.id_), 100, 0, 100);
+    EXPECT_EQ("Y", fieldOf(reports[6], FIX::FIELD::WorkingIndicator));
+    expectStatus(reports[7], FIX::OrdStatus_PARTIALLY_FILLED, std::to_string(limit->orderId_.id_), 100, 40, 60);
+    EXPECT_EQ("(not set)", fieldOf(reports[7], FIX::FIELD::WorkingIndicator));
     expectEverythingSentIsTaken();
 }
 

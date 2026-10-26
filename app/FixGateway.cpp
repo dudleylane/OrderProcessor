@@ -86,6 +86,14 @@ std::optional<u64> toOrderNumber(const std::string &text)
     const auto [at, error] = std::from_chars(text.data(), end, number);
     return ((std::errc() == error) && (end == at)) ? std::optional<u64>(number) : std::nullopt;
 }
+/// WorkingIndicator (636) on a report of a New order (39=0), the state EP284's state diagram qualifies with it (#387):
+/// N while the order is held off the book, a stop or stop limit whose stop hasn't been reached, as E.1.f acknowledges
+/// one, and Y once it is in the book, as E.1.f reports the release. E.1.f sends no 636 for an order booked at once, and
+/// the diagram takes Y and none alike there ("Yes (or unspecified)"): Y says so.
+void setWorkingIndicator(FIX50SP2::ExecutionReport &report, bool held)
+{
+    report.set(FIX::WorkingIndicator(!held));
+}
 /// What a status answer reports of a stored order (#383): the fields a transaction worker changes, read together under
 /// the order's lock. Its ClOrdIDs and instrument never change once it is stored.
 struct OrderSeen
@@ -102,13 +110,14 @@ struct OrderSeen
     PriceT avgPx = 0;
     PriceT dayAvgPx = 0;
     DateTimeT expireTime = 0;
+    bool held = false; // held off the book, its stop not reached (#387): its release changes it
 };
 OrderSeen seenOf(const OrderEntry &order)
 {
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(order.entryMutex_, false);
-    return OrderSeen{ order.orderId_.id_, order.status_, order.side_,      order.tif_,
-                      order.orderQty_,    order.cumQty_, order.leavesQty_, order.dayOrderQty_,
-                      order.dayCumQty_,   order.avgPx_,  order.dayAvgPx_,  order.expireTime_ };
+    return OrderSeen{ order.orderId_.id_, order.status_,     order.side_,        order.tif_,       order.orderQty_,
+                      order.cumQty_,      order.leavesQty_,  order.dayOrderQty_, order.dayCumQty_, order.avgPx_,
+                      order.dayAvgPx_,    order.expireTime_, order.heldStop() };
 }
 /// What an order had left to trade when a replace of it is pending (#383): a replace zeroes the original's LeavesQty
 /// once the engine decides it, before the replacement is acknowledged
@@ -158,6 +167,10 @@ FIX50SP2::ExecutionReport storedOrderStatusReport(const OrderEntry &order, const
     if ((GTD_TIF == seen.tif) && (0 != seen.expireTime))
     {
         report.set(FIX::ExpireTime(FixGateway::toUtcTimeStamp(seen.expireTime), 3));
+    }
+    if (FIX::OrdStatus_NEW == ordStatus)
+    {
+        setWorkingIndicator(report, seen.held); // as the order's own reports carry it (#387)
     }
     return report;
 }
@@ -1826,6 +1839,12 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
     // writes for the double: its conversion, to 15 significant digits, falls back to bignum arithmetic for these
     // values, about 2,900 instructions a field.
     report.setField(FIX::FIELD::OrderQty, std::to_string(order.orderQty_));
+    // Whether a New order is in the book (#387), read as the quantities are: the report is published by the transaction
+    // that changed the order, and a stop's release, which changes it, is a later transaction on the order
+    if (NEW_ORDSTATUS == exec->orderStatus_)
+    {
+        setWorkingIndicator(report, order.heldStop());
+    }
 
     // The client's own ClOrdIDs, without the session's key they are stored under (#71)
     const std::string source = sourceOf(order);

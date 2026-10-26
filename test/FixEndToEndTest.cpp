@@ -65,6 +65,7 @@ struct CapturedExecReport
     ExecType execType;
     OrderStatus orderStatus;
     std::string source;
+    std::string workingIndicator; // WorkingIndicator (636) of the report a session gets, or "(not set)" (#387)
 };
 
 class CapturingOutQueues : public Queues::OutQueues
@@ -72,12 +73,14 @@ class CapturingOutQueues : public Queues::OutQueues
 public:
     void push(const ExecReportEvent &evnt, const std::string &target) override
     {
+        const std::string workingIndicator = workingIndicatorOf(evnt);
         std::lock_guard<std::mutex> lock(mtx_);
         CapturedExecReport r;
         r.orderId = evnt.exec_->orderId_;
         r.execType = evnt.exec_->type_;
         r.orderStatus = evnt.exec_->orderStatus_;
         r.source = target;
+        r.workingIndicator = workingIndicator;
         reports_.push_back(r);
         totalEvents_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -129,6 +132,22 @@ public:
     }
 
 private:
+    /// WorkingIndicator (636) of the report a session gets for evnt, built as it goes out, from the order as the
+    /// transaction that publishes it leaves it, as FixOutQueues has the gateway build one for a session that is logged on
+    /// (#387). This pipeline's gateway has none, so builds nothing.
+    static std::string workingIndicatorOf(const ExecReportEvent &evnt)
+    {
+        const OrderEntry *order = OrderStorage::instance()->locateByOrderId(evnt.exec_->orderId_);
+        if ((nullptr == order) || !FixGateway::reportsOverFix(evnt.exec_))
+        {
+            return "(not sent)";
+        }
+        const FIX50SP2::ExecutionReport report =
+            FixGateway::buildExecutionReport(evnt.exec_, *order, evnt.requestClOrdId_);
+        return report.isSetField(FIX::FIELD::WorkingIndicator) ? report.getField(FIX::FIELD::WorkingIndicator)
+                                                               : std::string("(not set)");
+    }
+
     mutable std::mutex mtx_;
     std::deque<CapturedExecReport> reports_;
     std::deque<std::pair<CancelRejectEvent, std::string>> cancelRejects_;
@@ -1098,6 +1117,70 @@ TEST_F(FixEndToEndTest, ReplaceWithTheClOrdIdOfAnOrderOnItsWay_IsRefusedBeforeTh
     EXPECT_DOUBLE_EQ(1.0840, k->price_);
     EXPECT_EQ(50u, k->orderQty_);
     EXPECT_FALSE(k->origOrderId_.isValid()) << "the new order, not a replacement";
+}
+
+// =============================================================================
+// WorkingIndicator (636), as EP284's E.1.f sends it (#387)
+// =============================================================================
+
+TEST_F(FixEndToEndTest, StopOrder_IsNotWorkingUntilATradeReleasesIt)
+{
+    // A buy stop at 1.0850 is held off the book, and acknowledged with WorkingIndicator N; a trade at 1.0850 reaches
+    // it, and its release (150=L) says Y; it then buys at the market. The trade's buy is held back until the stop's
+    // acknowledgement is out, then let through, so that the release follows the acknowledgement at once: each report
+    // says what its order was when it went out, not what the order is by the time the test reads it.
+    gateway_->onMessage(makeNOS("WI-S", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
+    waitForProcessing();
+    auto stopMsg = makeNOS("WI-STOP", FIX::Side_BUY, FIX::OrdType_STOP, 0.0, 50);
+    stopMsg.removeField(FIX::FIELD::Price);
+    stopMsg.set(FIX::StopPx(1.0850));
+    gateway_->onMessage(stopMsg, fixSid_);
+    holdingInQueues_->hold();
+    gateway_->onMessage(makeNOS("WI-B", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 10), fixSid_);
+    bool acknowledged = false;
+    for (const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+         !acknowledged && (std::chrono::steady_clock::now() < deadline);)
+    {
+        const OrderEntry *stop = orderOf("WI-STOP");
+        acknowledged = (nullptr != stop) && !reportsOf(*stop).empty();
+        if (!acknowledged)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    holdingInQueues_->release();
+    waitForProcessing();
+    ASSERT_TRUE(acknowledged) << "the stop wasn't acknowledged";
+
+    OrderEntry *stop = orderOf("WI-STOP");
+    OrderEntry *sell = orderOf("WI-S");
+    OrderEntry *buy = orderOf("WI-B");
+    ASSERT_NE(nullptr, stop);
+    ASSERT_NE(nullptr, sell);
+    ASSERT_NE(nullptr, buy);
+    EXPECT_TRUE(stop->stopTriggered_);
+    EXPECT_EQ(FILLED_ORDSTATUS, stop->status_);
+    EXPECT_EQ(40u, sell->leavesQty_);
+    // Each order's reports, with the WorkingIndicator each went out with
+    auto reportsWithIndicator = [&](const OrderEntry &order)
+    {
+        std::vector<std::pair<ExecType, std::string>> found;
+        for (const auto &r : outQueues_->reports())
+        {
+            if (order.orderId_ == r.orderId)
+            {
+                found.emplace_back(r.execType, r.workingIndicator);
+            }
+        }
+        return found;
+    };
+    using Reports = std::vector<std::pair<ExecType, std::string>>;
+    EXPECT_EQ((Reports{ { NEW_EXECTYPE, "N" }, { TRIGGERED_EXECTYPE, "Y" }, { TRADE_EXECTYPE, "(not set)" } }),
+              reportsWithIndicator(*stop));
+    // Booked at once
+    EXPECT_EQ((Reports{ { NEW_EXECTYPE, "Y" }, { TRADE_EXECTYPE, "(not set)" } }), reportsWithIndicator(*buy));
+    EXPECT_EQ((Reports{ { NEW_EXECTYPE, "Y" }, { TRADE_EXECTYPE, "(not set)" }, { TRADE_EXECTYPE, "(not set)" } }),
+              reportsWithIndicator(*sell));
 }
 
 } // anonymous namespace
