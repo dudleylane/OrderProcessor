@@ -255,6 +255,26 @@ public:
         return true;
     }
 
+    /// Fails the benchmark unless the last order made ended as the timed path leaves its orders: one rejected, or left
+    /// working, would mean the benchmark timed some other path
+    bool lastEndedAs(benchmark::State &state, OrderStatus status, QuantityT cumQty)
+    {
+        OrderEntry *order = lastAccepted();
+        if (nullptr == order)
+        {
+            state.SkipWithError("engine did not store the warm-up order");
+            return false;
+        }
+        if ((status != order->status_) || (cumQty != order->cumQty_))
+        {
+            state.SkipWithError(("warm-up order status is " + std::to_string(static_cast<int>(order->status_)) +
+                                 " with " + std::to_string(order->cumQty_) + " filled")
+                                    .c_str());
+            return false;
+        }
+        return true;
+    }
+
     Processor &processor()
     {
         return *processor_;
@@ -388,6 +408,85 @@ static void BM_ProcessCancelOrder(benchmark::State &state)
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_ProcessCancelOrder);
+
+static void BM_ProcessIocRemainder(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // Where the timed path ends: an IOC that trades part of itself, and the engine cancels the rest
+    engine.submit(engine.newOrder(SELL_SIDE, 50.0, 40));
+    OrderEntry *warmUp = engine.newOrder(BUY_SIDE, 50.0, 100);
+    warmUp->tif_ = IOC_TIF;
+    engine.submit(warmUp);
+    if (!engine.lastEndedAs(state, CANCELED_ORDSTATUS, 40))
+    {
+        return;
+    }
+
+    // One resting sell for 40 per iteration, each a point above the last. Each IOC buys 100 at its own sell's price, so
+    // it trades with that sell alone, the cheapest left (the fixture's first order is a buy), and the engine cancels
+    // the 60 it couldn't trade at once (#426): a trade, its deferred execution events, and the cancel's.
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        engine.submit(engine.newOrder(SELL_SIDE, 100.0 + static_cast<PriceT>(i), 40));
+    }
+
+    std::vector<OrderEntry *> aggressors;
+    aggressors.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        OrderEntry *ioc = engine.newOrder(BUY_SIDE, 100.0 + static_cast<PriceT>(i), 100);
+        ioc->tif_ = IOC_TIF;
+        aggressors.push_back(ioc);
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessIocRemainder);
+
+static void BM_ProcessExpiry(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // Where the timed path ends: the warm-up order, a resting DAY order, expired at its day's end
+    engine.inQueues().push("bench", TimerEvent(engine.lastAccepted()->orderId_, TimerEvent::DAY_END));
+    engine.processor().process();
+    if (!engine.lastEndedAs(state, EXPIRED_ORDSTATUS, 0))
+    {
+        return;
+    }
+
+    // One resting DAY order per iteration, each expired by the DAY_END timer ExpiryScheduler sets a DAY order (#426).
+    // The event enqueues a transaction, which runs inline: it decides the expiry, takes the order off the book and
+    // reports it.
+    std::vector<IdT> resting;
+    resting.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        resting.push_back(engine.submit(engine.newOrder(BUY_SIDE, 100.0, 100)));
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", TimerEvent(resting[next++], TimerEvent::DAY_END));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessExpiry);
 
 // =============================================================================
 // End-to-end throughput through TaskManager's worker pool
