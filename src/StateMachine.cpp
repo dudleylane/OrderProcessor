@@ -225,6 +225,18 @@ bool OrderState_::hasFills(onReplace const &evnt)
     return 0 < orderData_->cumQty_;
 }
 
+/// A replacement with fills and nothing left to trade, which Processor::process(onReplace) amended to what its original
+/// had filled (#381). Test mode has one answer to give, and hasFills gives it, so it never takes this row.
+bool OrderState_::isFilled(onReplace const &evnt)
+{
+    if (evnt.testStateMachine_)
+    {
+        return false;
+    }
+    assert(nullptr != orderData_);
+    return (0 < orderData_->cumQty_) && (0 == orderData_->leavesQty_);
+}
+
 bool OrderState_::notexecuted(onTradeExecution const &evnt)
 {
     if (evnt.testStateMachine_)

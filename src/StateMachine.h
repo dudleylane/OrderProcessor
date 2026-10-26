@@ -67,6 +67,7 @@ public:
 
     void accept(onReplace const &);
     bool hasFills(onReplace const &);
+    bool isFilled(onReplace const &);
 
     void fill(onTradeExecution const &);
     bool notexecuted(onTradeExecution const &);
@@ -103,7 +104,7 @@ public:
     // ToDo: add execCorrect, when qty not changed Fill->Fill for example
     // ToDo: add administrative switch to any state
     // clang-format off
-	struct transition_table : mpl::vector47<
+	struct transition_table : mpl::vector48<
 		//    Start                Event           Next           Action				Guard
 		//	  +-------------+------------------+-------------+------------+----------------------+
 		// create OrderEntry from received event and generate id
@@ -125,6 +126,9 @@ public:
 		a_row< Rcvd_New,	 onReplace,			New,		  &os::accept						 >,
 		/// should be after Rcvd_New->New to switch state depend on hasFills: the original's fills carry over
 		row  < Rcvd_New,	 onReplace,			PartFill,	  &os::accept, &os::hasFills		 >,
+		/// after Rcvd_New->PartFill, so that it is tried first: a replacement amended to what its original has filled
+		/// has nothing left to trade (#381), and accept books nothing for it
+		row  < Rcvd_New,	 onReplace,			Filled,		  &os::accept, &os::isFilled		 >,
 
 		// apply onExecReplace to the original order and add to OrderBook
 		// Create ExecReport New

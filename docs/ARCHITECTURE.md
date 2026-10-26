@@ -26,7 +26,7 @@
 OrderProcessor is a high-performance, concurrent order processing library written in C++23. It provides:
 
 - **ACID-compliant** transaction processing
-- **State machine-based** order lifecycle management (<!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> states, <!-- DOC_CHECK:transition_count -->47<!-- /DOC_CHECK --> transitions)
+- **State machine-based** order lifecycle management (<!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> states, <!-- DOC_CHECK:transition_count -->48<!-- /DOC_CHECK --> transitions)
 - **Order matching** against an in-memory order book with price-time priority
 - **Lock-free** and fine-grained locking for maximum throughput
 - **File-based persistence** with versioned records
@@ -655,9 +655,11 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │     with, before taking the original's lock (a matcher can hold the      │
 │     book's lock while it waits on an order)                              │
 │   • Lock the original. Not NEW/PARTFILL, or a cancel/replace pending,    │
-│     or the replacement changes instrument or side, or its quantity is    │
-│     not above the original's cumQty, or it is invalid, or it is a        │
-│     market order with nothing to trade with → refuse                     │
+│     or the replacement changes instrument or side, or it is invalid,     │
+│     or it is a market order with something left and nothing to trade     │
+│     with → refuse                                                        │
+│   • A quantity at or below the original's cumQty is amended to it, with  │
+│     nothing left: the rest of the order is canceled, as FIX does (#381)  │
 │   • Replacement takes the original's cumQty, avgPx and executions;       │
 │     stored under a fresh id (a ClOrdID in use → refuse, #67), and        │
 │     marked until the transaction below, which books it, is enqueued      │
@@ -665,7 +667,8 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │   • Original:    onExecReplace: NO_CNL_REPLACE → CNCL_REPLACED,          │
 │                  RemoveFromOrderBook, leavesQty = 0, REPLACE report      │
 │   • Replacement: onReplace: RCVD_NEW → NEW (PARTFILL with fills),        │
-│                  MatchOrder, AddToOrderBook, REPLACE report              │
+│                  MatchOrder, AddToOrderBook, REPLACE report; one with    │
+│                  nothing left → FILLED, REPLACE report only (#381)       │
 │   • A held stop's replacement is held at its own stop; a released        │
 │     one's stays released if it is still a stop order (#223), and a       │
 │     new stopPx for it is refused (#238)                                  │

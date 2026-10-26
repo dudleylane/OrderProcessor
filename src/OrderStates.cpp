@@ -386,6 +386,21 @@ template <class FSM> void Filled::on_entry(onTradeExecution const &evnt, FSM &)
     evnt.transaction_->addOperation(op);
 }
 
+/// A replacement amended to what its original had filled (#381): filled from the start
+template <class FSM> void Filled::on_entry(onReplace const &evnt, FSM &)
+{
+    if (evnt.testStateMachine_)
+    {
+        return;
+    }
+    assert(nullptr != evnt.order4StateMachine_);
+    evnt.order4StateMachine_->status_ = FILLED_ORDSTATUS;
+
+    std::unique_ptr<Operation> op(
+        new CreateReplaceExecReportTrOperation(evnt.origOrderId_, COP::FILLED_ORDSTATUS, *evnt.order4StateMachine_));
+    evnt.transaction_->addOperation(op);
+}
+
 template <class FSM> void Suspended::on_entry(onTradeCrctCncl const &evnt, FSM &)
 {
     if (evnt.testStateMachine_)
@@ -529,6 +544,7 @@ template void PartFill::on_entry<OrderState>(onReplace const &, OrderState &);
 
 // Filled state on_entry instantiations
 template void Filled::on_entry<OrderState>(onTradeExecution const &, OrderState &);
+template void Filled::on_entry<OrderState>(onReplace const &, OrderState &);
 
 // GoingCancel state on_entry instantiations
 template void GoingCancel::on_entry<OrderState>(onCancelReceived const &, OrderState &);

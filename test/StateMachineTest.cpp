@@ -705,6 +705,35 @@ TEST_F(StateMachineTest, RcvdNew_To_PartFill_OnReplaceOfAnOrderWithFills)
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REPLACE_EXECREPORT_TROPERATION));
 }
 
+TEST_F(StateMachineTest, RcvdNew_To_Filled_OnReplaceOfAnOrderWithNothingLeft)
+{
+    // A replacement amended to what its original filled is filled from the start, and goes neither to the matcher nor
+    // into a book (#381)
+    TestTransactionContext trCntxt;
+    OrderStateWrapper p;
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+    OrderEntry *stored = OrderStorage::instance()->save(*order, IdTGenerator::instance());
+    stored->cumQty_ = stored->orderQty_;
+    stored->leavesQty_ = 0;
+
+    p.start();
+    p.setOrderData(stored);
+    onReplace accept;
+    accept.origOrderId_ = IdT(1, 1790000000);
+    accept.generator_ = IdTGenerator::instance();
+    accept.transaction_ = &trCntxt;
+    accept.orderStorage_ = OrderStorage::instance();
+
+    p.processEvent(accept);
+    p.checkStates("Filled", "NoCnlReplace");
+    EXPECT_EQ(FILLED_ORDSTATUS, stored->status_);
+    EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REPLACE_EXECREPORT_TROPERATION));
+    EXPECT_FALSE(trCntxt.isOperationEnqueued(MATCH_ORDER_TROPERATION));
+    EXPECT_FALSE(trCntxt.isOperationEnqueued(ADD_ORDERBOOK_TROPERATION));
+    EXPECT_FALSE(trCntxt.isOperationEnqueued(ADD_STOPBOOK_TROPERATION));
+}
+
 TEST_F(StateMachineTest, NoCnlReplace_To_CnclReplaced_OnExecReplace)
 {
     // The original of an accepted replace goes straight from NoCnlReplace to CnclReplaced (#74)
