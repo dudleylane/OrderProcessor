@@ -1927,7 +1927,7 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
     }
 
     // FX Swap leg: populate NoLegs group with leg-specific fields, set
-    // TradeLinkID so clients can correlate near+far reports for the same swap.
+    // TrdMatchID so clients can correlate near+far reports for the same swap.
     if (exec->execLegType_ != SINGLE_LEG)
     {
         FIX50SP2::ExecutionReport::NoLegs legGroup;
@@ -1965,10 +1965,12 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
 
         report.addGroup(legGroup);
 
-        // TradeLinkID (820): the same on a side's near and far reports, so a client pairs them (#199). It was
-        // "<orderId>-<transactTime>", and each report stamps its own time. FIX 5.0 SP2's ExecutionReport doesn't have
-        // it, as 4.4's didn't, so a client checking a swap's report against its dictionary refuses it (#378).
-        report.setField(820, std::to_string(exec->tradeLink_));
+        // TrdMatchID (880): the same on a side's near and far reports, so a client pairs them (#199). It was
+        // "<orderId>-<transactTime>", and each report stamps its own time. FIX defines 880 as the trade's id, which
+        // both sides would share; each side keeps its own here, as #199's link did, by the maintainer's ruling
+        // (2026-10-26). Until #378 it was TradeLinkID (820), which neither FIX 4.4's ExecutionReport nor 5.0 SP2's
+        // has, so a client checking a swap's report against its dictionary refused it.
+        report.set(FIX::TrdMatchID(std::to_string(exec->tradeLink_)));
     }
 
     return report;

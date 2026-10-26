@@ -1703,9 +1703,9 @@ TEST_F(ProcessorTest, ASuspendedOrderStaysOutOfTheBookAfterARestartAndIsBookedOn
 
 TEST_F(ProcessorTest, ASwapFillsTwoReportsOnEachSideShareTheirOwnLink)
 {
-    // A side's near and far reports carry one link, which FIX sends as TradeLinkID, so a client can pair them; each side
-    // has its own (#199). The gateway's TradeLinkID came from each report's own transact time, so a millisecond boundary
-    // between the two reports split the pair.
+    // A side's near and far reports carry one link, which FIX sends as TrdMatchID (TradeLinkID until #378), so a client
+    // can pair them; each side has its own (#199). The gateway's link came from each report's own transact time, so a
+    // millisecond boundary between the two reports split the pair.
     LegRecordingOutQueues outQueues;
     ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
                            &outQueues, inQueues_.get(), transMgr_.get());

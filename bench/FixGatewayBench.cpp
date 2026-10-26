@@ -500,7 +500,7 @@ static void BM_FixBuildExecutionReport(benchmark::State &state)
 }
 BENCHMARK(BM_FixBuildExecutionReport);
 
-/// The same for a swap's near leg, whose report also has a NoLegs group and TradeLinkID (820)
+/// The same for a swap's near leg, whose report also has a NoLegs group and TrdMatchID (880)
 static void BM_FixBuildSwapLegReport(benchmark::State &state)
 {
     FixBenchSetup setup;
