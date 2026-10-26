@@ -1202,7 +1202,10 @@ public:
         {
             return;
         }
-        reports_.push_back(Report{ evnt.exec_->orderId_, evnt.exec_->type_ });
+        // The order's LeavesQty as the report goes out, when the WebSocket and FIX gateways read it for the report
+        const OrderEntry *order = OrderStorage::instance()->locateByOrderId(evnt.exec_->orderId_);
+        reports_.push_back(
+            Report{ evnt.exec_->orderId_, evnt.exec_->type_, (nullptr != order) ? order->leavesQty_ : UNKNOWN_LEAVES });
         if (nullptr != log_)
         {
             log_->push_back(std::string("report ") + typeName(evnt.exec_->type_));
@@ -1260,6 +1263,23 @@ public:
         return result;
     }
 
+    /// The order's LeavesQty as its last report of the type went out (#386): UNKNOWN_LEAVES if none did, or if the
+    /// fixture's storage doesn't hold the order
+    QuantityT leavesReportedWith(const IdT &orderId, ExecType type) const
+    {
+        QuantityT leaves = UNKNOWN_LEAVES;
+        for (const Report &report : reports_)
+        {
+            if ((report.orderId_ == orderId) && (report.type_ == type))
+            {
+                leaves = report.leaves_;
+            }
+        }
+        return leaves;
+    }
+
+    static constexpr QuantityT UNKNOWN_LEAVES = std::numeric_limits<QuantityT>::max();
+
     static const char *typeName(ExecType type)
     {
         switch (type)
@@ -1283,6 +1303,7 @@ public:
     {
         IdT orderId_;
         ExecType type_;
+        QuantityT leaves_;
     };
 
     std::vector<Trade> trades_;
@@ -1507,6 +1528,43 @@ TEST_F(ProcessorTest, AMarketOrderThatFillsCompletelyIsReportedFilled)
         EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(market)->status_);
         EXPECT_EQ(PARTFILL_ORDSTATUS, restarted.storage_.locateByOrderId(sell)->status_);
         EXPECT_EQ(70u, restarted.storage_.locateByOrderId(sell)->leavesQty_);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AMarketOrdersRestTheEngineCanceledIsRestoredWithNoLeaves)
+{
+    // The engine cancels what a market order couldn't trade at once. A closed order's LeavesQty is 0, whatever closed
+    // it (#386), and its record says so: the rest, 20, was kept.
+    const std::string dir = test::uniqueTestPath("market-rest-canceled");
+    std::filesystem::remove_all(dir);
+    IdT market;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory engine(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 10);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        engine.process(clOrdId);
+        order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 30);
+        order->ordType_ = MARKET_ORDERTYPE;
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        const OrderEntry *bought = engine.process(clOrdId);
+        market = bought->orderId_;
+
+        EXPECT_EQ(CANCELED_ORDSTATUS, bought->status_);
+        EXPECT_EQ(10u, bought->cumQty_);
+        EXPECT_EQ(0u, bought->leavesQty_);
+    }
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        const OrderEntry *restored = restarted.storage_.locateByOrderId(market);
+        ASSERT_NE(nullptr, restored);
+        EXPECT_EQ(CANCELED_ORDSTATUS, restored->status_);
+        EXPECT_EQ(10u, restored->cumQty_);
+        EXPECT_EQ(0u, restored->leavesQty_);
     }
     std::filesystem::remove_all(dir);
 }
@@ -2426,6 +2484,9 @@ TEST_F(ProcessorTest, AnIocOrderTradesWhatItCanAtOnceAndTheRestIsCanceled)
     EXPECT_EQ(std::vector<std::string>{ "10@10" }, engine.reports_.tradesOf(ioc->orderId_));
     EXPECT_EQ(CANCELED_ORDSTATUS, ioc->status_);
     EXPECT_EQ(10u, ioc->cumQty_);
+    // Its rest was its LeavesQty, 20, where its client's cancel would have left 0: a closed order has none (#386)
+    EXPECT_EQ(0u, ioc->leavesQty_);
+    EXPECT_EQ(0u, engine.reports_.leavesReportedWith(ioc->orderId_, CANCEL_EXECTYPE));
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "an IOC order rests in the book";
 }
 
@@ -2438,6 +2499,7 @@ TEST_F(ProcessorTest, AnIocOrderWithNothingToTradeIsCanceledNotRejected)
 
     EXPECT_TRUE(engine.reports_.tradesOf(ioc->orderId_).empty());
     EXPECT_EQ(CANCELED_ORDSTATUS, ioc->status_);
+    EXPECT_EQ(0u, ioc->leavesQty_);
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
 }
 
@@ -2462,6 +2524,7 @@ TEST_F(ProcessorTest, AFokOrderTheBookCantFillIsCanceledWithNothingTraded)
 
     EXPECT_TRUE(engine.reports_.tradesOf(fok->orderId_).empty()) << "a FOK order traded part of itself";
     EXPECT_EQ(CANCELED_ORDSTATUS, fok->status_);
+    EXPECT_EQ(0u, fok->leavesQty_);
     EXPECT_EQ(10u, atTen->leavesQty_);
     EXPECT_EQ(20u, atTwelve->leavesQty_);
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
@@ -2510,6 +2573,8 @@ TEST_F(ProcessorTest, AReleasedIocStopLimitCancelsWhatItCantTradeAtItsLimit)
     EXPECT_TRUE(stop->stopTriggered_);
     EXPECT_EQ(std::vector<std::string>{ "15@10" }, engine.reports_.tradesOf(stop->orderId_));
     EXPECT_EQ(CANCELED_ORDSTATUS, stop->status_);
+    EXPECT_EQ(0u, stop->leavesQty_);
+    EXPECT_EQ(0u, engine.reports_.leavesReportedWith(stop->orderId_, CANCEL_EXECTYPE));
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "a released IOC stop limit rests";
 }
 
@@ -2527,6 +2592,7 @@ TEST_F(ProcessorTest, AReleasedFokStopTheBookCantFillIsCanceledWithNothingTraded
     EXPECT_TRUE(stop->stopTriggered_);
     EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty()) << "a released FOK stop traded part of itself";
     EXPECT_EQ(CANCELED_ORDSTATUS, stop->status_);
+    EXPECT_EQ(0u, stop->leavesQty_);
 }
 
 namespace
@@ -2565,6 +2631,78 @@ TEST_F(ProcessorTest, AGtdOrderExpiresAtItsTimeAndLeavesTheBook)
     engine.processQueued(1);
     EXPECT_EQ(EXPIRED_ORDSTATUS, gtd->status_);
     EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, EXPIRED_EXECTYPE }), engine.reports_.reportTypesOf(gtd->orderId_));
+    EXPECT_EQ(0u, gtd->leavesQty_);
+    EXPECT_EQ(0u, engine.reports_.leavesReportedWith(gtd->orderId_, EXPIRED_EXECTYPE));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+}
+
+TEST_F(ProcessorTest, AnOrderThatExpiresAfterAPartFillKeepsItAndHasNoLeaves)
+{
+    // An expiry closes the order as a cancel does, and a closed order's LeavesQty is 0, whatever closed it (#386). It
+    // was the 60 the order hadn't filled.
+    DateTimeT now = OCT15 + 9 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry);
+    OrderEntry *gtd = engine.submit(asGtd(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), now, now + HOUR));
+    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 40), IOC_TIF)); // no timer of its own
+    ASSERT_EQ(PARTFILL_ORDSTATUS, gtd->status_);
+    ASSERT_EQ(60u, gtd->leavesQty_);
+
+    now += HOUR;
+    ASSERT_EQ(1u, expiry.fireDue());
+    engine.processQueued(1);
+    EXPECT_EQ(EXPIRED_ORDSTATUS, gtd->status_);
+    EXPECT_EQ(40u, gtd->cumQty_);
+    EXPECT_EQ(0u, gtd->leavesQty_);
+    EXPECT_EQ(0u, engine.reports_.leavesReportedWith(gtd->orderId_, EXPIRED_EXECTYPE));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+}
+
+TEST_F(ProcessorTest, AMatchBetweenAnExpiryAndItsRemovalFromTheBookPassesTheExpiredOrderBy)
+{
+    // An expiry is decided in one transaction, and the order leaves the book in another, enqueued as the decision ends.
+    // A match enqueued in between runs first, with the expired order still in the book. The matcher passes by an order
+    // with no leaves, and an expired order has none (#386), as a canceled one has had since #73.
+    DateTimeT now = OCT15 + 9 * HOUR;
+    ExpiryScheduler expiry(inQueues_.get(),
+                           [&now]
+                           {
+                               return now;
+                           });
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry);
+    OrderEntry *gtd = engine.submit(asGtd(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100), now, now + HOUR));
+    auto sell = withTif(createTestOrder(instrId1_, SELL_SIDE, 10.5, 100), GTC_TIF);
+    sell->creationTime_ = now;
+    OrderEntry *gtc = engine.submit(std::move(sell));
+
+    // The GTD sell's expiry is decided, and the transaction that takes it out of the book is held back
+    now += HOUR;
+    ASSERT_EQ(1u, expiry.fireDue());
+    engine.processor_.process();
+    ASSERT_EQ(EXPIRED_ORDSTATUS, gtd->status_);
+    EXPECT_EQ(0u, gtd->leavesQty_);
+    ASSERT_EQ(gtd->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE)) << "out of the book only once the removal runs";
+
+    // A buy that crosses both sells arrives, and its match runs ahead of the removal
+    auto buy = createTestOrder(instrId1_, BUY_SIDE, 11.0, 100);
+    const RawDataEntry clOrdId = buy->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(buy.release()));
+    EXPECT_NO_THROW(engine.processor_.process());
+    engine.processQueued(0); // the removal, then the trade's reports
+
+    OrderEntry *bought = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, bought);
+    EXPECT_EQ(FILLED_ORDSTATUS, bought->status_) << "it trades with the GTC sell, passing the expired one by";
+    EXPECT_EQ(FILLED_ORDSTATUS, gtc->status_);
+    EXPECT_EQ(EXPIRED_ORDSTATUS, gtd->status_);
+    EXPECT_EQ(0u, gtd->cumQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, EXPIRED_EXECTYPE }), engine.reports_.reportTypesOf(gtd->orderId_));
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRADE_EXECTYPE }), engine.reports_.reportTypesOf(bought->orderId_));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, SELL_SIDE).isValid());
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
 }
 
@@ -2592,7 +2730,9 @@ TEST_F(ProcessorTest, ADayOrderExpiresAtTheEndOfItsDayAndAGtcOrderDoesNot)
     ASSERT_EQ(2u, expiry.fireDue());
     engine.processQueued(2);
     EXPECT_EQ(EXPIRED_ORDSTATUS, day->status_);
+    EXPECT_EQ(0u, day->leavesQty_);
     EXPECT_EQ(NEW_ORDSTATUS, gtc->status_) << "a GTC order expired with the day";
+    EXPECT_EQ(30u, gtc->leavesQty_);
     EXPECT_EQ(gtc->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
 }
 
@@ -2709,7 +2849,48 @@ TEST_F(ProcessorTest, AHeldDayStopExpiresAndLeavesTheStopBook)
     ASSERT_EQ(1u, expiry.fireDue());
     engine.processQueued(1);
     EXPECT_EQ(EXPIRED_ORDSTATUS, stop->status_);
+    EXPECT_EQ(0u, stop->leavesQty_);
     EXPECT_FALSE(orderBook_->holdsStops(instrId1_)) << "an expired stop is still held";
+}
+
+TEST_F(ProcessorTest, AnOrderDoneForTheDayHasNoLeavesUntilANewDayOrAResumeGivesThemBack)
+{
+    // Done for the day, an order trades no more, so its LeavesQty is 0, as a closed order's is (#386). The next day, or
+    // a resume, books it again with what it hasn't filled, and it is NEW or PARTFILL by its fills, as its leaves no
+    // longer tell.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *part = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 40), IOC_TIF));
+    OrderEntry *none = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 9.0, 50));
+    ASSERT_EQ(PARTFILL_ORDSTATUS, part->status_);
+    ASSERT_EQ(NEW_ORDSTATUS, none->status_);
+
+    for (OrderEntry *order : { part, none })
+    {
+        engine.request(OrderChangeStateEvent(order->orderId_, OrderChangeStateEvent::FINISH));
+        EXPECT_EQ(DFD_ORDSTATUS, order->status_);
+        EXPECT_EQ(0u, order->leavesQty_);
+        EXPECT_EQ(0u, engine.reports_.leavesReportedWith(order->orderId_, DFD_EXECTYPE));
+    }
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "an order done for the day is in the book";
+
+    // The day's end that expires a working DAY order begins the next day of one done for the day
+    engine.request(TimerEvent(part->orderId_, TimerEvent::DAY_END));
+    EXPECT_EQ(PARTFILL_ORDSTATUS, part->status_);
+    EXPECT_EQ(40u, part->cumQty_);
+    EXPECT_EQ(60u, part->leavesQty_);
+    // Suspended while done for the day, then resumed
+    engine.request(OrderChangeStateEvent(none->orderId_, OrderChangeStateEvent::SUSPEND));
+    EXPECT_EQ(SUSPENDED_ORDSTATUS, none->status_);
+    EXPECT_EQ(0u, none->leavesQty_);
+    engine.request(OrderChangeStateEvent(none->orderId_, OrderChangeStateEvent::RESUME));
+    EXPECT_EQ(NEW_ORDSTATUS, none->status_) << "an order that never traded came back partly filled";
+    EXPECT_EQ(50u, none->leavesQty_);
+
+    const BookSnapshot book = orderBook_->getSnapshot(instrId1_, OrderStorage::instance());
+    ASSERT_EQ(2u, book.bids.size());
+    EXPECT_EQ(60u, book.bids[0].totalQty);
+    EXPECT_EQ(50u, book.bids[1].totalQty);
 }
 
 TEST_F(ProcessorTest, AReplacementHasATimerOfItsOwnAndTheOriginalsFindsItReplaced)
