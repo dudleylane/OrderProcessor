@@ -783,6 +783,7 @@ The engine read an order's time in force and acted on none of it until #240.
 | `ProcessorTest.cpp` | `*Gtd*`, `*Day*`, `ATimerOfAnOrderThatFilledDecidesNothing`, `AReplacementHasATimerOfItsOwn*` | Expiry at the order's time, and nothing for an order no longer live |
 | `ExpirySchedulerTest.cpp` | `ExpirySchedulerTest.*` | The day's end, which orders have a timer, firing order, the thread |
 | `ServerDataTest.cpp` | `RestoredDayAndGtdOrdersThatAreLiveGetTheirTimersBack` | Timers set again at a restart |
+| `ProcessorBench.cpp` | `BM_ProcessIocRemainder`, `BM_ProcessExpiry` | Timed through a `Processor`: an IOC's rest canceled by the engine, and an expiry decided by the transaction its timer enqueues (#426) |
 
 ### 4.7 Business Days and Day Figures (#244)
 
@@ -1493,7 +1494,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | `TransactionScopePoolBench.cpp` | Lock-free object pool allocation |
 | `NumaAllocatorBench.cpp` | NUMA-aware allocation performance |
 | `OrderParamsLayoutBench.cpp` | Field layout optimization |
-| `ProcessorBench.cpp` | The real path: new order, match and cancel through a `Processor`, and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290) |
+| `ProcessorBench.cpp` | The real path: new order, match and cancel through a `Processor`, an IOC's remainder and an expiry (#426), and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290) |
 | `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159) |
 
 ---
