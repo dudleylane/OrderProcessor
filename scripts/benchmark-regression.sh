@@ -26,6 +26,11 @@
 # rather than waiting for none (#265):
 #   - Each run waits for the one-minute load average to fall under --settle-load
 #     (2.0), and starts when it does, or after --settle-max seconds (600) anyway.
+#   - A pinned run also waits for each pinned CPU, and each hyperthread sibling of
+#     one, to be under --settle-busy percent busy (20) over a one-second sample
+#     (#406). The load average can't say which CPUs its load is on: a job pinned to
+#     CPUs 1-3 held it near 2 while it saturated three of the four cores that 2-5
+#     covers. The report gives each run's busiest watched CPU.
 #   - The rounds in which the baseline ran first, and the rounds in which it ran
 #     second, give two estimates of each benchmark's change. When they disagree by
 #     more than 25 points on more than a quarter of the benchmarks, the machine was
@@ -61,6 +66,7 @@ BASELINE_ARG=""
 MEMORY_CAP_GIB=""
 SETTLE_LOAD=2.0
 SETTLE_MAX=600
+SETTLE_BUSY=20
 MIN_TIME_NS=200
 
 # --- Resolve project root from script location ---
@@ -88,11 +94,12 @@ while [[ $# -gt 0 ]]; do
                 --memory-cap)  MEMORY_CAP_GIB="$2" ;;
             esac
             shift 2 ;;
-        --settle-load|--settle-max|--min-time)
+        --settle-load|--settle-max|--settle-busy|--min-time)
             [[ $# -ge 2 ]] || usage_error "$1 needs a value"
             case "$1" in
                 --settle-load) SETTLE_LOAD="$2" ;;
                 --settle-max)  SETTLE_MAX="$2" ;;
+                --settle-busy) SETTLE_BUSY="$2" ;;
                 --min-time)    MIN_TIME_NS="$2" ;;
             esac
             shift 2 ;;
@@ -121,6 +128,8 @@ while [[ $# -gt 0 ]]; do
             echo "                       (default: 2.0)"
             echo "  --settle-max SECONDS Wait at most SECONDS for that, then run anyway (default: 600;"
             echo "                       0 never waits)"
+            echo "  --settle-busy PCT    With --pinned, also wait until each pinned CPU and each"
+            echo "                       hyperthread sibling of one is under PCT percent busy (default: 20)"
             echo "  --min-time NS        Report, but never fail on, a benchmark faster than NS"
             echo "                       nanoseconds (default: 200)"
             echo "  -h, --help           Show this help"
@@ -144,6 +153,19 @@ REPETITIONS=$(( 10#$REPETITIONS ))
 [[ "$SETTLE_LOAD" =~ ^[0-9]+([.][0-9]+)?$ ]] || usage_error "--settle-load needs a number, got '$SETTLE_LOAD'"
 [[ "$SETTLE_MAX" =~ ^[0-9]+$ ]] || usage_error "--settle-max needs a whole number of seconds, got '$SETTLE_MAX'"
 SETTLE_MAX=$(( 10#$SETTLE_MAX ))
+if ! [[ "$SETTLE_BUSY" =~ ^[0-9]+$ ]] || (( 10#$SETTLE_BUSY < 1 || 10#$SETTLE_BUSY > 100 )); then
+    usage_error "--settle-busy needs a whole number of percent from 1 to 100, got '$SETTLE_BUSY'"
+fi
+SETTLE_BUSY=$(( 10#$SETTLE_BUSY ))
+# The CPUs a pinned run shares with anything else (#406): the pinned ones and their hyperthread siblings
+WATCHED=""
+if [[ -n "$PINNED_CORES" ]]; then
+    WATCHED=$("$SCRIPT_DIR/cpu-busy.sh" watched "$PINNED_CORES") ||
+        usage_error "--pinned needs a list of CPUs, such as 2-5, got '$PINNED_CORES'"
+    # Here, before anything is built, rather than at the first run's settle
+    "$SCRIPT_DIR/cpu-busy.sh" busiest "$WATCHED" /proc/stat /proc/stat > /dev/null ||
+        usage_error "--pinned names a CPU that isn't online here: '$PINNED_CORES' watches CPUs $WATCHED"
+fi
 [[ "$MIN_TIME_NS" =~ ^[0-9]+([.][0-9]+)?$ ]] || usage_error "--min-time needs a number of nanoseconds, got '$MIN_TIME_NS'"
 if [[ -n "$MEMORY_CAP_GIB" ]]; then
     [[ "$MEMORY_CAP_GIB" =~ ^[0-9]+$ ]] || usage_error "--memory-cap needs a whole number of GiB (0 for no cap), got '$MEMORY_CAP_GIB'"
@@ -332,6 +354,9 @@ if (( SETTLE_MAX > 0 )); then
 else
     echo "  settle:    none (--settle-max 0); one-minute load now $now"
 fi
+if [[ -n "$WATCHED" ]]; then
+    echo "  watched:   CPUs $WATCHED, the pinned ones and their hyperthread siblings; each under $SETTLE_BUSY% busy before a run (#406)"
+fi
 echo "--- before (baseline) ---"
 echo "  binary:    $BASELINE"
 if [[ -f "$BASELINE.info" ]]; then
@@ -358,16 +383,40 @@ limit_memory() {
     fi
 }
 
-# As QuickFIX's ptgate.sh does (#265): wait until the one-minute load average is under SETTLE_LOAD, for SETTLE_MAX
-# seconds at most, then let the run start regardless. Sets SETTLE_AT, the load it started at, and SETTLE_WAITED.
+# The busiest watched CPU over a one-second sample, as "<cpu> <percent busy>" (#406); "- 0" when the runs aren't pinned
+busiest_watched() {
+    if [[ -z "$WATCHED" ]]; then
+        echo "- 0"
+        return
+    fi
+    cat /proc/stat > "$WORK/stat.before"
+    sleep 1
+    cat /proc/stat > "$WORK/stat.after"
+    "$SCRIPT_DIR/cpu-busy.sh" busiest "$WATCHED" "$WORK/stat.before" "$WORK/stat.after"
+}
+
+# As QuickFIX's ptgate.sh does (#265): wait until the one-minute load average is under SETTLE_LOAD, and every watched
+# CPU under SETTLE_BUSY percent busy (#406), for SETTLE_MAX seconds at most, then let the run start regardless. Sets
+# SETTLE_AT, the load it started at, SETTLE_BUSIEST, its busiest watched CPU then and how busy, and SETTLE_WAITED, the
+# seconds it waited, a pinned run's samples included.
 settle() {
-    local step
-    SETTLE_WAITED=0
-    while (( SETTLE_WAITED < SETTLE_MAX )) && ! awk -v max="$SETTLE_LOAD" '{ exit !($1 + 0 < max + 0) }' /proc/loadavg; do
+    local began step
+    began=$(date +%s)
+    while :; do
+        SETTLE_BUSIEST=""
+        if awk -v max="$SETTLE_LOAD" '{ exit !($1 + 0 < max + 0) }' /proc/loadavg; then
+            SETTLE_BUSIEST=$(busiest_watched)
+            if (( ${SETTLE_BUSIEST##* } < SETTLE_BUSY )); then
+                break
+            fi
+        fi
+        SETTLE_WAITED=$(( $(date +%s) - began ))
+        (( SETTLE_WAITED < SETTLE_MAX )) || break
         step=$(( SETTLE_MAX - SETTLE_WAITED < 10 ? SETTLE_MAX - SETTLE_WAITED : 10 ))
         sleep "$step"
-        SETTLE_WAITED=$(( SETTLE_WAITED + step ))
     done
+    [[ -n "$SETTLE_BUSIEST" ]] || SETTLE_BUSIEST=$(busiest_watched)
+    SETTLE_WAITED=$(( $(date +%s) - began ))
     SETTLE_AT=$(cut -d' ' -f1 /proc/loadavg)
 }
 
@@ -385,7 +434,7 @@ run_side() {  # round, side, binary
         fi
         exit 2
     fi
-    echo "$SETTLE_AT $SETTLE_WAITED $(( $(date +%s) - began ))" > "$WORK/r$1-$2.load"
+    echo "$SETTLE_AT $SETTLE_WAITED $(( $(date +%s) - began )) $SETTLE_BUSIEST" > "$WORK/r$1-$2.load"
 }
 
 for (( r = 1; r <= ROUNDS; r++ )); do
@@ -401,9 +450,9 @@ for (( r = 1; r <= ROUNDS; r++ )); do
         else
             run_side "$r" after "$BENCH_EXE"
         fi
-        read -r load waited ran < "$WORK/r$r-$side.load"
+        read -r load waited ran busiest busy < "$WORK/r$r-$side.load"
         took=$(( took + ran ))
-        starts+="${starts:+, }$side at load $load after ${waited} s"
+        starts+="${starts:+, }$side at load $load${WATCHED:+ (CPU $busiest $busy% busy)} after ${waited} s"
     done
     if (( r == 1 )); then
         eta=$(( (took * (ROUNDS - 1) + 59) / 60 ))
@@ -416,7 +465,7 @@ echo ""
 
 # --- Step 6: Judge and report ---
 set +e
-python3 - "$THRESHOLD" "$ROUNDS" "$WORK" "$MIN_TIME_NS" "$SETTLE_LOAD" "$SETTLE_MAX" <<'PYEOF'
+python3 - "$THRESHOLD" "$ROUNDS" "$WORK" "$MIN_TIME_NS" "$SETTLE_LOAD" "$SETTLE_MAX" "$SETTLE_BUSY" "$WATCHED" <<'PYEOF'
 import json, os, statistics, sys
 
 threshold_pct = float(sys.argv[1])
@@ -425,6 +474,8 @@ work = sys.argv[3]
 min_time_ns = float(sys.argv[4])
 settle_load = float(sys.argv[5])
 settle_max = int(sys.argv[6])
+settle_busy = int(sys.argv[7])
+watched = sys.argv[8]
 limit = threshold_pct / 100.0
 # As QuickFIX's ptcompare.py (#265): the rounds in which the baseline ran first, and the rest, give two estimates of
 # a change. A benchmark is noisy when they differ by more than NOISE, and more than NOISY_SHARE of the benchmarks
@@ -551,14 +602,27 @@ def main():
     for r in range(1, rounds + 1):
         for side in ('before', 'after'):
             with open(os.path.join(work, f'r{r}-{side}.load')) as f:
-                started_at, waited, _ = f.read().split()
-                loads.append((float(started_at), int(waited)))
-    full = sum(1 for _, waited in loads if settle_max and waited >= settle_max)
-    lo, hi = min(x for x, _ in loads), max(x for x, _ in loads)
+                started_at, waited, _, cpu, busy = f.read().split()
+                loads.append((float(started_at), int(waited), cpu, int(busy)))
+    full = sum(1 for x in loads if settle_max and x[1] >= settle_max)
+    lo, hi = min(x[0] for x in loads), max(x[0] for x in loads)
     line = f"\nThe {len(loads)} runs started at one-minute loads {lo:.2f}..{hi:.2f}"
     if full:
         line += f"; {full} of them after the full {settle_max} s wait, with the load still at {settle_load:g} or more"
+        if watched:
+            line += f", or a watched CPU {settle_busy}% busy or more"
     print(line)
+    if watched:
+        # Ahead of any verdict, as the load is: whether a busy start makes a comparison inconclusive awaits a ruling
+        # (#406), so for now the report says so and the verdict stands
+        busy = [x[3] for x in loads]
+        worst = max(loads, key=lambda x: x[3])
+        line = f"Their busiest watched CPU (of {watched}) was {min(busy)}..{max(busy)}% busy as they started"
+        over = sum(1 for b in busy if b >= settle_busy)
+        if over:
+            line += (f"; {over} of them started with one at {settle_busy}% or more (CPU {worst[2]} at {worst[3]}% "
+                     f"at the worst), so something else ran on their cores: re-run before trusting this verdict")
+        print(line)
     if len(noisy) > NOISY_SHARE * len(rows):
         print(f"\n*** INCONCLUSIVE: the two halves differ by more than {NOISE * 100:.0f} points on {len(noisy)} of "
               f"{len(rows)} benchmarks: the machine was too busy to judge. Re-run when it is quieter ***")

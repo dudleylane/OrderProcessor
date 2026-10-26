@@ -170,6 +170,12 @@ if(BUILD_TESTS)
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/CiTestedTreeTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/ci-tested-tree.sh)
     set_tests_properties(CiTestedTreeDecides PROPERTIES SKIP_RETURN_CODE 77)
+
+    # The CPUs a pinned benchmark comparison watches, and the busiest of them (#406), against a made-up topology and
+    # canned /proc/stat snapshots
+    add_test(NAME CpuBusyDecides
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/CpuBusyTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/cpu-busy.sh)
 endif()
 
 if(BUILD_BENCHMARKS)
