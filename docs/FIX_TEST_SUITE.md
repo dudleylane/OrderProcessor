@@ -60,7 +60,7 @@ A single test that submits two FIX orders (sell + buy limit) through the entire 
 **File:** `test/FixEndToEndTest.cpp`
 **Requires:** `BUILD_FIX=ON`
 
-Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBook. Orders enter via `FixGateway::onMessage()` and flow through the complete pipeline. The engine's reports go to the gateway too, through `MultiOutQueues` and `FixOutQueues` as in the server, and the gateway pushes through `HoldingInQueues`, which can hold the engine's input back so that an order isn't stored yet (#380).
+Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBook. Orders enter via `FixGateway::onMessage()` and flow through the complete pipeline. The engine's reports go to the gateway too, through `MultiOutQueues` and `FixOutQueues` as in the server, and the gateway pushes through `HoldingInQueues`, which can hold the engine's input back so that an order isn't stored yet (#380). `CapturingOutQueues` builds each report as the gateway builds one for a session, as it goes out, and keeps its WorkingIndicator (636) (#387).
 
 | Test | Description |
 |------|-------------|
@@ -84,6 +84,7 @@ Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBo
 | `StatusRequests_FollowAnOrderThroughItsLife` | EP284's G.1.c through the engine: a status request (35=H) is answered 150=I with Pending New (39=A) while the engine's input holds the order, then New, then Partially Filled, with the order's quantities; after Replace (Y,X), one for X is answered with Y's state, ClOrdID Y and OrigClOrdID X, and one for Y with Y's (#383) |
 | `DuplicateClOrdId_IsRefusedBeforeTheEngine` | EP284's F.1.a through the engine: a new order that repeats the ClOrdID of a partly filled order is refused by the gateway and never handed on (the engine's input, held, holds nothing, and the engine refuses nothing), and a status request meanwhile is answered with the partly filled order's state, 39=1 with 100/40/60; it was Pending New until the engine refused the repeat (#382) |
 | `ReplaceWithTheClOrdIdOfAnOrderOnItsWay_IsRefusedBeforeTheEngine` | Replace (K,X) while a new order K is held in the engine's input → the gateway refuses the replace and never hands it on (the input holds the new order alone); K is stored, X untouched, and the engine refuses nothing, where with two event processors the replacement could have been stored and K refused (#403) |
+| `StopOrder_IsNotWorkingUntilATradeReleasesIt` | EP284's E.1.f through the engine: a buy stop, held off the book, is acknowledged with WorkingIndicator (636) N; a trade at its stop, whose buy is held back until that acknowledgement is out, releases it, 150=L with 636 Y, and it buys at the market. The orders booked at once are acknowledged with 636 Y, and no trade report has one (#387) |
 
 ---
 
@@ -185,6 +186,8 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ExecutionReport_TradeCarriesItsTradeDate` | Trade → TradeDate (75), the business day it counts in, `YYYYMMDD`; a trade in no day has none (#258) |
 | `ExecutionReport_CorrectionIsTradeCorrect` | Correction → 150=G, not NEW |
 | `ExecutionReport_AStopsReleaseIsTriggeredAndNew` | A stop's release → 150=L, 39=0, its ClOrdID, no 103 or LastQty (#236) |
+| `ExecutionReport_WorkingIndicatorSaysWhetherANewOrderIsInTheBook` | A report of a New order (39=0) says in WorkingIndicator (636) whether the order is in the book: N for a held stop or stop limit, acknowledged or restated, Y for its release and for a limit or market order; a trade, a reject and a cancel have none (EP284's E.1.f, #387) |
+| `ExecutionReport_AReplacementsWorkingIndicatorFollowsWhatItIs` | A replacement's report (150=5, 39=0): 636 N for a held stop's stop replacement, Y for its limit replacement and for a released stop's stop replacement, which stays released (#223), and none once the order has traded (#387) |
 | `ExecutionReport_AGtdOrdersReportCarriesItsExpireTime` | A GTD order's report → ExpireTime (126) to the millisecond; a Day order's has none (#240) |
 | `ExecutionReport_ARestatementIsExecTypeDForAGtRenewal` | A business day's restatement → 150=D, 378=1 (GT renewal / restatement), the order's status; no other report carries 378 (#244) |
 | `ExecutionReport_AGtOrderCarriesItsDayFiguresOnceItTradedOnAnEarlierDay` | A GT order with fills before today → DayOrderQty (424), DayCumQty (425), DayAvgPx (426); one whose fills are all today's, or a DAY order, carries none (#244) |
@@ -450,6 +453,7 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `ARequestThatNamesARefusedReplacementIsDecidedAgainstItsOriginal` | EP284's D.2.c: after Replace (Y,X) is refused, by the gateway or by the engine, a replace naming Y is pushed as a replace of X, or refused by the gateway naming X in 41, and a cancel naming Y cancels X (#398) |
 | `ARefusalForAClOrdIdInUseIsNotRemembered` | A replacement refused for a ClOrdID in use (102=6), by the engine, or by the gateway while the new order with that ClOrdID was on its way and was then refused: a replace or cancel naming the ClOrdID is answered as unknown (102=1) and never pushed (#398) |
 | `ARefusedReplacementsClOrdIdNamesWhatItWasLastSentFor` | A refused replacement's ClOrdID sent again for a new order that is refused, by the gateway or by the engine, names no order: a replace or cancel naming it is answered as unknown (102=1); sent again for another replace that is refused, it names that replace's order (#398) |
+| `AHeldStopSaysItIsNotWorkingUntilItsRelease` | A held stop's acknowledgement, a status answer for it and the refusal of a new order that repeats its ClOrdID say WorkingIndicator (636) N; its release and a status answer after it, Y; a limit order's acknowledgement and status, Y, and a status answer once it has traded, none; a validating counterparty takes each (EP284's E.1.f, #387) |
 
 ---
 
