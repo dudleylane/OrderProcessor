@@ -94,6 +94,15 @@ void setWorkingIndicator(FIX50SP2::ExecutionReport &report, bool held)
 {
     report.set(FIX::WorkingIndicator(!held));
 }
+/// A quantity field (QTY) holding qty, written as the whole number it is (#384, #396): the bytes QuickFIX writes for the
+/// double its constructor takes. That conversion, to 15 significant digits, falls back to double-conversion's bignum
+/// arithmetic for every whole number, about 2,000 instructions a field more than this.
+template <typename QtyField> QtyField quantity(QuantityT qty)
+{
+    QtyField field;
+    field.setString(std::to_string(qty));
+    return field;
+}
 /// What a status answer reports of a stored order (#383): the fields a transaction worker changes, read together under
 /// the order's lock. Its ClOrdIDs and instrument never change once it is stored.
 struct OrderSeen
@@ -131,10 +140,10 @@ FIX50SP2::ExecutionReport orderStatusReport(const std::string &orderId, char ord
                                             QuantityT cumQty, QuantityT leavesQty, PriceT avgPx)
 {
     FIX50SP2::ExecutionReport report(FIX::OrderID(orderId), FIX::ExecID("0"), FIX::ExecType(FIX::ExecType_ORDER_STATUS),
-                                     FIX::OrdStatus(ordStatus), FIX::Side(side), FIX::LeavesQty(leavesQty),
-                                     FIX::CumQty(cumQty));
+                                     FIX::OrdStatus(ordStatus), FIX::Side(side), quantity<FIX::LeavesQty>(leavesQty),
+                                     quantity<FIX::CumQty>(cumQty));
     report.set(FIX::AvgPx(avgPx));
-    report.setField(FIX::FIELD::OrderQty, std::to_string(orderQty));
+    report.set(quantity<FIX::OrderQty>(orderQty));
     report.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
     return report;
 }
@@ -160,8 +169,8 @@ FIX50SP2::ExecutionReport storedOrderStatusReport(const OrderEntry &order, const
     // (#240)
     if ((DAY_TIF != seen.tif) && (IOC_TIF != seen.tif) && (FOK_TIF != seen.tif) && (seen.dayCumQty < seen.cumQty))
     {
-        report.set(FIX::DayOrderQty(seen.dayOrderQty));
-        report.set(FIX::DayCumQty(seen.dayCumQty));
+        report.set(quantity<FIX::DayOrderQty>(seen.dayOrderQty));
+        report.set(quantity<FIX::DayCumQty>(seen.dayCumQty));
         report.set(FIX::DayAvgPx(seen.dayAvgPx));
     }
     if ((GTD_TIF == seen.tif) && (0 != seen.expireTime))
@@ -1830,15 +1839,14 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
     FIX50SP2::ExecutionReport report(
         FIX::OrderID(std::to_string(order.orderId_.id_)), FIX::ExecID(std::to_string(exec->execId_.id_)),
         FIX::ExecType(fromExecType(exec->type_)), FIX::OrdStatus(fromOrdStatus(exec->orderStatus_)),
-        FIX::Side(fromSide(order.side_)), FIX::LeavesQty(order.leavesQty_), FIX::CumQty(order.cumQty_));
+        FIX::Side(fromSide(order.side_)), quantity<FIX::LeavesQty>(order.leavesQty_),
+        quantity<FIX::CumQty>(order.cumQty_));
     // Optional since FIX 5.0, so no longer the constructor's, but every report of the Order State Changes has it
     report.set(FIX::AvgPx(order.avgPx_));
     // OrderQty (38) too, or a closed order's quantity can't be read from its reports once LeavesQty is 0 (#384). A
     // replacement's is its own. Read without the order's lock, as the other quantities are: it never changes once the
-    // order is stored, since a replace stores a new order (#74). Written as the whole number it is, the bytes QuickFIX
-    // writes for the double: its conversion, to 15 significant digits, falls back to bignum arithmetic for these
-    // values, about 2,900 instructions a field.
-    report.setField(FIX::FIELD::OrderQty, std::to_string(order.orderQty_));
+    // order is stored, since a replace stores a new order (#74).
+    report.set(quantity<FIX::OrderQty>(order.orderQty_));
     // Whether a New order is in the book (#387), read as the quantities are: the report is published by the transaction
     // that changed the order, and a stop's release, which changes it, is a later transaction on the order
     if (NEW_ORDSTATUS == exec->orderStatus_)
@@ -1883,8 +1891,8 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
     if ((DAY_TIF != order.tif_) && (IOC_TIF != order.tif_) && (FOK_TIF != order.tif_) &&
         (order.dayCumQty_ < order.cumQty_))
     {
-        report.set(FIX::DayOrderQty(order.dayOrderQty_));
-        report.set(FIX::DayCumQty(order.dayCumQty_));
+        report.set(quantity<FIX::DayOrderQty>(order.dayOrderQty_));
+        report.set(quantity<FIX::DayCumQty>(order.dayCumQty_));
         report.set(FIX::DayAvgPx(order.dayAvgPx_));
     }
     // A GTD order's expiry (#240)
@@ -1896,7 +1904,7 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
     // Extra fields follow the report's class, as in the JSON serializer; reports are full copies since #56
     if (auto *trade = dynamic_cast<const TradeExecEntry *>(exec))
     {
-        report.set(FIX::LastQty(trade->lastQty_));
+        report.set(quantity<FIX::LastQty>(trade->lastQty_));
         report.set(FIX::LastPx(trade->lastPx_));
         // TradeDate (75), a LocalMktDate: the business day the trade counts in, which the engine keeps as YYYYMMDD
         // (#258). A trade in no day has none.
@@ -1946,7 +1954,7 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
             legGroup.set(FIX::LegLastPx(trade->lastPx_));
             // LegLastQty (1418), in FIX 5.0 SP2's leg group: FIX 4.4 had no such field, so a client checking a report
             // against its dictionary refused it there
-            legGroup.set(FIX::LegLastQty(trade->lastQty_));
+            legGroup.set(quantity<FIX::LegLastQty>(trade->lastQty_));
         }
 
         // A LocalMktDate, YYYYMMDD: it used to be the engine's milliseconds, which no FIX client could read (#198)
@@ -2058,7 +2066,8 @@ FIX50SP2::ExecutionReport FixGateway::buildOrderReject(const Queues::OrderReject
     // The order was never stored, so it has no OrderID; its reject still needs an ExecID of its own
     FIX50SP2::ExecutionReport report(FIX::OrderID("NONE"), FIX::ExecID("R" + std::to_string(execId)),
                                      FIX::ExecType(FIX::ExecType_REJECTED), FIX::OrdStatus(FIX::OrdStatus_REJECTED),
-                                     FIX::Side(fromSide(evnt.side_)), FIX::LeavesQty(0), FIX::CumQty(0));
+                                     FIX::Side(fromSide(evnt.side_)), quantity<FIX::LeavesQty>(0),
+                                     quantity<FIX::CumQty>(0));
     report.set(FIX::AvgPx(0)); // as buildExecutionReport() sends it
     if (!evnt.clOrderId_.empty())
     {
@@ -2068,7 +2077,7 @@ FIX50SP2::ExecutionReport FixGateway::buildOrderReject(const Queues::OrderReject
     {
         report.set(FIX::Symbol(evnt.symbol_));
     }
-    report.set(FIX::OrderQty(evnt.orderQty_));
+    report.set(quantity<FIX::OrderQty>(evnt.orderQty_));
     report.set(
         FIX::OrdRejReason(evnt.duplicateClOrderId_ ? FIX::OrdRejReason_DUPLICATE_ORDER : ORD_REJ_REASON_BROKER_OPTION));
     report.set(FIX::Text(evnt.reason_));
