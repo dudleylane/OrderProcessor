@@ -55,6 +55,12 @@ using test::DummyOrderSaver;
 namespace
 {
 
+/// A field's value, or "(not set)", so that a field that isn't there fails a comparison rather than throws
+std::string fieldOf(const FIX::FieldMap &fields, int tag)
+{
+    return fields.isSetField(tag) ? fields.getField(tag) : "(not set)";
+}
+
 // =============================================================================
 // Capturing OutQueues — records all outbound events for verification
 // =============================================================================
@@ -66,6 +72,7 @@ struct CapturedExecReport
     OrderStatus orderStatus;
     std::string source;
     std::string workingIndicator; // WorkingIndicator (636) of the report a session gets, or "(not set)" (#387)
+    std::string leavesQty;        // its LeavesQty (151) (#386)
 };
 
 class CapturingOutQueues : public Queues::OutQueues
@@ -73,14 +80,13 @@ class CapturingOutQueues : public Queues::OutQueues
 public:
     void push(const ExecReportEvent &evnt, const std::string &target) override
     {
-        const std::string workingIndicator = workingIndicatorOf(evnt);
-        std::lock_guard<std::mutex> lock(mtx_);
         CapturedExecReport r;
         r.orderId = evnt.exec_->orderId_;
         r.execType = evnt.exec_->type_;
         r.orderStatus = evnt.exec_->orderStatus_;
         r.source = target;
-        r.workingIndicator = workingIndicator;
+        readSentReport(evnt, &r);
+        std::lock_guard<std::mutex> lock(mtx_);
         reports_.push_back(r);
         totalEvents_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -132,20 +138,22 @@ public:
     }
 
 private:
-    /// WorkingIndicator (636) of the report a session gets for evnt, built as it goes out, from the order as the
-    /// transaction that publishes it leaves it, as FixOutQueues has the gateway build one for a session that is logged on
-    /// (#387). This pipeline's gateway has none, so builds nothing.
-    static std::string workingIndicatorOf(const ExecReportEvent &evnt)
+    /// The WorkingIndicator (636) (#387) and LeavesQty (151) (#386) of the report a session gets for evnt, built as it
+    /// goes out, from the order as the transaction that publishes it leaves it, as FixOutQueues has the gateway build one
+    /// for a session that is logged on. This pipeline's gateway has none, so builds nothing.
+    static void readSentReport(const ExecReportEvent &evnt, CapturedExecReport *r)
     {
         const OrderEntry *order = OrderStorage::instance()->locateByOrderId(evnt.exec_->orderId_);
         if ((nullptr == order) || !FixGateway::reportsOverFix(evnt.exec_))
         {
-            return "(not sent)";
+            r->workingIndicator = "(not sent)";
+            r->leavesQty = "(not sent)";
+            return;
         }
         const FIX50SP2::ExecutionReport report =
             FixGateway::buildExecutionReport(evnt.exec_, *order, evnt.requestClOrdId_);
-        return report.isSetField(FIX::FIELD::WorkingIndicator) ? report.getField(FIX::FIELD::WorkingIndicator)
-                                                               : std::string("(not set)");
+        r->workingIndicator = fieldOf(report, FIX::FIELD::WorkingIndicator);
+        r->leavesQty = fieldOf(report, FIX::FIELD::LeavesQty);
     }
 
     mutable std::mutex mtx_;
@@ -270,12 +278,6 @@ SourceIdT addTestInstrument(const std::string &symbol)
     instr->securityId_ = "SEC1";
     instr->securityIdSource_ = "SRC1";
     return WideDataStorage::instance()->add(instr);
-}
-
-/// A field's value, or "(not set)", so that a field that isn't there fails a comparison rather than throws
-std::string fieldOf(const FIX::FieldMap &fields, int tag)
-{
-    return fields.isSetField(tag) ? fields.getField(tag) : "(not set)";
 }
 
 // =============================================================================
@@ -491,6 +493,19 @@ protected:
             }
         }
         return types;
+    }
+
+    /// The LeavesQty (151) a session got in the order's first report of this ExecType, or "(no report)" (#386)
+    std::string leavesSentWith(const OrderEntry &order, ExecType type) const
+    {
+        for (const auto &r : outQueues_->reports())
+        {
+            if ((order.orderId_ == r.orderId) && (type == r.execType))
+            {
+                return r.leavesQty;
+            }
+        }
+        return "(no report)";
     }
 
 protected:
@@ -1238,6 +1253,45 @@ TEST_F(FixEndToEndTest, StopOrder_IsNotWorkingUntilATradeReleasesIt)
     EXPECT_EQ((Reports{ { NEW_EXECTYPE, "Y" }, { TRADE_EXECTYPE, "(not set)" } }), reportsWithIndicator(*buy));
     EXPECT_EQ((Reports{ { NEW_EXECTYPE, "Y" }, { TRADE_EXECTYPE, "(not set)" }, { TRADE_EXECTYPE, "(not set)" } }),
               reportsWithIndicator(*sell));
+}
+
+TEST_F(FixEndToEndTest, AnOrderTheEngineCloses_IsReportedWithNoLeaves)
+{
+    // A closed order has nothing left to trade, LeavesQty 0, whatever closed it, as after its client's cancel (#73):
+    // here an IOC's rest, which the engine cancels, and a DAY order at its day's end. They were reported with what they
+    // hadn't traded, which is their OrderQty less their CumQty (#386).
+    gateway_->onMessage(makeNOS("LV-S", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 40), fixSid_);
+    waitForProcessing();
+    gateway_->onMessage(
+        makeNOS("LV-IOC", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100, FIX::TimeInForce_IMMEDIATE_OR_CANCEL),
+        fixSid_);
+    waitForProcessing();
+    OrderEntry *ioc = orderOf("LV-IOC");
+    ASSERT_NE(nullptr, ioc);
+    EXPECT_EQ(CANCELED_ORDSTATUS, ioc->status_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRADE_EXECTYPE, CANCEL_EXECTYPE }), reportsOf(*ioc));
+    EXPECT_EQ("0", leavesSentWith(*ioc, CANCEL_EXECTYPE)) << "the engine's cancel of what the IOC couldn't trade";
+    const FIX50SP2::ExecutionReport iocStatus = statusOf("LV-IOC");
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_CANCELED), fieldOf(iocStatus, FIX::FIELD::OrdStatus));
+    EXPECT_EQ("100", fieldOf(iocStatus, FIX::FIELD::OrderQty));
+    EXPECT_EQ("40", fieldOf(iocStatus, FIX::FIELD::CumQty));
+    EXPECT_EQ("0", fieldOf(iocStatus, FIX::FIELD::LeavesQty));
+
+    // The day's end, as the expiry scheduler sends it at 17:00 New York (#240): this pipeline has none
+    gateway_->onMessage(makeNOS("LV-DAY", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0800, 100), fixSid_);
+    waitForProcessing();
+    OrderEntry *day = orderOf("LV-DAY");
+    ASSERT_NE(nullptr, day);
+    inQueues_->push("test", TimerEvent(day->orderId_, TimerEvent::DAY_END));
+    waitForProcessing();
+    EXPECT_EQ(EXPIRED_ORDSTATUS, day->status_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, EXPIRED_EXECTYPE }), reportsOf(*day));
+    EXPECT_EQ("0", leavesSentWith(*day, EXPIRED_EXECTYPE)) << "the DAY order's expiry";
+    const FIX50SP2::ExecutionReport dayStatus = statusOf("LV-DAY");
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_EXPIRED), fieldOf(dayStatus, FIX::FIELD::OrdStatus));
+    EXPECT_EQ("100", fieldOf(dayStatus, FIX::FIELD::OrderQty));
+    EXPECT_EQ("0", fieldOf(dayStatus, FIX::FIELD::CumQty));
+    EXPECT_EQ("0", fieldOf(dayStatus, FIX::FIELD::LeavesQty));
 }
 
 } // anonymous namespace
