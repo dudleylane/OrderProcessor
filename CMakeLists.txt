@@ -167,6 +167,13 @@ if(BUILD_TESTS)
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/BenchmarkBaselineTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/benchmark-regression.sh)
     set_tests_properties(BenchmarkBaselineKeepsItsConfig PROPERTIES SKIP_RETURN_CODE 77)
+
+    # A benchmark comparison in which a pinned run started with a watched CPU busy is inconclusive (#422), with a
+    # stand-in for scripts/cpu-busy.sh. It needs python3 and taskset, as the script does: without them it is skipped.
+    add_test(NAME BenchmarkBusyStartIsInconclusive
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/BenchmarkBusyStartTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/benchmark-regression.sh)
+    set_tests_properties(BenchmarkBusyStartIsInconclusive PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 if(BUILD_BENCHMARKS)
