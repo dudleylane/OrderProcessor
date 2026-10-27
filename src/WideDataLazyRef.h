@@ -31,8 +31,12 @@ public:
         }
     }
 
+    /// A copy takes the value only once it sees it loaded (#455). get() and load() write the value under the mutex, then
+    /// mark it loaded with a release store, so a copy that read the value before looking raced with another thread's
+    /// first load. A copy of a ref not yet loaded makes its own first load. loaded_ is read once, for both members: read
+    /// twice, a load between the reads would leave the copy marked loaded with no value.
     WideDataLazyRef(const WideDataLazyRef &other)
-        : val_(other.val_), id_(other.id_), loaded_(other.loaded_.load(std::memory_order_acquire))
+        : WideDataLazyRef(other, other.loaded_.load(std::memory_order_acquire))
     {
     }
 
@@ -40,9 +44,10 @@ public:
     {
         if (this != &other)
         {
-            val_ = other.val_;
+            const bool loaded = other.loaded_.load(std::memory_order_acquire); // before the value, as a copy looks
+            val_ = loaded ? other.val_ : T{};
             id_ = other.id_;
-            loaded_.store(other.loaded_.load(std::memory_order_acquire), std::memory_order_release);
+            loaded_.store(loaded, std::memory_order_release);
         }
         return *this;
     }
@@ -82,6 +87,11 @@ public:
     };
 
 private:
+    WideDataLazyRef(const WideDataLazyRef &other, bool loaded)
+        : val_(loaded ? other.val_ : T{}), id_(other.id_), loaded_(loaded)
+    {
+    }
+
     mutable T val_{};
     SourceIdT id_;
     mutable std::atomic<bool> loaded_;
