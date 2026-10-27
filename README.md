@@ -297,8 +297,9 @@ match: nearly half of its processing is raising its exception twice (#436).
 
 `BM_ProcessNewOrderWithMatchRecorded` and `BM_WsOutQueuesPushTradeReport` were measured on 2026-10-27,
 pinned, in runs where `BM_ProcessNewOrderWithMatch` took ~5.8 µs: a match's three records (the booking's
-and the trade's two) take about 2.1 µs to encode. A report takes ~13.0 µs to push to eight clients. Its
-broadcasts take under 1 µs of that, and most of the rest is building and serializing its JSON.
+and the trade's two) take about 2.1 µs to encode. A report takes ~13.0 µs to push to eight clients. Its two
+broadcasts, the report's and the order's, take about 1.5 µs of that, and most of the rest is building and
+serializing its JSON.
 
 `BM_TaskManagerThroughput` takes the processor count as its argument: ~205K orders/sec at 2, ~265K at
 4, and little more (~270K) at 8 on a 4-core machine.
