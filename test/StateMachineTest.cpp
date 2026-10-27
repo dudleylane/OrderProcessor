@@ -452,6 +452,7 @@ TEST_F(StateMachineTest, New_To_Rejected_OnOrderRejected)
 
     OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
     ASSERT_NE(nullptr, ord);
+    ord->leavesQty_ = ord->orderQty_; // as the gateways make an order
 
     // Apply rejection
     onOrderRejected reject;
@@ -465,6 +466,8 @@ TEST_F(StateMachineTest, New_To_Rejected_OnOrderRejected)
     EXPECT_EQ(2u, trCntxt.op_.size());
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
     EXPECT_TRUE(trCntxt.isOperationEnqueued(REMOVE_ORDERBOOK_TROPERATION));
+    // Rejected, it trades no more, so its LeavesQty is 0, as a closed order's is (#386, #427)
+    EXPECT_EQ(0u, ord->leavesQty_);
 }
 
 // =============================================================================
