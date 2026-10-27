@@ -279,6 +279,8 @@ differ; these numbers are a shape, not a specification.
 | `BM_ProcessCancelOrder` | ~1.6 µs | ~635K orders/sec | cancel of a resting order, completed: decided after the order's earlier transactions, removed from the book, reported |
 | `BM_ProcessIocRemainder` | ~6.7 µs | ~150K orders/sec | an IOC that trades part of itself: the trade, its deferred execution events, and the engine's cancel of the rest (#426) |
 | `BM_ProcessExpiry` | ~1.7 µs | ~580K orders/sec | a resting DAY order's expiry at its day's end: the transaction its `DAY_END` timer enqueues decides it, takes the order off the book, reports it (#426) |
+| `BM_ProcessInvalidOrder` | ~6.8 µs | ~147K orders/sec | an order `OrderEntry::isValid()` refuses: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
+| `BM_ProcessMarketOrderWithNoMarket` | ~6.9 µs | ~145K orders/sec | a market order with nothing to trade with: stored, then rejected and reported (#435) |
 | `BM_TaskManagerThroughput/4` | ~1.9 ms per 500 orders | ~265K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
 | `BM_TaskManagerTrades/instruments:8/processors:4` | ~3.6 ms per 500 orders | ~140K orders/sec, ~70K trades/sec | the same pool while every order trades: 250 sells and 250 buys at one price a batch, dealt over 8 instruments |
 
@@ -286,6 +288,10 @@ differ; these numbers are a shape, not a specification.
 above them (#76). In the same runs `BM_ProcessNewOrder` took ~2.7 µs, `BM_ProcessNewOrderWithMatch`
 ~5.6 µs and `BM_ProcessCancelOrder` ~1.8 µs, 11-14% more than their rows give: whether the engine slowed or
 the rows come from a faster session is #429.
+
+`BM_ProcessInvalidOrder` and `BM_ProcessMarketOrderWithNoMarket` were measured on 2026-10-26 too, in runs
+that gave the five rows above them as #426's did. A reject costs about 2.6 times a new order, and more than a
+match: nearly half of its processing is raising its exception twice (#436).
 
 `BM_TaskManagerThroughput` takes the processor count as its argument: ~205K orders/sec at 2, ~265K at
 4, and little more (~270K) at 8 on a 4-core machine.
