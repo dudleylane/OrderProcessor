@@ -353,6 +353,11 @@ Measured on 2026-10-27, pinned, in runs where `BM_ProcessNewOrderWithMatch` took
 the transaction its `RESTATEMENT` timer enqueues begins the order's next day, persists it and reports it `RESTATED`
 (#451). Measured on 2026-10-27, pinned, it took ~1.4 µs, in runs where `BM_ProcessExpiry` took ~1.6 µs.
 
+`BM_ProcessReplaceOrder` drives a real `Processor` through a resting order's replace at a new price: decided after the
+order's earlier transactions, the replacement stored, the original taken off the book and the replacement booked, both
+persisted and reported (#457). Measured on 2026-10-27, pinned, it took ~4.8 µs, in runs where `BM_ProcessCancelOrder`
+took ~1.7 µs.
+
 ---
 
 ## Architecture
