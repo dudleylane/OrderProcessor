@@ -349,6 +349,10 @@ Measured on 2026-10-27, pinned, in runs where `BM_ProcessNewOrderWithMatch` took
 ~10.7 µs to push to one client and ~12.9 µs to eight. Its two broadcasts, the report's and the order's, take about
 0.3 µs of the first and 1.5 µs of the second, and most of the rest is building and serializing its JSON.
 
+`BM_ProcessRestatement` drives a real `Processor` through a resting GTC order's restatement as a business day starts:
+the transaction its `RESTATEMENT` timer enqueues begins the order's next day, persists it and reports it `RESTATED`
+(#451). Measured on 2026-10-27, pinned, it took ~1.4 µs, in runs where `BM_ProcessExpiry` took ~1.6 µs.
+
 ---
 
 ## Architecture
