@@ -13,8 +13,15 @@
 #include <string>
 #include <vector>
 
+#include "IdTGenerator.h"
+#include "Logger.h"
+#include "OrderBookImpl.h"
+#include "OrderStorage.h"
+#include "QueuesDef.h"
 #include "SessionManager.h"
+#include "WideDataStorage.h"
 #include "WsCredentials.h"
+#include "WsOutQueues.h"
 #include "WsSession.h"
 
 using namespace COP;
@@ -101,6 +108,83 @@ const std::int64_t RESET_EVERY = 4096;
 /// A message the size of an execution report's JSON
 const std::string MESSAGE(300, 'x');
 
+/// The order a report is about, as WsOutQueues finds it: stored, with its instrument, account and ClOrdID in reference
+/// data, and its instrument's book, which is empty. Notes are off, as in the other benchmarks that log.
+class ReportedOrder
+{
+public:
+    ReportedOrder()
+    {
+        aux::ExchLogger::create();
+        aux::ExchLogger::instance()->setNoteOn(false);
+        aux::ExchLogger::instance()->setWarnOn(false);
+        aux::ExchLogger::instance()->setDebugOn(false);
+        Store::WideDataStorage::create();
+        IdTGenerator::create();
+        Store::OrderStorage::create();
+
+        auto *instrument = new InstrumentEntry();
+        instrument->symbol_ = "AAPL";
+        instrument->securityId_ = "US0378331005";
+        instrument->securityIdSource_ = "ISIN";
+        const SourceIdT instrumentId = Store::WideDataStorage::instance()->add(instrument);
+        auto *account = new AccountEntry();
+        account->type_ = PRINCIPAL_ACCOUNTTYPE;
+        account->firm_ = "BENCHFIRM";
+        account->account_ = "BENCHACCT";
+        const SourceIdT accountId = Store::WideDataStorage::instance()->add(account);
+        auto *clearing = new ClearingEntry();
+        clearing->firm_ = "BENCHCLEARER";
+        const SourceIdT clearingId = Store::WideDataStorage::instance()->add(clearing);
+        const std::string clOrdId = "BENCH-1";
+        const SourceIdT clOrderId = Store::WideDataStorage::instance()->add(
+            new RawDataEntry(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size())));
+
+        // A sell of 100 that has traded 30
+        order_ = new OrderEntry(SourceIdT(), SourceIdT(), clOrderId, SourceIdT(), instrumentId, accountId, clearingId,
+                                SourceIdT());
+        order_->orderId_ = IdT(1, 20261027);
+        order_->side_ = SELL_SIDE;
+        order_->ordType_ = LIMIT_ORDERTYPE;
+        order_->tif_ = DAY_TIF;
+        order_->capacity_ = PRINCIPAL_CAPACITY;
+        order_->currency_ = USD_CURRENCY;
+        order_->price_ = 150.0;
+        order_->orderQty_ = 100;
+        order_->status_ = PARTFILL_ORDSTATUS;
+        order_->cumQty_ = 30;
+        order_->leavesQty_ = 70;
+        order_->avgPx_ = 150.0;
+        Store::OrderStorage::instance()->restore(order_);
+
+        OrderBookImpl::InstrumentsT instruments;
+        instruments.insert(instrumentId);
+        book_ = std::make_unique<OrderBookImpl>();
+        book_->init(instruments);
+    }
+    ~ReportedOrder()
+    {
+        book_.reset();
+        Store::OrderStorage::destroy();
+        IdTGenerator::destroy();
+        Store::WideDataStorage::destroy();
+        aux::ExchLogger::destroy();
+    }
+
+    const OrderEntry &order() const
+    {
+        return *order_;
+    }
+    OrderBookImpl *book()
+    {
+        return book_.get();
+    }
+
+private:
+    OrderEntry *order_; // the storage's
+    std::unique_ptr<OrderBookImpl> book_;
+};
+
 } // namespace
 
 // SessionManager::broadcast as a transaction worker calls it, through WsOutQueues, for every execution report and order
@@ -158,3 +242,48 @@ static void BM_SessionManagerBookUpdate(benchmark::State &state)
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_SessionManagerBookUpdate)->Arg(1)->Arg(8)->Arg(64);
+
+// WsOutQueues::push as a transaction worker calls it for a fill's report, with K clients: the execution report and the
+// order, each serialized and sent to the clients that may see the order's account (all of them, without identities),
+// then the book, serialized and offered to its subscribers, of which there are none
+static void BM_WsOutQueuesPushTradeReport(benchmark::State &state)
+{
+    Clients clients(static_cast<int>(state.range(0)));
+    ReportedOrder reported;
+    App::WsOutQueues out(&clients.manager(), Store::WideDataStorage::instance(), Store::OrderStorage::instance(),
+                         reported.book());
+
+    TradeExecEntry trade;
+    trade.type_ = TRADE_EXECTYPE;
+    trade.execId_ = IdT(2, 20261027);
+    trade.orderId_ = reported.order().orderId_;
+    trade.orderStatus_ = PARTFILL_ORDSTATUS;
+    trade.transactTime_ = 1;
+    trade.market_ = INTERNAL_EXECUTION;
+    trade.lastQty_ = 30;
+    trade.lastPx_ = 150.0;
+    trade.currency_ = USD_CURRENCY;
+    trade.tradeDate_ = 20261027;
+    const Queues::ExecReportEvent report(&trade);
+    // A push for an order the storage doesn't have sends the report alone: not the path a fill takes
+    if (nullptr == Store::OrderStorage::instance()->locateByOrderId(trade.orderId_))
+    {
+        state.SkipWithError("the report's order isn't in storage");
+        return;
+    }
+
+    std::int64_t sinceReset = 0;
+    for (auto _ : state)
+    {
+        out.push(report, "bench");
+        if (++sinceReset == RESET_EVERY)
+        {
+            state.PauseTiming();
+            clients.reset();
+            sinceReset = 0;
+            state.ResumeTiming();
+        }
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_WsOutQueuesPushTradeReport)->Arg(1)->Arg(8);
