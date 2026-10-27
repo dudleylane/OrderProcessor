@@ -20,6 +20,7 @@
 
 #include "DataModelDef.h"
 #include "ExchUtils.h"
+#include "FileStorageDef.h"
 #include "IdTGenerator.h"
 #include "IncomingQueues.h"
 #include "Logger.h"
@@ -28,6 +29,7 @@
 #include "OutgoingQueues.h"
 #include "Processor.h"
 #include "QueuesDef.h"
+#include "StorageRecordDispatcher.h"
 #include "TaskManager.h"
 #include "TransactionDef.h"
 #include "TransactionMgr.h"
@@ -180,8 +182,46 @@ private:
     u64 nextId_;
 };
 
+/// Keeps nothing it is given: what a record costs before LMDB writes it, without the write
+class DiscardingFileSaver final : public FileSaver
+{
+public:
+    void load(const std::string &, FileStorageObserver *) override {}
+    IdT save(const char *, size_t) override
+    {
+        return IdT();
+    }
+    void save(const IdT &, const char *, size_t) override {}
+    u32 update(const IdT &, const char *, size_t size) override
+    {
+        bytes_ += size;
+        return ++version_;
+    }
+    u32 replace(const IdT &, u32, const char *, size_t) override
+    {
+        return 0;
+    }
+    void erase(const IdT &, u32) override {}
+    void erase(const IdT &) override {}
+
+    /// How many records it was given, and their bytes
+    u32 records() const
+    {
+        return version_;
+    }
+    u64 bytes() const
+    {
+        return bytes_;
+    }
+
+private:
+    u32 version_ = 0;
+    u64 bytes_ = 0;
+};
+
 /// A whole engine minus the worker pool: one Processor whose transactions execute inline. No
-/// OrderSaver is attached, so these are in-memory costs; persistence adds an LMDB write on top.
+/// OrderSaver is attached unless recordOrders() asks for one, so these are in-memory costs;
+/// persistence adds an LMDB write on top.
 class EngineFixture
 {
 public:
@@ -218,6 +258,19 @@ public:
     OrderEntry *newOrder(const Side &side, PriceT price, QuantityT qty)
     {
         return makeOrder(data_, ++counter_, side, price, qty);
+    }
+
+    /// Has each order the engine persists encoded as the server has it, by the dispatcher it attaches, with the
+    /// record's strings found in reference data, into a file storage that keeps nothing: the record without its write
+    void recordOrders()
+    {
+        dispatcher_.init(WideDataStorage::instance(), orderBook_.get(), &discarded_, OrderStorage::instance());
+        OrderStorage::instance()->attach(&dispatcher_);
+    }
+
+    const DiscardingFileSaver &discarded() const
+    {
+        return discarded_;
     }
 
     IdT submit(OrderEntry *order)
@@ -288,6 +341,8 @@ private:
     WideData data_;
     u64 counter_;
 
+    DiscardingFileSaver discarded_;
+    StorageRecordDispatcher dispatcher_;
     std::unique_ptr<OrderBookImpl> orderBook_;
     std::unique_ptr<IncomingQueues> inQueues_;
     std::unique_ptr<OutgoingQueues> outQueues_;
@@ -383,6 +438,44 @@ static void BM_ProcessNewOrderWithMatch(benchmark::State &state)
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_ProcessNewOrderWithMatch);
+
+// BM_ProcessNewOrderWithMatch with each persist's record encoded, as the dispatcher the server attaches encodes it for
+// LMDB, which keeps nothing here: the booking's record and both of the trade's
+static void BM_ProcessNewOrderWithMatchRecorded(benchmark::State &state)
+{
+    EngineFixture engine;
+    engine.recordOrders();
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    if (0 == engine.discarded().records())
+    {
+        state.SkipWithError("the warm-up order's record wasn't encoded");
+        return;
+    }
+
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        engine.submit(engine.newOrder(SELL_SIDE, 100.0, 100));
+    }
+
+    std::vector<OrderEntry *> aggressors;
+    aggressors.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        aggressors.push_back(engine.newOrder(BUY_SIDE, 100.0, 100));
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessNewOrderWithMatchRecorded);
 
 static void BM_ProcessCancelOrder(benchmark::State &state)
 {
