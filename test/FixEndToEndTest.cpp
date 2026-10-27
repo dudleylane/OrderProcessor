@@ -1294,6 +1294,25 @@ TEST_F(FixEndToEndTest, AnOrderTheEngineCloses_IsReportedWithNoLeaves)
     EXPECT_EQ("0", fieldOf(dayStatus, FIX::FIELD::LeavesQty));
 }
 
+TEST_F(FixEndToEndTest, AnOrderTheEngineStoresAndRejects_IsReportedWithNoLeaves)
+{
+    // A rejected order is closed, and a closed order's LeavesQty is 0, whatever closed it (#386, #427). Here a market
+    // order with nothing to trade with, which the engine's receive stores before refusing it. Its reject (150=8, 39=8)
+    // went out with LeavesQty equal to its OrderQty, where the gateway's own refusals carry 0.
+    gateway_->onMessage(makeNOS("RJ-MKT", FIX::Side_BUY, FIX::OrdType_MARKET, 0.0, 100), fixSid_);
+    waitForProcessing();
+    OrderEntry *rejected = orderOf("RJ-MKT");
+    ASSERT_NE(nullptr, rejected);
+    EXPECT_EQ(REJECTED_ORDSTATUS, rejected->status_);
+    EXPECT_EQ((std::vector<ExecType>{ REJECT_EXECTYPE }), reportsOf(*rejected));
+    EXPECT_EQ("0", leavesSentWith(*rejected, REJECT_EXECTYPE));
+    const FIX50SP2::ExecutionReport status = statusOf("RJ-MKT");
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_REJECTED), fieldOf(status, FIX::FIELD::OrdStatus));
+    EXPECT_EQ("100", fieldOf(status, FIX::FIELD::OrderQty));
+    EXPECT_EQ("0", fieldOf(status, FIX::FIELD::CumQty));
+    EXPECT_EQ("0", fieldOf(status, FIX::FIELD::LeavesQty));
+}
+
 } // anonymous namespace
 
 #endif // BUILD_FIX

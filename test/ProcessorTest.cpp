@@ -1655,6 +1655,41 @@ TEST_F(ProcessorTest, AMarketOrdersRestTheEngineCanceledIsRestoredWithNoLeaves)
     std::filesystem::remove_all(dir);
 }
 
+TEST_F(ProcessorTest, AnOrderTheEngineStoresAndRejectsIsRestoredWithNoLeaves)
+{
+    // A stored order the engine rejects is persisted as any new order is, and its record carries its LeavesQty: 0, as a
+    // rejected order's is (#427), where it had been all of its quantity
+    const std::string dir = test::uniqueTestPath("rejected-no-leaves");
+    std::filesystem::remove_all(dir);
+    IdT invalid;
+    IdT market;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory engine(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 100); // a limit order at 0, which isValid() refuses
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        invalid = engine.process(clOrdId)->orderId_;
+        order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 100); // a market order with nothing to trade with
+        order->ordType_ = MARKET_ORDERTYPE;
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        market = engine.process(clOrdId)->orderId_;
+    }
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        for (const IdT &id : { invalid, market })
+        {
+            const OrderEntry *restored = restarted.storage_.locateByOrderId(id);
+            ASSERT_NE(nullptr, restored);
+            EXPECT_EQ(REJECTED_ORDSTATUS, restored->status_);
+            EXPECT_EQ(0u, restored->leavesQty_);
+        }
+    }
+    std::filesystem::remove_all(dir);
+}
+
 // =============================================================================
 // A market order's booking is ordered with the others on its instrument (#209)
 // =============================================================================
@@ -2751,6 +2786,29 @@ TEST_F(ProcessorTest, AnIocOrderWithNothingToTradeIsCanceledNotRejected)
     EXPECT_EQ(CANCELED_ORDSTATUS, ioc->status_);
     EXPECT_EQ(0u, ioc->leavesQty_);
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+}
+
+TEST_F(ProcessorTest, AnOrderTheEngineStoresAndRejectsIsReportedWithNoLeaves)
+{
+    // A rejected order is closed, and a closed order's LeavesQty is 0, whatever closed it (#386, #427). The engine stores
+    // an order it rejects in two ways: the reject stores an order isValid() refuses, here a limit order at 0 (#188), and
+    // the receive stores a market order before finding it nothing to trade with. Each used to be reported with all of
+    // its quantity left.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *invalid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 0.0, 100));
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 100);
+    order->ordType_ = MARKET_ORDERTYPE;
+    const OrderEntry *market = engine.submit(std::move(order));
+
+    for (const OrderEntry *rejected : { invalid, market })
+    {
+        ASSERT_NE(nullptr, rejected);
+        EXPECT_EQ(REJECTED_ORDSTATUS, rejected->status_);
+        EXPECT_EQ(0u, rejected->cumQty_);
+        EXPECT_EQ(0u, rejected->leavesQty_);
+        EXPECT_EQ(0u, engine.reports_.leavesReportedWith(rejected->orderId_, REJECT_EXECTYPE));
+    }
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "a rejected order rests in the book";
 }
 
 TEST_F(ProcessorTest, AFokOrderTheBookCanFillTradesInFullAcrossLevels)
