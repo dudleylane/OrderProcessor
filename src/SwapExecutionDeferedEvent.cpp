@@ -52,6 +52,9 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
     const u64 baseLink = cnxt.idGenerator_->getId().id_;
     // Both sides' near legs trade in one business day (#244), as an outright match's sides do: the clock is read once
     const DateTimeT dayStart = ExpiryScheduler::dayStartOf(cnxt.now());
+    // And on its date, as an outright trade does (#258): both legs, on both sides. The legs settle on different dates,
+    // but they trade on one. Every swap leg's trade said 1 (#445).
+    const DateTimeT tradeDate = ExpiryScheduler::tradeDateOf(dayStart);
 
     try
     {
@@ -62,7 +65,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         nearTradeEntry.lastQty_ = nearTrade_.lastQty_;
         nearTradeEntry.lastPx_ = nearTrade_.lastPx_;
         nearTradeEntry.currency_ = nearTrade_.order_->currency_;
-        nearTradeEntry.tradeDate_ = 1;
+        nearTradeEntry.tradeDate_ = tradeDate;
         nearTradeEntry.type_ = TRADE_EXECTYPE;
         nearTradeEntry.transactTime_ = 1;
         nearTradeEntry.orderId_ = nearTrade_.order_->orderId_;
@@ -83,7 +86,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         {
             oneapi::tbb::spin_rw_mutex::scoped_lock lock(nearTrade_.order_->entryMutex_, false);
             OrderStatus contraStatus = (nearTrade_.order_->leavesQty_ == 0) ? FILLED_ORDSTATUS : PARTFILL_ORDSTATUS;
-            contraFarOp.reset(new CreateTradeExecReportTrOperation(farTrade_.lastQty_, farTrade_.lastPx_,
+            contraFarOp.reset(new CreateTradeExecReportTrOperation(farTrade_.lastQty_, farTrade_.lastPx_, tradeDate,
                                                                    nearTrade_.order_->currency_, contraStatus, FAR_LEG,
                                                                    contraLink, *nearTrade_.order_));
         }
@@ -96,7 +99,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         baseNearTradeEntry.lastQty_ = nearTrade_.lastQty_;
         baseNearTradeEntry.lastPx_ = nearTrade_.lastPx_;
         baseNearTradeEntry.currency_ = baseOrder_->currency_;
-        baseNearTradeEntry.tradeDate_ = 1;
+        baseNearTradeEntry.tradeDate_ = tradeDate;
         baseNearTradeEntry.type_ = TRADE_EXECTYPE;
         baseNearTradeEntry.transactTime_ = 1;
         baseNearTradeEntry.orderId_ = baseOrder_->orderId_;
@@ -115,7 +118,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         {
             oneapi::tbb::spin_rw_mutex::scoped_lock lock(baseOrder_->entryMutex_, false);
             OrderStatus baseStatus = (baseOrder_->leavesQty_ == 0) ? FILLED_ORDSTATUS : PARTFILL_ORDSTATUS;
-            baseFarOp.reset(new CreateTradeExecReportTrOperation(farTrade_.lastQty_, farTrade_.lastPx_,
+            baseFarOp.reset(new CreateTradeExecReportTrOperation(farTrade_.lastQty_, farTrade_.lastPx_, tradeDate,
                                                                  baseOrder_->currency_, baseStatus, FAR_LEG, baseLink,
                                                                  *baseOrder_));
         }

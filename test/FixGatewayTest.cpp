@@ -3171,7 +3171,10 @@ TEST_F(FixtSessionTest, ASwapsLegReportIsTakenWithItsTrdMatchId)
     // A side's two reports of a swap's fill are paired by TrdMatchID (880), a field of FIX 5.0 SP2's ExecutionReport
     // (#199). They were paired by TradeLinkID (820), which neither 4.4's ExecutionReport nor 5.0 SP2's has, so a
     // counterparty that validates refused every swap leg's report for it (#378). LegLastQty (1418) is in 5.0 SP2's
-    // NoLegs group, where FIX 4.4 had no such field.
+    // NoLegs group, where FIX 4.4 had no such field. Its TradeDate (75) is its fill's business day's, as an outright
+    // trade's is (#258): the engine gave every swap leg's trade 1 (#445). This checks the gateway's side, that a leg's
+    // report sends the date and a counterparty that validates takes it; ProcessorTest's
+    // ASwapsLegsTradeOnTheDateOfTheDayItsFillCountsIn checks that the engine sets it.
     ASSERT_NO_FATAL_FAILURE(logOn());
     OrderEntry *order = saveOrderOf(sid_, "SWAP-1");
     order->ordType_ = FXSWAP_ORDERTYPE;
@@ -3183,11 +3186,13 @@ TEST_F(FixtSessionTest, ASwapsLegReportIsTakenWithItsTrdMatchId)
     trade.tradeLink_ = 4242;
     trade.lastQty_ = 100;
     trade.lastPx_ = 1.0872;
+    trade.tradeDate_ = 20261016;
     gateway_->sendExecutionReport(&trade, *order);
     ASSERT_EQ(1u, sent_.size()) << sentText();
     expectEverythingSentIsTaken();
     const FIX::Message report = parsed(sent_[0]);
     EXPECT_EQ("4242", fieldOf(report, FIX::FIELD::TrdMatchID));
+    EXPECT_EQ("20261016", fieldOf(report, FIX::FIELD::TradeDate));
     EXPECT_EQ("(not set)", fieldOf(report, FIX::FIELD::TradeLinkID));
     EXPECT_EQ(1u, report.groupCount(FIX::FIELD::NoLegs));
 }

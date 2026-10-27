@@ -301,7 +301,8 @@ CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(const TradeEx
     tradeLink_ = trade->tradeLink_; // a swap's near leg's link, as its far leg's report carries it (#199)
 }
 
-CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx, Currency currency,
+CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx,
+                                                                   DateTimeT tradeDate, Currency currency,
                                                                    OrderStatus status, ExecLegType legType,
                                                                    u64 tradeLink, const OrderEntry &order)
     : Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), tradeLink_(tradeLink), status_(status),
@@ -309,7 +310,7 @@ CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(QuantityT las
 {
     lastQty_ = lastQty;
     lastPx_ = lastPx;
-    tradeDate_ = 1;
+    tradeDate_ = tradeDate;
     currency_ = currency;
 }
 

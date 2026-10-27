@@ -65,9 +65,10 @@ class CreateTradeExecReportTrOperation final : public Operation
 public:
     CreateTradeExecReportTrOperation(const TradeExecEntry *trade, OrderStatus status, const OrderEntry &order);
     /// A swap leg's report outside the state machine; tradeLink pairs it with its other leg's (#199). Its caller holds
-    /// the order's lock, for the figures it takes (#411).
-    CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx, Currency currency, OrderStatus status,
-                                     ExecLegType legType, u64 tradeLink, const OrderEntry &order);
+    /// the order's lock, for the figures it takes (#411). Its tradeDate is its fill's business day's, as its near leg's
+    /// is (#445).
+    CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx, DateTimeT tradeDate, Currency currency,
+                                     OrderStatus status, ExecLegType legType, u64 tradeLink, const OrderEntry &order);
     ~CreateTradeExecReportTrOperation();
 
     void execute(const Context &cnxt) override;

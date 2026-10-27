@@ -3554,6 +3554,60 @@ TEST_F(ProcessorTest, ATradesDateIsTheBusinessDayItCountsIn)
     EXPECT_EQ(std::set<DateTimeT>{ 20261016 }, storedDates(*late));
 }
 
+TEST_F(ProcessorTest, ASwapsLegsTradeOnTheDateOfTheDayItsFillCountsIn)
+{
+    // Every swap leg's trade had tradeDate 1, on both sides (#445): SwapExecutionDeferedEvent set none, where an outright
+    // trade has its business day's date (#258). A swap's legs settle on different dates, but they trade on one, the date
+    // of the day the fill counts in, so a fill at 17:00 New York has the next day's.
+    DateTimeT now = OCT15 + 13 * HOUR; // 09:00 EDT
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+                      [&now]
+                      {
+                          return now;
+                      });
+    const auto swap = [&](Side side, QuantityT qty)
+    {
+        auto order = createTestOrder(instrId1_, side, 1.085, qty);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->tif_ = GTC_TIF;
+        order->creationTime_ = now;
+        order->farPrice_ = 1.095;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        return order;
+    };
+    OrderEntry *sell = engine.submit(swap(SELL_SIDE, 50));
+    OrderEntry *buy = engine.submit(swap(BUY_SIDE, 20));
+    now = OCT15 + 21 * HOUR; // 17:00 EDT, the next day's start
+    OrderEntry *late = engine.submit(swap(BUY_SIDE, 30));
+    ASSERT_NE(nullptr, sell);
+    ASSERT_NE(nullptr, buy);
+    ASSERT_NE(nullptr, late);
+    ASSERT_EQ(FILLED_ORDSTATUS, late->status_) << "the swaps didn't trade";
+    // Each fill's near leg's report, then its far leg's
+    EXPECT_EQ((std::vector<DateTimeT>{ 20261015, 20261015, 20261016, 20261016 }),
+              engine.reports_.tradeDatesOf(sell->orderId_));
+    EXPECT_EQ((std::vector<DateTimeT>{ 20261015, 20261015 }), engine.reports_.tradeDatesOf(buy->orderId_));
+    EXPECT_EQ((std::vector<DateTimeT>{ 20261016, 20261016 }), engine.reports_.tradeDatesOf(late->orderId_));
+    // The stored trades have it too: a near leg's, as its fill stored it, and each leg's report
+    auto storedDates = [](OrderEntry &order)
+    {
+        std::set<DateTimeT> dates;
+        for (const EventData &event : *order.executions_.get())
+        {
+            const ExecutionEntry *exec = OrderStorage::instance()->locateByExecId(event.eventId_);
+            if ((nullptr != exec) && (TRADE_EXECTYPE == exec->type_))
+            {
+                dates.insert(static_cast<const TradeExecEntry *>(exec)->tradeDate_);
+            }
+        }
+        return dates;
+    };
+    EXPECT_EQ((std::set<DateTimeT>{ 20261015, 20261016 }), storedDates(*sell));
+    EXPECT_EQ(std::set<DateTimeT>{ 20261015 }, storedDates(*buy));
+    EXPECT_EQ(std::set<DateTimeT>{ 20261016 }, storedDates(*late));
+}
+
 TEST_F(ProcessorTest, BothSidesOfATradeCountItInTheSameDay)
 {
     // The clock is read once for a match (#244): a trade at the day's end can't count in one day for one side and in
