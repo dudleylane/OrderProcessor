@@ -293,8 +293,10 @@ private:
 };
 
 /// Reports an order restated for a new business day with a RESTATED execution report, FIX's ExecType D (#244): its day
-/// figures as they begin the day, and its status as it is. It follows the persist that records them, so they are
-/// durable before its client hears (#28).
+/// figures as they begin the day, and its status, as the restatement left them (#441). It takes them under the order's
+/// write lock, which its caller holds: its transaction names the order alone, so a booking on the instrument can fill
+/// the order before it runs. It follows the persist that records them, so they are durable before its client hears
+/// (#28).
 class ReportRestatementTrOperation final : public Operation
 {
 public:
@@ -302,6 +304,9 @@ public:
 
     void execute(const Context &cnxt) override;
     void rollback(const Context &cnxt) override;
+
+private:
+    OrderFigures figures_;
 };
 
 void executeEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
