@@ -13,11 +13,14 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <memory>
+#include <optional>
 
 #include "TestFixtures.h"
 #include "TestAux.h"
 #include "MockStorage.h"
 #include "WideDataStorage.h"
+#include "WideDataLazyRef.h"
 
 using namespace COP;
 using namespace COP::Store;
@@ -532,6 +535,96 @@ TEST_F(WideDataStorageTest, AddClearingHelper)
     storage()->get(id, &retrieved);
 
     EXPECT_EQ("ClearFirm", retrieved.firm_);
+}
+
+// =============================================================================
+// A ref copied while another thread loads it (#455)
+// =============================================================================
+
+enum class CopyBy
+{
+    CONSTRUCTOR,
+    ASSIGNMENT
+};
+
+/// One thread makes a ref's first load and another copies it, in the order given. A relaxed flag orders them, which
+/// gives TSan no happens-before edge between the two: only the ref's own release, as its load marks it loaded, and the
+/// copy's acquire, as it looks, may order them. A copy that read the value before looking raced with the load either
+/// way, and TSan reports it. The copier does nothing after its copy but raise the flag, and the copy is read once
+/// both threads are joined: a storage read of its own, before the load, would order the copy before it. Each gives
+/// the stored value.
+void copyWhileAnotherThreadLoads(CopyBy by, bool copyFirst)
+{
+    for (int i = 0; i < 10; ++i)
+    {
+        const SourceIdT id = WideDataStorage::instance()->add(new StringT("NASDAQ"));
+        const SourceIdT other = WideDataStorage::instance()->add(new StringT("OTHER"));
+        auto ref = std::make_unique<WideDataLazyRef<StringT>>(id);
+        std::optional<WideDataLazyRef<StringT>> copy;
+        if (CopyBy::ASSIGNMENT == by)
+        {
+            copy.emplace(other);
+        }
+        StringT loaded;
+        std::atomic<bool> firstDone{ false };
+        auto load = [&]
+        {
+            loaded = ref->get();
+        };
+        auto copyRef = [&]
+        {
+            if (CopyBy::CONSTRUCTOR == by)
+            {
+                copy.emplace(*ref);
+            }
+            else
+            {
+                *copy = *ref;
+            }
+        };
+        std::thread first(
+            [&]
+            {
+                copyFirst ? copyRef() : load();
+                firstDone.store(true, std::memory_order_relaxed);
+            });
+        std::thread second(
+            [&]
+            {
+                while (!firstDone.load(std::memory_order_relaxed))
+                {
+                    std::this_thread::yield();
+                }
+                copyFirst ? load() : copyRef();
+            });
+        first.join();
+        second.join();
+
+        EXPECT_EQ("NASDAQ", loaded);
+        ASSERT_TRUE(copy.has_value());
+        EXPECT_EQ(id, copy->getId());
+        EXPECT_EQ("NASDAQ", copy->get()) << (copyFirst ? "copied before the load" : "copied after the load");
+    }
+}
+
+TEST_F(WideDataStorageTest, ACopyOfARefAnotherThreadHasLoadedTakesTheValueOnceItSeesItLoaded)
+{
+    copyWhileAnotherThreadLoads(CopyBy::CONSTRUCTOR, false);
+}
+
+TEST_F(WideDataStorageTest, ACopyOfARefAnotherThreadLoadsLaterLoadsTheValueItself)
+{
+    copyWhileAnotherThreadLoads(CopyBy::CONSTRUCTOR, true);
+}
+
+TEST_F(WideDataStorageTest, AnAssignmentOfARefAnotherThreadHasLoadedTakesTheValueOnceItSeesItLoaded)
+{
+    copyWhileAnotherThreadLoads(CopyBy::ASSIGNMENT, false);
+}
+
+TEST_F(WideDataStorageTest, AnAssignmentOfARefAnotherThreadLoadsLaterLoadsTheValueItself)
+{
+    copyWhileAnotherThreadLoads(CopyBy::ASSIGNMENT, true);
 }
 
 } // namespace
