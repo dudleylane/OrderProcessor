@@ -819,6 +819,7 @@ An order keeps FIX's day figures for the business day that began at its `dayStar
 | `ExpirySchedulerTest.cpp` | `*DayStart*`, `*Restatement*`, `DaysLookedUpFromSeveralThreadsAtOnceAgree` | The day a time is in, across the clock changes and from several threads at once; which orders are restated |
 | `StorageRecordDispatcherTest.cpp` | `*Golden*` | Format version 4, and `dayStart_` 0 from older ones |
 | `ServerDataTest.cpp` | `AnOrderWhoseDayEndedWhileTheServerWasDownIsRestatedAtOnce` | A restart's restatement |
+| `ProcessorBench.cpp` | `BM_ProcessRestatement` | Timed through a `Processor`: a restatement decided by the transaction its timer enqueues, a day after the order rested (#451) |
 
 ## 5. State Machine Design
 
