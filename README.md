@@ -340,6 +340,15 @@ inline through the engine's reject of an order it stores (#435): one that `Order
 order with nothing to trade with. A reject costs about 2.5 times a new order, and more than a match: nearly half of its
 processing is raising its exception twice (#436).
 
+`BM_ProcessNewOrderWithMatchRecorded` is `BM_ProcessNewOrderWithMatch` with each order's record encoded as the
+server's storage dispatcher encodes it, into a storage that keeps nothing: the encoding, without LMDB's write.
+`BM_WsOutQueuesPushTradeReport/K` pushes a fill's report through `WsOutQueues` to K WebSocket clients: the report
+and its order serialized and sent, and the book serialized for its subscribers, none here (#442).
+Measured on 2026-10-27, pinned, in runs where `BM_ProcessNewOrderWithMatch` took ~5.7 µs, the recorded match took
+~7.6 µs: a match's three records (the booking's and the trade's two) take about 1.9 µs to encode. A report takes
+~10.7 µs to push to one client and ~12.9 µs to eight. Its two broadcasts, the report's and the order's, take about
+0.3 µs of the first and 1.5 µs of the second, and most of the rest is building and serializing its JSON.
+
 ---
 
 ## Architecture

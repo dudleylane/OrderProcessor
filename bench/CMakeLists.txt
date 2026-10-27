@@ -15,6 +15,7 @@ target_sources(orderProcessorBench
         ${CMAKE_SOURCE_DIR}/app/WsCredentials.cpp
         ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
         ${CMAKE_SOURCE_DIR}/app/ClientMessageParser.cpp
+        ${CMAKE_SOURCE_DIR}/app/WsOutQueues.cpp
 )
 
 target_include_directories(orderProcessorBench
