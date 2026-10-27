@@ -281,6 +281,8 @@ differ; these numbers are a shape, not a specification.
 | `BM_ProcessExpiry` | ~1.7 µs | ~580K orders/sec | a resting DAY order's expiry at its day's end: the transaction its `DAY_END` timer enqueues decides it, takes the order off the book, reports it (#426) |
 | `BM_ProcessInvalidOrder` | ~6.8 µs | ~147K orders/sec | an order `OrderEntry::isValid()` refuses: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
 | `BM_ProcessMarketOrderWithNoMarket` | ~6.9 µs | ~145K orders/sec | a market order with nothing to trade with: stored, then rejected and reported (#435) |
+| `BM_ProcessNewOrderWithMatchRecorded` | ~7.9 µs | ~127K orders/sec | `BM_ProcessNewOrderWithMatch` with each order's record encoded as the server's storage dispatcher encodes it, into a storage that keeps nothing: the encoding, without LMDB's write (#442) |
+| `BM_WsOutQueuesPushTradeReport/1` | ~11.2 µs | ~90K reports/sec | a fill's report pushed through `WsOutQueues` to one WebSocket client: the report and its order serialized and sent, and the book serialized for its subscribers, none here (#442) |
 | `BM_TaskManagerThroughput/4` | ~1.9 ms per 500 orders | ~265K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
 | `BM_TaskManagerTrades/instruments:8/processors:4` | ~3.6 ms per 500 orders | ~140K orders/sec, ~70K trades/sec | the same pool while every order trades: 250 sells and 250 buys at one price a batch, dealt over 8 instruments |
 
@@ -292,6 +294,11 @@ the rows come from a faster session is #429.
 `BM_ProcessInvalidOrder` and `BM_ProcessMarketOrderWithNoMarket` were measured on 2026-10-26 too, in runs
 that gave the five rows above them as #426's did. A reject costs about 2.6 times a new order, and more than a
 match: nearly half of its processing is raising its exception twice (#436).
+
+`BM_ProcessNewOrderWithMatchRecorded` and `BM_WsOutQueuesPushTradeReport` were measured on 2026-10-27,
+pinned, in runs where `BM_ProcessNewOrderWithMatch` took ~5.8 µs: a match's three records (the booking's
+and the trade's two) take about 2.1 µs to encode. A report takes ~13.0 µs to push to eight clients. Its
+broadcasts take under 1 µs of that, and most of the rest is building and serializing its JSON.
 
 `BM_TaskManagerThroughput` takes the processor count as its argument: ~205K orders/sec at 2, ~265K at
 4, and little more (~270K) at 8 on a 4-core machine.

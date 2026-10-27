@@ -1409,6 +1409,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | `OrderStorageTest.cpp` | `OrderStorageTest.*` | Order storage operations |
 | `WideDataStorageTest.cpp` | `WideDataStorageTest.*` | Reference data storage |
 | `LMDBStorageTest.cpp` | `LMDBStorageTest.*` | LMDB key-value backend |
+| `ProcessorBench.cpp` | `BM_ProcessNewOrderWithMatchRecorded` | A match's records encoded by the dispatcher, without LMDB's write (#442) |
 
 ---
 
@@ -1420,7 +1421,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 
 | Component | Tests | Benchmarks |
 |-----------|-------|------------|
-| **Codecs** | `CodecsTest.cpp`; `StorageRecordDispatcherTest.cpp`, which holds the golden records (#149) | - |
+| **Codecs** | `CodecsTest.cpp`; `StorageRecordDispatcherTest.cpp`, which holds the golden records (#149) | `ProcessorBench.cpp` (`BM_ProcessNewOrderWithMatchRecorded`, through the dispatcher, #442) |
 | **State Machine** | `StatesTest.cpp`, `StateMachineTest.cpp`, both through `StateMachineHelper` | `StateMachineBench.cpp` |
 | **Order Book & Matching** | `OrderBookTest.cpp`, `OrderMatcherTest.cpp` | `OrderMatchingBench.cpp` |
 | **Queues** | `IncomingQueuesTest.cpp`, `OutgoingQueuesTest.cpp`, `QueuesManagerTest.cpp` | `EventProcessingBench.cpp` |
@@ -1499,8 +1500,8 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | `TransactionScopePoolBench.cpp` | Lock-free object pool allocation |
 | `NumaAllocatorBench.cpp` | NUMA-aware allocation performance |
 | `OrderParamsLayoutBench.cpp` | Field layout optimization |
-| `ProcessorBench.cpp` | The real path: new order, match and cancel through a `Processor`, an IOC's remainder and an expiry (#426), the reject of an order `isValid()` refuses and of a market order with no market (#435), and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290) |
-| `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159) |
+| `ProcessorBench.cpp` | The real path: new order, match and cancel through a `Processor`, an IOC's remainder and an expiry (#426), the reject of an order `isValid()` refuses and of a market order with no market (#435), a match whose records are encoded as the server's dispatcher encodes them (#442), and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290) |
+| `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159), and a fill's report pushed through `WsOutQueues` (#442) |
 
 ---
 
