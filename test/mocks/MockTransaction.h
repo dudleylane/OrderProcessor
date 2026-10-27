@@ -77,7 +77,8 @@ public:
     MOCK_METHOD(void, removeLastOperation, (), (override));
     MOCK_METHOD(size_t, startNewStage, (), (override));
     MOCK_METHOD(void, removeStage, (const size_t &id), (override));
-    MOCK_METHOD(bool, hasOperation, (COP::ACID::OperationType type, const COP::IdT &id), (const, override));
+    MOCK_METHOD(COP::ACID::Operation *, findOperation, (COP::ACID::OperationType type, const COP::IdT &id),
+                (const, override));
 };
 
 /**

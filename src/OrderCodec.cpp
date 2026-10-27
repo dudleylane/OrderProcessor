@@ -265,6 +265,12 @@ OrderCodec::~OrderCodec(void) {}
 
 void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *version, const OrderStrings &strings)
 {
+    encode(val, OrderFigures(val), buf, id, version, strings);
+}
+
+void OrderCodec::encode(const OrderEntry &val, const OrderFigures &figures, std::string *buf, IdT *id, u32 *version,
+                        const OrderStrings &strings)
+{
     assert(nullptr != buf);
     assert(nullptr != id);
     assert(nullptr != version);
@@ -327,16 +333,16 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
     buf->append(typebuf, sizeof(val.stopPx_));
     buf->append(1, '.');
 
-    memcpy(typebuf, &(val.avgPx_), sizeof(val.avgPx_));
-    buf->append(typebuf, sizeof(val.avgPx_));
+    memcpy(typebuf, &(figures.avgPx_), sizeof(figures.avgPx_));
+    buf->append(typebuf, sizeof(figures.avgPx_));
     buf->append(1, '.');
 
-    memcpy(typebuf, &(val.dayAvgPx_), sizeof(val.dayAvgPx_));
-    buf->append(typebuf, sizeof(val.dayAvgPx_));
+    memcpy(typebuf, &(figures.dayAvgPx_), sizeof(figures.dayAvgPx_));
+    buf->append(typebuf, sizeof(figures.dayAvgPx_));
     buf->append(1, '.');
 
-    memcpy(typebuf, &(val.status_), sizeof(val.status_));
-    buf->append(typebuf, sizeof(val.status_));
+    memcpy(typebuf, &(figures.status_), sizeof(figures.status_));
+    buf->append(typebuf, sizeof(figures.status_));
     buf->append(1, '.');
 
     memcpy(typebuf, &(val.side_), sizeof(val.side_));
@@ -371,23 +377,23 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
     buf->append(typebuf, sizeof(val.orderQty_));
     buf->append(1, '.');
 
-    memcpy(typebuf, &(val.leavesQty_), sizeof(val.leavesQty_));
-    buf->append(typebuf, sizeof(val.leavesQty_));
+    memcpy(typebuf, &(figures.leavesQty_), sizeof(figures.leavesQty_));
+    buf->append(typebuf, sizeof(figures.leavesQty_));
     buf->append(1, '.');
 
-    memcpy(typebuf, &(val.cumQty_), sizeof(val.cumQty_));
-    buf->append(typebuf, sizeof(val.cumQty_));
+    memcpy(typebuf, &(figures.cumQty_), sizeof(figures.cumQty_));
+    buf->append(typebuf, sizeof(figures.cumQty_));
     buf->append(1, '.');
 
-    memcpy(typebuf, &(val.dayOrderQty_), sizeof(val.dayOrderQty_));
-    buf->append(typebuf, sizeof(val.dayOrderQty_));
+    memcpy(typebuf, &(figures.dayOrderQty_), sizeof(figures.dayOrderQty_));
+    buf->append(typebuf, sizeof(figures.dayOrderQty_));
     buf->append(1, '.');
 
-    memcpy(typebuf, &(val.dayCumQty_), sizeof(val.dayCumQty_));
-    buf->append(typebuf, sizeof(val.dayCumQty_));
+    memcpy(typebuf, &(figures.dayCumQty_), sizeof(figures.dayCumQty_));
+    buf->append(typebuf, sizeof(figures.dayCumQty_));
     buf->append(1, '.');
 
-    val.stateMachinePersistance_.serialize(*buf);
+    figures.stateMachinePersistance_.serialize(*buf);
     buf->append(1, '.');
 
     // Format version 1 (#172)
@@ -397,7 +403,7 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
     buf->append(1, '.');
 
     // Format version 2 (#223)
-    buf->append(1, val.stopTriggered_ ? '\x01' : '\x00');
+    buf->append(1, figures.stopTriggered_ ? '\x01' : '\x00');
 
     // Format version 3 (#192)
     appendRaw(buf, strings.clOrderId);
@@ -407,11 +413,17 @@ void OrderCodec::encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *v
 
     // Format version 4 (#244)
     buf->append(1, '.');
-    memcpy(typebuf, &(val.dayStart_), sizeof(val.dayStart_));
-    buf->append(typebuf, sizeof(val.dayStart_));
+    memcpy(typebuf, &(figures.dayStart_), sizeof(figures.dayStart_));
+    buf->append(typebuf, sizeof(figures.dayStart_));
 }
 
 char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version, const OrderStrings &strings)
+{
+    return encode(val, OrderFigures(val), buf, id, version, strings);
+}
+
+char *OrderCodec::encode(const OrderEntry &val, const OrderFigures &figures, char *buf, IdT *id, u32 *version,
+                         const OrderStrings &strings)
 {
     assert(nullptr != buf);
     assert(nullptr != id);
@@ -488,18 +500,18 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     *p = '.';
     ++p;
 
-    memcpy(p, &(val.avgPx_), sizeof(val.avgPx_));
-    p += sizeof(val.avgPx_);
+    memcpy(p, &(figures.avgPx_), sizeof(figures.avgPx_));
+    p += sizeof(figures.avgPx_);
     *p = '.';
     ++p;
 
-    memcpy(p, &(val.dayAvgPx_), sizeof(val.dayAvgPx_));
-    p += sizeof(val.dayAvgPx_);
+    memcpy(p, &(figures.dayAvgPx_), sizeof(figures.dayAvgPx_));
+    p += sizeof(figures.dayAvgPx_);
     *p = '.';
     ++p;
 
-    memcpy(p, &(val.status_), sizeof(val.status_));
-    p += sizeof(val.status_);
+    memcpy(p, &(figures.status_), sizeof(figures.status_));
+    p += sizeof(figures.status_);
     *p = '.';
     ++p;
 
@@ -543,27 +555,27 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     *p = '.';
     ++p;
 
-    memcpy(p, &(val.leavesQty_), sizeof(val.leavesQty_));
-    p += sizeof(val.leavesQty_);
+    memcpy(p, &(figures.leavesQty_), sizeof(figures.leavesQty_));
+    p += sizeof(figures.leavesQty_);
     *p = '.';
     ++p;
 
-    memcpy(p, &(val.cumQty_), sizeof(val.cumQty_));
-    p += sizeof(val.cumQty_);
+    memcpy(p, &(figures.cumQty_), sizeof(figures.cumQty_));
+    p += sizeof(figures.cumQty_);
     *p = '.';
     ++p;
 
-    memcpy(p, &(val.dayOrderQty_), sizeof(val.dayOrderQty_));
-    p += sizeof(val.dayOrderQty_);
+    memcpy(p, &(figures.dayOrderQty_), sizeof(figures.dayOrderQty_));
+    p += sizeof(figures.dayOrderQty_);
     *p = '.';
     ++p;
 
-    memcpy(p, &(val.dayCumQty_), sizeof(val.dayCumQty_));
-    p += sizeof(val.dayCumQty_);
+    memcpy(p, &(figures.dayCumQty_), sizeof(figures.dayCumQty_));
+    p += sizeof(figures.dayCumQty_);
     *p = '.';
     ++p;
 
-    p = val.stateMachinePersistance_.serialize(p);
+    p = figures.stateMachinePersistance_.serialize(p);
     *p = '.';
     ++p;
 
@@ -575,7 +587,7 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     ++p;
 
     // Format version 2 (#223)
-    *p = val.stopTriggered_ ? '\x01' : '\x00';
+    *p = figures.stopTriggered_ ? '\x01' : '\x00';
     ++p;
 
     // Format version 3 (#192)
@@ -587,8 +599,8 @@ char *OrderCodec::encode(const OrderEntry &val, char *buf, IdT *id, u32 *version
     // Format version 4 (#244)
     *p = '.';
     ++p;
-    memcpy(p, &(val.dayStart_), sizeof(val.dayStart_));
-    p += sizeof(val.dayStart_);
+    memcpy(p, &(figures.dayStart_), sizeof(figures.dayStart_));
+    p += sizeof(figures.dayStart_);
     return p;
 }
 

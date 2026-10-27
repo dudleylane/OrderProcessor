@@ -24,7 +24,10 @@ public:
     static InstrumentWrite fromInstrument(const InstrumentEntry &val);
     static AccountWrite fromAccount(const AccountEntry &val);
     static ClearingWrite fromClearing(const ClearingEntry &val);
+    /// The order's row with its own figures, which are its record's for an order decoded from storage or restored
     static OrderWrite fromOrder(const OrderEntry &val);
+    /// The order's row with the figures a decision left it with (#411), in place of its own
+    static OrderWrite fromOrder(const OrderEntry &val, const OrderFigures &figures);
 };
 
 } // namespace COP::PG

@@ -485,17 +485,21 @@ void Processor::removeDeferedEventsFrom(size_t startIndex)
 void Processor::persistOrder(ACID::Scope *transaction, const OrderEntry &order)
 {
     assert(nullptr != transaction);
-    // Once per transaction (#148). A second operation would write the same record, since the codec reads the order
-    // when the operation executes. And LMDBStorage::update() keeps only the newest version it finds besides the one it
-    // writes, so two versions of the order from one transaction would leave nothing to restore if it rolled back.
-    if (transaction->hasOperation(ACID::PERSIST_ORDER_TROPERATION, order.orderId_))
+    // What the decision left the order with, read now, under the order's write lock that every caller holds: the
+    // transaction can run after a later decision about the order was applied (#411)
+    const OrderFigures decided(order);
+    // Once per transaction (#148): LMDBStorage::update() keeps only the newest version it finds besides the one it
+    // writes, so two versions of the order from one transaction would leave nothing to restore if it rolled back. A
+    // later decision in the transaction goes to the operation the first made.
+    if (ACID::Operation *persist = transaction->findOperation(ACID::PERSIST_ORDER_TROPERATION, order.orderId_))
     {
+        static_cast<ACID::PersistOrderTrOperation *>(persist)->decided(decided);
         return;
     }
-    std::unique_ptr<ACID::Operation> op(new ACID::PersistOrderTrOperation(order));
+    std::unique_ptr<ACID::Operation> op(new ACID::PersistOrderTrOperation(order, decided));
     // First, not last: CreateExecReportTrOperation publishes during execute and WsOutQueues
     // broadcasts straight away, so persisting afterwards let a client see a fill before it was
-    // durable (#28). No operation mutates the fields the codec writes, so the record is the same.
+    // durable (#28).
     transaction->addOperationFirst(op);
 }
 

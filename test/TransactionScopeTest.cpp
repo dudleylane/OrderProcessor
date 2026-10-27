@@ -617,6 +617,25 @@ TEST_F(TransactionScopeTest, HasOperationFindsAnOperationByItsTypeAndObject)
     EXPECT_EQ(2u, scope.operationCount());
 }
 
+// Processor hands a second decision about an order in one scope to the persist the first one added (#411), which it
+// finds by this: the operation itself, or nothing
+TEST_F(TransactionScopeTest, FindOperationGivesTheOperationOfItsTypeAndObject)
+{
+    TransactionScope scope;
+    EXPECT_EQ(nullptr, scope.findOperation(MATCH_ORDER_TROPERATION, IdT(7, 1)));
+    std::unique_ptr<Operation> op(new TrackingOperation(7, &execOrder_, &rollbackOrder_));
+    const Operation *added = op.get();
+    scope.addOperation(op);
+    std::unique_ptr<Operation> front(new TrackingOperation(9, &execOrder_, &rollbackOrder_));
+    const Operation *addedFirst = front.get();
+    scope.addOperationFirst(front);
+
+    EXPECT_EQ(added, scope.findOperation(MATCH_ORDER_TROPERATION, IdT(7, 1)));
+    EXPECT_EQ(addedFirst, scope.findOperation(MATCH_ORDER_TROPERATION, IdT(9, 1)));
+    EXPECT_EQ(nullptr, scope.findOperation(MATCH_ORDER_TROPERATION, IdT(8, 1)));
+    EXPECT_EQ(nullptr, scope.findOperation(PERSIST_ORDER_TROPERATION, IdT(7, 1)));
+}
+
 } // namespace
 
 // =============================================================================

@@ -36,7 +36,8 @@ StringT stringOrEmpty(const WideDataLazyRef<StringT> &ref)
     return isSet(ref) ? ref.get() : StringT();
 }
 
-json orderToJson(const OrderEntry &order)
+/// The order with the figures given for the fields its decisions change (#411): a report's, or its own
+json orderToJson(const OrderEntry &order, const OrderFigures &figures)
 {
     json j;
     j["orderId"] = order.orderId_.id_;
@@ -49,19 +50,19 @@ json orderToJson(const OrderEntry &order)
     j["price"] = order.price_;
     j["stopPx"] = order.stopPx_;
     // A stop order is held until a trade reaches its stop price; then it is released (#223)
-    j["stopTriggered"] = order.stopTriggered_;
-    j["avgPx"] = order.avgPx_;
+    j["stopTriggered"] = figures.stopTriggered_;
+    j["avgPx"] = figures.avgPx_;
     j["orderQty"] = order.orderQty_;
-    j["cumQty"] = order.cumQty_;
-    j["leavesQty"] = order.leavesQty_;
+    j["cumQty"] = figures.cumQty_;
+    j["leavesQty"] = figures.leavesQty_;
     j["minQty"] = order.minQty_;
     // The business day's figures, FIX's DayOrderQty, DayCumQty and DayAvgPx (#244): what the order had left to trade
     // when the day began, and the day's fills. dayStart is when that day began, 17:00 New York; 0 for none.
-    j["dayOrderQty"] = order.dayOrderQty_;
-    j["dayCumQty"] = order.dayCumQty_;
-    j["dayAvgPx"] = order.dayAvgPx_;
-    j["dayStart"] = order.dayStart_;
-    j["status"] = toJsonString(order.status_);
+    j["dayOrderQty"] = figures.dayOrderQty_;
+    j["dayCumQty"] = figures.dayCumQty_;
+    j["dayAvgPx"] = figures.dayAvgPx_;
+    j["dayStart"] = figures.dayStart_;
+    j["status"] = toJsonString(figures.status_);
     j["tif"] = toJsonString(order.tif_);
     j["capacity"] = toJsonString(order.capacity_);
     j["currency"] = toJsonString(order.currency_);
@@ -181,16 +182,21 @@ std::string App::serializeOrderSnapshot(const Store::OrderDataStorage *storage, 
             {
                 return;
             }
-            j["data"].push_back(orderToJson(order));
+            j["data"].push_back(orderToJson(order, OrderFigures(order)));
         });
     return j.dump();
 }
 
 std::string App::serializeOrderUpdate(const OrderEntry &order)
 {
+    return serializeOrderUpdate(order, OrderFigures(order));
+}
+
+std::string App::serializeOrderUpdate(const OrderEntry &order, const OrderFigures &figures)
+{
     json j;
     j["type"] = "order_update";
-    j["data"] = orderToJson(order);
+    j["data"] = orderToJson(order, figures);
     return j.dump();
 }
 

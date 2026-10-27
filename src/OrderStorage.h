@@ -94,9 +94,10 @@ public:
 
     void attach(OrderSaver *saver);
 
-    /// Writes a new persisted version of the order, out-param receives it. Returns false when no
-    /// saver is attached (tests, and the load passes), in which case nothing was written.
-    bool persist(const OrderEntry &order, u32 *version);
+    /// Writes a new persisted version of the order, with the figures a decision left it with (#411), out-param
+    /// receives it. Returns false when no saver is attached (tests, and the load passes), in which case nothing was
+    /// written.
+    bool persist(const OrderEntry &order, const OrderFigures &figures, u32 *version);
     /// Erases one persisted version, undoing a persist().
     void unpersist(const IdT &orderId, u32 version);
     /// Writes a new persisted version of the instrument's last trade (#237), as persist() writes an order's. Returns

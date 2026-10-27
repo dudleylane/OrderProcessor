@@ -70,8 +70,14 @@ public:
 
 public:
     /// reimplemented from OrderSaver
-    virtual u32 save(const OrderEntry &val);
+    u32 save(const OrderEntry &val, const OrderFigures &figures) override;
     virtual void erase(const IdT &orderId, u32 version);
+    /// Persists the order with its figures as they are now. Tests call it: the engine persists the figures a decision
+    /// left (#411).
+    u32 save(const OrderEntry &val)
+    {
+        return save(val, OrderFigures(val));
+    }
     /// A group of orders' saves, written as one by the file storage (#163)
     void beginGroup() override;
     void commitGroup() override;
