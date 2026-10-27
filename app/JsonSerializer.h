@@ -26,6 +26,7 @@ std::string serializeInstrumentList(const Store::WideParamsDataStorage *wds);
 using AccountFilter = std::function<bool(const SourceIdT &account)>;
 std::string serializeAccountList(const Store::WideParamsDataStorage *wds,
                                  const AccountFilter &maySee = AccountFilter());
+/// Every order the session may see, as its last report left it (#404), but one whose first report isn't out
 std::string serializeOrderSnapshot(const Store::OrderDataStorage *storage,
                                    const AccountFilter &maySee = AccountFilter());
 /// The order as it is now. Tests call it: a report's update gives the report's figures (#411).

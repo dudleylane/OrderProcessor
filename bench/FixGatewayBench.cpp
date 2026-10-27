@@ -717,11 +717,13 @@ private:
     std::string message_;
 };
 
-/// The session's order, stored and working: storeBenchOrder()'s limit buy, 40 of 100 filled
+/// The session's order, stored and working: storeBenchOrder()'s limit buy, 40 of 100 filled, published as its last
+/// report would have, since the gateway answers about an order with what its last report said (#404)
 OrderEntry *storeWorkingOrder(const FixBenchSetup &setup, const std::string &source)
 {
     OrderEntry *order = storeBenchOrder(setup, source, LIMIT_ORDERTYPE);
     order->status_ = PARTFILL_ORDSTATUS;
+    order->published_ = OrderFigures(*order);
     return order;
 }
 

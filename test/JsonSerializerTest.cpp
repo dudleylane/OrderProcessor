@@ -8,13 +8,17 @@
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <atomic>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "TestFixtures.h"
 #include "TestAux.h"
 #include "DataModelDef.h"
+#include "IdTGenerator.h"
 #include "JsonSerializer.h"
 #include "OrderStorage.h"
 #include "WideDataStorage.h"
@@ -218,6 +222,123 @@ TEST_F(JsonSerializerTest, SetReferencesAreSerialized)
     EXPECT_EQ("CL-2", data.value("clOrderId", "?"));
     EXPECT_EQ("CL-1", data.value("origClOrderId", "?"));
     EXPECT_EQ("TRADING-1", data.value("account", "?"));
+}
+
+TEST_F(JsonSerializerTest, ASnapshotGivesEachOrderAsItsLastReportLeftIt)
+{
+    // A fill is applied to its orders when it is decided, and persisted and reported after (#404). The snapshot gives
+    // each order as its last report left it: a restored order as it was persisted, whatever has been decided about it
+    // since. An order whose first report isn't out is left out, since its report's order update reaches the session
+    // after the snapshot.
+    std::unique_ptr<OrderEntry> restoredOrder = newOrder("CL-1", IdT(1, 1));
+    restoredOrder->status_ = NEW_ORDSTATUS;
+    restoredOrder->orderQty_ = 100;
+    restoredOrder->leavesQty_ = 100;
+    OrderEntry *restored = restoredOrder.get();
+    OrderStorage::instance()->restore(restoredOrder.release());
+    {
+        // A fill of 30 decided, not yet reported
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(restored->entryMutex_, true);
+        restored->status_ = PARTFILL_ORDSTATUS;
+        restored->cumQty_ = 30;
+        restored->leavesQty_ = 70;
+        restored->avgPx_ = 10.0;
+    }
+    std::unique_ptr<OrderEntry> received = newOrder("CL-2", IdT());
+    received->orderQty_ = 50;
+    received->leavesQty_ = 50;
+    OrderEntry *stored = OrderStorage::instance()->save(*received, IdTGenerator::instance());
+    ASSERT_NE(nullptr, stored);
+
+    nlohmann::json msg = nlohmann::json::parse(App::serializeOrderSnapshot(OrderStorage::instance()));
+    ASSERT_EQ(1u, msg["data"].size()) << "an order whose first report isn't out is in the snapshot";
+    EXPECT_EQ("CL-1", msg["data"][0].value("clOrderId", "?"));
+    EXPECT_EQ("NEW", msg["data"][0].value("status", "?")) << "the snapshot gives a fill that isn't reported";
+    EXPECT_EQ(0u, msg["data"][0].value("cumQty", 1u));
+    EXPECT_EQ(100u, msg["data"][0].value("leavesQty", 0u));
+    EXPECT_DOUBLE_EQ(0.0, msg["data"][0].value("avgPx", 1.0));
+
+    {
+        // Each order's next report goes out, as processEvent_GenerateExecution publishes one: the fill's, and the new
+        // order's acknowledgement
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(restored->entryMutex_, true);
+        restored->published_ = OrderFigures(*restored);
+    }
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(stored->entryMutex_, true);
+        stored->status_ = NEW_ORDSTATUS;
+        stored->published_ = OrderFigures(*stored);
+    }
+    msg = nlohmann::json::parse(App::serializeOrderSnapshot(OrderStorage::instance()));
+    ASSERT_EQ(2u, msg["data"].size());
+    for (const nlohmann::json &order : msg["data"])
+    {
+        if ("CL-1" == order.value("clOrderId", "?"))
+        {
+            EXPECT_EQ("PARTIAL_FILL", order.value("status", "?"));
+            EXPECT_EQ(30u, order.value("cumQty", 0u));
+            EXPECT_EQ(70u, order.value("leavesQty", 0u));
+            EXPECT_DOUBLE_EQ(10.0, order.value("avgPx", 0.0));
+        }
+        else
+        {
+            EXPECT_EQ("CL-2", order.value("clOrderId", "?"));
+            EXPECT_EQ("NEW", order.value("status", "?"));
+            EXPECT_EQ(0u, order.value("cumQty", 1u));
+            EXPECT_EQ(50u, order.value("leavesQty", 0u));
+        }
+    }
+}
+
+TEST_F(JsonSerializerTest, ASnapshotWaitingForAnOrdersLockLeavesTheStoreFree)
+{
+    // A replace holds its original's write lock while it stores the replacement, and the store takes its own write
+    // lock to insert it (Processor::process(onReplace)). A snapshot that took an order's lock while it held the store's
+    // would wait there for the original, and the replacement's save for the store: a deadlock (#404). The snapshot
+    // reads each order under its lock once it has released the store's, so the save goes ahead while it waits.
+    std::unique_ptr<OrderEntry> originalOrder = newOrder("CL-1", IdT(1, 1));
+    originalOrder->status_ = NEW_ORDSTATUS;
+    originalOrder->orderQty_ = 100;
+    originalOrder->leavesQty_ = 100;
+    OrderEntry *original = originalOrder.get();
+    OrderStorage::instance()->restore(originalOrder.release());
+    const std::unique_ptr<OrderEntry> replacement = newOrder("CL-2", IdT());
+
+    std::string snapshot;
+    std::atomic<bool> saved{ false };
+    bool savedWhileHeld = false;
+    {
+        // The replace's hold on its original
+        oneapi::tbb::spin_rw_mutex::scoped_lock hold(original->entryMutex_, true);
+        std::thread reader(
+            [&snapshot]
+            {
+                snapshot = App::serializeOrderSnapshot(OrderStorage::instance());
+            });
+        // Time for the snapshot to reach the original's lock, which it waits for until the hold ends
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::thread replacer(
+            [&saved, &replacement]
+            {
+                OrderStorage::instance()->save(*replacement, IdTGenerator::instance());
+                saved = true;
+            });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!saved && (std::chrono::steady_clock::now() < deadline))
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        savedWhileHeld = saved;
+        // Released before the threads are joined, so that a snapshot holding the store's lock finishes, and the save
+        // after it
+        hold.release();
+        reader.join();
+        replacer.join();
+    }
+    EXPECT_TRUE(savedWhileHeld) << "the snapshot held the store's lock while it waited for an order's";
+    nlohmann::json msg = nlohmann::json::parse(snapshot);
+    ASSERT_EQ(1u, msg["data"].size()) << "the original, published when restored; the replacement has no report yet";
+    EXPECT_EQ("CL-1", msg["data"][0].value("clOrderId", "?"));
 }
 
 TEST_F(JsonSerializerTest, SnapshotIncludesAnOrderWithUnsetReferences)

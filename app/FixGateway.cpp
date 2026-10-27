@@ -115,8 +115,10 @@ template <typename QtyField> QtyField quantity(QuantityT qty)
     field.setString(std::to_string(qty));
     return field;
 }
-/// What a status answer reports of a stored order (#383): the fields a transaction worker changes, read together under
-/// the order's lock. Its ClOrdIDs and instrument never change once it is stored.
+/// What a status answer reports of a stored order (#383): the fields its decisions change, as its last report gave them
+/// (#404), read together under the order's lock. The order itself can have what no report has said, nor made durable:
+/// a fill applied by a booking whose own transaction hasn't run. Its ClOrdIDs, instrument and OrderQty never change
+/// once it is stored.
 struct OrderSeen
 {
     u64 number = 0; // its OrderID (37)
@@ -136,9 +138,35 @@ struct OrderSeen
 OrderSeen seenOf(const OrderEntry &order)
 {
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(order.entryMutex_, false);
-    return OrderSeen{ order.orderId_.id_, order.status_,     order.side_,        order.tif_,       order.orderQty_,
-                      order.cumQty_,      order.leavesQty_,  order.dayOrderQty_, order.dayCumQty_, order.avgPx_,
-                      order.dayAvgPx_,    order.expireTime_, order.heldStop() };
+    if (!order.published_)
+    {
+        // Its first report isn't out: Pending New, with nothing done, as it was stored, whatever the engine has decided
+        // about it since (a reject at receipt zeroes its LeavesQty, #427)
+        return OrderSeen{ order.orderId_.id_,
+                          PENDINGNEW_ORDSTATUS,
+                          order.side_,
+                          order.tif_,
+                          order.orderQty_,
+                          0,
+                          order.orderQty_,
+                          order.orderQty_,
+                          0,
+                          0,
+                          0,
+                          order.expireTime_,
+                          false };
+    }
+    const OrderFigures &reported = *order.published_;
+    return OrderSeen{ order.orderId_.id_,       reported.status_, order.side_,         order.tif_,
+                      order.orderQty_,          reported.cumQty_, reported.leavesQty_, reported.dayOrderQty_,
+                      reported.dayCumQty_,      reported.avgPx_,  reported.dayAvgPx_,  order.expireTime_,
+                      heldStop(order, reported) };
+}
+/// The order's status as its last report gave it (#404), Pending New before its first report. The caller holds the
+/// order's lock.
+OrderStatus reportedStatus(const OrderEntry &order)
+{
+    return order.published_ ? order.published_->status_ : PENDINGNEW_ORDSTATUS;
 }
 /// What an order had left to trade when a replace of it is pending (#383): a replace zeroes the original's LeavesQty
 /// once the engine decides it, before the replacement is acknowledged
@@ -1344,7 +1372,7 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(existing->entryMutex_, false);
         replacement.reset(existing->clone());
         origOrderId = std::to_string(existing->orderId_.id_);
-        origStatus = fromOrdStatus(existing->status_);
+        origStatus = fromOrdStatus(reportedStatus(*existing)); // as the client was told it (#404)
     }
 
     // A request the gateway refuses itself gets an OrderCancelReject (102=99) that says why, quoting its ClOrdIDs; one
@@ -2040,7 +2068,7 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
         if (evnt.replacement_)
         {
             // The reject describes the order it was to replace: its OrderID, and its status as the engine saw it when
-            // it refused (#74), or as it is now; Rejected when there is no such order
+            // it refused (#74), or as its last report gave it (#404); Rejected when there is no such order
             std::string origOrderId = "NONE";
             char origStatus = FIX::OrdStatus_REJECTED;
             RawDataEntry rawKey(STRING_RAWDATATYPE, evnt.origClOrderId_.c_str(),
@@ -2049,7 +2077,7 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
             {
                 oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(orig->entryMutex_, false);
                 origOrderId = std::to_string(orig->orderId_.id_);
-                origStatus = fromOrdStatus(orig->status_);
+                origStatus = fromOrdStatus(reportedStatus(*orig));
             }
             if (INVALID_ORDSTATUS != evnt.origStatus_)
             {

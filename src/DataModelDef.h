@@ -13,6 +13,7 @@
 #pragma once
 
 #include <atomic>
+#include <optional>
 #include <set>
 #include <oneapi/tbb/spin_rw_mutex.h>
 #include "TypesDef.h"
@@ -341,29 +342,6 @@ private:
     const OrderParams &operator=(const OrderParams &);
 };
 
-struct OrderEntry : public OrderParams
-{
-public:
-    OrderEntry(const SourceIdT &source, const SourceIdT &dest, const SourceIdT &clOrderId,
-               const SourceIdT &origClOrderID, const SourceIdT &instrument, const SourceIdT &account,
-               const SourceIdT &clearing, const SourceIdT &executions);
-    OrderEntry(const OrderEntry &ord);
-    ~OrderEntry();
-
-    //Todo: change string reason to error code
-    bool isValid(std::string *invalid) const;        // verifies that order is correct
-    bool isReplaceValid(std::string *invalid) const; // verifies that order could be replaced
-
-    OrdState::OrderStatePersistence stateMachinePersistance() const;
-    void setStateMachinePersistance(const OrdState::OrderStatePersistence &persist);
-
-    OrderEntry *clone() const;
-    bool compare(const OrderEntry &val) const;
-
-private:
-    const OrderEntry &operator=(const OrderEntry &);
-};
-
 /// What one decision about a stored order left it with, of the fields its decisions change (#411): its status, its
 /// quantities and prices, its day figures, whether its stop was reached, and its state machine's state. Everything else
 /// a record or a report writes is set when the order is stored and never changes: a replace stores a new order (#74).
@@ -394,6 +372,37 @@ struct OrderFigures
     QuantityT dayOrderQty_;
     QuantityT dayCumQty_;
     bool stopTriggered_;
+};
+
+struct OrderEntry : public OrderParams
+{
+public:
+    OrderEntry(const SourceIdT &source, const SourceIdT &dest, const SourceIdT &clOrderId,
+               const SourceIdT &origClOrderID, const SourceIdT &instrument, const SourceIdT &account,
+               const SourceIdT &clearing, const SourceIdT &executions);
+    OrderEntry(const OrderEntry &ord);
+    ~OrderEntry();
+
+    //Todo: change string reason to error code
+    bool isValid(std::string *invalid) const;        // verifies that order is correct
+    bool isReplaceValid(std::string *invalid) const; // verifies that order could be replaced
+
+    OrdState::OrderStatePersistence stateMachinePersistance() const;
+    void setStateMachinePersistance(const OrdState::OrderStatePersistence &persist);
+
+    OrderEntry *clone() const;
+    bool compare(const OrderEntry &val) const;
+
+    /// What the order's last report said it has (#404), which readers outside a transaction give: a WebSocket session's
+    /// order snapshot. A decision changes the order when it is made, and the transaction that persists and reports it
+    /// runs after it, so the order itself can have what no report has said, nor made durable. Set under the order's
+    /// write lock: by processEvent_GenerateExecution as each report goes out, after its transaction's persists have
+    /// committed (#28, #163), and by OrderDataStorage::restore from the record. Read under the read lock. Empty until
+    /// the order's first report, and in a copy.
+    std::optional<OrderFigures> published_;
+
+private:
+    const OrderEntry &operator=(const OrderEntry &);
 };
 
 class OrderFunctor
