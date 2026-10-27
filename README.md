@@ -277,6 +277,7 @@ differ; these numbers are a shape, not a specification.
 | `BM_ProcessNewOrder` | ~2.4 µs | ~410K orders/sec | `Processor::onEvent` through the state machine, `OrderDataStorage::save`, the book, and the transaction, executed inline |
 | `BM_ProcessNewOrderWithMatch` | ~4.9 µs | ~205K orders/sec | the same, for an order that crosses: trade, deferred execution events, book removal |
 | `BM_ProcessCancelOrder` | ~1.6 µs | ~635K orders/sec | cancel of a resting order, completed: decided after the order's earlier transactions, removed from the book, reported |
+| `BM_ProcessReplaceOrder` | ~4.7 µs | ~213K orders/sec | replace of a resting order's price, completed: decided after the order's earlier transactions, the replacement stored, the original taken off the book and the replacement booked, both persisted and reported (#457) |
 | `BM_ProcessIocRemainder` | ~6.7 µs | ~150K orders/sec | an IOC that trades part of itself: the trade, its deferred execution events, and the engine's cancel of the rest (#426) |
 | `BM_ProcessExpiry` | ~1.7 µs | ~580K orders/sec | a resting DAY order's expiry at its day's end: the transaction its `DAY_END` timer enqueues decides it, takes the order off the book, reports it (#426) |
 | `BM_ProcessRestatement` | ~1.4 µs | ~715K orders/sec | a resting GTC order restated as a business day starts: the transaction its `RESTATEMENT` timer enqueues begins the order's next day, persists it, reports it `RESTATED` (#451) |
@@ -304,6 +305,9 @@ serializing its JSON.
 
 `BM_ProcessRestatement` was measured on 2026-10-27, pinned, in runs where `BM_ProcessExpiry` took ~1.7 µs, as
 its row gives. It took ~1.5 µs when it was added (#451), and ~1.4 since #441.
+
+`BM_ProcessReplaceOrder` was measured on 2026-10-27, pinned, in runs where `BM_ProcessCancelOrder` took ~1.7 µs,
+against its row's ~1.6 (#429).
 
 `BM_TaskManagerThroughput` takes the processor count as its argument: ~205K orders/sec at 2, ~265K at
 4, and little more (~270K) at 8 on a 4-core machine.

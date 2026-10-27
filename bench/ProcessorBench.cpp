@@ -264,6 +264,26 @@ public:
         return makeOrder(data_, ++counter_, side, price, qty);
     }
 
+    /// A replacement of a stored order, made as the server's session makes one (#74): the order's clone, with a fresh
+    /// id, a ClOrdID of its own, the original's as its OrigClOrdID, and a new price. Null for an order not stored.
+    OrderEntry *replacementOf(const IdT &orderId, PriceT price)
+    {
+        const OrderEntry *original = OrderStorage::instance()->locateByOrderId(orderId);
+        if (nullptr == original)
+        {
+            return nullptr;
+        }
+        const std::string clOrdId = "BENCH-" + std::to_string(++counter_);
+        OrderEntry *replacement = original->clone();
+        replacement->orderId_ = IdT();
+        replacement->clOrderId_ = WideDataStorage::instance()->add(
+            new RawDataEntry(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size())));
+        replacement->origClOrderId_ = original->clOrderId_;
+        replacement->price_ = price;
+        replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+        return replacement;
+    }
+
     /// Has each order the engine persists encoded as the server has it, by the dispatcher it attaches, with the
     /// record's strings found in reference data, into a file storage that keeps nothing: the record without its write
     void recordOrders()
@@ -357,6 +377,26 @@ public:
             return false;
         }
         return true;
+    }
+
+    /// Fails the benchmark unless the order was replaced as the timed path replaces its orders: the original REPLACED,
+    /// and its replacement, the last order made, stored in its place at the new price, NEW with nothing filled. A
+    /// refused replace leaves the original working and stores nothing, and a replacement that trades isn't NEW.
+    bool replaced(benchmark::State &state, const IdT &originalId, PriceT price)
+    {
+        const OrderEntry *original = OrderStorage::instance()->locateByOrderId(originalId);
+        if ((nullptr == original) || (REPLACED_ORDSTATUS != original->status_))
+        {
+            state.SkipWithError("the warm-up order was not replaced");
+            return false;
+        }
+        const OrderEntry *replacement = lastAccepted();
+        if ((nullptr == replacement) || (originalId != replacement->origOrderId_) || (price != replacement->price_))
+        {
+            state.SkipWithError("engine did not store the warm-up order's replacement at its new price");
+            return false;
+        }
+        return lastEndedAs(state, NEW_ORDSTATUS, 0);
     }
 
     Processor &processor()
@@ -532,6 +572,50 @@ static void BM_ProcessCancelOrder(benchmark::State &state)
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_ProcessCancelOrder);
+
+static void BM_ProcessReplaceOrder(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // Where the timed path ends: the warm-up order, a buy at 1.0, replaced by a buy at 2.0, which crosses nothing
+    const IdT warmUp = engine.lastAccepted()->orderId_;
+    engine.inQueues().push("bench", OrderReplaceEvent(warmUp, engine.replacementOf(warmUp, 2.0)));
+    engine.processor().process();
+    if (!engine.replaced(state, warmUp, 2.0))
+    {
+        return;
+    }
+
+    // One resting buy per iteration, each replaced by a buy at a new price, which crosses nothing: the book holds no sell
+    // (#457). The event enqueues a transaction, which runs inline: it decides the replace under the original's lock,
+    // stores the replacement, takes the original off the book and books the replacement, persists both and reports
+    // both. The replacements are made first, as a session makes them on the IO thread.
+    std::vector<IdT> resting;
+    resting.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        resting.push_back(engine.submit(engine.newOrder(BUY_SIDE, 100.0, 100)));
+    }
+    std::vector<OrderEntry *> replacements;
+    replacements.reserve(state.max_iterations);
+    for (const IdT &original : resting)
+    {
+        replacements.push_back(engine.replacementOf(original, 101.0));
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderReplaceEvent(resting[next], replacements[next]));
+        engine.processor().process();
+        ++next;
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessReplaceOrder);
 
 static void BM_ProcessIocRemainder(benchmark::State &state)
 {
