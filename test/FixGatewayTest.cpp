@@ -3268,6 +3268,56 @@ TEST_F(FixtSessionTest, AReportGivesWhatItsOwnFillLeftTheOrder)
     EXPECT_EQ("Y", fieldOf(acks[1], FIX::FIELD::WorkingIndicator)) << "without figures, as the order is";
 }
 
+TEST_F(FixtSessionTest, ARestatementGivesWhatItLeftTheOrder)
+{
+    // A restatement's transaction names the order alone, so a booking on the instrument can fill the order before the
+    // restatement's report goes out (#441). The report gives what the restatement left, from the figures the engine gave
+    // it: the day it begins, with nothing done in it yet, and none of the fill that counts in that day.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1");
+    order->tif_ = GTC_TIF; // it traded 20 at 10 on an earlier day, and is restated as a new day begins
+    order->orderQty_ = 100;
+    order->status_ = PARTFILL_ORDSTATUS;
+    order->cumQty_ = 20;
+    order->leavesQty_ = 80;
+    order->avgPx_ = 10.0;
+    order->dayOrderQty_ = 80;
+    order->dayCumQty_ = 0;
+    order->dayAvgPx_ = 0.0;
+    const OrderFigures restatement(*order);
+    order->cumQty_ = 50; // the new day's first fill, 30 at 11, applied before the restatement's report is out
+    order->leavesQty_ = 50;
+    order->avgPx_ = 10.6;
+    order->dayCumQty_ = 30;
+    order->dayAvgPx_ = 11.0;
+
+    auto restated = makeReport<ExecutionEntry>(RESTATED_EXECTYPE, PARTFILL_ORDSTATUS);
+    restated.orderId_ = order->orderId_;
+    Queues::ExecReportEvent report(&restated);
+    report.figures_.emplace(restatement);
+    FixOutQueues outQueues(gateway_.get(), OrderStorage::instance());
+    const std::string source = FixGateway::makeSourceString(sid_);
+    outQueues.push(report, source);
+    report.figures_.reset();
+    outQueues.push(report, source);
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(2u, reports.size()) << sentText();
+    expectEverythingSentIsTaken();
+    EXPECT_EQ("D", fieldOf(reports[0], FIX::FIELD::ExecType));
+    EXPECT_EQ("1", fieldOf(reports[0], FIX::FIELD::OrdStatus));
+    EXPECT_EQ("1", fieldOf(reports[0], FIX::FIELD::ExecRestatementReason));
+    EXPECT_EQ("20", fieldOf(reports[0], FIX::FIELD::CumQty)) << "the restatement's report counts the day's fill";
+    EXPECT_EQ("80", fieldOf(reports[0], FIX::FIELD::LeavesQty));
+    EXPECT_EQ("10", fieldOf(reports[0], FIX::FIELD::AvgPx));
+    EXPECT_EQ("80", fieldOf(reports[0], FIX::FIELD::DayOrderQty));
+    EXPECT_EQ("0", fieldOf(reports[0], FIX::FIELD::DayCumQty));
+    EXPECT_EQ("0", fieldOf(reports[0], FIX::FIELD::DayAvgPx));
+    EXPECT_EQ("50", fieldOf(reports[1], FIX::FIELD::CumQty)) << "a report without figures";
+    EXPECT_EQ("50", fieldOf(reports[1], FIX::FIELD::LeavesQty));
+    EXPECT_EQ("30", fieldOf(reports[1], FIX::FIELD::DayCumQty));
+}
+
 TEST_F(FixtSessionTest, ARequestForAnOrderTheEngineHasntAnsweredIsRefusedAsPendingNew)
 {
     // A cancel or a replace that names an order the session sent just before waits for the engine to store or refuse
