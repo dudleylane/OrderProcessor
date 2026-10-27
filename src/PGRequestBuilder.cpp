@@ -42,6 +42,11 @@ ClearingWrite PGRequestBuilder::fromClearing(const ClearingEntry &val)
 
 OrderWrite PGRequestBuilder::fromOrder(const OrderEntry &val)
 {
+    return fromOrder(val, OrderFigures(val));
+}
+
+OrderWrite PGRequestBuilder::fromOrder(const OrderEntry &val, const OrderFigures &figures)
+{
     OrderWrite w;
 
     w.orderId = val.orderId_.id_;
@@ -85,7 +90,7 @@ OrderWrite PGRequestBuilder::fromOrder(const OrderEntry &val)
     // Map enums to PG strings
     w.side = safeStr(toSQL(val.side_));
     w.ordType = safeStr(toSQL(val.ordType_));
-    w.status = safeStr(toSQL(val.status_));
+    w.status = safeStr(toSQL(figures.status_));
     w.tif = safeStr(toSQL(val.tif_));
     w.capacity = safeStr(toSQL(val.capacity_));
     w.currency = safeStr(toSQL(val.currency_));
@@ -94,17 +99,17 @@ OrderWrite PGRequestBuilder::fromOrder(const OrderEntry &val)
     // Copy scalar fields
     w.price = val.price_;
     w.stopPx = val.stopPx_;
-    w.stopTriggered = val.stopTriggered_;
-    w.dayStart = val.dayStart_;
-    w.avgPx = val.avgPx_;
-    w.dayAvgPx = val.dayAvgPx_;
+    w.stopTriggered = figures.stopTriggered_;
+    w.dayStart = figures.dayStart_;
+    w.avgPx = figures.avgPx_;
+    w.dayAvgPx = figures.dayAvgPx_;
 
     w.minQty = val.minQty_;
     w.orderQty = val.orderQty_;
-    w.leavesQty = val.leavesQty_;
-    w.cumQty = val.cumQty_;
-    w.dayOrderQty = val.dayOrderQty_;
-    w.dayCumQty = val.dayCumQty_;
+    w.leavesQty = figures.leavesQty_;
+    w.cumQty = figures.cumQty_;
+    w.dayOrderQty = figures.dayOrderQty_;
+    w.dayCumQty = figures.dayCumQty_;
 
     w.expireTime = val.expireTime_;
     w.settlDate = val.settlDate_;

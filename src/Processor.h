@@ -104,7 +104,9 @@ public:
     /// reimplemented from TransactionProcessor
     virtual void process(const ACID::TransactionId &id, ACID::Transaction *tr);
 
-    /// Appends the operation that persists the order when the transaction commits (#20), once per transaction (#148)
+    /// Appends the operation that persists the order when the transaction commits (#20), once per transaction (#148),
+    /// with the figures the decision just made left it with (#411). Call it under the order's write lock, once the
+    /// decision is done.
     static void persistOrder(ACID::Scope *transaction, const OrderEntry &order);
     /// Sets the timers of an order just accepted: its expiry, if its time in force ends, a DAY or GTD order (#240), and
     /// its restatement, if it outlives the business day (#244)

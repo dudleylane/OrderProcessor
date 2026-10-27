@@ -161,6 +161,48 @@ TEST_F(JsonSerializerTest, AnOrderCarriesItsDayFigures)
     EXPECT_EQ(1792098000000ULL, data.value("dayStart", 0ULL));
 }
 
+TEST_F(JsonSerializerTest, AnOrderUpdateGivesTheFiguresItsReportCarries)
+{
+    // A fill's report can go out after a later fill of the order was applied (#411). The order update sent with it
+    // gives what the fill left the order with, which the report carries, and not what the order has by then.
+    std::unique_ptr<OrderEntry> order = newOrder("CL-1", IdT(1, 1));
+    order->orderQty_ = 100;
+    order->status_ = PARTFILL_ORDSTATUS;
+    order->cumQty_ = 30;
+    order->leavesQty_ = 70;
+    order->avgPx_ = 10.0;
+    order->dayOrderQty_ = 100;
+    order->dayCumQty_ = 30;
+    order->dayAvgPx_ = 10.0;
+    order->dayStart_ = 1792098000000ULL;
+    const OrderFigures firstFill(*order);
+    // The second fill, which takes the rest, applied before the first fill's report goes out
+    order->status_ = FILLED_ORDSTATUS;
+    order->cumQty_ = 100;
+    order->leavesQty_ = 0;
+    order->avgPx_ = 10.35;
+    order->dayCumQty_ = 100;
+    order->dayAvgPx_ = 10.35;
+
+    nlohmann::json data = nlohmann::json::parse(App::serializeOrderUpdate(*order, firstFill))["data"];
+    EXPECT_EQ("PARTIAL_FILL", data.value("status", "?"));
+    EXPECT_EQ(30u, data.value("cumQty", 0u));
+    EXPECT_EQ(70u, data.value("leavesQty", 0u));
+    EXPECT_DOUBLE_EQ(10.0, data.value("avgPx", 0.0));
+    EXPECT_EQ(100u, data.value("dayOrderQty", 0u));
+    EXPECT_EQ(30u, data.value("dayCumQty", 0u));
+    EXPECT_DOUBLE_EQ(10.0, data.value("dayAvgPx", 0.0));
+    EXPECT_EQ(1792098000000ULL, data.value("dayStart", 0ULL));
+    EXPECT_EQ(100u, data.value("orderQty", 0u)) << "what no decision changes comes from the order";
+    EXPECT_EQ("CL-1", data.value("clOrderId", "?"));
+
+    // Without a report's figures, the order as it is
+    data = nlohmann::json::parse(App::serializeOrderUpdate(*order))["data"];
+    EXPECT_EQ("FILLED", data.value("status", "?"));
+    EXPECT_EQ(100u, data.value("cumQty", 0u));
+    EXPECT_EQ(0u, data.value("leavesQty", 1u));
+}
+
 TEST_F(JsonSerializerTest, SetReferencesAreSerialized)
 {
     // A replacement has an origClOrderId, and an order may have an account: both still come through.

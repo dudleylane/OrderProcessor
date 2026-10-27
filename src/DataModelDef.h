@@ -337,6 +337,38 @@ private:
     const OrderEntry &operator=(const OrderEntry &);
 };
 
+/// What one decision about a stored order left it with, of the fields its decisions change (#411): its status, its
+/// quantities and prices, its day figures, whether its stop was reached, and its state machine's state. Everything else
+/// a record or a report writes is set when the order is stored and never changes: a replace stores a new order (#74).
+/// The transaction that persists and reports a decision runs after the decision, and can run after a later one. A fill
+/// is applied while the booking that matched it drains, and the fill's transaction names the orders, not their
+/// instrument, so the instrument's next booking can fill an order again before that transaction runs. Written from the
+/// order then, the first fill's record and report would count the second. So the operations that persist and report a
+/// decision write these, taken when it is made, under the order's write lock.
+struct OrderFigures
+{
+    explicit OrderFigures(const OrderParams &order) noexcept
+        : avgPx_(order.avgPx_), dayAvgPx_(order.dayAvgPx_), dayStart_(order.dayStart_),
+          stateMachinePersistance_(order.stateMachinePersistance_), status_(order.status_),
+          leavesQty_(order.leavesQty_), cumQty_(order.cumQty_), dayOrderQty_(order.dayOrderQty_),
+          dayCumQty_(order.dayCumQty_), stopTriggered_(order.stopTriggered_)
+    {
+    }
+
+    PriceT avgPx_;
+    PriceT dayAvgPx_;
+    DateTimeT dayStart_;
+    /// Written to the order's record. A trade's report takes its figures as the state machine enters the state the
+    /// fill leads to, before the machine's state is saved into the order, and no report writes this.
+    OrdState::OrderStatePersistence stateMachinePersistance_;
+    OrderStatus status_;
+    QuantityT leavesQty_;
+    QuantityT cumQty_;
+    QuantityT dayOrderQty_;
+    QuantityT dayCumQty_;
+    bool stopTriggered_;
+};
+
 class OrderFunctor
 {
 public:
@@ -489,8 +521,9 @@ class OrderSaver
 {
 public:
     virtual ~OrderSaver() {};
-    /// Persists the order as a new version of its record and returns that version.
-    virtual u32 save(const OrderEntry &order) = 0;
+    /// Persists the order as a new version of its record, with the figures one decision left it with (#411), and
+    /// returns that version.
+    virtual u32 save(const OrderEntry &order, const OrderFigures &figures) = 0;
     /// Erases one persisted version, undoing a save().
     virtual void erase(const IdT &orderId, u32 version) = 0;
     /// The saves a thread makes between beginGroup() and commitGroup() become durable together, or none of them do

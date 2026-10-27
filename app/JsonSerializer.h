@@ -28,7 +28,10 @@ std::string serializeAccountList(const Store::WideParamsDataStorage *wds,
                                  const AccountFilter &maySee = AccountFilter());
 std::string serializeOrderSnapshot(const Store::OrderDataStorage *storage,
                                    const AccountFilter &maySee = AccountFilter());
+/// The order as it is now. Tests call it: a report's update gives the report's figures (#411).
 std::string serializeOrderUpdate(const OrderEntry &order);
+/// The order with the figures a report gives it (#411), in place of its own
+std::string serializeOrderUpdate(const OrderEntry &order, const OrderFigures &figures);
 std::string serializeExecReport(const ExecutionEntry *exec);
 std::string serializeBookUpdate(const std::string &symbol, const BookSnapshot &snap);
 std::string serializeCancelReject(u64 orderId, const std::string &reason);

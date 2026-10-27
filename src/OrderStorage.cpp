@@ -242,14 +242,14 @@ void OrderDataStorage::restore(OrderEntry *order)
     }
 }
 
-bool OrderDataStorage::persist(const OrderEntry &order, u32 *version)
+bool OrderDataStorage::persist(const OrderEntry &order, const OrderFigures &figures, u32 *version)
 {
     assert(nullptr != version);
     if (nullptr == saver_)
     {
         return false;
     }
-    *version = saver_->save(order);
+    *version = saver_->save(order, figures);
     return true;
 }
 

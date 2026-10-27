@@ -88,7 +88,7 @@ public:
     void removeLastOperation() override;
     size_t startNewStage() override;
     void removeStage(const size_t &id) override;
-    bool hasOperation(COP::ACID::OperationType type, const COP::IdT &id) const override;
+    COP::ACID::Operation *findOperation(COP::ACID::OperationType type, const COP::IdT &id) const override;
 
     // Extended interface for testing
     const std::string &invalidReason() const;
@@ -117,7 +117,7 @@ public:
     DummyOrderSaver() = default;
     ~DummyOrderSaver() = default;
 
-    COP::u32 save(const COP::OrderEntry &) override
+    COP::u32 save(const COP::OrderEntry &, const COP::OrderFigures &) override
     {
         return 0;
     }

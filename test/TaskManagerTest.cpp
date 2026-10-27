@@ -62,6 +62,9 @@ public:
         std::string market;
         std::string rejectReason; // set for a RejectExecEntry only
         IdT origOrderId;          // set for a ReplaceExecEntry only
+        QuantityT lastQty = 0;    // set for a TradeExecEntry only
+        /// What the report says its order has, which the gateways write (#411)
+        std::optional<OrderFigures> figures{};
     };
 
     void push(const ExecReportEvent &evnt, const std::string &) override
@@ -81,6 +84,11 @@ public:
         {
             report.origOrderId = replace->origOrderId_;
         }
+        if (auto *trade = dynamic_cast<const TradeExecEntry *>(evnt.exec_))
+        {
+            report.lastQty = trade->lastQty_;
+        }
+        report.figures = evnt.figures_;
         {
             std::lock_guard<std::mutex> lock(reportsLock_);
             reports_.push_back(report);
@@ -206,10 +214,10 @@ struct RecordingSaver final : public COP::OrderSaver
         QuantityT orderQty;
         QuantityT leavesQty;
     };
-    u32 save(const OrderEntry &order) override
+    u32 save(const OrderEntry &order, const OrderFigures &figures) override
     {
         std::lock_guard<std::mutex> lock(lock_);
-        versions_.push_back({ order.orderId_, order.status_, order.orderQty_, order.leavesQty_ });
+        versions_.push_back({ order.orderId_, figures.status_, order.orderQty_, figures.leavesQty_ });
         return static_cast<u32>(versions_.size());
     }
     void erase(const IdT &, u32) override {}
@@ -241,6 +249,58 @@ public:
 private:
     std::unique_ptr<Processor> processor_;
     std::atomic<bool> thrown_{ false };
+};
+
+/// Shared by the transaction processors: the first transaction that reports a trade for the order waits, before it
+/// runs, until the order's leaves fall to untilLeaves, as a worker preempted before it starts would, for at most five
+/// seconds
+struct TradeReportGate
+{
+    std::atomic<const OrderEntry *> order{ nullptr };
+    QuantityT untilLeaves = 0;
+    std::atomic<bool> used{ false };
+    /// Whether the leaves fell that far while the transaction waited
+    std::atomic<bool> reached{ false };
+};
+
+/// Hands each transaction to a real processor, which it owns, since TaskManager deletes this one, after the gate
+class GatedTransactionProcessor final : public TransactionProcessor
+{
+public:
+    GatedTransactionProcessor(std::unique_ptr<Processor> processor, TradeReportGate *gate)
+        : processor_(std::move(processor)), gate_(gate)
+    {
+    }
+
+    void process(const TransactionId &id, Transaction *tr) override
+    {
+        const OrderEntry *order = gate_->order.load();
+        const auto *scope = dynamic_cast<const Scope *>(tr);
+        if ((nullptr != order) && (nullptr != scope) &&
+            scope->hasOperation(CREATE_TRADE_EXECREPORT_TROPERATION, order->orderId_) && !gate_->used.exchange(true))
+        {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                QuantityT leaves = 0;
+                {
+                    oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
+                    leaves = order->leavesQty_;
+                }
+                if (leaves <= gate_->untilLeaves)
+                {
+                    gate_->reached = true;
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        processor_->process(id, tr);
+    }
+
+private:
+    std::unique_ptr<Processor> processor_;
+    TradeReportGate *gate_;
 };
 
 /// Holds the first removal it is asked for until released. TaskManager hands a finished transaction's processor back
@@ -1595,6 +1655,127 @@ TEST_F(TaskManagerTest, ReplacesRacingTradesLeaveBothSidesConsistent)
         sold += sell->cumQty_;
     }
     EXPECT_EQ(bought, sold) << "a fill without its other side";
+    EXPECT_EQ(0, manager->tasksFailed());
+}
+
+// =============================================================================
+// A fill's report and record have what its own fill left (#411)
+// =============================================================================
+
+TEST_F(TaskManagerTest, AFillsReportAndRecordCountNoLaterFill)
+{
+    // O rests, a sell of 100. A1 buys 30, then A2 buys 30. The transaction that persists and reports A1's fill waits,
+    // before it runs, until A2's booking has applied its fill to O, as a worker preempted before it starts would: the
+    // two transactions share nothing, so the manager orders them by nothing (#411). Each of O's records and trade
+    // reports must have what its own fill left. The first fill's had the second's too.
+    RecordingSaver saver;
+    OrderStorage::instance()->attach(&saver);
+    TradeReportGate gate;
+    TaskManagerParams params;
+    params.transactMgr_ = transMgr_.get();
+    params.inQueues_ = inQueues_.get();
+    auto evntProc = std::make_unique<Processor>();
+    evntProc->init(*procParams_);
+    params.evntProcessors_.push_back(evntProc.release());
+    for (int i = 0; i < 2; ++i)
+    {
+        auto trProc = std::make_unique<Processor>();
+        trProc->init(*procParams_);
+        params.transactProcessors_.push_back(new GatedTransactionProcessor(std::move(trProc), &gate));
+    }
+    auto manager = std::make_unique<TaskManager>(params);
+
+    RawDataEntry restingId = pushOrder(SELL_SIDE, 10.0, 100, "seller");
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *resting = OrderStorage::instance()->locateByClOrderId(restingId);
+    ASSERT_NE(nullptr, resting);
+    gate.untilLeaves = 40;
+    gate.order = resting;
+
+    pushOrder(BUY_SIDE, 10.0, 30, "buyer1");
+    pushOrder(BUY_SIDE, 10.0, 30, "buyer2");
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    ASSERT_TRUE(gate.reached) << "the second fill was not applied while the first fill's transaction waited";
+
+    std::vector<std::pair<QuantityT, QuantityT>> reported; // each trade report's CumQty and LeavesQty
+    for (const auto &report : outQueues_->reportsFor(resting->orderId_))
+    {
+        if (TRADE_EXECTYPE == report.type)
+        {
+            ASSERT_TRUE(report.figures.has_value());
+            EXPECT_EQ(30u, report.lastQty);
+            reported.emplace_back(report.figures->cumQty_, report.figures->leavesQty_);
+        }
+    }
+    EXPECT_EQ((std::vector<std::pair<QuantityT, QuantityT>>{ { 30, 70 }, { 60, 40 } }), reported)
+        << "the first fill's report counts the second";
+    std::vector<QuantityT> leaves;
+    for (const auto &version : saver.versions())
+    {
+        if (resting->orderId_ == version.orderId)
+        {
+            leaves.push_back(version.leavesQty);
+        }
+    }
+    EXPECT_EQ((std::vector<QuantityT>{ 100, 70, 40 }), leaves) << "the first fill's record counts the second";
+    EXPECT_EQ(0, manager->tasksFailed());
+}
+
+TEST_F(TaskManagerTest, EachFillsReportAndRecordCountTheFillsUpToIt)
+{
+    // With no gate and one worker of each kind: when a booking finishes, the next booking on the instrument is ready
+    // beside the transaction of the fill it decided, and the worker can run it first. Before #411, 91 to 99 of O's 100
+    // trade reports, and as many of its records, counted the next fill too.
+    RecordingSaver saver;
+    OrderStorage::instance()->attach(&saver);
+    auto manager = createTaskManager(1, 1);
+    RawDataEntry restingId = pushOrder(SELL_SIDE, 10.0, 1000, "seller");
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *resting = OrderStorage::instance()->locateByClOrderId(restingId);
+    ASSERT_NE(nullptr, resting);
+    for (int i = 0; i < 100; ++i)
+    {
+        pushOrder(BUY_SIDE, 10.0, 10, "buyer" + std::to_string(i));
+    }
+    ASSERT_TRUE(waitUntilIdle(*manager, std::chrono::seconds(60)));
+
+    int trades = 0;
+    int ahead = 0;
+    QuantityT filled = 0;
+    for (const auto &report : outQueues_->reportsFor(resting->orderId_))
+    {
+        if (TRADE_EXECTYPE != report.type)
+        {
+            continue;
+        }
+        ++trades;
+        ASSERT_TRUE(report.figures.has_value());
+        filled += report.lastQty;
+        const bool done = (1000u == filled);
+        if ((filled != report.figures->cumQty_) || ((1000u - filled) != report.figures->leavesQty_) ||
+            ((done ? FILLED_ORDSTATUS : PARTFILL_ORDSTATUS) != report.figures->status_))
+        {
+            ++ahead;
+        }
+    }
+    EXPECT_EQ(100, trades);
+    EXPECT_EQ(0, ahead) << "trade reports whose figures aren't their own fill's";
+    int versions = 0;
+    int versionsAhead = 0;
+    for (const auto &version : saver.versions())
+    {
+        if (resting->orderId_ == version.orderId)
+        {
+            // the booking's, then one for each fill
+            if ((1000u - 10u * static_cast<QuantityT>(versions)) != version.leavesQty)
+            {
+                ++versionsAhead;
+            }
+            ++versions;
+        }
+    }
+    EXPECT_EQ(101, versions);
+    EXPECT_EQ(0, versionsAhead) << "records whose figures aren't their own fill's";
     EXPECT_EQ(0, manager->tasksFailed());
 }
 
