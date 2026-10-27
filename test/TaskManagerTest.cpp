@@ -12,6 +12,7 @@
 */
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <atomic>
 #include <thread>
@@ -32,6 +33,7 @@
 #include "IncomingQueues.h"
 #include "OutgoingQueues.h"
 #include "ExpiryScheduler.h"
+#include "JsonSerializer.h"
 
 using namespace COP;
 using namespace COP::Tasks;
@@ -254,14 +256,18 @@ private:
 
 /// Shared by the transaction processors: the first transaction with the operation for the order, a trade's report
 /// unless another is set, waits, before it runs, until the order's leaves fall to untilLeaves, as a worker preempted
-/// before it starts would, for at most five seconds
+/// before it starts would, or, with untilReleased, until the test releases it (#404), for at most five seconds
 struct ReportGate
 {
     OperationType operation = CREATE_TRADE_EXECREPORT_TROPERATION;
     std::atomic<const OrderEntry *> order{ nullptr };
     QuantityT untilLeaves = 0;
+    bool untilReleased = false;
+    std::atomic<bool> released{ false };
     std::atomic<bool> used{ false };
-    /// Whether the leaves fell that far while the transaction waited
+    /// Whether a transaction has stopped at the gate
+    std::atomic<bool> held{ false };
+    /// Whether the leaves fell that far, or the test released it, while the transaction waited
     std::atomic<bool> reached{ false };
 };
 
@@ -282,6 +288,7 @@ public:
             !gate_->used.exchange(true))
         {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            gate_->held = true;
             while (std::chrono::steady_clock::now() < deadline)
             {
                 QuantityT leaves = 0;
@@ -289,7 +296,7 @@ public:
                     oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
                     leaves = order->leavesQty_;
                 }
-                if (leaves <= gate_->untilLeaves)
+                if (gate_->untilReleased ? gate_->released.load() : (leaves <= gate_->untilLeaves))
                 {
                     gate_->reached = true;
                     break;
@@ -1869,6 +1876,159 @@ TEST_F(TaskManagerTest, ARestatementsReportCountsNoLaterFill)
     }
     EXPECT_EQ((std::vector<QuantityT>{ 100, 100, 70 }), leaves) << "the booking's, the restatement's, the fill's";
     EXPECT_EQ(0, manager->tasksFailed());
+}
+
+// =============================================================================
+// Readers outside a transaction give an order as its last report left it (#404)
+// =============================================================================
+
+/// The order snapshot's entry for the order, or nothing when the snapshot leaves the order out
+std::optional<nlohmann::json> snapshotEntry(const nlohmann::json &snapshot, const IdT &orderId)
+{
+    for (const nlohmann::json &entry : snapshot["data"])
+    {
+        if (orderId.id_ == entry.value("orderId", u64(0)))
+        {
+            return entry;
+        }
+    }
+    return std::nullopt;
+}
+
+TEST_F(TaskManagerTest, AnOrderSnapshotGivesEachOrderAsItsLastReportLeftIt)
+{
+    // O rests, a sell of 100, and B buys 30 of it. B's booking applies the fill to both orders when it decides it, and
+    // the transaction that persists and reports the fill runs after it (#404). Held before it runs, a WebSocket
+    // session's order snapshot must give O and B as their NEW reports left them, with nothing filled: the fill is
+    // neither reported nor durable yet. The snapshot gave the fill. Once the fill's transaction has run, the fill.
+    ReportGate gate;
+    gate.untilReleased = true;
+    TaskManagerParams params;
+    params.transactMgr_ = transMgr_.get();
+    params.inQueues_ = inQueues_.get();
+    auto evntProc = std::make_unique<Processor>();
+    evntProc->init(*procParams_);
+    params.evntProcessors_.push_back(evntProc.release());
+    for (int i = 0; i < 2; ++i)
+    {
+        auto trProc = std::make_unique<Processor>();
+        trProc->init(*procParams_);
+        params.transactProcessors_.push_back(new GatedTransactionProcessor(std::move(trProc), &gate));
+    }
+    auto manager = std::make_unique<TaskManager>(params);
+
+    RawDataEntry restingId = pushOrder(SELL_SIDE, 10.0, 100, "seller");
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *resting = OrderStorage::instance()->locateByClOrderId(restingId);
+    ASSERT_NE(nullptr, resting);
+    gate.order = resting;
+
+    RawDataEntry buyerId = pushOrder(BUY_SIDE, 10.0, 30, "buyer");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!gate.held && (std::chrono::steady_clock::now() < deadline))
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_TRUE(gate.held) << "the fill's transaction never came to the gate";
+    OrderEntry *buyer = OrderStorage::instance()->locateByClOrderId(buyerId);
+    ASSERT_NE(nullptr, buyer);
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(resting->entryMutex_, false);
+        ASSERT_EQ(30u, resting->cumQty_) << "the fill wasn't applied before its transaction ran: nothing to see";
+    }
+    const nlohmann::json held = nlohmann::json::parse(App::serializeOrderSnapshot(OrderStorage::instance()));
+    gate.released = true;
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    ASSERT_TRUE(gate.reached) << "the fill's transaction ran before the test released it";
+    const nlohmann::json after = nlohmann::json::parse(App::serializeOrderSnapshot(OrderStorage::instance()));
+
+    std::optional<nlohmann::json> sell = snapshotEntry(held, resting->orderId_);
+    std::optional<nlohmann::json> buy = snapshotEntry(held, buyer->orderId_);
+    ASSERT_TRUE(sell.has_value());
+    ASSERT_TRUE(buy.has_value());
+    EXPECT_EQ("NEW", sell->value("status", "?")) << "the snapshot gives a fill that isn't reported";
+    EXPECT_EQ(0u, sell->value("cumQty", 1u));
+    EXPECT_EQ(100u, sell->value("leavesQty", 0u));
+    EXPECT_EQ("NEW", buy->value("status", "?"));
+    EXPECT_EQ(0u, buy->value("cumQty", 1u));
+    EXPECT_EQ(30u, buy->value("leavesQty", 0u));
+
+    sell = snapshotEntry(after, resting->orderId_);
+    buy = snapshotEntry(after, buyer->orderId_);
+    ASSERT_TRUE(sell.has_value());
+    ASSERT_TRUE(buy.has_value());
+    EXPECT_EQ("PARTIAL_FILL", sell->value("status", "?"));
+    EXPECT_EQ(30u, sell->value("cumQty", 0u));
+    EXPECT_EQ(70u, sell->value("leavesQty", 0u));
+    EXPECT_DOUBLE_EQ(10.0, sell->value("avgPx", 0.0));
+    EXPECT_EQ("FILLED", buy->value("status", "?"));
+    EXPECT_EQ(30u, buy->value("cumQty", 0u));
+    EXPECT_EQ(0u, buy->value("leavesQty", 1u));
+    EXPECT_EQ(0, manager->tasksFailed());
+}
+
+TEST_F(TaskManagerTest, AnOrderSnapshotTakenWhileOrdersTradeAndAreReplacedReadsEachUnderItsLock)
+{
+    // A session's order snapshot is taken on the IO thread while the workers run (#404). It reads each order's figures
+    // under the order's lock, and takes no order's lock while it holds the store's: a replace holds its original's
+    // write lock while it stores the replacement, which takes the store's. Under the store's lock the snapshot would
+    // deadlock with the replace, and without the order's lock it reads what a fill writes (TSan). Once every
+    // transaction has run, each order has had its last decision reported, and the snapshot gives the orders as they are.
+    auto manager = createTaskManager(2, 2);
+    constexpr int ORDERS = 40;
+    std::vector<RawDataEntry> restingIds;
+    for (int i = 0; i < ORDERS; ++i)
+    {
+        restingIds.push_back(pushOrder(BUY_SIDE, 10.0, 100, "buyer" + std::to_string(i)));
+    }
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    std::vector<OrderEntry *> resting;
+    for (const RawDataEntry &id : restingIds)
+    {
+        resting.push_back(OrderStorage::instance()->locateByClOrderId(id));
+        ASSERT_NE(nullptr, resting.back());
+    }
+
+    std::atomic<bool> stop{ false };
+    std::atomic<int> snapshots{ 0 };
+    std::thread reader(
+        [&]
+        {
+            while (!stop)
+            {
+                const std::string text = App::serializeOrderSnapshot(OrderStorage::instance());
+                if (!text.empty())
+                {
+                    ++snapshots;
+                }
+            }
+        });
+    for (int i = 0; i < ORDERS; ++i)
+    {
+        inQueues_->push("buyer" + std::to_string(i),
+                        OrderReplaceEvent(resting[i]->orderId_, makeReplacement(*resting[i], 10.0, 120)));
+        pushOrder(SELL_SIDE, 10.0, 50, "seller" + std::to_string(i));
+    }
+    const bool idle = waitUntilIdle(*manager, std::chrono::seconds(60));
+    stop = true;
+    reader.join();
+    ASSERT_TRUE(idle) << "the workers didn't finish: a replace and the snapshot can deadlock";
+    EXPECT_LT(0, snapshots.load());
+    EXPECT_EQ(0, manager->tasksFailed());
+
+    const nlohmann::json snapshot = nlohmann::json::parse(App::serializeOrderSnapshot(OrderStorage::instance()));
+    size_t given = 0;
+    OrderStorage::instance()->forEachOrder(
+        [&](const IdT &id, const OrderEntry &order)
+        {
+            const std::optional<nlohmann::json> entry = snapshotEntry(snapshot, id);
+            ASSERT_TRUE(entry.has_value()) << "order " << id.id_ << " is reported, and not in the snapshot";
+            ++given;
+            EXPECT_EQ(order.cumQty_, entry->value("cumQty", QuantityT(0))) << "order " << id.id_;
+            EXPECT_EQ(order.leavesQty_, entry->value("leavesQty", QuantityT(0))) << "order " << id.id_;
+        });
+    EXPECT_EQ(given, snapshot["data"].size());
+    EXPECT_LT(static_cast<size_t>(2 * ORDERS), given) << "the replacements and the sells are in it";
 }
 
 } // namespace
