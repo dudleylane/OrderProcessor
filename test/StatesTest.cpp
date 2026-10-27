@@ -828,3 +828,74 @@ TEST_F(StatesTest, ExternalOrderRejectKeepsTheCopyTheAcceptStored)
     EXPECT_EQ(stored, rejectGivenTheStoredCopy<onExternalOrderRejected>(order.get(), stored));
     EXPECT_EQ(stored, OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get()));
 }
+
+// =============================================================================
+// A rejected order has no leaves (#427)
+// =============================================================================
+//
+// A rejected order is closed, and a closed order's LeavesQty is 0, whatever closed it (#386): each of a receive's
+// rejects leaves none, whether it stores the order or is handed the copy its receive stored. Each order starts with
+// all of its quantity left, as the gateways make one.
+
+namespace
+{
+template <typename RejectEvent> void expectNoLeavesOnceRejected()
+{
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+    order->leavesQty_ = order->orderQty_;
+    OrderEntry *kept = rejectGivenTheStoredCopy<RejectEvent>(order.get(), nullptr);
+    ASSERT_NE(nullptr, kept);
+    ASSERT_NE(order.get(), kept) << "the reject should have stored the order";
+    EXPECT_EQ(0u, kept->leavesQty_) << "stored by the reject";
+
+    std::unique_ptr<OrderEntry> received(createCorrectOrder());
+    assignClOrderId(received.get());
+    received->leavesQty_ = received->orderQty_;
+    OrderEntry *stored = OrderStorage::instance()->save(*received, IdTGenerator::instance());
+    ASSERT_NE(nullptr, stored);
+    ASSERT_EQ(stored, rejectGivenTheStoredCopy<RejectEvent>(received.get(), stored));
+    EXPECT_EQ(0u, stored->leavesQty_) << "stored by the receive";
+}
+} // namespace
+
+TEST_F(StatesTest, ARejectedOrderHasNoLeaves)
+{
+    expectNoLeavesOnceRejected<onRecvOrderRejected>();
+}
+
+TEST_F(StatesTest, ARejectedReplacementHasNoLeaves)
+{
+    expectNoLeavesOnceRejected<onRecvRplOrderRejected>();
+}
+
+TEST_F(StatesTest, ARejectedExternalOrderHasNoLeaves)
+{
+    expectNoLeavesOnceRejected<onExternalOrderRejected>();
+}
+
+TEST_F(StatesTest, ARejectedPendingReplacementHasNoLeaves)
+{
+    // Pend_Replace -> Rejected: a legacy replace's replacement, which nothing produces since #74. The reject tells the
+    // original, and the replacement is closed.
+    std::unique_ptr<OrderEntry> original(createCorrectOrder());
+    assignClOrderId(original.get());
+    OrderEntry *orig = OrderStorage::instance()->save(*original, IdTGenerator::instance());
+    ASSERT_NE(nullptr, orig);
+    std::unique_ptr<OrderEntry> replacement(createReplOrder());
+    assignClOrderId(replacement.get());
+    OrderEntry *repl = OrderStorage::instance()->save(*replacement, IdTGenerator::instance());
+    ASSERT_NE(nullptr, repl);
+    repl->origOrderId_ = orig->orderId_;
+    repl->leavesQty_ = repl->orderQty_;
+
+    TestTransactionContext trCntxt;
+    onRplOrderRejected evnt;
+    evnt.generator_ = IdTGenerator::instance();
+    evnt.transaction_ = &trCntxt;
+    evnt.orderStorage_ = OrderStorage::instance();
+    OrdStateImpl::processReject(repl, evnt);
+
+    EXPECT_EQ(0u, repl->leavesQty_);
+    EXPECT_TRUE(trCntxt.isOperationEnqueued(ENQUEUE_EVENT_TROPERATION)) << "the original should be told";
+}

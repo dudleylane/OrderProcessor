@@ -249,6 +249,7 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvOrderRe
     assert(nullptr != orderData);
     if (alreadyStored(*orderData, evnt.order_, evnt.orderStorage_))
     {
+        (*orderData)->leavesQty_ = 0; // rejected, so closed, as below (#427)
         return;
     }
     assert((nullptr == *orderData) || (evnt.order_ == *orderData));
@@ -267,6 +268,10 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvOrderRe
     catch (const std::exception &) //save could fails if ClOrderId already exists, just continue reject it
     {
     }
+    // A rejected order is closed, and a closed order's LeavesQty is 0, whatever closed it (#386, #427): whether the
+    // reject stores it, as here, or its receive stored it before refusing it (above), as it does a market order with
+    // nothing to trade with
+    (*orderData)->leavesQty_ = 0;
 }
 
 void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvRplOrderRejected const &evnt)
@@ -274,6 +279,7 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvRplOrde
     assert(nullptr != orderData);
     if (alreadyStored(*orderData, evnt.order_, evnt.orderStorage_))
     {
+        (*orderData)->leavesQty_ = 0; // rejected, so closed (#427)
         return;
     }
     assert((nullptr == *orderData) || (evnt.order_ == *orderData));
@@ -289,6 +295,7 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvRplOrde
     catch (const std::exception &) //save could fails if ClOrderId already exists, just continue reject it
     {
     }
+    (*orderData)->leavesQty_ = 0; // rejected, so closed, as a rejected new order is (#427)
 }
 
 void OrdStateImpl::processAccept(OrderEntry **orderData, OrdState::onExternalOrder const &evnt)
@@ -324,6 +331,7 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onExternalOrd
     assert(nullptr != orderData);
     if (alreadyStored(*orderData, evnt.order_, evnt.orderStorage_))
     {
+        (*orderData)->leavesQty_ = 0; // rejected, so closed (#427)
         return;
     }
     assert((nullptr == *orderData) || (evnt.order_ == *orderData));
@@ -339,6 +347,7 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onExternalOrd
     catch (const std::exception &) //save could fails if ClOrderId already exists, just continue reject it
     {
     }
+    (*orderData)->leavesQty_ = 0; // rejected, so closed, as a rejected new order is (#427)
 }
 
 void OrdStateImpl::processReject(OrderEntry *, OrdState::onOrderRejected const &)
@@ -374,6 +383,8 @@ void OrdStateImpl::processReject(OrderEntry *orderData, OrdState::onRplOrderReje
     {
         throw std::runtime_error("Unable to locate original order for OrderReplaceReject!");
     }
+    // A rejected replacement has nothing left to fill: a closed order's LeavesQty is 0, whatever closed it (#386, #427)
+    orderData->leavesQty_ = 0;
 
     // read lock on original order during field access
     oneapi::tbb::spin_rw_mutex::scoped_lock origLock(origOrder->entryMutex_, false);
@@ -513,6 +524,9 @@ void OrdStateImpl::processRejectNew(OrderEntry *orderData, OrdState::onOrderReje
     assert(nullptr != orderData);
 
     addUnbooking(*orderData, evnt.transaction_);
+    // A rejected order is closed, and a closed order's LeavesQty is 0, whatever closed it (#386, #427). Set at the
+    // decision, as an expiry sets it: until the removal above runs, the matcher passes by an order with no leaves.
+    orderData->leavesQty_ = 0;
 }
 
 bool OrdStateImpl::processNotExecuted(OrderEntry *, OrdState::onTradeExecution const &)
