@@ -502,9 +502,9 @@ static void BM_ProcessInvalidOrder(benchmark::State &state)
         return;
     }
 
-    // One limit buy at 0 per iteration, refused by isValid()'s last check, the limit price (#188), so that every check
-    // runs: processReceive() throws before it stores the order, and the reject stores it
-    // (processReject(onRecvOrderRejected)) and reports it (#435)
+    // One limit buy at 0 per iteration, refused for its price (#188), which isValid() checks after everything else a
+    // limit order needs, so that every other check runs first: processReceive() throws before it stores the order, and
+    // the reject stores it (processReject(onRecvOrderRejected)) and reports it (#435)
     std::vector<OrderEntry *> orders;
     orders.reserve(state.max_iterations);
     for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
