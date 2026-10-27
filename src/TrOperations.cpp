@@ -51,9 +51,10 @@ void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, con
     ord->addExecution(execReport->execId_);
 
     // What the report says the order has (#411): what its decision left, for a report made with it, a fill's, and
-    // otherwise the order as it is now
+    // otherwise the order as it is now. Readers outside a transaction give the order as this from now on (#404).
     ExecReportEvent report(execReport);
     report.figures_ = (nullptr != decided) ? *decided : OrderFigures(*ord);
+    ord->published_ = report.figures_;
 
     ordLock.release();
 
