@@ -136,6 +136,45 @@ TEST_F(PGRequestBuilderTest, FromSwapOrderCarriesItsFarLeg)
     EXPECT_EQ(0u, o.farSettlDate);
 }
 
+TEST_F(PGRequestBuilderTest, FromOrderWritesTheFiguresADecisionLeft)
+{
+    // A fill's row is written when the fill's transaction runs, which can be after a later fill of the order was
+    // applied (#411): it has what the fill left the order with
+    auto order = test::createCorrectOrder();
+    order->orderQty_ = 100;
+    order->status_ = PARTFILL_ORDSTATUS;
+    order->leavesQty_ = 70;
+    order->cumQty_ = 30;
+    order->avgPx_ = 1.5;
+    order->dayOrderQty_ = 100;
+    order->dayCumQty_ = 30;
+    order->dayAvgPx_ = 1.5;
+    order->dayStart_ = 1792098000000ULL;
+    const OrderFigures firstFill(*order);
+    order->status_ = FILLED_ORDSTATUS;
+    order->leavesQty_ = 0;
+    order->cumQty_ = 100;
+    order->avgPx_ = 1.55;
+    order->dayCumQty_ = 100;
+    order->dayAvgPx_ = 1.55;
+    order->dayStart_ = 1792184400000ULL;
+
+    auto w = PGRequestBuilder::fromOrder(*order, firstFill);
+
+    EXPECT_EQ("PARTIAL_FILL", w.status);
+    EXPECT_EQ(70u, w.leavesQty);
+    EXPECT_EQ(30u, w.cumQty);
+    EXPECT_DOUBLE_EQ(1.5, w.avgPx);
+    EXPECT_EQ(100u, w.dayOrderQty);
+    EXPECT_EQ(30u, w.dayCumQty);
+    EXPECT_DOUBLE_EQ(1.5, w.dayAvgPx);
+    EXPECT_EQ(1792098000000ULL, w.dayStart);
+    EXPECT_EQ(100u, w.orderQty) << "what no decision changes comes from the order";
+
+    // Without them, the order as it is
+    EXPECT_EQ("FILLED", PGRequestBuilder::fromOrder(*order).status);
+}
+
 TEST_F(PGRequestBuilderTest, FromOrderCheckAllQuantities)
 {
     auto order = test::createCorrectOrder();

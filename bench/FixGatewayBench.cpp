@@ -485,15 +485,17 @@ private:
 } // anonymous namespace
 
 /// The gateway's builder for an outright order's trade: what it reads from the order and the report, the enums it maps,
-/// the session's key it takes off the ClOrdID, and the fields a trade's report has
+/// the session's key it takes off the ClOrdID, and the fields a trade's report has. With the figures the engine gives
+/// every report it makes, as FixOutQueues builds one (#411).
 static void BM_FixBuildExecutionReport(benchmark::State &state)
 {
     FixBenchSetup setup;
     const OrderEntry *order = storeBenchOrder(setup, FixGateway::makeSourceString(BENCH_SID), LIMIT_ORDERTYPE);
     const TradeExecEntry trade = benchTrade(*order, SINGLE_LEG);
+    const OrderFigures figures(*order);
     for (auto _ : state)
     {
-        FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+        FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order, figures);
         benchmark::DoNotOptimize(report);
     }
     state.SetItemsProcessed(state.iterations());
@@ -506,9 +508,10 @@ static void BM_FixBuildSwapLegReport(benchmark::State &state)
     FixBenchSetup setup;
     const OrderEntry *order = storeBenchOrder(setup, FixGateway::makeSourceString(BENCH_SID), FXSWAP_ORDERTYPE);
     const TradeExecEntry trade = benchTrade(*order, NEAR_LEG);
+    const OrderFigures figures(*order);
     for (auto _ : state)
     {
-        FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+        FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order, figures);
         benchmark::DoNotOptimize(report);
     }
     state.SetItemsProcessed(state.iterations());
@@ -532,7 +535,8 @@ static void BM_FixSendExecutionReport(benchmark::State &state)
     }
     const OrderEntry *order = storeBenchOrder(setup, session.source(), LIMIT_ORDERTYPE);
     TradeExecEntry trade = benchTrade(*order, SINGLE_LEG);
-    const ExecReportEvent evnt(&trade);
+    ExecReportEvent evnt(&trade);
+    evnt.figures_.emplace(*order); // as the engine gives every report it makes (#411)
     const std::string target;
     const u64 before = session.sent();
     for (auto _ : state)
@@ -590,7 +594,8 @@ static void BM_FixOrderAndAcknowledgement(benchmark::State &state)
         ack.orderStatus_ = NEW_ORDSTATUS;
         ack.orderId_ = order->orderId_;
         ack.execId_ = IdTGenerator::instance()->getId();
-        const ExecReportEvent evnt(&ack);
+        ExecReportEvent evnt(&ack);
+        evnt.figures_.emplace(*order); // as the engine gives every report it makes (#411)
 
         start = std::chrono::steady_clock::now();
         outQueues.push(evnt, target);

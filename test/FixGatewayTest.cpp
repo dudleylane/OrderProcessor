@@ -24,6 +24,7 @@
 #include <quickfix/TimeRange.h>
 #include <quickfix/Utility.h>
 #include "FixGateway.h"
+#include "FixOutQueues.h"
 #include "FixServer.h"
 #include "MultiOutQueues.h"
 
@@ -3189,6 +3190,77 @@ TEST_F(FixtSessionTest, ASwapsLegReportIsTakenWithItsTrdMatchId)
     EXPECT_EQ("4242", fieldOf(report, FIX::FIELD::TrdMatchID));
     EXPECT_EQ("(not set)", fieldOf(report, FIX::FIELD::TradeLinkID));
     EXPECT_EQ(1u, report.groupCount(FIX::FIELD::NoLegs));
+}
+
+TEST_F(FixtSessionTest, AReportGivesWhatItsOwnFillLeftTheOrder)
+{
+    // A fill's report goes out when its transaction runs, which can be after a later fill of the order was applied
+    // (#411). FixOutQueues has the gateway write what the engine gives the report, not the order's own figures, which
+    // count the later fill. A report the engine didn't make, without them, gives the order as it is.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1");
+    order->tif_ = GTC_TIF; // it traded 30 on an earlier day, and its first fill today was 20
+    order->orderQty_ = 100;
+    order->status_ = PARTFILL_ORDSTATUS;
+    order->cumQty_ = 50;
+    order->leavesQty_ = 50;
+    order->avgPx_ = 10.5;
+    order->dayOrderQty_ = 70;
+    order->dayCumQty_ = 20;
+    order->dayAvgPx_ = 10.25;
+    const OrderFigures firstFill(*order);
+    order->cumQty_ = 80; // its second fill today, 30 at 11, applied before the first fill's report is out
+    order->leavesQty_ = 20;
+    order->avgPx_ = 10.6875;
+    order->dayCumQty_ = 50;
+    order->dayAvgPx_ = 10.7;
+
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+    trade.orderId_ = order->orderId_;
+    trade.lastQty_ = 20;
+    trade.lastPx_ = 10.25;
+    Queues::ExecReportEvent report(&trade);
+    report.figures_.emplace(firstFill);
+    FixOutQueues outQueues(gateway_.get(), OrderStorage::instance());
+    const std::string source = FixGateway::makeSourceString(sid_);
+    outQueues.push(report, source);
+    report.figures_.reset();
+    outQueues.push(report, source);
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(2u, reports.size()) << sentText();
+    expectEverythingSentIsTaken();
+    EXPECT_EQ("50", fieldOf(reports[0], FIX::FIELD::CumQty)) << "the first fill's report counts the second";
+    EXPECT_EQ("50", fieldOf(reports[0], FIX::FIELD::LeavesQty));
+    EXPECT_EQ("10.5", fieldOf(reports[0], FIX::FIELD::AvgPx));
+    EXPECT_EQ("70", fieldOf(reports[0], FIX::FIELD::DayOrderQty));
+    EXPECT_EQ("20", fieldOf(reports[0], FIX::FIELD::DayCumQty));
+    EXPECT_EQ("10.25", fieldOf(reports[0], FIX::FIELD::DayAvgPx));
+    EXPECT_EQ("100", fieldOf(reports[0], FIX::FIELD::OrderQty)) << "what no decision changes comes from the order";
+    EXPECT_EQ("80", fieldOf(reports[1], FIX::FIELD::CumQty)) << "a report without figures";
+    EXPECT_EQ("20", fieldOf(reports[1], FIX::FIELD::LeavesQty));
+    EXPECT_EQ("10.6875", fieldOf(reports[1], FIX::FIELD::AvgPx));
+    EXPECT_EQ("50", fieldOf(reports[1], FIX::FIELD::DayCumQty));
+
+    // A stop's acknowledgement says it is held (#387) as its figures do, though its release came first
+    OrderEntry *stop = saveOrderOf(sid_, "STOP-1");
+    stop->ordType_ = STOP_ORDERTYPE;
+    stop->stopPx_ = 10.0;
+    const OrderFigures held(*stop);
+    stop->stopTriggered_ = true;
+    auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    ack.orderId_ = stop->orderId_;
+    Queues::ExecReportEvent acknowledgement(&ack);
+    acknowledgement.figures_.emplace(held);
+    sent_.clear();
+    outQueues.push(acknowledgement, source);
+    acknowledgement.figures_.reset();
+    outQueues.push(acknowledgement, source);
+    const std::vector<FIX::Message> acks = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(2u, acks.size()) << sentText();
+    expectEverythingSentIsTaken();
+    EXPECT_EQ("N", fieldOf(acks[0], FIX::FIELD::WorkingIndicator));
+    EXPECT_EQ("Y", fieldOf(acks[1], FIX::FIELD::WorkingIndicator)) << "without figures, as the order is";
 }
 
 TEST_F(FixtSessionTest, ARequestForAnOrderTheEngineHasntAnsweredIsRefusedAsPendingNew)

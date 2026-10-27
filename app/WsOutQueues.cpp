@@ -26,10 +26,18 @@ void WsOutQueues::push(const Queues::ExecReportEvent &evnt, const std::string &t
         sessionMgr_->sendToSource(target, serializeExecReport(evnt.exec_));
         return;
     }
-    // 1. The execution report, and 2. the updated order, to the sessions that may see its account
+    // 1. The execution report, and 2. the order as the report says it is, to the sessions that may see its account. A
+    // later fill of the order can be applied before a fill's report goes out, so the order's own figures can count it
+    // (#411). A report built without figures, as a test may build one, gives the order as it is.
+    std::optional<OrderFigures> figures = evnt.figures_;
+    if (!figures)
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
+        figures.emplace(*order);
+    }
     const SourceIdT account = order->account_.getId();
     sessionMgr_->broadcastToAccount(account, serializeExecReport(evnt.exec_));
-    sessionMgr_->broadcastToAccount(account, serializeOrderUpdate(*order));
+    sessionMgr_->broadcastToAccount(account, serializeOrderUpdate(*order, *figures));
 
     // 3. The book, to its subscribers, whatever their accounts: it shows no account (#225)
     const std::string &symbol = order->instrument_.get().symbol_;

@@ -38,7 +38,9 @@ void ReleaseStopDeferedEvent::execute(DeferedEventFunctor * /*func*/, const Cont
     std::unique_ptr<Operation> release(releaseOp.release());
     scope->addOperation(release);
     // After the release, not first as Processor::persistOrder() puts it: the release marks the order released when it
-    // executes, and the codec reads the order when this executes. The release publishes nothing itself.
+    // executes, so this writes the order as it is when it executes, not figures taken now (#411). Nothing else changes
+    // the order meanwhile: the transaction names the instrument, as every one that decides about a booked order does,
+    // and the release's own fills are applied after its operations. The release publishes nothing itself.
     std::unique_ptr<Operation> persist(new PersistOrderTrOperation(*order_));
     scope->addOperation(persist);
     // Then the TRIGGERED report, once the order is durable (#28, #236)

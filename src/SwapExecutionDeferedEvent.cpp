@@ -75,11 +75,18 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         contraEvnt.transaction_ = scope;
         func->process(contraEvnt, nearTrade_.order_, cnxt);
 
-        // 2. Far-leg execution REPORT on contra order (no state machine, no leavesQty_ change)
-        OrderStatus contraStatus = (nearTrade_.order_->leavesQty_ == 0) ? FILLED_ORDSTATUS : PARTFILL_ORDSTATUS;
-        std::unique_ptr<Operation> contraFarOp(
-            new CreateTradeExecReportTrOperation(farTrade_.lastQty_, farTrade_.lastPx_, nearTrade_.order_->currency_,
-                                                 contraStatus, FAR_LEG, contraLink, *nearTrade_.order_));
+        // 2. Far-leg execution REPORT on contra order (no state machine, no leavesQty_ change). It reports what the near
+        // leg's fill left the order with (#411), taken here, under the order's lock: nothing else decides about the
+        // order meanwhile, since every transaction that does names its instrument, as the one draining this fill does.
+        // The report goes out when this fill's transaction runs, which can be after a later fill of the order.
+        std::unique_ptr<Operation> contraFarOp;
+        {
+            oneapi::tbb::spin_rw_mutex::scoped_lock lock(nearTrade_.order_->entryMutex_, false);
+            OrderStatus contraStatus = (nearTrade_.order_->leavesQty_ == 0) ? FILLED_ORDSTATUS : PARTFILL_ORDSTATUS;
+            contraFarOp.reset(new CreateTradeExecReportTrOperation(farTrade_.lastQty_, farTrade_.lastPx_,
+                                                                   nearTrade_.order_->currency_, contraStatus, FAR_LEG,
+                                                                   contraLink, *nearTrade_.order_));
+        }
         scope->addOperation(contraFarOp);
 
         // === BASE (AGGRESSOR) ORDER ===
@@ -102,10 +109,16 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         baseEvnt.transaction_ = scope;
         func->process(baseEvnt, baseOrder_, cnxt);
 
-        // 4. Far-leg execution REPORT on base order (no state machine, no leavesQty_ change)
-        OrderStatus baseStatus = (baseOrder_->leavesQty_ == 0) ? FILLED_ORDSTATUS : PARTFILL_ORDSTATUS;
-        std::unique_ptr<Operation> baseFarOp(new CreateTradeExecReportTrOperation(
-            farTrade_.lastQty_, farTrade_.lastPx_, baseOrder_->currency_, baseStatus, FAR_LEG, baseLink, *baseOrder_));
+        // 4. Far-leg execution REPORT on base order (no state machine, no leavesQty_ change), with what its near leg's
+        // fill left it with, as the contra's (#411)
+        std::unique_ptr<Operation> baseFarOp;
+        {
+            oneapi::tbb::spin_rw_mutex::scoped_lock lock(baseOrder_->entryMutex_, false);
+            OrderStatus baseStatus = (baseOrder_->leavesQty_ == 0) ? FILLED_ORDSTATUS : PARTFILL_ORDSTATUS;
+            baseFarOp.reset(new CreateTradeExecReportTrOperation(farTrade_.lastQty_, farTrade_.lastPx_,
+                                                                 baseOrder_->currency_, baseStatus, FAR_LEG, baseLink,
+                                                                 *baseOrder_));
+        }
         scope->addOperation(baseFarOp);
     }
     catch (const std::exception &)

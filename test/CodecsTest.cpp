@@ -453,6 +453,79 @@ TEST_F(OrderCodecTest, BothEncodersWriteTheSameRecord)
     EXPECT_EQ(written, std::string(buf.data(), static_cast<size_t>(end - buf.data())));
 }
 
+// A record is written with what the decision it persists left the order with (#411): a fill's transaction can run after
+// a later fill of the order was applied, and the fill's record must not count it. Both encoders write the figures given.
+TEST_F(OrderCodecTest, AnOrderIsWrittenWithTheFiguresGiven)
+{
+    SourceIdT instrId = addInstrument("instrument");
+    OrderEntry val(SourceIdT(1, 1), SourceIdT(2, 2), SourceIdT(3, 3), SourceIdT(4, 4), instrId, SourceIdT(6, 6),
+                   SourceIdT(7, 7), SourceIdT(8, 8));
+    val.orderId_ = IdT(4444, 4445);
+    val.price_ = 22.22;
+    val.side_ = SELL_SIDE;
+    val.ordType_ = STOPLIMIT_ORDERTYPE;
+    val.stopPx_ = 22.0;
+    val.orderQty_ = 100;
+    // The first fill: 30 of 100, once the stop was reached
+    val.status_ = PARTFILL_ORDSTATUS;
+    val.leavesQty_ = 70;
+    val.cumQty_ = 30;
+    val.avgPx_ = 22.25;
+    val.dayOrderQty_ = 100;
+    val.dayCumQty_ = 30;
+    val.dayAvgPx_ = 22.25;
+    val.dayStart_ = 1792098000000ULL;
+    val.stopTriggered_ = true;
+    val.stateMachinePersistance_.stateZone1Id_ = 3; // PartFill
+    val.stateMachinePersistance_.stateZone2Id_ = 8; // NoCnlReplace
+    const OrderFigures firstFill(val);
+    // The second, which takes the rest, applied to the order before the first fill's transaction runs
+    val.status_ = FILLED_ORDSTATUS;
+    val.leavesQty_ = 0;
+    val.cumQty_ = 100;
+    val.avgPx_ = 22.4;
+    val.dayCumQty_ = 100;
+    val.dayAvgPx_ = 22.4;
+    val.stateMachinePersistance_.stateZone1Id_ = 4; // Filled
+
+    std::string written;
+    IdT id;
+    u32 version = 0;
+    OrderCodec::encode(val, firstFill, &written, &id, &version);
+    EXPECT_EQ(id, val.orderId_);
+    std::vector<char> buf(4096);
+    const char *end = OrderCodec::encode(val, firstFill, buf.data(), &id, &version);
+    EXPECT_EQ(written, std::string(buf.data(), static_cast<size_t>(end - buf.data())));
+
+    auto decVal =
+        std::unique_ptr<OrderEntry>(OrderCodec::decode(id, OrderCodec::FORMAT_VERSION, written.data(), written.size()));
+    ASSERT_NE(nullptr, decVal.get());
+    EXPECT_EQ(PARTFILL_ORDSTATUS, decVal->status_);
+    EXPECT_EQ(70u, decVal->leavesQty_);
+    EXPECT_EQ(30u, decVal->cumQty_);
+    EXPECT_DOUBLE_EQ(22.25, decVal->avgPx_);
+    EXPECT_EQ(100u, decVal->dayOrderQty_);
+    EXPECT_EQ(30u, decVal->dayCumQty_);
+    EXPECT_DOUBLE_EQ(22.25, decVal->dayAvgPx_);
+    EXPECT_EQ(1792098000000ULL, decVal->dayStart_);
+    EXPECT_TRUE(decVal->stopTriggered_);
+    EXPECT_EQ(3, decVal->stateMachinePersistance_.stateZone1Id_);
+    EXPECT_EQ(8, decVal->stateMachinePersistance_.stateZone2Id_);
+    // What no decision changes comes from the order
+    EXPECT_EQ(100u, decVal->orderQty_);
+    EXPECT_DOUBLE_EQ(22.22, decVal->price_);
+    EXPECT_DOUBLE_EQ(22.0, decVal->stopPx_);
+    EXPECT_EQ(SELL_SIDE, decVal->side_);
+
+    // Without figures, the order as it is: the record its own figures write
+    std::string own;
+    OrderCodec::encode(val, &own, &id, &version);
+    std::string withOwn;
+    OrderCodec::encode(val, OrderFigures(val), &withOwn, &id, &version);
+    EXPECT_EQ(own, withOwn);
+    EXPECT_NE(own, written);
+}
+
 // Since format version 3 a record carries the order's strings, each under its field's id (#192). A string given for a
 // field that names nothing could never be restored: the encoder refuses it, and so does the decoder, in a record.
 TEST_F(OrderCodecTest, AStringForAFieldThatNamesNothingIsRefused)

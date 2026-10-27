@@ -60,11 +60,17 @@ public:
     /// from an older version is decoded with 0, figures for no day: its first restatement begins them.
     static constexpr u32 FORMAT_VERSION = 4;
 
-    /// Writes the order and the strings given. Throws std::invalid_argument for a string given for a field whose id
-    /// isn't set: nothing could restore it.
+    /// Writes the order as it is, and the strings given. Throws std::invalid_argument for a string given for a field
+    /// whose id isn't set: nothing could restore it. Tests write records so; the engine writes the figures a decision
+    /// left, with the overloads below (#411).
     static void encode(const OrderEntry &val, std::string *buf, IdT *id, u32 *version,
                        const OrderStrings &strings = OrderStrings());
     static char *encode(const OrderEntry &val, char *buf, IdT *id, u32 *version,
+                        const OrderStrings &strings = OrderStrings());
+    /// Writes the order with the figures a decision left it with (#411) in place of its own, and the strings given
+    static void encode(const OrderEntry &val, const OrderFigures &figures, std::string *buf, IdT *id, u32 *version,
+                       const OrderStrings &strings = OrderStrings());
+    static char *encode(const OrderEntry &val, const OrderFigures &figures, char *buf, IdT *id, u32 *version,
                         const OrderStrings &strings = OrderStrings());
     /// Reads an order, and from format version 3 the strings its record carries into strings, if given
     static OrderEntry *decode(const IdT &id, u32 formatVersion, const char *buf, size_t size,

@@ -205,9 +205,16 @@ public:
     /// removes operation's related to the passed stage from transaction
     virtual void removeStage(const size_t &id) = 0;
 
-    /// true if the scope holds an operation of this type on this object. Processor persists an order once per scope
-    /// with it, which LMDBStorage::update()'s pruning relies on (#148).
-    virtual bool hasOperation(OperationType type, const IdT &id) const = 0;
+    /// The scope's operation of this type on this object, or nullptr. Processor persists an order once per scope with
+    /// it, which LMDBStorage::update()'s pruning relies on (#148), giving a later decision in the scope to the operation
+    /// the first made (#411).
+    virtual Operation *findOperation(OperationType type, const IdT &id) const = 0;
+
+    /// true if the scope holds an operation of this type on this object
+    bool hasOperation(OperationType type, const IdT &id) const
+    {
+        return nullptr != findOperation(type, id);
+    }
 };
 
 class Transaction

@@ -426,7 +426,7 @@ A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through
 | `instrument_list` | `Instrument[]` | On connect |
 | `account_list` | `Account[]` | On connect |
 | `order_snapshot` | `Order[]` | On connect (all current orders) |
-| `order_update` | `Order` | On any order state change |
+| `order_update` | `Order` | After each `execution_report`: the order as that report's decision left it, so a fill's counts no later fill (#411) |
 | `execution_report` | `ExecutionReport` | On trade, reject, cancel, replace, correct |
 | `book_update` | `OrderBookSnapshot` | On book change (subscribed symbols only) |
 | `cancel_reject` | `{orderId, reason}` | When a cancel is refused; `reason` says why: unknown order, too late (with the order's status), or a replace pending |
