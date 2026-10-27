@@ -797,6 +797,8 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
+`ProcessorBench.cpp`'s `BM_ProcessReplaceOrder` times a replace through a `Processor`, its transaction run inline: a resting order's price replaced, and the replacement booked in its place (#457).
+
 ---
 
 ### 4.5 Stop Order Flow (#223)
@@ -1622,7 +1624,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | `TransactionScopePoolBench.cpp` | Lock-free object pool allocation |
 | `NumaAllocatorBench.cpp` | NUMA-aware allocation performance |
 | `OrderParamsLayoutBench.cpp` | Field layout optimization |
-| `ProcessorBench.cpp` | The real path: new order, match and cancel through a `Processor`, an IOC's remainder and an expiry (#426), the reject of an order `isValid()` refuses and of a market order with no market (#435), a match whose records are encoded as the server's dispatcher encodes them (#442), and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290) |
+| `ProcessorBench.cpp` | The real path: new order, match, cancel and replace (#457) through a `Processor`, an IOC's remainder and an expiry (#426), a restatement (#451), the reject of an order `isValid()` refuses and of a market order with no market (#435), a match whose records are encoded as the server's dispatcher encodes them (#442), and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290) |
 | `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159), and a fill's report pushed through `WsOutQueues` (#442) |
 | `FixGatewayBench.cpp` | The FIX gateway (`BUILD_FIX=ON`): enum conversion, NewOrderSingle translation, the gateway's ExecutionReport builder, a report's way to a logged-on session, and a new order with its acknowledgement (#395), the fan-out, swap and single-leg matching, and a FIX order's fill end to end |
 
