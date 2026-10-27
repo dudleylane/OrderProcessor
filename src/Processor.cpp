@@ -674,6 +674,8 @@ void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope 
         const DateTimeT now = cnxt.now();
         order->startDay(ExpiryScheduler::dayStartOf(now));
         persistOrder(scope, *order);
+        // The report takes what the restatement left now, as the persist does: the transaction names the order
+        // alone, so a booking on the instrument can fill the order before it runs (#441)
         std::unique_ptr<Operation> report(new ReportRestatementTrOperation(*order));
         scope->addOperation(report);
         DateTimeT next = 0;

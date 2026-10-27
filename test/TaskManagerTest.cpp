@@ -31,6 +31,7 @@
 #include "Processor.h"
 #include "IncomingQueues.h"
 #include "OutgoingQueues.h"
+#include "ExpiryScheduler.h"
 
 using namespace COP;
 using namespace COP::Tasks;
@@ -251,11 +252,12 @@ private:
     std::atomic<bool> thrown_{ false };
 };
 
-/// Shared by the transaction processors: the first transaction that reports a trade for the order waits, before it
-/// runs, until the order's leaves fall to untilLeaves, as a worker preempted before it starts would, for at most five
-/// seconds
-struct TradeReportGate
+/// Shared by the transaction processors: the first transaction with the operation for the order, a trade's report
+/// unless another is set, waits, before it runs, until the order's leaves fall to untilLeaves, as a worker preempted
+/// before it starts would, for at most five seconds
+struct ReportGate
 {
+    OperationType operation = CREATE_TRADE_EXECREPORT_TROPERATION;
     std::atomic<const OrderEntry *> order{ nullptr };
     QuantityT untilLeaves = 0;
     std::atomic<bool> used{ false };
@@ -267,7 +269,7 @@ struct TradeReportGate
 class GatedTransactionProcessor final : public TransactionProcessor
 {
 public:
-    GatedTransactionProcessor(std::unique_ptr<Processor> processor, TradeReportGate *gate)
+    GatedTransactionProcessor(std::unique_ptr<Processor> processor, ReportGate *gate)
         : processor_(std::move(processor)), gate_(gate)
     {
     }
@@ -276,8 +278,8 @@ public:
     {
         const OrderEntry *order = gate_->order.load();
         const auto *scope = dynamic_cast<const Scope *>(tr);
-        if ((nullptr != order) && (nullptr != scope) &&
-            scope->hasOperation(CREATE_TRADE_EXECREPORT_TROPERATION, order->orderId_) && !gate_->used.exchange(true))
+        if ((nullptr != order) && (nullptr != scope) && scope->hasOperation(gate_->operation, order->orderId_) &&
+            !gate_->used.exchange(true))
         {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
             while (std::chrono::steady_clock::now() < deadline)
@@ -300,7 +302,7 @@ public:
 
 private:
     std::unique_ptr<Processor> processor_;
-    TradeReportGate *gate_;
+    ReportGate *gate_;
 };
 
 /// Holds the first removal it is asked for until released. TaskManager hands a finished transaction's processor back
@@ -505,11 +507,12 @@ protected:
     }
 
     /// Pushes a limit order from the source, and returns its ClOrdID to find it by once it is processed
-    RawDataEntry pushOrder(Side side, PriceT price, QuantityT qty, const std::string &source)
+    RawDataEntry pushOrder(Side side, PriceT price, QuantityT qty, const std::string &source, TimeInForce tif = DAY_TIF)
     {
         auto order = createCorrectOrder(instrumentId1_);
         assignClOrderId(order.get());
         order->side_ = side;
+        order->tif_ = tif;
         order->price_ = price;
         order->orderQty_ = qty;
         order->leavesQty_ = qty;
@@ -1670,7 +1673,7 @@ TEST_F(TaskManagerTest, AFillsReportAndRecordCountNoLaterFill)
     // reports must have what its own fill left. The first fill's had the second's too.
     RecordingSaver saver;
     OrderStorage::instance()->attach(&saver);
-    TradeReportGate gate;
+    ReportGate gate;
     TaskManagerParams params;
     params.transactMgr_ = transMgr_.get();
     params.inQueues_ = inQueues_.get();
@@ -1776,6 +1779,95 @@ TEST_F(TaskManagerTest, EachFillsReportAndRecordCountTheFillsUpToIt)
     }
     EXPECT_EQ(101, versions);
     EXPECT_EQ(0, versionsAhead) << "records whose figures aren't their own fill's";
+    EXPECT_EQ(0, manager->tasksFailed());
+}
+
+// =============================================================================
+// A restatement's report has what the restatement left (#441)
+// =============================================================================
+
+TEST_F(TaskManagerTest, ARestatementsReportCountsNoLaterFill)
+{
+    // O, a GTC sell of 100, rests. In the next business day O's restatement arrives, then a buy of 30. The
+    // transaction that persists and reports the restatement names O alone, and the buy's booking, ready once the
+    // transaction that decided the restatement has run, shares nothing with it, so the manager orders them by
+    // nothing (#441). The restatement's waits, before it runs, until the booking has applied its fill to O, as a
+    // worker preempted before it starts would. O's RESTATED report must have what the restatement left, and the
+    // fill's report, after it, what the fill left. The RESTATED report had the fill too.
+    std::atomic<DateTimeT> now{ 0 };
+    procParams_->clock_ = [&now]
+    {
+        return now.load();
+    };
+    RecordingSaver saver;
+    OrderStorage::instance()->attach(&saver);
+    ReportGate gate;
+    gate.operation = REPORT_RESTATEMENT_TROPERATION;
+    TaskManagerParams params;
+    params.transactMgr_ = transMgr_.get();
+    params.inQueues_ = inQueues_.get();
+    auto evntProc = std::make_unique<Processor>();
+    evntProc->init(*procParams_);
+    params.evntProcessors_.push_back(evntProc.release());
+    for (int i = 0; i < 2; ++i)
+    {
+        auto trProc = std::make_unique<Processor>();
+        trProc->init(*procParams_);
+        params.transactProcessors_.push_back(new GatedTransactionProcessor(std::move(trProc), &gate));
+    }
+    auto manager = std::make_unique<TaskManager>(params);
+
+    RawDataEntry restingId = pushOrder(SELL_SIDE, 10.0, 100, "seller", GTC_TIF);
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    OrderEntry *resting = OrderStorage::instance()->locateByClOrderId(restingId);
+    ASSERT_NE(nullptr, resting);
+    // An hour into the next business day, which the restatement begins and the fill counts in
+    now = ExpiryScheduler::dayEndAfter(resting->creationTime_) + 60 * 60 * 1000;
+    const DateTimeT nextDay = ExpiryScheduler::dayStartOf(now);
+    ASSERT_LT(resting->dayStart_, nextDay);
+    gate.untilLeaves = 70;
+    gate.order = resting;
+
+    inQueues_->push("timer", TimerEvent(resting->orderId_, TimerEvent::RESTATEMENT));
+    pushOrder(BUY_SIDE, 10.0, 30, "buyer");
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    ASSERT_TRUE(gate.reached) << "the fill was not applied while the restatement's transaction waited";
+
+    std::vector<ExecType> types;
+    for (const auto &report : outQueues_->reportsFor(resting->orderId_))
+    {
+        types.push_back(report.type);
+        ASSERT_TRUE(report.figures.has_value());
+        if (RESTATED_EXECTYPE == report.type)
+        {
+            EXPECT_EQ(NEW_ORDSTATUS, report.status);
+            EXPECT_EQ(NEW_ORDSTATUS, report.figures->status_);
+            EXPECT_EQ(0u, report.figures->cumQty_) << "the restatement's report counts the later fill";
+            EXPECT_EQ(100u, report.figures->leavesQty_);
+            EXPECT_EQ(nextDay, report.figures->dayStart_);
+            EXPECT_EQ(100u, report.figures->dayOrderQty_);
+            EXPECT_EQ(0u, report.figures->dayCumQty_);
+        }
+        else if (TRADE_EXECTYPE == report.type)
+        {
+            EXPECT_EQ(30u, report.lastQty);
+            EXPECT_EQ(PARTFILL_ORDSTATUS, report.figures->status_);
+            EXPECT_EQ(30u, report.figures->cumQty_);
+            EXPECT_EQ(70u, report.figures->leavesQty_);
+            EXPECT_EQ(nextDay, report.figures->dayStart_);
+            EXPECT_EQ(30u, report.figures->dayCumQty_);
+        }
+    }
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, RESTATED_EXECTYPE, TRADE_EXECTYPE }), types);
+    std::vector<QuantityT> leaves;
+    for (const auto &version : saver.versions())
+    {
+        if (resting->orderId_ == version.orderId)
+        {
+            leaves.push_back(version.leavesQty);
+        }
+    }
+    EXPECT_EQ((std::vector<QuantityT>{ 100, 100, 70 }), leaves) << "the booking's, the restatement's, the fill's";
     EXPECT_EQ(0, manager->tasksFailed());
 }
 

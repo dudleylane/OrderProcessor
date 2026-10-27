@@ -790,27 +790,20 @@ void ReportReleaseTrOperation::execute(const Context &cnxt)
 void ReportReleaseTrOperation::rollback(const Context &) {}
 
 ReportRestatementTrOperation::ReportRestatementTrOperation(const OrderEntry &order)
-    : Operation(REPORT_RESTATEMENT_TROPERATION, order.orderId_)
+    : Operation(REPORT_RESTATEMENT_TROPERATION, order.orderId_), figures_(order)
 {
 }
 
 void ReportRestatementTrOperation::execute(const Context &cnxt)
 {
-    assert(nullptr != cnxt.orderStorage_);
-    const OrderEntry *order = cnxt.orderStorage_->locateByOrderId(getObjectId());
-    assert(nullptr != order);
-
     ExecutionEntry execReport;
     execReport.orderId_ = getObjectId();
     execReport.type_ = RESTATED_EXECTYPE;
     execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
-    {
-        oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
-        execReport.orderStatus_ = order->status_;
-    }
+    execReport.orderStatus_ = figures_.status_;
     execReport.market_ = INTERNAL_EXECUTION;
-    processEvent_GenerateExecution(cnxt, getObjectId(), execReport);
+    processEvent_GenerateExecution(cnxt, getObjectId(), execReport, std::string(), &figures_);
 }
 
 void ReportRestatementTrOperation::rollback(const Context &) {}

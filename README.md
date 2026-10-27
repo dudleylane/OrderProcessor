@@ -279,7 +279,7 @@ differ; these numbers are a shape, not a specification.
 | `BM_ProcessCancelOrder` | ~1.6 µs | ~635K orders/sec | cancel of a resting order, completed: decided after the order's earlier transactions, removed from the book, reported |
 | `BM_ProcessIocRemainder` | ~6.7 µs | ~150K orders/sec | an IOC that trades part of itself: the trade, its deferred execution events, and the engine's cancel of the rest (#426) |
 | `BM_ProcessExpiry` | ~1.7 µs | ~580K orders/sec | a resting DAY order's expiry at its day's end: the transaction its `DAY_END` timer enqueues decides it, takes the order off the book, reports it (#426) |
-| `BM_ProcessRestatement` | ~1.5 µs | ~675K orders/sec | a resting GTC order restated as a business day starts: the transaction its `RESTATEMENT` timer enqueues begins the order's next day, persists it, reports it `RESTATED` (#451) |
+| `BM_ProcessRestatement` | ~1.4 µs | ~715K orders/sec | a resting GTC order restated as a business day starts: the transaction its `RESTATEMENT` timer enqueues begins the order's next day, persists it, reports it `RESTATED` (#451) |
 | `BM_ProcessInvalidOrder` | ~6.8 µs | ~147K orders/sec | an order `OrderEntry::isValid()` refuses: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
 | `BM_ProcessMarketOrderWithNoMarket` | ~6.9 µs | ~145K orders/sec | a market order with nothing to trade with: stored, then rejected and reported (#435) |
 | `BM_ProcessNewOrderWithMatchRecorded` | ~7.9 µs | ~127K orders/sec | `BM_ProcessNewOrderWithMatch` with each order's record encoded as the server's storage dispatcher encodes it, into a storage that keeps nothing: the encoding, without LMDB's write (#442) |
@@ -303,7 +303,7 @@ broadcasts, the report's and the order's, take about 1.5 µs of that, and most o
 serializing its JSON.
 
 `BM_ProcessRestatement` was measured on 2026-10-27, pinned, in runs where `BM_ProcessExpiry` took ~1.7 µs, as
-its row gives.
+its row gives. It took ~1.5 µs when it was added (#451), and ~1.4 since #441.
 
 `BM_TaskManagerThroughput` takes the processor count as its argument: ~205K orders/sec at 2, ~265K at
 4, and little more (~270K) at 8 on a 4-core machine.
@@ -445,7 +445,7 @@ An order's time in force (#240):
 - **`DAY`** expires at the end of the business day it was created in, or, for a replacement, replaced in, 17:00 New York, the FX market's roll: 21:00 UTC in daylight time, 22:00 UTC in standard time. **`GTD`** expires at its `expireTime`. Either way the order gets an `EXPIRED` report and leaves the book; an order filled, canceled or replaced first is left as it is. A restart sets the timers again, and an order whose time passed while the server was down expires as it starts.
 - **`GTC`** rests until it trades or is canceled. **`OPG`** and **`ATCLOSE`** need auctions the engine doesn't have, and rest as `GTC` orders.
 - A stop order's time in force applies when its stop releases it: a held `IOC` stop waits like any held stop.
-- **Business days (#244):** an order that rests past its business day, of any time in force but `DAY`, is restated at each day's start, 17:00 New York. Its day figures begin again, `dayOrderQty` at what it has left to trade and `dayCumQty` and `dayAvgPx` at 0, and its client gets an `execution_report` of type `RESTATED`, FIX's ExecType D, with the order as it is. A fill after the day's end counts in the new day, even before the order's restatement runs, and both sides of a trade count it in the same day. A restart restates, as it starts, an order whose day ended while the server was down.
+- **Business days (#244):** an order that rests past its business day, of any time in force but `DAY`, is restated at each day's start, 17:00 New York. Its day figures begin again, `dayOrderQty` at what it has left to trade and `dayCumQty` and `dayAvgPx` at 0, and its client gets an `execution_report` of type `RESTATED`, FIX's ExecType D, with the order as the restatement left it, even if a fill reaches the order before the report goes out (#441). A fill after the day's end counts in the new day, even before the order's restatement runs, and both sides of a trade count it in the same day. A restart restates, as it starts, an order whose day ended while the server was down.
 
 Every order clears through the server's clearing firm (`--clearing-firm`), and an order with no `account` goes to the server's default account (`--default-account`), or, under an identity (#225), to the identity's first account. `seedData` seeds both. If either is missing from the data directory, the server logs a warning at startup and answers each order that needs it with an `error` message.
 
