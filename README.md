@@ -279,6 +279,7 @@ differ; these numbers are a shape, not a specification.
 | `BM_ProcessCancelOrder` | ~1.6 µs | ~635K orders/sec | cancel of a resting order, completed: decided after the order's earlier transactions, removed from the book, reported |
 | `BM_ProcessIocRemainder` | ~6.7 µs | ~150K orders/sec | an IOC that trades part of itself: the trade, its deferred execution events, and the engine's cancel of the rest (#426) |
 | `BM_ProcessExpiry` | ~1.7 µs | ~580K orders/sec | a resting DAY order's expiry at its day's end: the transaction its `DAY_END` timer enqueues decides it, takes the order off the book, reports it (#426) |
+| `BM_ProcessRestatement` | ~1.5 µs | ~675K orders/sec | a resting GTC order restated as a business day starts: the transaction its `RESTATEMENT` timer enqueues begins the order's next day, persists it, reports it `RESTATED` (#451) |
 | `BM_ProcessInvalidOrder` | ~6.8 µs | ~147K orders/sec | an order `OrderEntry::isValid()` refuses: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
 | `BM_ProcessMarketOrderWithNoMarket` | ~6.9 µs | ~145K orders/sec | a market order with nothing to trade with: stored, then rejected and reported (#435) |
 | `BM_ProcessNewOrderWithMatchRecorded` | ~7.9 µs | ~127K orders/sec | `BM_ProcessNewOrderWithMatch` with each order's record encoded as the server's storage dispatcher encodes it, into a storage that keeps nothing: the encoding, without LMDB's write (#442) |
@@ -300,6 +301,9 @@ pinned, in runs where `BM_ProcessNewOrderWithMatch` took ~5.8 µs: a match's thr
 and the trade's two) take about 2.1 µs to encode. A report takes ~13.0 µs to push to eight clients. Its two
 broadcasts, the report's and the order's, take about 1.5 µs of that, and most of the rest is building and
 serializing its JSON.
+
+`BM_ProcessRestatement` was measured on 2026-10-27, pinned, in runs where `BM_ProcessExpiry` took ~1.7 µs, as
+its row gives.
 
 `BM_TaskManagerThroughput` takes the processor count as its argument: ~205K orders/sec at 2, ~265K at
 4, and little more (~270K) at 8 on a 4-core machine.
