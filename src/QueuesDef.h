@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 #include "TypesDef.h"
@@ -98,6 +99,10 @@ struct ExecReportEvent : public EventBase
     /// On a cancel's acknowledgement, the ClOrdID of the cancel request (OrderCancelEvent::requestClOrdId_); empty on
     /// every other report (#98)
     std::string requestClOrdId_;
+    /// What the report says the order has (#411), which a gateway writes rather than reading the order: a fill's
+    /// report can go out after a later fill of the order was applied. The engine sets them on every report; one built
+    /// without them, as a test may build one, is written from the order.
+    std::optional<OrderFigures> figures_;
 };
 
 /// A cancel the engine refused. It says why in terms a gateway can map to its protocol (FIX CxlRejReason 102 and

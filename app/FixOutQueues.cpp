@@ -22,9 +22,19 @@ void FixOutQueues::push(const ExecReportEvent &evnt, const std::string & /*targe
         return;
     }
 
+    // What the report says the order has (#411): a fill's report can go out after a later fill of the order was
+    // applied, so the order's own figures can count it. A report built without them, as a test may build one, gives the
+    // order as it is.
+    std::optional<OrderFigures> figures = evnt.figures_;
+    if (!figures)
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
+        figures.emplace(*order);
+    }
+
     // FixGateway::sendExecutionReport checks sessionMap_ internally —
     // silently returns if this order didn't come from a FIX session
-    gateway_->sendExecutionReport(evnt.exec_, *order, evnt.requestClOrdId_);
+    gateway_->sendExecutionReport(evnt.exec_, *order, *figures, evnt.requestClOrdId_);
 }
 
 void FixOutQueues::push(const CancelRejectEvent &evnt, const std::string &target)

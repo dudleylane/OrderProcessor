@@ -13,6 +13,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include "TransactionDef.h"
@@ -56,11 +57,15 @@ private:
     std::string requestClOrdId_;
 };
 
+/// Reports a fill with what it left the order with (#411), taken as the state machine enters the state the fill leads
+/// to, under the order's write lock, or, for a swap's far leg, as its report is made, just after its near leg's fill. A
+/// later fill can be applied to the order before this runs.
 class CreateTradeExecReportTrOperation final : public Operation
 {
 public:
     CreateTradeExecReportTrOperation(const TradeExecEntry *trade, OrderStatus status, const OrderEntry &order);
-    /// A swap leg's report outside the state machine; tradeLink pairs it with its other leg's (#199)
+    /// A swap leg's report outside the state machine; tradeLink pairs it with its other leg's (#199). Its caller holds
+    /// the order's lock, for the figures it takes (#411).
     CreateTradeExecReportTrOperation(QuantityT lastQty, PriceT lastPx, Currency currency, OrderStatus status,
                                      ExecLegType legType, u64 tradeLink, const OrderEntry &order);
     ~CreateTradeExecReportTrOperation();
@@ -69,7 +74,8 @@ public:
     void rollback(const Context &cnxt) override;
 
 private:
-    // In this order, the link fits where padding was: the operation stays 88 bytes in the transaction's arena (#199)
+    // In this order, the link fits where padding was (#199). With the figures (#411) the operation takes 152 bytes of
+    // the transaction's arena, where it took 88.
     PriceT lastPx_;
     DateTimeT tradeDate_;
     u64 tradeLink_;
@@ -77,6 +83,7 @@ private:
     Currency currency_;
     OrderStatus status_;
     ExecLegType execLegType_;
+    OrderFigures figures_;
 };
 
 class CreateRejectExecReportTrOperation final : public Operation
@@ -145,14 +152,22 @@ private:
     const OrderEntry &order_;
 };
 
-/// Writes the order to storage as part of the transaction that changed it (#20). Appended after the
-/// operations that change the book and the executions, so it persists the final state of the order.
-/// Rollback erases the version it wrote, which is why OrderSaver::save() returns one.
+/// Writes the order to storage as part of the transaction that persists a decision about it (#20), with the figures the
+/// decision left it with (#411): a later decision, applied to the order before this runs, isn't in the record.
+/// Processor puts it first, ahead of the operations that publish the decision (#28). Rollback erases the version it
+/// wrote, which is why OrderSaver::save() returns one.
 class PersistOrderTrOperation final : public Operation
 {
 public:
+    /// Writes the figures given, those the decision left, taken when it was made
+    PersistOrderTrOperation(const OrderEntry &order, const OrderFigures &decided);
+    /// Writes the order's figures as they are when this executes. For a transaction whose own operation decides as it
+    /// executes, ahead of this one: a stop's release (ReleaseStopDeferedEvent).
     explicit PersistOrderTrOperation(const OrderEntry &order);
     ~PersistOrderTrOperation();
+
+    /// A later decision in the same transaction: the record has what that one left (Processor::persistOrder())
+    void decided(const OrderFigures &figures) noexcept;
 
     void execute(const Context &cnxt) override;
     void rollback(const Context &cnxt) override;
@@ -162,6 +177,7 @@ private:
     PersistOrderTrOperation &operator=(const PersistOrderTrOperation &);
 
     const OrderEntry &order_;
+    std::optional<OrderFigures> decided_;
     u32 version_;
     bool written_;
 };

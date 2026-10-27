@@ -264,7 +264,9 @@ static void BM_WsOutQueuesPushTradeReport(benchmark::State &state)
     trade.lastPx_ = 150.0;
     trade.currency_ = USD_CURRENCY;
     trade.tradeDate_ = 20261027;
-    const Queues::ExecReportEvent report(&trade);
+    Queues::ExecReportEvent report(&trade);
+    // The figures the engine puts on every report it makes, which the order update is written from (#411)
+    report.figures_.emplace(reported.order());
     // A push for an order the storage doesn't have sends the report alone: not the path a fill takes
     if (nullptr == Store::OrderStorage::instance()->locateByOrderId(trade.orderId_))
     {

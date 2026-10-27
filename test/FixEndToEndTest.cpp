@@ -139,8 +139,8 @@ public:
 
 private:
     /// The WorkingIndicator (636) (#387) and LeavesQty (151) (#386) of the report a session gets for evnt, built as it
-    /// goes out, from the order as the transaction that publishes it leaves it, as FixOutQueues has the gateway build one
-    /// for a session that is logged on. This pipeline's gateway has none, so builds nothing.
+    /// goes out, with the figures the engine gives the report (#411), as FixOutQueues has the gateway build one for a
+    /// session that is logged on. This pipeline's gateway has none, so builds nothing.
     static void readSentReport(const ExecReportEvent &evnt, CapturedExecReport *r)
     {
         const OrderEntry *order = OrderStorage::instance()->locateByOrderId(evnt.exec_->orderId_);
@@ -150,8 +150,15 @@ private:
             r->leavesQty = "(not sent)";
             return;
         }
+        if (!evnt.figures_)
+        {
+            // The engine gives every report it makes its figures
+            r->workingIndicator = "(no figures)";
+            r->leavesQty = "(no figures)";
+            return;
+        }
         const FIX50SP2::ExecutionReport report =
-            FixGateway::buildExecutionReport(evnt.exec_, *order, evnt.requestClOrdId_);
+            FixGateway::buildExecutionReport(evnt.exec_, *order, *evnt.figures_, evnt.requestClOrdId_);
         r->workingIndicator = fieldOf(report, FIX::FIELD::WorkingIndicator);
         r->leavesQty = fieldOf(report, FIX::FIELD::LeavesQty);
     }

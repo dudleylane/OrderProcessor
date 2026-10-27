@@ -31,7 +31,8 @@ namespace ACID
 {
 
 void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, const ExecutionEntry &exec,
-                                    const std::string &requestClOrdId = std::string())
+                                    const std::string &requestClOrdId = std::string(),
+                                    const OrderFigures *decided = nullptr)
 {
     /// locate order and push event into the executions_
     /// find source of the order and push ExecReport to the source
@@ -49,10 +50,14 @@ void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, con
 
     ord->addExecution(execReport->execId_);
 
+    // What the report says the order has (#411): what its decision left, for a report made with it, a fill's, and
+    // otherwise the order as it is now
+    ExecReportEvent report(execReport);
+    report.figures_ = (nullptr != decided) ? *decided : OrderFigures(*ord);
+
     ordLock.release();
 
     assert(nullptr != cnxt.outQueues_);
-    ExecReportEvent report(execReport);
     report.requestClOrdId_ = requestClOrdId;
     cnxt.outQueues_->push(report, src);
 }
@@ -283,7 +288,7 @@ void CreateCancelExecReportTrOperation::rollback(const Context &) {}
 
 CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(const TradeExecEntry *trade, OrderStatus status,
                                                                    const OrderEntry &order)
-    : Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), status_(status)
+    : Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), status_(status), figures_(order)
 {
     assert(nullptr != trade);
     lastQty_ = trade->lastQty_;
@@ -300,7 +305,7 @@ CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(QuantityT las
                                                                    OrderStatus status, ExecLegType legType,
                                                                    u64 tradeLink, const OrderEntry &order)
     : Operation(CREATE_TRADE_EXECREPORT_TROPERATION, order.orderId_), tradeLink_(tradeLink), status_(status),
-      execLegType_(legType)
+      execLegType_(legType), figures_(order)
 {
     lastQty_ = lastQty;
     lastPx_ = lastPx;
@@ -330,7 +335,7 @@ void CreateTradeExecReportTrOperation::execute(const Context &cnxt)
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     execReport.orderStatus_ = status_;
     execReport.market_ = INTERNAL_EXECUTION;
-    processEvent_GenerateExecution(cnxt, getObjectId(), execReport);
+    processEvent_GenerateExecution(cnxt, getObjectId(), execReport, std::string(), &figures_);
 }
 
 void CreateTradeExecReportTrOperation::rollback(const Context &) {}
@@ -453,18 +458,29 @@ void AddToOrderBookTrOperation::rollback(const Context &cnxt)
     cnxt.orderBook_->remove(order_);
 }
 
+PersistOrderTrOperation::PersistOrderTrOperation(const OrderEntry &order, const OrderFigures &decided)
+    : Operation(PERSIST_ORDER_TROPERATION, order.orderId_), order_(order), decided_(decided), version_(0),
+      written_(false)
+{
+}
+
 PersistOrderTrOperation::PersistOrderTrOperation(const OrderEntry &order)
     : Operation(PERSIST_ORDER_TROPERATION, order.orderId_), order_(order), version_(0), written_(false)
 {
 }
 PersistOrderTrOperation::~PersistOrderTrOperation() {}
 
+void PersistOrderTrOperation::decided(const OrderFigures &figures) noexcept
+{
+    decided_ = figures;
+}
+
 void PersistOrderTrOperation::execute(const Context &cnxt)
 {
     assert(nullptr != cnxt.orderStorage_);
     // Read lock: this runs on a transaction worker while other threads may read the same order.
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order_.entryMutex_, false);
-    written_ = cnxt.orderStorage_->persist(order_, &version_);
+    written_ = cnxt.orderStorage_->persist(order_, decided_ ? *decided_ : OrderFigures(order_), &version_);
 }
 
 void PersistOrderTrOperation::rollback(const Context &cnxt)

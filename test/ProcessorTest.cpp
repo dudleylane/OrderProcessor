@@ -789,15 +789,19 @@ class RecordingOrderSaver final : public COP::OrderSaver
 public:
     explicit RecordingOrderSaver(std::vector<std::string> *seq) : seq_(seq), version_(0) {}
 
-    COP::u32 save(const COP::OrderEntry &) override
+    COP::u32 save(const COP::OrderEntry &, const COP::OrderFigures &figures) override
     {
         seq_->push_back("persist");
+        figures_.push_back(figures);
         return version_++;
     }
     void erase(const COP::IdT &, COP::u32) override
     {
         seq_->push_back("erase");
     }
+
+    /// What each record was written with, in the order they were written (#411)
+    std::vector<COP::OrderFigures> figures_;
 
 private:
     std::vector<std::string> *seq_;
@@ -834,8 +838,8 @@ TEST_F(ProcessorTest, AnOrderIsPersistedOncePerTransaction)
 {
     // LMDBStorage::update() keeps the newest version it finds besides the one it writes (#148). That is safe because
     // the transactions that persist an order run one after another, and each writes it once: a rollback then erases
-    // the one version it wrote. A second persist of the order in the same transaction would write the same record,
-    // since the codec reads the order when the operation executes, and a rollback would erase both versions.
+    // the one version it wrote. A second persist of the order in the same transaction goes to the first one's
+    // operation (#411), where a second record would have a rollback erase both versions.
     std::vector<std::string> sequence;
     RecordingOrderSaver saver(&sequence);
     OrderStorage::instance()->attach(&saver);
@@ -855,6 +859,43 @@ TEST_F(ProcessorTest, AnOrderIsPersistedOncePerTransaction)
     cnxt.orderStorage_ = OrderStorage::instance();
     EXPECT_TRUE(scope.executeTransaction(cnxt));
     EXPECT_EQ((std::vector<std::string>{ "persist", "persist" }), sequence);
+}
+
+TEST_F(ProcessorTest, AnOrderIsWrittenWithWhatItsTransactionsLastDecisionLeft)
+{
+    // A record has what the decisions its transaction made left the order with, captured as each is made (#411): the
+    // transaction can run after a decision a later transaction will persist was applied to the order. The second
+    // decision in a transaction counts; one made after the transaction's last doesn't.
+    std::vector<std::string> sequence;
+    RecordingOrderSaver saver(&sequence);
+    OrderStorage::instance()->attach(&saver);
+
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    order->orderId_ = IdT(1001, 1);
+    order->status_ = NEW_ORDSTATUS;
+    order->leavesQty_ = 100;
+    order->cumQty_ = 0;
+
+    TransactionScope scope;
+    Processor::persistOrder(&scope, *order);
+    order->status_ = PARTFILL_ORDSTATUS; // a second decision in the same transaction
+    order->leavesQty_ = 70;
+    order->cumQty_ = 30;
+    order->avgPx_ = 10.0;
+    Processor::persistOrder(&scope, *order);
+    EXPECT_EQ(1u, scope.operationCount());
+    order->leavesQty_ = 40; // a decision a later transaction persists
+    order->cumQty_ = 60;
+
+    Context cnxt;
+    cnxt.orderStorage_ = OrderStorage::instance();
+    EXPECT_TRUE(scope.executeTransaction(cnxt));
+    ASSERT_EQ(std::vector<std::string>{ "persist" }, sequence);
+    ASSERT_EQ(1u, saver.figures_.size());
+    EXPECT_EQ(PARTFILL_ORDSTATUS, saver.figures_[0].status_);
+    EXPECT_EQ(70u, saver.figures_[0].leavesQty_);
+    EXPECT_EQ(30u, saver.figures_[0].cumQty_);
+    EXPECT_DOUBLE_EQ(10.0, saver.figures_[0].avgPx_);
 }
 
 // =============================================================================
@@ -1184,7 +1225,8 @@ TEST_F(ProcessorTest, ReplaceWaitsForTheTransactionThatBooksTheOriginal)
 
 namespace
 {
-/// Keeps what a test needs of each execution report: whose it is, its type, its leg and its price
+/// Keeps what a test needs of each execution report: whose it is, its type, its leg, its price, and what it says the
+/// order has
 class LegRecordingOutQueues final : public Queues::OutQueues
 {
 public:
@@ -1195,13 +1237,31 @@ public:
         ExecLegType leg_;
         PriceT lastPx_;
         u64 tradeLink_;
+        std::optional<OrderFigures> figures_; // which the gateways write (#411)
     };
 
     void push(const ExecReportEvent &evnt, const std::string &) override
     {
         const auto *trade = dynamic_cast<const TradeExecEntry *>(evnt.exec_);
         reports_.push_back(Report{ evnt.exec_->orderId_, evnt.exec_->type_, evnt.exec_->execLegType_,
-                                   (nullptr != trade) ? trade->lastPx_ : 0.0, evnt.exec_->tradeLink_ });
+                                   (nullptr != trade) ? trade->lastPx_ : 0.0, evnt.exec_->tradeLink_, evnt.figures_ });
+    }
+
+    /// The LeavesQty and CumQty each of the order's trade reports of the leg gave it, in the order they went out, or
+    /// the most a quantity can be for one that gave none
+    std::vector<std::pair<QuantityT, QuantityT>> tradeFiguresOf(const IdT &orderId, ExecLegType leg) const
+    {
+        constexpr QuantityT NONE = std::numeric_limits<QuantityT>::max();
+        std::vector<std::pair<QuantityT, QuantityT>> result;
+        for (const Report &report : reports_)
+        {
+            if ((report.orderId_ == orderId) && (TRADE_EXECTYPE == report.type_) && (leg == report.leg_))
+            {
+                result.emplace_back(report.figures_ ? report.figures_->leavesQty_ : NONE,
+                                    report.figures_ ? report.figures_->cumQty_ : NONE);
+            }
+        }
+        return result;
     }
     void push(const CancelRejectEvent &, const std::string &) override {}
     void push(const BusinessRejectEvent &, const std::string &) override {}
@@ -1264,6 +1324,57 @@ TEST_F(ProcessorTest, ASwapFillIsReportedAsItsNearLegAndItsFarLeg)
     }
 }
 
+TEST_F(ProcessorTest, EachOfASwapFillsLegsIsReportedWithWhatTheFillLeft)
+{
+    // A swap fill's near and far reports both give what the fill left the order with (#411). O rests, a swap sell of
+    // 100; A1 and A2 each buy 30. Each booking applies its fill to both orders and enqueues the transaction that persists
+    // and reports it, which waits here, so the first fill's runs after the second fill was applied. A far leg's report
+    // has no state machine to take its figures, as a near leg's has: it took the order's as its transaction ran, and
+    // O's first far leg counted the second fill.
+    using Figures = std::vector<std::pair<QuantityT, QuantityT>>; // a trade report's LeavesQty and CumQty
+    LegRecordingOutQueues outQueues;
+    ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
+                           &outQueues, inQueues_.get(), transMgr_.get());
+    Processor processor;
+    processor.init(params);
+    transMgr_->proc_ = &processor;
+    transMgr_->keepNested_ = true; // each fill's transaction waits
+
+    const auto submit = [this, &processor](Side side, QuantityT qty)
+    {
+        auto order = createTestOrder(instrId1_, side, 1.0850, qty);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->farPrice_ = 1.0872;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        const RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        processor.process();
+        return OrderStorage::instance()->locateByClOrderId(clOrdId);
+    };
+    const OrderEntry *o = submit(SELL_SIDE, 100);
+    const OrderEntry *a1 = submit(BUY_SIDE, 30);
+    const OrderEntry *a2 = submit(BUY_SIDE, 30);
+    ASSERT_NE(nullptr, o);
+    ASSERT_NE(nullptr, a1);
+    ASSERT_NE(nullptr, a2);
+    ASSERT_EQ(2u, transMgr_->kept_.size()) << "each fill's transaction";
+    ASSERT_EQ(40u, o->leavesQty_) << "both fills are applied to O";
+
+    transMgr_->runKept(1); // the first fill's
+    EXPECT_EQ((Figures{ { 70, 30 } }), outQueues.tradeFiguresOf(o->orderId_, NEAR_LEG));
+    EXPECT_EQ((Figures{ { 70, 30 } }), outQueues.tradeFiguresOf(o->orderId_, FAR_LEG))
+        << "the first fill's far leg counts the second";
+    EXPECT_EQ((Figures{ { 0, 30 } }), outQueues.tradeFiguresOf(a1->orderId_, NEAR_LEG));
+    EXPECT_EQ((Figures{ { 0, 30 } }), outQueues.tradeFiguresOf(a1->orderId_, FAR_LEG));
+
+    transMgr_->runKept();
+    EXPECT_EQ((Figures{ { 70, 30 }, { 40, 60 } }), outQueues.tradeFiguresOf(o->orderId_, NEAR_LEG));
+    EXPECT_EQ((Figures{ { 70, 30 }, { 40, 60 } }), outQueues.tradeFiguresOf(o->orderId_, FAR_LEG));
+    EXPECT_EQ((Figures{ { 0, 30 } }), outQueues.tradeFiguresOf(a2->orderId_, NEAR_LEG));
+    EXPECT_EQ((Figures{ { 0, 30 } }), outQueues.tradeFiguresOf(a2->orderId_, FAR_LEG));
+}
+
 // =============================================================================
 // Orders a crash left without their fills (#207)
 // =============================================================================
@@ -1288,10 +1399,10 @@ public:
         {
             return;
         }
-        // The order's LeavesQty as the report goes out, when the WebSocket and FIX gateways read it for the report
-        const OrderEntry *order = OrderStorage::instance()->locateByOrderId(evnt.exec_->orderId_);
-        reports_.push_back(
-            Report{ evnt.exec_->orderId_, evnt.exec_->type_, (nullptr != order) ? order->leavesQty_ : UNKNOWN_LEAVES });
+        // What the report says the order has, which the WebSocket and FIX gateways write (#411)
+        reports_.push_back(Report{ evnt.exec_->orderId_, evnt.exec_->type_,
+                                   evnt.figures_ ? evnt.figures_->leavesQty_ : UNKNOWN_LEAVES,
+                                   evnt.figures_ ? evnt.figures_->cumQty_ : UNKNOWN_LEAVES });
         if (nullptr != log_)
         {
             log_->push_back(std::string("report ") + typeName(evnt.exec_->type_));
@@ -1349,8 +1460,8 @@ public:
         return result;
     }
 
-    /// The order's LeavesQty as its last report of the type went out (#386): UNKNOWN_LEAVES if none did, or if the
-    /// fixture's storage doesn't hold the order
+    /// The LeavesQty the order's last report of the type gave it (#386, #411): UNKNOWN_LEAVES if none did, or if it
+    /// carried no figures
     QuantityT leavesReportedWith(const IdT &orderId, ExecType type) const
     {
         QuantityT leaves = UNKNOWN_LEAVES;
@@ -1385,11 +1496,26 @@ public:
         }
     }
 
+    /// The LeavesQty and CumQty each of the order's trade reports gave it, in the order they went out (#411)
+    std::vector<std::pair<QuantityT, QuantityT>> tradeFiguresOf(const IdT &orderId) const
+    {
+        std::vector<std::pair<QuantityT, QuantityT>> result;
+        for (const Report &report : reports_)
+        {
+            if ((report.orderId_ == orderId) && (TRADE_EXECTYPE == report.type_))
+            {
+                result.emplace_back(report.leaves_, report.cum_);
+            }
+        }
+        return result;
+    }
+
     struct Report
     {
         IdT orderId_;
         ExecType type_;
         QuantityT leaves_;
+        QuantityT cum_;
     };
 
     std::vector<Trade> trades_;
@@ -1510,6 +1636,82 @@ TEST_F(ProcessorTest, OrdersACrashLeftWithoutTheirFillsTradeAsTheyDidOnceRestart
         EXPECT_EQ(FILLED_ORDSTATUS, again.storage_.locateByOrderId(w)->status_);
         EXPECT_EQ(y, again.book_.getTop(instrId1_, BUY_SIDE));
         EXPECT_FALSE(again.book_.getTop(instrId1_, SELL_SIDE).isValid());
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AFillsRecordCountsNoLaterFillACrashLost)
+{
+    // O rests, a sell of 100. A1 buys 30, then A2 buys 30: each booking applies its fill to O and enqueues the
+    // transaction that persists and reports it. The first fill's transaction runs after the second fill was applied,
+    // and a crash loses the second's (#411). The first fill's record and report must count the first fill alone. The
+    // record used to count both: restored, O had both fills and A2 was open, as its booking wrote it, so restart
+    // matching (#207) filled A2 from O again, and O counted 90.
+    using Figures = std::vector<std::pair<QuantityT, QuantityT>>; // a trade report's LeavesQty and CumQty
+    const std::string dir = test::uniqueTestPath("fill-figures-restart");
+    std::filesystem::remove_all(dir);
+    IdT o;
+    IdT a1;
+    IdT a2;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        crashed.transactions_.keepNested_ = true; // each fill's transaction waits
+        auto order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 100);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        const OrderEntry *resting = crashed.process(clOrdId);
+        ASSERT_NE(nullptr, resting);
+        o = resting->orderId_;
+        order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 30);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        a1 = crashed.process(clOrdId)->orderId_;
+        order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 30);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        a2 = crashed.process(clOrdId)->orderId_;
+        ASSERT_EQ(2u, crashed.transactions_.kept_.size()) << "each fill's transaction";
+        ASSERT_EQ(40u, resting->leavesQty_) << "both fills are applied to O";
+
+        crashed.transactions_.runKept(1); // the first fill's; the crash loses the second's
+        EXPECT_EQ((Figures{ { 70, 30 } }), reports.tradeFiguresOf(o)) << "the first fill's report counts the second";
+        EXPECT_EQ((Figures{ { 0, 30 } }), reports.tradeFiguresOf(a1));
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        OrderEntry *resting = restarted.storage_.locateByOrderId(o);
+        ASSERT_NE(nullptr, resting);
+        EXPECT_EQ(PARTFILL_ORDSTATUS, resting->status_);
+        EXPECT_EQ(30u, resting->cumQty_) << "the first fill's record counts the second";
+        EXPECT_EQ(70u, resting->leavesQty_);
+        ASSERT_NE(nullptr, restarted.storage_.locateByOrderId(a1));
+        EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(a1)->status_);
+        ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+        EXPECT_EQ(a2, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+
+        for (OrderEntry *order : restarted.dispatcher_.ordersToMatch())
+        {
+            restarted.processor_.matchRestored(order);
+        }
+        EXPECT_EQ(60u, resting->cumQty_) << "O counts A2's fill once";
+        EXPECT_EQ(40u, resting->leavesQty_);
+        EXPECT_EQ((Figures{ { 40, 60 } }), reports.tradeFiguresOf(o));
+        EXPECT_EQ((Figures{ { 0, 30 } }), reports.tradeFiguresOf(a2));
+    }
+
+    // Restarted again, O's newest record has both fills, A2 is filled, and nothing waits to be matched
+    {
+        TradeRecorder reports;
+        EngineOverDirectory again(dir, instrId1_, inQueues_.get(), &reports);
+        EXPECT_TRUE(again.dispatcher_.ordersToMatch().empty());
+        ASSERT_NE(nullptr, again.storage_.locateByOrderId(o));
+        EXPECT_EQ(60u, again.storage_.locateByOrderId(o)->cumQty_);
+        EXPECT_EQ(40u, again.storage_.locateByOrderId(o)->leavesQty_);
+        ASSERT_NE(nullptr, again.storage_.locateByOrderId(a2));
+        EXPECT_EQ(FILLED_ORDSTATUS, again.storage_.locateByOrderId(a2)->status_);
     }
     std::filesystem::remove_all(dir);
 }
@@ -2208,11 +2410,11 @@ class StopVersionLog final : public COP::OrderSaver
 public:
     explicit StopVersionLog(std::vector<std::string> *log) : log_(log) {}
 
-    COP::u32 save(const COP::OrderEntry &order) override
+    COP::u32 save(const COP::OrderEntry &order, const COP::OrderFigures &figures) override
     {
         if ((STOP_ORDERTYPE == order.ordType_) || (STOPLIMIT_ORDERTYPE == order.ordType_))
         {
-            log_->push_back(order.stopTriggered_ ? "persist released" : "persist held");
+            log_->push_back(figures.stopTriggered_ ? "persist released" : "persist held");
         }
         return version_++;
     }
@@ -2602,7 +2804,7 @@ namespace
 class LastTradeCount final : public COP::OrderSaver
 {
 public:
-    COP::u32 save(const COP::OrderEntry &) override
+    COP::u32 save(const COP::OrderEntry &, const COP::OrderFigures &) override
     {
         return version_++;
     }
@@ -3247,9 +3449,9 @@ class DayVersionLog final : public COP::OrderSaver
 public:
     explicit DayVersionLog(std::vector<std::string> *log) : log_(log) {}
 
-    COP::u32 save(const COP::OrderEntry &order) override
+    COP::u32 save(const COP::OrderEntry &, const COP::OrderFigures &figures) override
     {
-        log_->push_back("persist day " + std::to_string(order.dayStart_));
+        log_->push_back("persist day " + std::to_string(figures.dayStart_));
         return version_++;
     }
     void erase(const COP::IdT &, COP::u32) override {}

@@ -72,7 +72,7 @@ public:
     virtual void removeLastOperation();
     virtual size_t startNewStage();
     virtual void removeStage(const size_t &id);
-    virtual bool hasOperation(OperationType type, const IdT &id) const;
+    virtual Operation *findOperation(OperationType type, const IdT &id) const;
 
     /// the operations the scope holds
     size_t operationCount() const noexcept

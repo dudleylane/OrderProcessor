@@ -491,19 +491,19 @@ Codec::OrderStrings orderStringsOf(const OrderEntry &val, const DataStorageResto
 }
 } // namespace
 
-u32 StorageRecordDispatcher::save(const OrderEntry &val)
+u32 StorageRecordDispatcher::save(const OrderEntry &val, const OrderFigures &figures)
 {
     string buffer = recordWord(ORDER_RECORDTYPE, Codec::OrderCodec::FORMAT_VERSION);
     IdT id;
     u32 version;
-    Codec::OrderCodec::encode(val, &buffer, &id, &version, orderStringsOf(val, storage_));
+    Codec::OrderCodec::encode(val, figures, &buffer, &id, &version, orderStringsOf(val, storage_));
     // update() appends a new version and returns it; for an order written for the first time that
     // version is 0. save() would reject the second write of an order that changed (issue #20).
     const u32 written = fileStorage_->update(id, buffer.c_str(), buffer.size());
 #ifdef BUILD_PG
     if (pgWriter_)
     {
-        pgWriter_->enqueue(PG::PGRequestBuilder::fromOrder(val));
+        pgWriter_->enqueue(PG::PGRequestBuilder::fromOrder(val, figures));
     }
 #endif
     return written;

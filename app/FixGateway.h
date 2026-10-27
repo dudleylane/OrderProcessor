@@ -94,7 +94,11 @@ public:
     FIX50SP2::ExecutionReport answerOrderStatus(const FIX50SP2::OrderStatusRequest &msg, const FIX::SessionID &sid);
 
     // Outbound — called by FixOutQueues
-    /// requestClOrdId is the ClOrdID of the cancel request a cancel's acknowledgement answers (#98); empty otherwise
+    /// figures are what the report says the order has, which the engine gives every report it makes (#411).
+    /// requestClOrdId is the ClOrdID of the cancel request a cancel's acknowledgement answers (#98); empty otherwise.
+    void sendExecutionReport(const ExecutionEntry *exec, const OrderEntry &order, const OrderFigures &figures,
+                             const std::string &requestClOrdId = std::string());
+    /// The same, with the order's figures as they are now, as a test sends a report
     void sendExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
                              const std::string &requestClOrdId = std::string());
     /// Refuses a cancel to the session that sent it, which target names (#73); silent when that is not a FIX session
@@ -307,10 +311,15 @@ public:
     static char fromExecType(ExecType t);
     static char fromSide(Side s);
 
-    /// The ExecutionReport (35=8) for one of an order's execution reports; sendExecutionReport() sends it to the order's
-    /// session. Public and static so that tests can check it without a FIX session. A replacement's REPLACE report
-    /// (150=5) also names the order it replaced in OrigClOrdID (41). A cancel's acknowledgement names the cancel
-    /// request in ClOrdID (11), when requestClOrdId gives it, and the cancelled order in OrigClOrdID (41) (#98).
+    /// The ExecutionReport (35=8) for one of an order's execution reports, with the figures it gives the order (#411);
+    /// sendExecutionReport() sends it to the order's session. Public and static so that tests can check it without a
+    /// FIX session. A replacement's REPLACE report (150=5) also names the order it replaced in OrigClOrdID (41). A
+    /// cancel's acknowledgement names the cancel request in ClOrdID (11), when requestClOrdId gives it, and the
+    /// cancelled order in OrigClOrdID (41) (#98).
+    static FIX50SP2::ExecutionReport buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
+                                                          const OrderFigures &figures,
+                                                          const std::string &requestClOrdId = std::string());
+    /// The same, with the order's figures as they are now, as a test builds a report
     static FIX50SP2::ExecutionReport buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
                                                           const std::string &requestClOrdId = std::string());
     /// Whether a FIX client gets this report. FIX acknowledges a replace once, with the replacement's report, as the

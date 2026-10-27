@@ -94,6 +94,18 @@ void setWorkingIndicator(FIX50SP2::ExecutionReport &report, bool held)
 {
     report.set(FIX::WorkingIndicator(!held));
 }
+/// Whether a stop or stop limit order is held off the book, as the figures a report gives it say (#411):
+/// OrderParams::heldStop() reads the order as it is now
+bool heldStop(const OrderEntry &order, const OrderFigures &figures)
+{
+    return ((STOP_ORDERTYPE == order.ordType_) || (STOPLIMIT_ORDERTYPE == order.ordType_)) && !figures.stopTriggered_;
+}
+/// The order's figures as they are now, read under its lock (#411)
+OrderFigures figuresOf(const OrderEntry &order)
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(order.entryMutex_, false);
+    return OrderFigures(order);
+}
 /// A quantity field (QTY) holding qty, written as the whole number it is (#384, #396): the bytes QuickFIX writes for the
 /// double its constructor takes. That conversion, to 15 significant digits, falls back to double-conversion's bignum
 /// arithmetic for every whole number, about 2,000 instructions a field more than this.
@@ -1789,6 +1801,12 @@ bool FixGateway::reportsOverFix(const ExecutionEntry *exec)
 void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
                                      const std::string &requestClOrdId)
 {
+    sendExecutionReport(exec, order, figuresOf(order), requestClOrdId);
+}
+
+void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntry &order, const OrderFigures &figures,
+                                     const std::string &requestClOrdId)
+{
     if (!reportsOverFix(exec))
     {
         return; // the replacement's report acknowledges the replace (#74)
@@ -1829,29 +1847,37 @@ void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntr
         sid = it->second;
     }
 
-    FIX50SP2::ExecutionReport report = buildExecutionReport(exec, order, requestClOrdId);
+    FIX50SP2::ExecutionReport report = buildExecutionReport(exec, order, figures, requestClOrdId);
     FIX::Session::sendToTarget(report, sid);
 }
 
 FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
                                                            const std::string &requestClOrdId)
 {
+    return buildExecutionReport(exec, order, figuresOf(order), requestClOrdId);
+}
+
+FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,
+                                                           const OrderFigures &figures,
+                                                           const std::string &requestClOrdId)
+{
+    // What decisions change, the quantities, the prices and the stop's release, comes from the report's figures (#411):
+    // a fill's report can go out after a later fill of the order was applied, which the order's own would count
     FIX50SP2::ExecutionReport report(
         FIX::OrderID(std::to_string(order.orderId_.id_)), FIX::ExecID(std::to_string(exec->execId_.id_)),
         FIX::ExecType(fromExecType(exec->type_)), FIX::OrdStatus(fromOrdStatus(exec->orderStatus_)),
-        FIX::Side(fromSide(order.side_)), quantity<FIX::LeavesQty>(order.leavesQty_),
-        quantity<FIX::CumQty>(order.cumQty_));
+        FIX::Side(fromSide(order.side_)), quantity<FIX::LeavesQty>(figures.leavesQty_),
+        quantity<FIX::CumQty>(figures.cumQty_));
     // Optional since FIX 5.0, so no longer the constructor's, but every report of the Order State Changes has it
-    report.set(FIX::AvgPx(order.avgPx_));
+    report.set(FIX::AvgPx(figures.avgPx_));
     // OrderQty (38) too, or a closed order's quantity can't be read from its reports once LeavesQty is 0 (#384). A
-    // replacement's is its own. Read without the order's lock, as the other quantities are: it never changes once the
-    // order is stored, since a replace stores a new order (#74).
+    // replacement's is its own. Read from the order: it never changes once the order is stored, since a replace stores
+    // a new order (#74).
     report.set(quantity<FIX::OrderQty>(order.orderQty_));
-    // Whether a New order is in the book (#387), read as the quantities are: the report is published by the transaction
-    // that changed the order, and a stop's release, which changes it, is a later transaction on the order
+    // Whether a New order is in the book (#387)
     if (NEW_ORDSTATUS == exec->orderStatus_)
     {
-        setWorkingIndicator(report, order.heldStop());
+        setWorkingIndicator(report, heldStop(order, figures));
     }
 
     // The client's own ClOrdIDs, without the session's key they are stored under (#71)
@@ -1889,11 +1915,11 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
     }
     // A GT order's figures for the business day, once it has traded on an earlier one, as FIX defines them (#244)
     if ((DAY_TIF != order.tif_) && (IOC_TIF != order.tif_) && (FOK_TIF != order.tif_) &&
-        (order.dayCumQty_ < order.cumQty_))
+        (figures.dayCumQty_ < figures.cumQty_))
     {
-        report.set(quantity<FIX::DayOrderQty>(order.dayOrderQty_));
-        report.set(quantity<FIX::DayCumQty>(order.dayCumQty_));
-        report.set(FIX::DayAvgPx(order.dayAvgPx_));
+        report.set(quantity<FIX::DayOrderQty>(figures.dayOrderQty_));
+        report.set(quantity<FIX::DayCumQty>(figures.dayCumQty_));
+        report.set(FIX::DayAvgPx(figures.dayAvgPx_));
     }
     // A GTD order's expiry (#240)
     if ((GTD_TIF == order.tif_) && (0 != order.expireTime_))

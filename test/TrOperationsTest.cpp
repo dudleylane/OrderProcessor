@@ -749,7 +749,7 @@ TEST_F(MatchOrderOperationTest, PersistOrderWritesAVersion)
     Context ctx = createContext();
     PersistOrderTrOperation op(*buyOrder_);
 
-    EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_))).WillOnce(::testing::Return(7u));
+    EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_), ::testing::_)).WillOnce(::testing::Return(7u));
     op.execute(ctx);
 }
 
@@ -761,7 +761,7 @@ TEST_F(MatchOrderOperationTest, PersistOrderRollbackErasesTheVersionItWrote)
     Context ctx = createContext();
     PersistOrderTrOperation op(*buyOrder_);
 
-    EXPECT_CALL(saver, save(::testing::_)).WillOnce(::testing::Return(7u));
+    EXPECT_CALL(saver, save(::testing::_, ::testing::_)).WillOnce(::testing::Return(7u));
     op.execute(ctx);
 
     EXPECT_CALL(saver, erase(buyOrder_->orderId_, 7u)).Times(1);
@@ -978,13 +978,13 @@ class CrashingSaver final : public OrderSaver
 {
 public:
     CrashingSaver(OrderSaver *inner, const OrderEntry *crashOn) : inner_(inner), crashOn_(crashOn) {}
-    u32 save(const OrderEntry &order) override
+    u32 save(const OrderEntry &order, const OrderFigures &figures) override
     {
         if (&order == crashOn_)
         {
             std::_Exit(0);
         }
-        return inner_->save(order);
+        return inner_->save(order, figures);
     }
     void erase(const IdT &orderId, u32 version) override
     {
@@ -1020,8 +1020,8 @@ TEST_F(MatchOrderOperationTest, ATradesPersistsAreCommittedTogetherBeforeItPubli
     {
         ::testing::InSequence order;
         EXPECT_CALL(saver, beginGroup());
-        EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_))).WillOnce(::testing::Return(3u));
-        EXPECT_CALL(saver, save(::testing::Ref(*sellOrder_))).WillOnce(::testing::Return(5u));
+        EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_), ::testing::_)).WillOnce(::testing::Return(3u));
+        EXPECT_CALL(saver, save(::testing::Ref(*sellOrder_), ::testing::_)).WillOnce(::testing::Return(5u));
         EXPECT_CALL(saver, commitGroup())
             .WillOnce(
                 [&committed]
@@ -1048,8 +1048,8 @@ TEST_F(MatchOrderOperationTest, ATradesLastTradeIsCommittedWithItsOrders)
         ::testing::InSequence order;
         EXPECT_CALL(saver, beginGroup());
         EXPECT_CALL(saver, saveLastTrade(instrumentId_, 100.0, tradeId)).WillOnce(::testing::Return(0u));
-        EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_))).WillOnce(::testing::Return(3u));
-        EXPECT_CALL(saver, save(::testing::Ref(*sellOrder_))).WillOnce(::testing::Return(5u));
+        EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_), ::testing::_)).WillOnce(::testing::Return(3u));
+        EXPECT_CALL(saver, save(::testing::Ref(*sellOrder_), ::testing::_)).WillOnce(::testing::Return(5u));
         EXPECT_CALL(saver, commitGroup());
     }
     TransactionScope scope;
@@ -1083,7 +1083,7 @@ TEST_F(MatchOrderOperationTest, ATradeWhosePersistsFailToCommitPublishesNothing)
 {
     ::testing::NiceMock<MockOrderSaver> saver;
     OrderStorage::instance()->attach(&saver);
-    ON_CALL(saver, save(::testing::_)).WillByDefault(::testing::Return(1u));
+    ON_CALL(saver, save(::testing::_, ::testing::_)).WillByDefault(::testing::Return(1u));
     EXPECT_CALL(saver, commitGroup()).WillOnce(::testing::Throw(std::runtime_error("injected: the commit failed")));
     bool committed = false;
     bool ran = false;
@@ -1101,7 +1101,7 @@ TEST_F(MatchOrderOperationTest, OnePersistIsWrittenAsBefore)
     // Nothing to group: a transaction that persists one order writes it at once
     ::testing::StrictMock<MockOrderSaver> saver;
     OrderStorage::instance()->attach(&saver);
-    EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_))).WillOnce(::testing::Return(2u));
+    EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_), ::testing::_)).WillOnce(::testing::Return(2u));
     TransactionScope scope;
     std::unique_ptr<Operation> persist = std::make_unique<PersistOrderTrOperation>(*buyOrder_);
     scope.addOperationFirst(persist);

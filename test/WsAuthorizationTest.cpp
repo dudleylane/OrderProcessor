@@ -374,6 +374,44 @@ TEST_F(WsAuthorizationTest, AnOrdersReportsReachOnlyTheSessionsThatMaySeeItsAcco
     EXPECT_EQ((std::vector<std::string>{ "execution_report", "order_update" }), typesBeforeMarker(*b));
 }
 
+TEST_F(WsAuthorizationTest, AnOrderUpdateGivesWhatItsReportCarries)
+{
+    // A fill's report can go out after a later fill of its order was applied (#411). The order update sent with it
+    // gives the figures the report carries, what its fill left, and not the order as it is by then.
+    OrderEntry *order = storeOrder(1, tradingId_, "A-1");
+    start();
+    std::unique_ptr<Client> a = connect(TOKEN_A);
+    order->status_ = PARTFILL_ORDSTATUS; // the fill
+    order->cumQty_ = 30;
+    order->leavesQty_ = 70;
+    order->avgPx_ = 150.0;
+    const OrderFigures fill(*order);
+    order->cumQty_ = 60; // a later one
+    order->leavesQty_ = 40;
+
+    TradeExecEntry exec;
+    exec.type_ = TRADE_EXECTYPE;
+    exec.orderId_ = order->orderId_;
+    exec.orderStatus_ = PARTFILL_ORDSTATUS;
+    exec.transactTime_ = 1;
+    exec.market_ = INTERNAL_EXECUTION;
+    exec.lastQty_ = 30;
+    exec.lastPx_ = 150.0;
+    Queues::ExecReportEvent evnt(&exec);
+    evnt.figures_ = fill;
+    out_->push(evnt, "desk-a");
+    std::optional<nlohmann::json> update = readUntil(*a, "order_update");
+    ASSERT_TRUE(update.has_value());
+    EXPECT_EQ(30u, update->at("data").value("cumQty", 0u));
+    EXPECT_EQ(70u, update->at("data").value("leavesQty", 0u));
+
+    report(*order, "desk-a"); // one without figures, as a test builds it, gives the order as it is
+    update = readUntil(*a, "order_update");
+    ASSERT_TRUE(update.has_value());
+    EXPECT_EQ(60u, update->at("data").value("cumQty", 0u));
+    EXPECT_EQ(40u, update->at("data").value("leavesQty", 0u));
+}
+
 TEST_F(WsAuthorizationTest, AReportOfAnOrderTheStorageLacksGoesOnlyToItsSource)
 {
     start();
