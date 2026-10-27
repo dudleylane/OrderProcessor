@@ -182,18 +182,36 @@ std::string App::serializeAccountList(const Store::WideParamsDataStorage *wds, c
 
 std::string App::serializeOrderSnapshot(const Store::OrderDataStorage *storage, const AccountFilter &maySee)
 {
-    json j;
-    j["type"] = "order_snapshot";
-    j["data"] = json::array();
+    // The orders are gathered under the store's lock, and each is read under its own after that lock is released: a
+    // replace holds its original's write lock while it stores the replacement, which takes the store's, so an order's
+    // lock taken under the store's could deadlock with it (#404). A stored order is freed only with the store.
+    std::vector<const OrderEntry *> orders;
     storage->forEachOrder(
         [&](const IdT & /*id*/, const OrderEntry &order)
         {
-            if (maySee && !maySee(order.account_.getId()))
+            if (!maySee || maySee(order.account_.getId()))
             {
-                return;
+                orders.push_back(&order);
             }
-            j["data"].push_back(orderToJson(order, OrderFigures(order)));
         });
+    json j;
+    j["type"] = "order_snapshot";
+    j["data"] = json::array();
+    for (const OrderEntry *order : orders)
+    {
+        // As its last report left it, not as it is: a decision's transaction persists and reports it after the
+        // decision, so the order can have what no report has said, nor made durable (#404). One whose first report
+        // isn't out is left out. Its session joined before this snapshot, so that report's update follows it.
+        std::optional<OrderFigures> published;
+        {
+            oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
+            published = order->published_;
+        }
+        if (published)
+        {
+            j["data"].push_back(orderToJson(*order, *published));
+        }
+    }
     return j.dump();
 }
 

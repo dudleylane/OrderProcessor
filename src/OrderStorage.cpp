@@ -218,6 +218,9 @@ void OrderDataStorage::restore(OrderEntry *order)
         {
             throw std::runtime_error("Unable to restore order - order with same ClOrderId already exists.");
         }
+        // Restored from its record, which is durable: readers outside a transaction give it as that (#404). Set before
+        // it is reachable.
+        order->published_ = OrderFigures(*order);
 
         int st = 0;
         try

@@ -3458,13 +3458,14 @@ void expectStatus(const FIX::Message &status, char ordStatus, const std::string 
     EXPECT_EQ("aaa", fieldOf(status, FIX::FIELD::Symbol));
 }
 
-/// Gives a stored order the state a test describes
+/// Gives a stored order the state a test describes, as its last report gave it (#404)
 void setState(OrderEntry *order, OrderStatus status, QuantityT orderQty, QuantityT cumQty, QuantityT leavesQty)
 {
     order->status_ = status;
     order->orderQty_ = orderQty;
     order->cumQty_ = cumQty;
     order->leavesQty_ = leavesQty;
+    order->published_ = OrderFigures(*order);
 }
 
 TEST_F(FixtSessionTest, AStatusRequestIsAnsweredWithTheOrdersStateAndQuantities)
@@ -3477,8 +3478,8 @@ TEST_F(FixtSessionTest, AStatusRequestIsAnsweredWithTheOrdersStateAndQuantities)
     const std::string orderId = std::to_string(order->orderId_.id_);
     setState(order, NEW_ORDSTATUS, 100, 0, 100);
     receive(makeStatusRequest("ORD-1", "", "STATUS-1"));
-    setState(order, PARTFILL_ORDSTATUS, 100, 40, 60);
     order->avgPx_ = 10.5;
+    setState(order, PARTFILL_ORDSTATUS, 100, 40, 60);
     receive(makeStatusRequest("ORD-1"));
     setState(order, FILLED_ORDSTATUS, 100, 100, 0);
     receive(makeStatusRequest("ORD-1"));
@@ -3508,10 +3509,10 @@ TEST_F(FixtSessionTest, AStatusAnswersQuantitiesAreTheBytesQuickFixWritesForTheD
     ASSERT_NO_FATAL_FAILURE(logOn());
     OrderEntry *order = saveOrderOf(sid_, "ORD-1");
     const QuantityT most = std::numeric_limits<QuantityT>::max();
-    setState(order, PARTFILL_ORDSTATUS, most, most - 1, 1);
     order->tif_ = GTC_TIF;
     order->dayOrderQty_ = most - 2;
     order->dayCumQty_ = 0;
+    setState(order, PARTFILL_ORDSTATUS, most, most - 1, 1);
     receive(makeStatusRequest("ORD-1"));
 
     const std::vector<FIX::Message> answers = sentOfType(FIX::MsgType_ExecutionReport);
@@ -3585,6 +3586,99 @@ TEST_F(FixtSessionTest, AStatusRequestForAnOrderNotYetAcknowledgedIsPendingNew)
     for (const FIX::Message &report : reports)
     {
         EXPECT_EQ("ORD-1", fieldOf(report, FIX::FIELD::ClOrdID));
+    }
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AStatusAnswerGivesTheOrderAsItsLastReportLeftIt)
+{
+    // A fill is applied to its orders when it is decided, and persisted and reported after (#404). A status request in
+    // between is answered with the order as its last report left it, New with nothing filled, and not with the fill no
+    // report has told the client of, which a crash would lose. Once the fill's report is out, with the fill.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1");
+    const std::string orderId = std::to_string(order->orderId_.id_);
+    setState(order, NEW_ORDSTATUS, 100, 0, 100);
+    // A fill of 30 decided, its report not out
+    order->status_ = PARTFILL_ORDSTATUS;
+    order->cumQty_ = 30;
+    order->leavesQty_ = 70;
+    order->avgPx_ = 10.0;
+    receive(makeStatusRequest("ORD-1"));
+    order->published_ = OrderFigures(*order); // and reported
+    receive(makeStatusRequest("ORD-1"));
+
+    const std::vector<FIX::Message> answers = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(2u, answers.size()) << sentText();
+    expectStatus(answers[0], FIX::OrdStatus_NEW, orderId, 100, 0, 100);
+    EXPECT_EQ("0", fieldOf(answers[0], FIX::FIELD::AvgPx));
+    expectStatus(answers[1], FIX::OrdStatus_PARTIALLY_FILLED, orderId, 100, 30, 70);
+    EXPECT_EQ("10", fieldOf(answers[1], FIX::FIELD::AvgPx));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AStatusRequestForAnOrderWhoseFirstReportIsntOutIsPendingNewAsStored)
+{
+    // A new order refused at receipt is stored and rejected at once, its LeavesQty zeroed at the decision (#427), and
+    // its report goes out after (#404). A status request in between is answered Pending New with the quantity it was
+    // sent with and nothing filled, not with the reject's zero, which no report has said. So is an order of the
+    // session's that the gateway keeps no record of, whose first report isn't out: stored, not unknown.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::unique_ptr<OrderEntry> pushed; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.reset(evt.order_);
+            }));
+    receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    ASSERT_NE(nullptr, pushed);
+    OrderEntry *refused = saveOrderOf(sid_, "ORD-1"); // as the engine stores it
+    refused->orderQty_ = 100;
+    refused->status_ = REJECTED_ORDSTATUS; // and refuses it, its report not out
+    refused->leavesQty_ = 0;
+    receive(makeStatusRequest("ORD-1"));
+    OrderEntry *unrecorded = saveOrderOf(sid_, "ORD-2");
+    unrecorded->orderQty_ = 40;
+    unrecorded->status_ = NEW_ORDSTATUS; // booked, its report not out
+    unrecorded->leavesQty_ = 40;
+    receive(makeStatusRequest("ORD-2"));
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(2u, reports.size()) << sentText();
+    expectStatus(reports[0], FIX::OrdStatus_PENDING_NEW, std::to_string(refused->orderId_.id_), 100, 0, 100);
+    EXPECT_EQ("ORD-1", fieldOf(reports[0], FIX::FIELD::ClOrdID));
+    expectStatus(reports[1], FIX::OrdStatus_PENDING_NEW, std::to_string(unrecorded->orderId_.id_), 40, 0, 40);
+    EXPECT_EQ("ORD-2", fieldOf(reports[1], FIX::FIELD::ClOrdID));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ARefusedReplaceGivesItsOriginalsStatusAsItsLastReportGaveIt)
+{
+    // An OrderCancelReject's OrdStatus (39) is the status of the order it was to replace (#74). A replace the gateway
+    // refuses itself, here for a ClOrdID in use, and one the engine refuses without the original's status, give it as
+    // the original's last report gave it (#404): New, and not the fill applied to it whose report isn't out.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, NEW_ORDSTATUS, 100, 0, 100);
+    OrderEntry *other = saveOrderOf(sid_, "ORD-S");
+    setState(other, NEW_ORDSTATUS, 50, 0, 50);
+    // A fill of 40 decided, its report not out
+    x->status_ = PARTFILL_ORDSTATUS;
+    x->cumQty_ = 40;
+    x->leavesQty_ = 60;
+    receive(makeLimitReplace("ORD-X", "ORD-S")); // refused by the gateway: ORD-S is in use
+    engineRefuses(sid_, "ORD-R", "ORD-X");       // refused by the engine
+
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(2u, rejects.size()) << sentText();
+    for (const FIX::Message &reject : rejects)
+    {
+        EXPECT_EQ("ORD-X", fieldOf(reject, FIX::FIELD::OrigClOrdID));
+        EXPECT_EQ(std::to_string(x->orderId_.id_), fieldOf(reject, FIX::FIELD::OrderID));
+        EXPECT_EQ(std::string(1, FIX::OrdStatus_NEW), fieldOf(reject, FIX::FIELD::OrdStatus))
+            << "the reject gives a fill that isn't reported";
     }
     expectEverythingSentIsTaken();
 }
@@ -4255,7 +4349,8 @@ TEST_F(FixtSessionTest, AHeldStopSaysItIsNotWorkingUntilItsRelease)
     gateway_->sendExecutionReport(&ack, *stop);
     receive(makeStatusRequest("STOP-1"));
     receive(makeNewOrderSingle("STOP-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
-    stop->stopTriggered_ = true; // as its release leaves it
+    stop->stopTriggered_ = true;            // as its release leaves it
+    stop->published_ = OrderFigures(*stop); // and its report gives it (#404)
     const auto release = makeReport<ExecutionEntry>(TRIGGERED_EXECTYPE, NEW_ORDSTATUS);
     gateway_->sendExecutionReport(&release, *stop);
     receive(makeStatusRequest("STOP-1"));
