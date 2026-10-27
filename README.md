@@ -335,6 +335,11 @@ reaches LMDB.
 `BM_TaskManagerTrades` runs the same pool while every order trades: sells and buys in pairs at one price,
 dealt over 1 or 8 instruments, into a queue that counts the trade reports and keeps nothing (#290).
 
+`BM_ProcessInvalidOrder` and `BM_ProcessMarketOrderWithNoMarket` drive a real `Processor` with transactions executed
+inline through the engine's reject of an order it stores (#435): one that `OrderEntry::isValid()` refuses, and a market
+order with nothing to trade with. A reject costs about 2.5 times a new order, and more than a match: nearly half of its
+processing is raising its exception twice (#436).
+
 ---
 
 ## Architecture

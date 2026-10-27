@@ -488,6 +488,78 @@ static void BM_ProcessExpiry(benchmark::State &state)
 }
 BENCHMARK(BM_ProcessExpiry);
 
+static void BM_ProcessInvalidOrder(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // Where the timed path ends: an order OrderEntry::isValid() refuses, which the engine stores as it rejects it
+    engine.submit(engine.newOrder(BUY_SIDE, 0.0, 100));
+    if (!engine.lastEndedAs(state, REJECTED_ORDSTATUS, 0))
+    {
+        return;
+    }
+
+    // One limit buy at 0 per iteration, refused for its price (#188), which isValid() checks after everything else a
+    // limit order needs, so that every other check runs first: processReceive() throws before it stores the order, and
+    // the reject stores it (processReject(onRecvOrderRejected)) and reports it (#435)
+    std::vector<OrderEntry *> orders;
+    orders.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        orders.push_back(engine.newOrder(BUY_SIDE, 0.0, 100));
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderEvent(orders[next++]));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessInvalidOrder);
+
+static void BM_ProcessMarketOrderWithNoMarket(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // Where the timed path ends: a market buy with nothing to buy, which the engine stores, then rejects
+    OrderEntry *warmUp = engine.newOrder(BUY_SIDE, 0.0, 100);
+    warmUp->ordType_ = MARKET_ORDERTYPE;
+    engine.submit(warmUp);
+    if (!engine.lastEndedAs(state, REJECTED_ORDSTATUS, 0))
+    {
+        return;
+    }
+
+    // One market buy per iteration, with no sell in the book (the fixture's first order is a buy): processReceive()
+    // stores it and finds no market, and the reject keeps the stored order (processReject(onRecvOrderRejected) returns
+    // at alreadyStored()) and reports it (#435)
+    std::vector<OrderEntry *> orders;
+    orders.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        OrderEntry *order = engine.newOrder(BUY_SIDE, 0.0, 100);
+        order->ordType_ = MARKET_ORDERTYPE;
+        orders.push_back(order);
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderEvent(orders[next++]));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessMarketOrderWithNoMarket);
+
 // =============================================================================
 // FX swaps (this branch only, #162)
 // =============================================================================
