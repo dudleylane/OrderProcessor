@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
@@ -225,7 +226,9 @@ private:
 class EngineFixture
 {
 public:
-    EngineFixture() : counter_(0)
+    /// The engine's clock is the system's unless a benchmark gives one: a restatement reads it for the business day
+    /// it begins (#244)
+    explicit EngineFixture(std::function<DateTimeT()> clock = {}) : counter_(0)
     {
         data_ = createEngineState();
 
@@ -240,6 +243,7 @@ public:
 
         ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
                                outQueues_.get(), inQueues_.get(), transactMgr_.get());
+        params.clock_ = std::move(clock);
         processor_ = std::make_unique<Processor>();
         processor_->init(params);
         transactMgr_->processor_ = processor_.get();
@@ -323,6 +327,33 @@ public:
             state.SkipWithError(("warm-up order status is " + std::to_string(static_cast<int>(order->status_)) +
                                  " with " + std::to_string(order->cumQty_) + " filled")
                                     .c_str());
+            return false;
+        }
+        return true;
+    }
+
+    /// Fails the benchmark unless the order was restated as the timed path restates its orders: a day later than
+    /// restedIn, the one it rested in, begun, and a RESTATED report sent. A restatement of an order no longer working
+    /// decides nothing, and one that finds its day begun only reports it.
+    bool restated(benchmark::State &state, const IdT &orderId, DateTimeT restedIn)
+    {
+        const OrderEntry *order = OrderStorage::instance()->locateByOrderId(orderId);
+        if (nullptr == order)
+        {
+            state.SkipWithError("engine did not store the warm-up order");
+            return false;
+        }
+        const ExecutionsT *executions = order->executions_.get();
+        const ExecutionEntry *last =
+            executions->empty() ? nullptr : OrderStorage::instance()->locateByExecId(executions->back().eventId_);
+        if ((nullptr == last) || (RESTATED_EXECTYPE != last->type_))
+        {
+            state.SkipWithError("the warm-up order's last report is not a RESTATED one");
+            return false;
+        }
+        if (order->dayStart_ <= restedIn)
+        {
+            state.SkipWithError("the warm-up order's restatement did not begin its next day");
             return false;
         }
         return true;
@@ -580,6 +611,55 @@ static void BM_ProcessExpiry(benchmark::State &state)
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_ProcessExpiry);
+
+static void BM_ProcessRestatement(benchmark::State &state)
+{
+    // The engine's clock, moved on a day once the orders rest
+    DateTimeT now = aux::currentDateTime();
+    EngineFixture engine(
+        [&now]
+        {
+            return now;
+        });
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+
+    // One resting GTC order per iteration, and the warm-up's, each restated by the RESTATEMENT timer ExpiryScheduler
+    // sets an order that rests past its business day (#244, #451). The event enqueues a transaction, which runs
+    // inline: it begins the order's next day, persists the order and reports it RESTATED.
+    std::vector<IdT> resting;
+    resting.reserve(state.max_iterations + 1);
+    for (u64 i = 0; i <= static_cast<u64>(state.max_iterations); ++i)
+    {
+        OrderEntry *order = engine.newOrder(BUY_SIDE, 100.0, 100);
+        order->tif_ = GTC_TIF;
+        resting.push_back(engine.submit(order));
+    }
+    // A day on, as at 17:00 New York: each restatement begins its order's next day. In the day the orders were
+    // accepted in, a restatement would find the day begun and only report it.
+    now += 24 * 60 * 60 * 1000;
+
+    // Where the timed path ends: the warm-up order restated
+    const OrderEntry *warmUp = OrderStorage::instance()->locateByOrderId(resting[0]);
+    const DateTimeT restedIn = (nullptr != warmUp) ? warmUp->dayStart_ : 0;
+    engine.inQueues().push("bench", TimerEvent(resting[0], TimerEvent::RESTATEMENT));
+    engine.processor().process();
+    if (!engine.restated(state, resting[0], restedIn))
+    {
+        return;
+    }
+
+    size_t next = 1;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", TimerEvent(resting[next++], TimerEvent::RESTATEMENT));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessRestatement);
 
 static void BM_ProcessInvalidOrder(benchmark::State &state)
 {
