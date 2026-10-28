@@ -331,10 +331,15 @@ Two things these numbers deliberately exclude, both real in production:
 - **Persistence.** No `OrderSaver` is attached, so nothing reaches LMDB. With the dispatcher wired
   up, each order change costs an LMDB write, about 2 ms with fsync per commit (issue #20).
 
-And one thing they include that production doesn't: the benchmark's `OutgoingQueues` keeps a copy of
-every report until the run ends, where production's queues keep none. That is about 2% of the
-instructions of a new order or a cancel. `BM_TaskManagerTrades` reports into a queue that counts trade
-reports and keeps nothing.
+Nor do they keep their reports, which production's queues don't either: since #447 the per-order benchmarks
+and `BM_TaskManagerThroughput` report into a queue that keeps nothing, as `BM_TaskManagerTrades` reports
+into one that counts trade reports and keeps nothing. Until #447 they reported into `OutgoingQueues`, which
+keeps a copy of every report until the run ends: about 2% of the instructions of a new order or a cancel
+before #411, and a page for each report since #411's figures took a report past the 128 bytes up to which
+oneTBB's queue puts two items on a page. The rows above were measured with it. On 2026-10-28, pinned,
+the queue that keeps nothing took 4 to 15% off each per-order benchmark (a new order 7%, a cancel 12%,
+a match 14%, an IOC's remainder 15%; median 10% at 6 × 1) and 3 to 4% off `BM_TaskManagerThroughput`
+(20 × 3): what that queue cost at the time.
 
 For the queue, order book, state machine, arena, pool, NUMA and field-layout microbenchmarks, run the binary:
 `./build/orderProcessorBench --benchmark_list_tests` shows everything available.
