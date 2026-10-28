@@ -193,6 +193,19 @@ private:
     OrderEntry *replacementOf(std::string_view key) const;
     /// How many replacements the gateway knows of, which no chain of them can be longer than (#383)
     size_t knownReplacements() const;
+    /// The order an OrderCancelReject (35=9) describes in its OrderID (37) and OrdStatus (39) (#385)
+    struct RejectedOrder
+    {
+        u64 number = 0;
+        OrderStatus status = INVALID_ORDSTATUS;
+    };
+    /// The order a reject of a cancel or replace that names order describes, given order's status as the engine
+    /// decided it or as its last report gave it (#385): order itself, unless it was replaced. A replaced order is
+    /// closed, and lives on in the order that replaced it: that order, or the one working in its place, found along
+    /// the replacements as a status request's answer finds it (#383), as its last report gave it (#404). A replacement
+    /// whose report isn't out leaves the replace pending for the client: the order it replaces, Pending Replace. Takes
+    /// each order's lock, so the caller holds none.
+    RejectedOrder rejectedOrder(const OrderEntry &order, OrderStatus status) const;
     /// A replacement the session source sent was refused, by the engine or by the gateway: a cancel or replace that
     /// names it is decided from now on against the order it was to replace, origClOrdId (#398). Both ClOrdIDs as the
     /// client sent them.

@@ -259,8 +259,10 @@ protected:
     }
 
     /// Hands the gateway the engine's refusal of sid's replacement clOrdId of the order origClOrdId, or of its new order
-    /// clOrdId when origClOrdId is empty, as the engine names them, under the session's key (#398)
-    void engineRefuses(const FIX::SessionID &sid, const std::string &clOrdId, const std::string &origClOrdId = "")
+    /// clOrdId when origClOrdId is empty, as the engine names them, under the session's key (#398), with the original's
+    /// status as the engine saw it, origStatus, when it gives one
+    void engineRefuses(const FIX::SessionID &sid, const std::string &clOrdId, const std::string &origClOrdId = "",
+                       OrderStatus origStatus = INVALID_ORDSTATUS)
     {
         const std::string source = FixGateway::makeSourceString(sid);
         Queues::OrderRejectEvent refusal;
@@ -269,6 +271,7 @@ protected:
         if (refusal.replacement_)
         {
             refusal.origClOrderId_ = FixGateway::sessionClOrdId(source, origClOrdId);
+            refusal.origStatus_ = origStatus;
         }
         refusal.symbol_ = "aaa";
         refusal.side_ = BUY_SIDE;
@@ -3680,6 +3683,155 @@ TEST_F(FixtSessionTest, ARefusedReplaceGivesItsOriginalsStatusAsItsLastReportGav
         EXPECT_EQ(std::string(1, FIX::OrdStatus_NEW), fieldOf(reject, FIX::FIELD::OrdStatus))
             << "the reject gives a fill that isn't reported";
     }
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AReplaceTheEngineRefusesGivesItsOriginalAsTheEngineSawIt)
+{
+    // The engine's refusal of a replace carries the original's status as the engine saw it when it refused (#74), which
+    // can be ahead of the original's last report: here a fill of 40 decided whose report isn't out. The OrderCancelReject
+    // gives the engine's, Partially Filled, where a refusal without it gives the last report's, New (#404, the test
+    // above): it is the status the reject describes the original from (#385). An original the gateway can't find is
+    // given with the engine's status too, and OrderID NONE.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, NEW_ORDSTATUS, 100, 0, 100);
+    // A fill of 40 decided, its report not out
+    x->status_ = PARTFILL_ORDSTATUS;
+    x->cumQty_ = 40;
+    x->leavesQty_ = 60;
+    engineRefuses(sid_, "ORD-R", "ORD-X", PARTFILL_ORDSTATUS);
+    engineRefuses(sid_, "ORD-Q", "ORD-GONE", FILLED_ORDSTATUS); // no order of the session's has this ClOrdID
+
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(2u, rejects.size()) << sentText();
+    EXPECT_EQ("ORD-R", fieldOf(rejects[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("ORD-X", fieldOf(rejects[0], FIX::FIELD::OrigClOrdID));
+    EXPECT_EQ(std::to_string(x->orderId_.id_), fieldOf(rejects[0], FIX::FIELD::OrderID));
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_PARTIALLY_FILLED), fieldOf(rejects[0], FIX::FIELD::OrdStatus))
+        << "the reject gives the original's last report, not the engine's status";
+    EXPECT_EQ("ORD-Q", fieldOf(rejects[1], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("ORD-GONE", fieldOf(rejects[1], FIX::FIELD::OrigClOrdID));
+    EXPECT_EQ("NONE", fieldOf(rejects[1], FIX::FIELD::OrderID));
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_FILLED), fieldOf(rejects[1], FIX::FIELD::OrdStatus));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ACancelOrReplaceOfAReplacedOrderIsRejectedWithTheOrderWorkingInItsPlace)
+{
+    // After Replace (Y,X), a cancel or replace that names X is too late (102=0): X is closed, its quantity moved to Y
+    // (#74). Its OrderCancelReject gives the order working in X's place, Y, in OrderID (37) and OrdStatus (39), as a
+    // status request for X is answered with Y (EP284's G.1.c), as ruled (2026-10-26). Before #385 it gave X's own, 39=4,
+    // which a client reads as the order canceled. OrigClOrdID (41) still names X, which the request named. Until Y's
+    // acknowledgement is out the replace is pending for the client: X, Pending Replace (39=E). So for each refusal: the
+    // engine's of a cancel and of a replace, and the gateway's own of a replace whose ClOrdID is in use (#403).
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, REPLACED_ORDSTATUS, 100, 40, 0); // as a replace leaves it
+    OrderEntry *y = saveOrderOf(sid_, "ORD-Y");
+    y->origOrderId_ = x->orderId_;
+    y->origClOrderId_ = x->clOrderId_;
+    setState(y, PARTFILL_ORDSTATUS, 120, 40, 80);
+    OrderEntry *other = saveOrderOf(sid_, "ORD-S");
+    setState(other, NEW_ORDSTATUS, 50, 0, 50);
+    const std::string source = FixGateway::makeSourceString(sid_);
+    auto refuseEach = [&](const std::string &n)
+    {
+        Queues::CancelRejectEvent tooLate;
+        tooLate.id_ = x->orderId_;
+        tooLate.reason_ = Queues::CancelRejectEvent::TOO_LATE;
+        tooLate.ordStatus_ = REPLACED_ORDSTATUS;
+        tooLate.requestClOrdId_ = "CXL-" + n;
+        gateway_->sendCancelReject(tooLate, source);
+        Queues::OrderRejectEvent refusal;
+        refusal.replacement_ = true;
+        refusal.clOrderId_ = FixGateway::sessionClOrdId(source, "ORD-Z" + n);
+        refusal.origClOrderId_ = FixGateway::sessionClOrdId(source, "ORD-X");
+        refusal.symbol_ = "aaa";
+        refusal.side_ = BUY_SIDE;
+        refusal.orderQty_ = 70;
+        refusal.refusal_ = CancelRejectEvent::TOO_LATE;
+        refusal.origStatus_ = REPLACED_ORDSTATUS;
+        refusal.reason_ = "Replace refused: too late, the order is no longer in the book";
+        gateway_->sendOrderReject(refusal, source);
+        receive(makeLimitReplace("ORD-X", "ORD-S"));
+    };
+    refuseEach("1");
+    auto ack = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, PARTFILL_ORDSTATUS);
+    ack.orderId_ = y->orderId_;
+    ack.origOrderId_ = x->orderId_;
+    gateway_->sendExecutionReport(&ack, *y);
+    refuseEach("2");
+
+    const std::string xId = std::to_string(x->orderId_.id_);
+    const std::string yId = std::to_string(y->orderId_.id_);
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(6u, rejects.size()) << sentText();
+    for (size_t i = 0; i < rejects.size(); ++i)
+    {
+        SCOPED_TRACE("reject " + std::to_string(i));
+        const bool acknowledged = (3 <= i);
+        EXPECT_EQ(acknowledged ? yId : xId, fieldOf(rejects[i], FIX::FIELD::OrderID));
+        EXPECT_EQ(std::string(1, acknowledged ? FIX::OrdStatus_PARTIALLY_FILLED : FIX::OrdStatus_PENDING_REPLACE),
+                  fieldOf(rejects[i], FIX::FIELD::OrdStatus));
+        EXPECT_EQ("ORD-X", fieldOf(rejects[i], FIX::FIELD::OrigClOrdID));
+        const size_t kind = i % 3; // the cancel's, the engine's refused replace, the gateway's
+        EXPECT_EQ(std::string(1, (0 == kind) ? FIX::CxlRejResponseTo_ORDER_CANCEL_REQUEST
+                                             : FIX::CxlRejResponseTo_ORDER_CANCEL_REPLACE_REQUEST),
+                  fieldOf(rejects[i], FIX::FIELD::CxlRejResponseTo));
+        EXPECT_EQ(
+            std::to_string((2 == kind) ? FIX::CxlRejReason_DUPLICATE_CL_ORD_ID : FIX::CxlRejReason_TOO_LATE_TO_CANCEL),
+            fieldOf(rejects[i], FIX::FIELD::CxlRejReason));
+        const std::string n = acknowledged ? "2" : "1";
+        EXPECT_EQ((0 == kind) ? "CXL-" + n : ((1 == kind) ? "ORD-Z" + n : "ORD-S"),
+                  fieldOf(rejects[i], FIX::FIELD::ClOrdID));
+        if (0 == kind)
+        {
+            // Text (58) gives the engine's reason, which is about X, not the state of the order working in its place
+            EXPECT_EQ("Cancel rejected: too late, the order is REPLACED", fieldOf(rejects[i], FIX::FIELD::Text));
+        }
+    }
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ACancelOfAnOrderReplacedTwiceIsRejectedWithTheOrderWorkingNow)
+{
+    // Replace (Y,X), then Replace (Z,Y): a cancel that names X is rejected with Z, the order working in X's place now,
+    // as a status request for X is answered with Z (#383, #385): its OrderID and status, New
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, REPLACED_ORDSTATUS, 100, 0, 0);
+    OrderEntry *y = saveOrderOf(sid_, "ORD-Y");
+    y->origOrderId_ = x->orderId_;
+    y->origClOrderId_ = x->clOrderId_;
+    setState(y, REPLACED_ORDSTATUS, 120, 0, 0);
+    OrderEntry *z = saveOrderOf(sid_, "ORD-Z");
+    z->origOrderId_ = y->orderId_;
+    z->origClOrderId_ = y->clOrderId_;
+    setState(z, NEW_ORDSTATUS, 150, 0, 150);
+    for (OrderEntry *replacement : { y, z })
+    {
+        auto ack = makeReport<ReplaceExecEntry>(REPLACE_EXECTYPE, NEW_ORDSTATUS);
+        ack.orderId_ = replacement->orderId_;
+        ack.origOrderId_ = replacement->origOrderId_;
+        gateway_->sendExecutionReport(&ack, *replacement);
+    }
+    Queues::CancelRejectEvent tooLate;
+    tooLate.id_ = x->orderId_;
+    tooLate.reason_ = Queues::CancelRejectEvent::TOO_LATE;
+    tooLate.ordStatus_ = REPLACED_ORDSTATUS;
+    tooLate.requestClOrdId_ = "CXL-1";
+    gateway_->sendCancelReject(tooLate, FixGateway::makeSourceString(sid_));
+
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(1u, rejects.size()) << sentText();
+    EXPECT_EQ(std::to_string(z->orderId_.id_), fieldOf(rejects[0], FIX::FIELD::OrderID));
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_NEW), fieldOf(rejects[0], FIX::FIELD::OrdStatus));
+    EXPECT_EQ("ORD-X", fieldOf(rejects[0], FIX::FIELD::OrigClOrdID));
+    EXPECT_EQ("CXL-1", fieldOf(rejects[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("Cancel rejected: too late, the order is REPLACED", fieldOf(rejects[0], FIX::FIELD::Text));
     expectEverythingSentIsTaken();
 }
 

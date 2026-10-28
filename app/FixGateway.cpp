@@ -478,6 +478,30 @@ size_t FixGateway::knownReplacements() const
     return replacements_.size();
 }
 
+FixGateway::RejectedOrder FixGateway::rejectedOrder(const OrderEntry &order, OrderStatus status) const
+{
+    // Its id and ClOrdID never change once it is stored, so they are read without its lock
+    RejectedOrder described{ order.orderId_.id_, status };
+    if (REPLACED_ORDSTATUS != status) [[likely]]
+    {
+        return described;
+    }
+    std::string key = rawText(order.clOrderId_.get());
+    for (size_t followed = 0; REPLACED_ORDSTATUS == described.status; ++followed)
+    {
+        const OrderEntry *next = (followed < knownReplacements()) ? replacementOf(key) : nullptr;
+        if (nullptr == next)
+        {
+            described.status = PENDINGREPLACE_ORDSTATUS;
+            break;
+        }
+        key = rawText(next->clOrderId_.get());
+        const OrderSeen seen = seenOf(*next);
+        described = RejectedOrder{ seen.number, seen.status };
+    }
+    return described;
+}
+
 void FixGateway::learnRefusal(const std::string &source, const std::string &clOrdId, const std::string &origClOrdId)
 {
     if (clOrdId.empty() || origClOrdId.empty())
@@ -1365,15 +1389,17 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
     // The replacement is the original with the request's changes, a fresh id and the request's ClOrdID (11), naming the
     // original (#74). The engine decides it, and carries over what the original has filled.
     std::unique_ptr<OrderEntry> replacement;
-    std::string origOrderId;
-    char origStatus = FIX::OrdStatus_NEW;
+    OrderStatus reported = INVALID_ORDSTATUS;
     {
         // read lock: a transaction worker may be updating the original
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(existing->entryMutex_, false);
         replacement.reset(existing->clone());
-        origOrderId = std::to_string(existing->orderId_.id_);
-        origStatus = fromOrdStatus(reportedStatus(*existing)); // as the client was told it (#404)
+        reported = reportedStatus(*existing); // as the client was told it (#404)
     }
+    // A refusal describes the original, or, once it is replaced, the order working in its place (#385)
+    const RejectedOrder described = rejectedOrder(*existing, reported);
+    const std::string origOrderId = std::to_string(described.number);
+    const char origStatus = fromOrdStatus(described.status);
 
     // A request the gateway refuses itself gets an OrderCancelReject (102=99) that says why, quoting its ClOrdIDs; one
     // whose ClOrdID is in use, 102=6, as the engine's refusal of it does (#403). The replacement is remembered as
@@ -2068,18 +2094,25 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
         if (evnt.replacement_)
         {
             // The reject describes the order it was to replace: its OrderID, and its status as the engine saw it when
-            // it refused (#74), or as its last report gave it (#404); Rejected when there is no such order
+            // it refused (#74), or as its last report gave it (#404); once it is replaced, the order working in its
+            // place (#385); Rejected when there is no such order
             std::string origOrderId = "NONE";
             char origStatus = FIX::OrdStatus_REJECTED;
             RawDataEntry rawKey(STRING_RAWDATATYPE, evnt.origClOrderId_.c_str(),
                                 static_cast<u32>(evnt.origClOrderId_.size()));
             if (OrderEntry *orig = orderStorage_->locateByClOrderId(rawKey))
             {
-                oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(orig->entryMutex_, false);
-                origOrderId = std::to_string(orig->orderId_.id_);
-                origStatus = fromOrdStatus(reportedStatus(*orig));
+                OrderStatus status = evnt.origStatus_;
+                if (INVALID_ORDSTATUS == status)
+                {
+                    oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(orig->entryMutex_, false);
+                    status = reportedStatus(*orig);
+                }
+                const RejectedOrder described = rejectedOrder(*orig, status);
+                origOrderId = std::to_string(described.number);
+                origStatus = fromOrdStatus(described.status);
             }
-            if (INVALID_ORDSTATUS != evnt.origStatus_)
+            else if (INVALID_ORDSTATUS != evnt.origStatus_)
             {
                 origStatus = fromOrdStatus(evnt.origStatus_);
             }
@@ -2260,20 +2293,31 @@ void FixGateway::sendCancelReject(const Queues::CancelRejectEvent &evnt, const s
 
     std::string orderId = "NONE";
     std::string clOrdId = "NONE";
+    OrderStatus shownStatus = evnt.ordStatus_;
     if (OrderEntry *order = orderStorage_->locateByOrderId(evnt.id_))
     {
-        oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, false);
-        orderId = std::to_string(order->orderId_.id_);
-        // the client's own ClOrdID, without the session's key it is stored under (#71)
-        const std::string client = clientClOrdId(rawText(order->clOrderId_.get()), sourceOf(*order));
-        if (!client.empty())
         {
-            clOrdId = client;
+            oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, false);
+            // the client's own ClOrdID, without the session's key it is stored under (#71)
+            const std::string client = clientClOrdId(rawText(order->clOrderId_.get()), sourceOf(*order));
+            if (!client.empty())
+            {
+                clOrdId = client;
+            }
         }
+        // The order, as the engine saw it when it refused; once it is replaced, the order working in its place (#385).
+        // OrigClOrdID (41) still names the order the cancel named, and Text (58) gives the engine's reason.
+        const RejectedOrder described = rejectedOrder(*order, evnt.ordStatus_);
+        orderId = std::to_string(described.number);
+        shownStatus = described.status;
     }
     try
     {
         FIX50SP2::OrderCancelReject reject = buildEngineCancelReject(evnt, orderId, clOrdId);
+        if (shownStatus != evnt.ordStatus_) [[unlikely]]
+        {
+            reject.set(FIX::OrdStatus(fromOrdStatus(shownStatus))); // that of the order working in its place
+        }
         FIX::Session::sendToTarget(reject, sid);
     }
     catch (const std::exception &ex)
@@ -2534,7 +2578,8 @@ char FixGateway::fromOrdStatus(OrderStatus s)
     case REPLACED_ORDSTATUS:
         // 39=5, Replaced, has been out of use since FIX 4.4, though QuickFIX's FIX 5.0 SP2 dictionary lists it: a
         // replace is told by ExecType 5 alone. A replaced order is closed, its quantity moved to the replacement, which
-        // has its own acknowledgement (#74); a cancel or replace that names it later gets 102=0 and this.
+        // has its own acknowledgement (#74). A cancel or replace that names it later gets 102=0 with the status of the
+        // order working in its place (#385), and a new order that repeats its ClOrdID this (#382).
         return FIX::OrdStatus_CANCELED;
     case PENDINGNEW_ORDSTATUS:
         return FIX::OrdStatus_PENDING_NEW;
