@@ -335,6 +335,14 @@ reaches LMDB.
 `BM_TaskManagerTrades` runs the same pool while every order trades: sells and buys in pairs at one price,
 dealt over 1 or 8 instruments, into a queue that counts the trade reports and keeps nothing (#290).
 
+The per-order benchmarks (`BM_Process*`) and `BM_TaskManagerThroughput` report into a queue that keeps nothing too,
+as production's queues keep none (#447). Until #447 they reported into `OutgoingQueues`, which keeps a copy of every
+report until the run ends: about 2% of the instructions of a new order or a cancel before #411, and a page for each
+report since #411's figures took a report past the 128 bytes up to which oneTBB's queue puts two items on a page. The
+figures below were measured with it. On 2026-10-28, pinned, the queue that keeps nothing took 4 to 19% off each
+per-order benchmark (a new order 5%, a cancel 13%, a match 19%, a swap's match 14%, an IOC's remainder 11%; median
+11% at 6 × 1) and about 4% off `BM_TaskManagerThroughput` (20 × 3): what that queue cost at the time.
+
 `BM_ProcessInvalidOrder` and `BM_ProcessMarketOrderWithNoMarket` drive a real `Processor` with transactions executed
 inline through the engine's reject of an order it stores (#435): one that `OrderEntry::isValid()` refuses, and a market
 order with nothing to trade with. A reject costs about 2.5 times a new order, and more than a match: nearly half of its
