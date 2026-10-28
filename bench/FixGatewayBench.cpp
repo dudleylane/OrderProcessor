@@ -310,12 +310,13 @@ BENCHMARK(BM_FixNewOrderSingleTranslation)->UseManualTime();
 namespace
 {
 
-/// An order the session sent, stored as the gateway stores one: its source names the session, and its ClOrdID is under
-/// the session's key (#71). 40 of 100 are filled at 1.265, so its trade's report has every quantity one has.
-OrderEntry *storeBenchOrder(const FixBenchSetup &setup, const std::string &source, OrderType ordType)
+/// An order the session sent, stored as the gateway stores one: its source names the session, and its ClOrdID, clOrdId,
+/// is under the session's key (#71). 40 of 100 are filled at 1.265, so its trade's report has every quantity one has.
+OrderEntry *storeBenchOrder(const FixBenchSetup &setup, const std::string &source, OrderType ordType,
+                            const std::string &clOrdId = "CLORD-001")
 {
     WideParamsDataStorage *wide = WideDataStorage::instance();
-    const std::string key = FixGateway::sessionClOrdId(source, "CLORD-001");
+    const std::string key = FixGateway::sessionClOrdId(source, clOrdId);
     OrderEntry order(wide->add(new StringT(source)), wide->add(new StringT("Internal")),
                      wide->add(new RawDataEntry(STRING_RAWDATATYPE, key.c_str(), static_cast<u32>(key.size()))),
                      SourceIdT(), setup.instrId_, SourceIdT(), setup.clearingId_, wide->add(new ExecutionsT()));
@@ -719,9 +720,10 @@ private:
 
 /// The session's order, stored and working: storeBenchOrder()'s limit buy, 40 of 100 filled, published as its last
 /// report would have, since the gateway answers about an order with what its last report said (#404)
-OrderEntry *storeWorkingOrder(const FixBenchSetup &setup, const std::string &source)
+OrderEntry *storeWorkingOrder(const FixBenchSetup &setup, const std::string &source,
+                              const std::string &clOrdId = "CLORD-001")
 {
-    OrderEntry *order = storeBenchOrder(setup, source, LIMIT_ORDERTYPE);
+    OrderEntry *order = storeBenchOrder(setup, source, LIMIT_ORDERTYPE, clOrdId);
     order->status_ = PARTFILL_ORDSTATUS;
     order->published_ = OrderFigures(*order);
     return order;
@@ -1020,6 +1022,77 @@ static void BM_FixEngineCancelReject(benchmark::State &state)
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_FixEngineCancelReject);
+
+/// The engine's refusal of a cancel of an order already replaced, too late (102=0), as BM_FixEngineCancelReject's: the
+/// reject describes the order working in its place (#385), which the gateway finds along the replacements as a status
+/// request's answer finds it (#383), here the one replacement it learned from its acknowledgement, as its last report
+/// gave it (#404). OrigClOrdID (41) still names the replaced order, and Text (58) the engine's reason.
+static void BM_FixEngineCancelRejectOfReplacedOrder(benchmark::State &state)
+{
+    FixBenchSetup setup;
+    RequestInQueues inQueues;
+    FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    FixOutQueues outQueues(&gateway, OrderStorage::instance());
+    BenchSession session(gateway);
+    if (!session.problem().empty())
+    {
+        state.SkipWithError(session.problem().c_str());
+        return;
+    }
+    const std::string source = session.source();
+    // Replace (Y,X): X closed, its quantity moved to Y, which works on, its acknowledgement out
+    OrderEntry *original = storeWorkingOrder(setup, source);
+    original->status_ = REPLACED_ORDSTATUS;
+    original->leavesQty_ = 0;
+    original->published_ = OrderFigures(*original);
+    OrderEntry *replacement = storeWorkingOrder(setup, source, "CLORD-002");
+    replacement->origOrderId_ = original->orderId_;
+    replacement->origClOrderId_ = original->clOrderId_;
+    ReplaceExecEntry ack;
+    ack.type_ = REPLACE_EXECTYPE;
+    ack.orderStatus_ = PARTFILL_ORDSTATUS;
+    ack.orderId_ = replacement->orderId_;
+    ack.origOrderId_ = original->orderId_;
+    ack.execId_ = IdTGenerator::instance()->getId();
+    ack.market_ = INTERNAL_EXECUTION;
+    gateway.sendExecutionReport(&ack, *replacement); // which teaches the gateway the replacement (#383)
+    Queues::CancelRejectEvent reject;
+    reject.id_ = original->orderId_;
+    reject.reason_ = Queues::CancelRejectEvent::TOO_LATE;
+    reject.ordStatus_ = REPLACED_ORDSTATUS;
+    reject.requestClOrdId_ = "CXL-001";
+
+    KeptMessage kept;
+    session.sendTo(&kept);
+    outQueues.push(reject, source);
+    session.sendTo(nullptr);
+    std::string problem;
+    if (!kept.has({ { FIX::FIELD::MsgType, FIX::MsgType_OrderCancelReject },
+                    { FIX::FIELD::CxlRejResponseTo, "1" },
+                    { FIX::FIELD::CxlRejReason, "0" },
+                    { FIX::FIELD::ClOrdID, "CXL-001" },
+                    { FIX::FIELD::OrigClOrdID, "CLORD-001" },
+                    { FIX::FIELD::OrderID, std::to_string(replacement->orderId_.id_) },
+                    { FIX::FIELD::OrdStatus, "1" },
+                    { FIX::FIELD::Text, "Cancel rejected: too late, the order is REPLACED" } },
+                  &problem))
+    {
+        state.SkipWithError(problem.c_str());
+        return;
+    }
+
+    const u64 before = session.sent();
+    for (auto _ : state)
+    {
+        outQueues.push(reject, source);
+    }
+    if (static_cast<u64>(state.iterations()) != session.sent() - before)
+    {
+        state.SkipWithError("the session wasn't sent a refusal on every iteration");
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_FixEngineCancelRejectOfReplacedOrder);
 
 /// A status request (35=H) for the session's working order, by its ClOrdID, answered on the session's thread (#383): the
 /// gateway finds the order under the session's key, reads what it has, and sends an ExecutionReport of ExecType Order
