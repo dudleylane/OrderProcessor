@@ -27,7 +27,6 @@
 #include "Logger.h"
 #include "OrderBookImpl.h"
 #include "OrderStorage.h"
-#include "OutgoingQueues.h"
 #include "Processor.h"
 #include "QueuesDef.h"
 #include "StorageRecordDispatcher.h"
@@ -220,8 +219,22 @@ private:
     u64 bytes_ = 0;
 };
 
-/// A whole engine minus the worker pool: one Processor whose transactions execute inline. No
-/// OrderSaver is attached unless recordOrders() asks for one, so these are in-memory costs;
+/// Keeps no report it is given, as production's queues keep none: WsOutQueues serializes each one as it is pushed. The
+/// benchmarks that time the engine report into it, so that none charges the engine for storing its reports (#447).
+/// OutgoingQueues, which they reported into until then, keeps each one until it is popped, and its cost moved in steps
+/// with a report's size: oneTBB's queue puts two items on a page up to 128 bytes, and one above, a line #411's figures
+/// took a report past. It is timed on its own (BM_OutQueuePush*), and a report's consumer on its own
+/// (BM_WsOutQueuesPushTradeReport).
+class DiscardingOutQueues final : public OutQueues
+{
+public:
+    void push(const ExecReportEvent &, const std::string &) override {}
+    void push(const CancelRejectEvent &, const std::string &) override {}
+    void push(const BusinessRejectEvent &, const std::string &) override {}
+};
+
+/// A whole engine minus the worker pool: one Processor whose transactions execute inline, reporting into a queue that
+/// keeps nothing (#447). No OrderSaver is attached unless recordOrders() asks for one, so these are in-memory costs;
 /// persistence adds an LMDB write on top.
 class EngineFixture
 {
@@ -238,7 +251,7 @@ public:
         orderBook_->init(instruments);
 
         inQueues_ = std::make_unique<IncomingQueues>();
-        outQueues_ = std::make_unique<OutgoingQueues>();
+        outQueues_ = std::make_unique<DiscardingOutQueues>();
         transactMgr_ = std::make_unique<InlineTransactionManager>();
 
         ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
@@ -416,7 +429,7 @@ private:
     StorageRecordDispatcher dispatcher_;
     std::unique_ptr<OrderBookImpl> orderBook_;
     std::unique_ptr<IncomingQueues> inQueues_;
-    std::unique_ptr<OutgoingQueues> outQueues_;
+    std::unique_ptr<DiscardingOutQueues> outQueues_;
     std::unique_ptr<InlineTransactionManager> transactMgr_;
     std::unique_ptr<Processor> processor_;
 };
@@ -851,7 +864,7 @@ static void BM_TaskManagerThroughput(benchmark::State &state)
         orderBook->init(instruments);
 
         auto inQueues = std::make_unique<IncomingQueues>();
-        auto outQueues = std::make_unique<OutgoingQueues>();
+        auto outQueues = std::make_unique<DiscardingOutQueues>(); // as the per-order benchmarks' (#447)
 
         TransactionMgrParams transParams(IdTGenerator::instance());
         auto transactMgr = std::make_unique<TransactionMgr>();
