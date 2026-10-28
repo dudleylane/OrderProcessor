@@ -219,13 +219,27 @@ on_exit() {
 }
 trap on_exit EXIT
 
+# The commit of the tree the build was configured from, which needn't be this script's checkout: a --build-dir can name
+# another worktree's build (#448). Named with the tree when it is another, and said so when the tree is unknown or gone.
 describe_commit() {
-    local sha
-    sha=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null) || { echo "(not a git checkout)"; return; }
-    if git -C "$PROJECT_ROOT" diff --quiet HEAD -- 2>/dev/null; then
-        echo "$sha"
+    local dir sha where=""
+    dir=$(cached_source_dir)
+    if [[ -z "$dir" ]]; then
+        echo "unknown: $BUILD_DIR/CMakeCache.txt doesn't name the tree it was built from"
+        return
+    fi
+    if [[ ! -d "$dir" ]]; then
+        echo "unknown: $dir, the tree it was built from, is gone"
+        return
+    fi
+    if [[ "$(realpath -m -- "$dir")" != "$(realpath -m -- "$PROJECT_ROOT")" ]]; then
+        where=" in $dir"
+    fi
+    sha=$(git -C "$dir" rev-parse --short HEAD 2>/dev/null) || { echo "unknown: $dir is not a git checkout"; return; }
+    if git -C "$dir" diff --quiet HEAD -- 2>/dev/null; then
+        echo "$sha$where"
     else
-        echo "$sha with uncommitted changes"
+        echo "$sha with uncommitted changes$where"
     fi
 }
 
@@ -236,10 +250,15 @@ describe_compiler() {
     "${compiler:-${CXX:-c++}}" --version 2>/dev/null | head -1
 }
 
+# The source tree the build was configured from, as its CMakeCache.txt names it; nothing when it names none
+cached_source_dir() {
+    sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$BUILD_DIR/CMakeCache.txt" 2>/dev/null || true
+}
+
 # The source tree the build was configured from, whose config/ the binary reads (#415)
 build_source_dir() {
     local dir
-    dir=$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$BUILD_DIR/CMakeCache.txt" 2>/dev/null || true)
+    dir=$(cached_source_dir)
     echo "${dir:-$PROJECT_ROOT}"
 }
 
