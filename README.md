@@ -379,6 +379,10 @@ sender directly, storing nothing. Three exceptions are raised, where since #436 
 order raise none (#432). Measured on 2026-10-29, pinned, it took ~8.4 µs, in runs where `BM_ProcessInvalidOrder`
 took ~2.4 µs.
 
+`BM_ProcessSweep` drives a real `Processor` through a buy that sweeps four resting sells at one price: four trades, each
+with its deferred execution events and book removal, and the three matches between them that continue the sweep
+(#477). Measured on 2026-10-29, pinned, it took ~13.1 µs, in runs where `BM_ProcessNewOrderWithMatch` took ~5.2 µs.
+
 ---
 
 ## Architecture
