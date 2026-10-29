@@ -10,7 +10,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 
 ### Core Engine
 - **ACID Transactions:** Full transaction support with operation-level rollback on failure
-- **State Machine:** <!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> order states and <!-- DOC_CHECK:transition_count -->48<!-- /DOC_CHECK --> transitions, managed via Boost Meta State Machine (MSM)
+- **State Machine:** <!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> order states and <!-- DOC_CHECK:transition_count -->49<!-- /DOC_CHECK --> transitions, managed via Boost Meta State Machine (MSM)
 - **Order Matching:** Price-time priority matching engine with per-instrument order books
 - **Stop Orders:** `STOP` and `STOPLIMIT` orders wait in a per-instrument stop book until a trade reaches their stop price, then trade as market or limit orders
 - **Deferred Event Chaining:** Trade executions trigger cascading events (e.g., settlement)
@@ -345,8 +345,11 @@ per-order benchmark (a new order 5%, a cancel 13%, a match 19%, a swap's match 1
 
 `BM_ProcessInvalidOrder` and `BM_ProcessMarketOrderWithNoMarket` drive a real `Processor` with transactions executed
 inline through the engine's reject of an order it stores (#435): one that `OrderEntry::isValid()` refuses, and a market
-order with nothing to trade with. A reject costs about 2.5 times a new order, and more than a match: nearly half of its
-processing is raising its exception twice (#436).
+order with nothing to trade with. Until #436 a reject cost about 2.5 times a new order, and more than a match: the state
+machine refused the order by raising an exception, caught it to queue the reject as an event of its own, and raised it
+again. Since #436 an order its checks refuse takes a transition of its own to Rejected, with no exception raised, and
+both rejects take about 63% less time (20 × 3 against c841b18, pinned to CPUs 2-5): about 2.4 µs, 0.9 times a
+new order in the same runs.
 
 `BM_ProcessNewOrderWithMatchRecorded` is `BM_ProcessNewOrderWithMatch` with each order's record encoded as the
 server's storage dispatcher encodes it, into a storage that keeps nothing: the encoding, without LMDB's write.

@@ -98,9 +98,10 @@ void addUnbooking(const OrderEntry &order, Scope *transaction)
     }
 }
 
-/// Whether a reject was handed the copy of the order that its event's receive had already stored. A receive can refuse
-/// an order after storing it, as it does a market order with nothing to trade with. The machine then passes the stored
-/// copy, not the incoming order, and the reject keeps it rather than storing the order a second time (#68).
+/// Whether a reject was handed the copy of the order that its event's receive had already stored: a receive that throws
+/// after storing the order. A new market order with nothing to trade with was refused that way (#68) until #436, which
+/// refuses it before it is stored. The machine then passes the stored copy, not the incoming order, and the reject keeps
+/// it rather than storing the order a second time.
 bool alreadyStored(const OrderEntry *order, const OrderEntry *received, OrderDataStorage *storage)
 {
     if ((nullptr == order) || (order == received))
@@ -185,12 +186,7 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
     assert(nullptr != orderData);
     assert(nullptr == *orderData);
     assert(nullptr != evnt.order_);
-
-    std::string reason;
-    if (!evnt.order_->isValid(&reason))
-    {
-        throw std::runtime_error(reason.c_str());
-    }
+    // processRefused() has passed the order: one it refuses takes the row to Rejected instead (#436)
 
     *orderData = evnt.order_;
     // generate id for the order
@@ -198,15 +194,6 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
     assert(nullptr != evnt.orderStorage_);
     *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
     (*orderData)->status_ = NEW_ORDSTATUS;
-
-    if ((*orderData)->marketLike())
-    {
-        assert(nullptr != evnt.orderBook_);
-        if (!evnt.orderBook_->find(FindAnyOpositeOrder((*orderData))).isValid())
-        {
-            throw std::runtime_error("There is no market for this instrument!");
-        }
-    }
 
     // FX Swap: validate far-leg fields are set (isValid already checked, but assert here)
     if (FXSWAP_ORDERTYPE == (*orderData)->ordType_)
@@ -218,6 +205,45 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
     // A stop order is held until a trade reaches its stop (#223); a market order is matched once, and anything else is
     // matched, then booked with what is left
     addBooking(*orderData, evnt.transaction_);
+}
+
+bool OrdStateImpl::processRefused(OrdState::onOrderReceived const &evnt)
+{
+    assert(nullptr != evnt.order_);
+    if (!evnt.order_->isValid(&evnt.refusal_))
+    {
+        return true;
+    }
+    if (evnt.order_->marketLike())
+    {
+        assert(nullptr != evnt.orderBook_);
+        if (!evnt.orderBook_->find(FindAnyOpositeOrder(evnt.order_)).isValid())
+        {
+            evnt.refusal_ = "There is no market for this instrument!";
+            return true;
+        }
+    }
+    return false;
+}
+
+void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onOrderReceived const &evnt)
+{
+    assert(nullptr != orderData);
+    assert(nullptr == *orderData);
+    assert(nullptr != evnt.order_);
+
+    *orderData = evnt.order_;
+    // generate id for the order
+    assert(nullptr != evnt.generator_);
+    assert(nullptr != evnt.orderStorage_);
+    try
+    {
+        *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
+    }
+    catch (const std::exception &) // save refuses a ClOrdID empty or in use: the order is rejected unstored (#67)
+    {
+    }
+    (*orderData)->leavesQty_ = 0; // rejected, so closed (#427)
 }
 
 void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onRplOrderReceived const &evnt)
@@ -276,8 +302,7 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvOrderRe
     {
     }
     // A rejected order is closed, and a closed order's LeavesQty is 0, whatever closed it (#386, #427): whether the
-    // reject stores it, as here, or its receive stored it before refusing it (above), as it does a market order with
-    // nothing to trade with
+    // reject stores it, as here, or its receive stored it before it threw (above)
     (*orderData)->leavesQty_ = 0;
 }
 
