@@ -979,6 +979,38 @@ TEST_F(TaskManagerTest, OrderWithAClOrdIdInUseIsRefusedWithoutBeingStored)
     EXPECT_EQ("Order refused: ClOrdID " + clOrdText + " is already in use", rejects[0].first.reason_);
 }
 
+TEST_F(TaskManagerTest, AMarketOrderWithNothingToTradeWithAndAClOrdIdInUseIsRefusedWithoutBeingStored)
+{
+    // Since #436 a market order with nothing to trade with is refused before it is stored, so the store that finds its
+    // ClOrdID in use is the reject's, where it had been the receive's. Either way the order is never stored, and its
+    // sender is told that its ClOrdID is in use (#67).
+    auto manager = createTaskManager(1, 1);
+
+    auto first = createCorrectOrder(instrumentId1_);
+    assignClOrderId(first.get());
+    RawDataEntry clOrdId = first->clOrderId_.get();
+    const std::string clOrdText(clOrdId.data_, clOrdId.length_);
+    auto second = createCorrectOrder(instrumentId1_);
+    second->clOrderId_ = first->clOrderId_;
+    second->ordType_ = MARKET_ORDERTYPE; // a buy, as the first is: nothing on the other side
+    inQueues_->push("first-client", OrderEvent(first.release()));
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+    inQueues_->push("second-client", OrderEvent(second.release()));
+    EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
+
+    OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, stored);
+    EXPECT_EQ(NEW_ORDSTATUS, stored->status_);
+    EXPECT_EQ(LIMIT_ORDERTYPE, stored->ordType_);
+    EXPECT_EQ(0, manager->tasksFailed());
+    auto rejects = outQueues_->orderRejects();
+    ASSERT_EQ(1u, rejects.size());
+    EXPECT_EQ("second-client", rejects[0].second);
+    EXPECT_TRUE(rejects[0].first.duplicateClOrderId_);
+    EXPECT_EQ("Order refused: ClOrdID " + clOrdText + " is already in use", rejects[0].first.reason_);
+    EXPECT_FALSE(outQueues_->report(REJECT_EXECTYPE).has_value()) << "an order never stored has no reject report";
+}
+
 TEST_F(TaskManagerTest, ReplacementWithAClOrdIdInUseIsRefusedWithoutBeingStored)
 {
     // A cancel/replace request's replacement can reuse a ClOrdID too: here, the original's own (#67). The replacement

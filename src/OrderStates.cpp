@@ -47,6 +47,21 @@ template <class FSM> void Rejected::on_entry(onRecvOrderRejected const &evnt, FS
     evnt.transaction_->addOperation(op);
 }
 
+/// A new order its checks refuse before it is stored (OrderState_::refused(), #436), reported with their reason
+template <class FSM> void Rejected::on_entry(onOrderReceived const &evnt, FSM &)
+{
+    if (evnt.testStateMachine_)
+    {
+        return;
+    }
+    assert(nullptr != evnt.order4StateMachine_);
+    evnt.order4StateMachine_->status_ = REJECTED_ORDSTATUS;
+
+    std::unique_ptr<Operation> op(
+        new CreateRejectExecReportTrOperation(evnt.refusal_, COP::REJECTED_ORDSTATUS, *evnt.order4StateMachine_));
+    evnt.transaction_->addOperation(op);
+}
+
 template <class FSM> void Rejected::on_entry(onRecvRplOrderRejected const &evnt, FSM &)
 {
     if (evnt.testStateMachine_)
@@ -502,6 +517,7 @@ template <class FSM> void NoCnlReplace::on_entry(onReplaceRejected const &evnt, 
 // Rejected state on_entry instantiations
 template void Rejected::on_entry<OrderState>(onReplace const &, OrderState &);
 template void Rejected::on_entry<OrderState>(onRecvOrderRejected const &, OrderState &);
+template void Rejected::on_entry<OrderState>(onOrderReceived const &, OrderState &);
 template void Rejected::on_entry<OrderState>(onRecvRplOrderRejected const &, OrderState &);
 template void Rejected::on_entry<OrderState>(onExternalOrderRejected const &, OrderState &);
 template void Rejected::on_entry<OrderState>(onOrderRejected const &, OrderState &);

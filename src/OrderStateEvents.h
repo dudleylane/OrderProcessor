@@ -75,6 +75,8 @@ struct OrderStateEvent
 struct onOrderReceived : public OrderStateEvent
 {
     OrderEntry *order_;
+    /// Why OrderState_::refused() refuses the order, for the report of its reject (#436)
+    mutable std::string refusal_;
 
     onOrderReceived() : order_(nullptr) {}
     explicit onOrderReceived(OrderEntry *order) : order_(order) {}

@@ -1000,8 +1000,9 @@ TEST_F(ProcessorTest, StateChangeWaitsForTheTransactionThatBooksTheOrder)
 
 TEST_F(ProcessorTest, MarketOrderWithNothingToMatchIsStoredOnceAndRejected)
 {
-    // The receive stores the order, then finds nothing on the other side and refuses it. The reject asserted it had
-    // been handed the incoming order rather than the stored copy, and Debug builds aborted here (#68).
+    // The receive stored the order, then found nothing on the other side and refused it. The reject asserted it had
+    // been handed the incoming order rather than the stored copy, and Debug builds aborted here (#68). Since #436 the
+    // order is refused before it is stored, and the reject stores it.
     auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
     order->ordType_ = MARKET_ORDERTYPE;
     RawDataEntry clOrdId = order->clOrderId_.get();
@@ -1256,6 +1257,24 @@ public:
             const TradeExecEntry *trade = static_cast<const TradeExecEntry *>(evnt.exec_);
             trades_.push_back(Trade{ trade->orderId_, trade->lastQty_, trade->lastPx_, trade->tradeDate_ });
         }
+        if (REJECT_EXECTYPE == evnt.exec_->type_)
+        {
+            const RejectExecEntry *reject = static_cast<const RejectExecEntry *>(evnt.exec_);
+            rejectReasons_.emplace_back(reject->orderId_, reject->rejectReason_);
+        }
+    }
+
+    /// The reason the order's reject report gave, empty if it was sent none (#436)
+    std::string rejectReasonOf(const IdT &orderId) const
+    {
+        for (const auto &reject : rejectReasons_)
+        {
+            if (reject.first == orderId)
+            {
+                return reject.second;
+            }
+        }
+        return std::string();
     }
     void push(const Queues::CancelRejectEvent &, const std::string &) override {}
     void push(const Queues::BusinessRejectEvent &, const std::string &) override {}
@@ -1364,6 +1383,7 @@ public:
 
     std::vector<Trade> trades_;
     std::vector<Report> reports_;
+    std::vector<std::pair<IdT, std::string>> rejectReasons_;
     /// If set, every report is noted here as "report <type>"
     std::vector<std::string> *log_ = nullptr;
 };
@@ -2673,9 +2693,9 @@ TEST_F(ProcessorTest, AnIocOrderWithNothingToTradeIsCanceledNotRejected)
 TEST_F(ProcessorTest, AnOrderTheEngineStoresAndRejectsIsReportedWithNoLeaves)
 {
     // A rejected order is closed, and a closed order's LeavesQty is 0, whatever closed it (#386, #427). The engine stores
-    // an order it rejects in two ways: the reject stores an order isValid() refuses, here a limit order at 0 (#188), and
-    // the receive stores a market order before finding it nothing to trade with. Each used to be reported with all of
-    // its quantity left.
+    // an order it rejects as it rejects it: one isValid() refuses, here a limit order at 0 (#188), and a market order
+    // with nothing to trade with, which until #436 the receive stored before finding it nothing to trade with. Each
+    // used to be reported with all of its quantity left.
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
     const OrderEntry *invalid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 0.0, 100));
     auto order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 100);
@@ -2691,6 +2711,25 @@ TEST_F(ProcessorTest, AnOrderTheEngineStoresAndRejectsIsReportedWithNoLeaves)
         EXPECT_EQ(0u, engine.reports_.leavesReportedWith(rejected->orderId_, REJECT_EXECTYPE));
     }
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "a rejected order rests in the book";
+}
+
+TEST_F(ProcessorTest, AnOrderItsChecksRefuseIsReportedWithTheirReason)
+{
+    // A new order its checks refuse takes a row of its own to Rejected, with no exception raised, where processReceive()
+    // threw and receive() rethrew (#436). Its report carries the reason the check gives, as the exception's message
+    // did: isValid()'s for a limit order at 0 (#188), and the market's for a market order with nothing to trade with.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *invalid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 0.0, 100));
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 100);
+    order->ordType_ = MARKET_ORDERTYPE;
+    const OrderEntry *market = engine.submit(std::move(order));
+
+    ASSERT_NE(nullptr, invalid);
+    ASSERT_NE(nullptr, market);
+    EXPECT_EQ(REJECTED_ORDSTATUS, invalid->status_);
+    EXPECT_EQ(REJECTED_ORDSTATUS, market->status_);
+    EXPECT_EQ("Invalid value of the order price!", engine.reports_.rejectReasonOf(invalid->orderId_));
+    EXPECT_EQ("There is no market for this instrument!", engine.reports_.rejectReasonOf(market->orderId_));
 }
 
 TEST_F(ProcessorTest, AFokOrderTheBookCanFillTradesInFullAcrossLevels)
