@@ -770,6 +770,50 @@ static void BM_ProcessFokFill(benchmark::State &state)
 }
 BENCHMARK(BM_ProcessFokFill);
 
+static void BM_ProcessSweep(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // Where the timed path ends: a buy for 100 that takes four sells of 25, so only a sweep of all four fills it
+    for (int i = 0; i < 4; ++i)
+    {
+        engine.submit(engine.newOrder(SELL_SIDE, 50.0, 25));
+    }
+    engine.submit(engine.newOrder(BUY_SIDE, 50.0, 100));
+    if (!engine.lastEndedAs(state, FILLED_ORDSTATUS, 100))
+    {
+        return;
+    }
+
+    // Four resting sells of 25 per iteration, all at one price, and a buy for 100 at it, so each timed buy sweeps the
+    // four oldest: four trades, each with its deferred execution events and its sell's book removal, and between them
+    // the three matches that continue the sweep (#477). The only benchmark in which a sweep's next match finds another
+    // order to trade with: every other timed order trades once, and an IOC's next match finds nothing.
+    for (u64 i = 0; i < 4 * static_cast<u64>(state.max_iterations); ++i)
+    {
+        engine.submit(engine.newOrder(SELL_SIDE, 100.0, 25));
+    }
+
+    std::vector<OrderEntry *> aggressors;
+    aggressors.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        aggressors.push_back(engine.newOrder(BUY_SIDE, 100.0, 100));
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessSweep);
+
 static void BM_ProcessExpiry(benchmark::State &state)
 {
     EngineFixture engine;
