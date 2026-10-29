@@ -318,6 +318,63 @@ TEST_F(FxSwapTest, SwapFarPriceIncompatible_NoMatch)
     EXPECT_EQ(0u, deferedContainer_->events_.size());
 }
 
+TEST_F(FxSwapTest, OnlyAWorkingSwapIsTradedWith)
+{
+    // The swap search passes by every status but NEW and PARTFILL, whatever the swap has left, as an outright order's
+    // search does (#432): a suspended swap keeps what it has left. So does the FOK check, which walks every order
+    OrderEntry *buySwap = createAndSaveSwapOrder(BUY_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    ASSERT_NE(nullptr, buySwap);
+    buySwap->status_ = NEW_ORDSTATUS;
+    for (int s = INVALID_ORDSTATUS; s <= CANCELED_ORDSTATUS; ++s)
+    {
+        const OrderStatus status = static_cast<OrderStatus>(s);
+        OrderEntry *sellSwap = createAndSaveSwapOrder(SELL_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+        ASSERT_NE(nullptr, sellSwap);
+        sellSwap->status_ = status;
+        orderBook_->add(*sellSwap);
+
+        const bool working = (NEW_ORDSTATUS == status) || (PARTFILL_ORDSTATUS == status);
+        const IdT contra = OrderMatcher::findContra(buySwap, *orderBook_, OrderStorage::instance());
+        EXPECT_EQ(working, contra.isValid()) << "status " << s;
+        if (working)
+        {
+            EXPECT_EQ(sellSwap->orderId_, contra) << "status " << s;
+        }
+        EXPECT_EQ(working, OrderMatcher::canFillAtOnce(buySwap, *orderBook_, OrderStorage::instance()))
+            << "status " << s;
+        orderBook_->remove(*sellSwap);
+    }
+
+    // Nor is a NEW one with nothing left (#386)
+    OrderEntry *sellSwap = createAndSaveSwapOrder(SELL_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    ASSERT_NE(nullptr, sellSwap);
+    sellSwap->status_ = NEW_ORDSTATUS;
+    sellSwap->leavesQty_ = 0;
+    orderBook_->add(*sellSwap);
+    EXPECT_FALSE(OrderMatcher::findContra(buySwap, *orderBook_, OrderStorage::instance()).isValid());
+    EXPECT_FALSE(OrderMatcher::canFillAtOnce(buySwap, *orderBook_, OrderStorage::instance()));
+}
+
+TEST_F(FxSwapTest, ASwapThatIsntWorkingDoesntEndTheSearch)
+{
+    // A suspended swap with the best near price, which trades with the buy on both legs but for its status, is passed
+    // by, and the working swap behind it is found (#432)
+    OrderEntry *suspended = createAndSaveSwapOrder(SELL_SIDE, 1.0840, 1.0872, 100, 1000, 2000);
+    ASSERT_NE(nullptr, suspended);
+    suspended->status_ = SUSPENDED_ORDSTATUS;
+    orderBook_->add(*suspended);
+    OrderEntry *working = createAndSaveSwapOrder(SELL_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    ASSERT_NE(nullptr, working);
+    working->status_ = NEW_ORDSTATUS;
+    orderBook_->add(*working);
+    ASSERT_EQ(suspended->orderId_, orderBook_->getTop(instrumentId1_, SELL_SIDE));
+
+    OrderEntry *buySwap = createAndSaveSwapOrder(BUY_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    ASSERT_NE(nullptr, buySwap);
+    buySwap->status_ = NEW_ORDSTATUS;
+    EXPECT_EQ(working->orderId_, OrderMatcher::findContra(buySwap, *orderBook_, OrderStorage::instance()));
+}
+
 // =============================================================================
 // Codec Round-Trip Tests
 // =============================================================================

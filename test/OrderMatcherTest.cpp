@@ -373,4 +373,71 @@ TEST_F(OrderMatcherTest, NoMatchAcrossDifferentInstruments)
     SUCCEED();
 }
 
+// =============================================================================
+// Only a working order is traded with (#432)
+// =============================================================================
+
+TEST_F(OrderMatcherTest, OnlyAWorkingOrderIsTradedWith)
+{
+    // The book holds an order the state machine took out of trading until its removal runs, and a suspended one keeps
+    // what it has left. Every status but NEW and PARTFILL is passed by, whatever the order has left.
+    OrderEntry *buy = createAndSaveOrder(BUY_SIDE, 10.0, 100);
+    ASSERT_NE(nullptr, buy);
+    buy->status_ = NEW_ORDSTATUS;
+    for (int s = INVALID_ORDSTATUS; s <= CANCELED_ORDSTATUS; ++s)
+    {
+        const OrderStatus status = static_cast<OrderStatus>(s);
+        OrderEntry *sell = createAndSaveOrder(SELL_SIDE, 10.0, 100);
+        ASSERT_NE(nullptr, sell);
+        sell->status_ = status;
+        orderBook_->add(*sell);
+
+        const bool working = (NEW_ORDSTATUS == status) || (PARTFILL_ORDSTATUS == status);
+        const IdT contra = OrderMatcher::findContra(buy, *orderBook_, OrderStorage::instance());
+        EXPECT_EQ(working, contra.isValid()) << "status " << s;
+        if (working)
+        {
+            EXPECT_EQ(sell->orderId_, contra) << "status " << s;
+        }
+        EXPECT_EQ(working, OrderMatcher::canFillAtOnce(buy, *orderBook_, OrderStorage::instance())) << "status " << s;
+        orderBook_->remove(*sell);
+    }
+
+    // Nor is a NEW one with nothing left (#386)
+    OrderEntry *sell = createAndSaveOrder(SELL_SIDE, 10.0, 100);
+    ASSERT_NE(nullptr, sell);
+    sell->status_ = NEW_ORDSTATUS;
+    sell->leavesQty_ = 0;
+    orderBook_->add(*sell);
+    EXPECT_FALSE(OrderMatcher::findContra(buy, *orderBook_, OrderStorage::instance()).isValid());
+    EXPECT_FALSE(OrderMatcher::canFillAtOnce(buy, *orderBook_, OrderStorage::instance()));
+}
+
+TEST_F(OrderMatcherTest, AnOrderThatIsntWorkingDoesntEndTheSearch)
+{
+    // Passed by, as an order with nothing left is: the next order on the side may trade, where a price that doesn't
+    // ends the search
+    OrderEntry *suspended = createAndSaveOrder(SELL_SIDE, 10.0, 100);
+    ASSERT_NE(nullptr, suspended);
+    suspended->status_ = SUSPENDED_ORDSTATUS;
+    orderBook_->add(*suspended);
+    OrderEntry *working = createAndSaveOrder(SELL_SIDE, 10.5, 100);
+    ASSERT_NE(nullptr, working);
+    working->status_ = NEW_ORDSTATUS;
+    orderBook_->add(*working);
+    ASSERT_EQ(suspended->orderId_, orderBook_->getTop(instrumentId1_, SELL_SIDE));
+
+    OrderEntry *buy = createAndSaveOrder(BUY_SIDE, 11.0, 100);
+    ASSERT_NE(nullptr, buy);
+    buy->status_ = NEW_ORDSTATUS;
+    EXPECT_EQ(working->orderId_, OrderMatcher::findContra(buy, *orderBook_, OrderStorage::instance()));
+    EXPECT_TRUE(OrderMatcher::canFillAtOnce(buy, *orderBook_, OrderStorage::instance()));
+
+    // Only what the working order has left counts towards filling an order at once
+    OrderEntry *bigger = createAndSaveOrder(BUY_SIDE, 11.0, 150);
+    ASSERT_NE(nullptr, bigger);
+    bigger->status_ = NEW_ORDSTATUS;
+    EXPECT_FALSE(OrderMatcher::canFillAtOnce(bigger, *orderBook_, OrderStorage::instance()));
+}
+
 } // namespace
