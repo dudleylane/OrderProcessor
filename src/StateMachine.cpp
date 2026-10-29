@@ -10,11 +10,14 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <atomic>
 #include <cassert>
 #include <stdexcept>
+#include <boost/core/demangle.hpp>
 #include <boost/mpl/size.hpp>
 #include "StateMachine.h"
 #include "DataModelDef.h"
+#include "Logger.h"
 #include "OrderStateMachineImpl.h"
 
 using namespace COP;
@@ -47,6 +50,10 @@ static_assert(stateId<CnclReplaced> == 11, "CnclReplaced's id is persisted");
 static_assert(stateId<Rejected> == 12, "Rejected's id is persisted");
 static_assert(boost::mpl::size<boost::msm::back::generate_state_set<OrderState::stt>::type>::value == ORDER_STATE_COUNT,
               "a new state needs its id pinned above and a name in state_names");
+
+// What exception_caught() has swallowed (#432): refused by design, and failed
+std::atomic<uint64_t> swallowedRefused{ 0 };
+std::atomic<uint64_t> swallowedFailed{ 0 };
 } // namespace
 
 const std::string &OrderState_::getStateName(int idx)
@@ -90,6 +97,59 @@ void OrderState_::setPersistance(const OrderStatePersistence &st)
     states[1] = st.stateZone2Id_;
 }
 
+uint64_t OrderState_::refusedCount() noexcept
+{
+    return swallowedRefused.load(std::memory_order_relaxed);
+}
+
+uint64_t OrderState_::failedCount() noexcept
+{
+    return swallowedFailed.load(std::memory_order_relaxed);
+}
+
+std::string OrderState_::describeSwallowed(bool refused, const std::type_info &event, const IdT &order,
+                                           const int *states, const char *what)
+{
+    std::string name = boost::core::demangle(event.name());
+    const std::string ns = "COP::OrdState::"; // every event is one of COP::OrdState's
+    if (0 == name.compare(0, ns.size(), ns))
+    {
+        name.erase(0, ns.size());
+    }
+    const auto state = [](int idx) -> std::string
+    {
+        return ((0 <= idx) && (idx < ORDER_STATE_COUNT)) ? state_names[idx] : std::to_string(idx);
+    };
+    return std::string("State machine ") + (refused ? "refused " : "failed ") + name + " for " +
+           (order.isValid() ? "order " + std::to_string(order.id_) : std::string("a new order")) + " in " +
+           state(states[0]) + "/" + state(states[1]) + ": " + what;
+}
+
+void OrderState_::swallowed(const std::type_info &event, const OrderEntry *order, const IdT &eventOrder,
+                            const int *states, const std::exception &ex) noexcept
+{
+    const bool refused = (nullptr != dynamic_cast<const TransitionRefused *>(&ex));
+    (refused ? swallowedRefused : swallowedFailed).fetch_add(1, std::memory_order_relaxed);
+    // As in TaskManager::taskFailed(): nothing may leave here (exception_caught()), so a line lost, e.g. to bad_alloc, is
+    // the lesser harm, and the count above still records it
+    try
+    {
+        aux::Logger *log = aux::ExchLogger::instance();
+        const IdT &id = (nullptr != order) ? order->orderId_ : eventOrder;
+        if (!refused)
+        {
+            log->error(describeSwallowed(false, event, id, states, ex.what()));
+        }
+        else if (log->isNoteOn())
+        {
+            log->note(describeSwallowed(true, event, id, states, ex.what()));
+        }
+    }
+    catch (...)
+    {
+    }
+}
+
 void OrderState_::receive(onOrderReceived const &evnt)
 {
     if (evnt.testStateMachine_)
@@ -106,11 +166,12 @@ void OrderState_::receive(onOrderReceived const &evnt)
     catch (const std::exception &ex)
     {
         // What storing the order refuses, a ClOrdID already in use, which refused() can't decide before the store does.
-        // The reject is queued, and the rethrow stops the transition to New, so that the reject leaves Rcvd_New (#436).
+        // The reject is queued, and the throw stops the transition to New, so that the reject leaves Rcvd_New (#436): a
+        // TransitionRefused, which exception_caught() notes rather than logs as a failure (#432).
         onRecvOrderRejected newEvnt(evnt, evnt.order_, ex.what());
         newEvnt.order4StateMachine_ = orderData_;
         static_cast<OrderState *>(this)->process_event(newEvnt);
-        throw;
+        throw TransitionRefused(ex.what());
     }
 }
 
@@ -155,7 +216,7 @@ void OrderState_::receive(onRplOrderReceived const &evnt)
         onRecvRplOrderRejected newEvnt(evnt, evnt.order_, ex.what());
         newEvnt.order4StateMachine_ = orderData_;
         static_cast<OrderState *>(this)->process_event(newEvnt);
-        throw;
+        throw TransitionRefused(ex.what());
     }
 }
 
@@ -176,7 +237,7 @@ void OrderState_::accept(onExternalOrder const &evnt)
         onExternalOrderRejected newEvnt(evnt, evnt.order_, ex.what());
         newEvnt.order4StateMachine_ = orderData_;
         static_cast<OrderState *>(this)->process_event(newEvnt);
-        throw;
+        throw TransitionRefused(ex.what());
     }
 }
 
@@ -221,7 +282,7 @@ void OrderState_::accept(onReplace const &evnt)
         {
             onRplOrderRejected newEvnt(evnt, "Test reject");
             static_cast<OrderState *>(this)->process_event(newEvnt);
-            throw std::runtime_error("Test reject");
+            throw TransitionRefused("Test reject");
         }
         return;
     }
@@ -236,7 +297,7 @@ void OrderState_::accept(onReplace const &evnt)
         onRplOrderRejected newEvnt(evnt, ex.what());
         newEvnt.order4StateMachine_ = orderData_;
         static_cast<OrderState *>(this)->process_event(newEvnt);
-        throw;
+        throw TransitionRefused(ex.what());
     }
 }
 
