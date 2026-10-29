@@ -3098,6 +3098,37 @@ TEST_F(ProcessorTest, AnIocOrderWhoseFillDoesntApplyIsCanceled)
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
 }
 
+TEST_F(ProcessorTest, ATradeWhoseFillDoesntApplyReleasesNoStop)
+{
+    // A trade's price reaches the held stops only once the trade has happened (#480). match() released them as it
+    // decided the trade, before either fill ran: a buy matched with a sell whose fill the state machine drops traded
+    // nothing, yet the buy stop at its price was released, and, matched as a market order, canceled. A trade that
+    // didn't happen has no price, so it reaches no stop on either side: the sell stop below it stays held too.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *unfillable = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 50));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+    OrderEntry *sellStop = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 9.5));
+    ASSERT_NO_FATAL_FAILURE(makeUnfillable(engine, inQueues_.get(), unfillable));
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    auto buy = createTestOrder(instrId1_, BUY_SIDE, 10.0, 50);
+    const RawDataEntry clOrdId = buy->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(buy.release()));
+    EXPECT_NO_THROW(engine.processor_.process());
+    engine.processQueued(0); // the removal, the trade's transaction, then any release
+    EXPECT_EQ(failed + 1, OrdState::OrderState::failedCount()) << "the dropped fill, once";
+
+    const OrderEntry *bought = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, bought);
+    EXPECT_EQ(0u, bought->cumQty_);
+    EXPECT_FALSE(stop->stopTriggered_) << "a trade that never happened released the stop";
+    EXPECT_EQ(NEW_ORDSTATUS, stop->status_);
+    EXPECT_EQ(std::vector<ExecType>{ NEW_EXECTYPE }, engine.reports_.reportTypesOf(stop->orderId_));
+    EXPECT_FALSE(sellStop->stopTriggered_);
+    EXPECT_EQ(std::vector<ExecType>{ NEW_EXECTYPE }, engine.reports_.reportTypesOf(sellStop->orderId_));
+    EXPECT_EQ((OrderBook::OrdersT{ stop->orderId_, sellStop->orderId_ }), heldStops(*orderBook_, instrId1_));
+}
+
 TEST_F(ProcessorTest, ADayOrderExpiresAtTheEndOfItsDayAndAGtcOrderDoesNot)
 {
     // 17:00 New York (#240, ruled 2026-10-16): 21:00 UTC, as New York keeps daylight time in October
