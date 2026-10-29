@@ -102,11 +102,13 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
         scope->addOperationFirst(lastTrade);
     }
 
-    // Then what follows the trade: the sweep's next match if the base order's fill applied, which it runs only once a
-    // contra's has, or the sweep's end if it didn't (#477). match() decided the trade before either fill ran, so it
-    // can't tell: it queued the next match from the trade's quantity, and a fill the state machine dropped was traded
-    // again without end. Queued now, the next match lands in the chain's next batch, after the releases match() queued
-    // with the trade, so the transactions run in the order they did: the trade's, the releases', the next match's.
+    // Then what follows the trade, if the base order's fill applied, which it runs only once a contra's has: the
+    // releases of the held stops the trade's price reaches (#480), then the sweep's next match. If it didn't, the
+    // sweep's end, with no release (#477). match() decided the trade before either fill ran, so it can't tell: it
+    // queued the next match from the trade's quantity, so that a fill the state machine dropped was traded again
+    // without end, and it released the stops the trade's price reached though the trade never happened. Queued now,
+    // both land in the chain's next batch, the releases first, so the transactions run in the order they did: the
+    // trade's, the releases', the next match's.
     assert(nullptr != cnxt.orderMatch_);
-    cnxt.orderMatch_->afterTrade(baseOrder_, baseBefore);
+    cnxt.orderMatch_->afterTrade(baseOrder_, baseBefore, lastPrint, cnxt);
 }
