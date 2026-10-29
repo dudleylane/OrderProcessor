@@ -442,7 +442,7 @@ COP (Concurrent Order Processor)
 | `OrderMatcherTest.cpp` | `OrderMatcherTest.*` | Order matching unit tests |
 | `OrderMatcherTest.cpp` | `OnlyAWorkingOrderIsTradedWith`, `AnOrderThatIsntWorkingDoesntEndTheSearch` | `findContra()` and `canFillAtOnce()` pass by every status but NEW and PARTFILL, whatever the order has left, and go on to the next order (#432) |
 | `IntegrationTest.cpp` | `IntegrationTest.*` | Order matching in full flow |
-| `ProcessorBench.cpp` | `BM_ProcessNewOrderWithMatch`, `BM_TaskManagerTrades` | Matching through a `Processor`, and through the worker pool |
+| `ProcessorBench.cpp` | `BM_ProcessNewOrderWithMatch`, `BM_ProcessSweep`, `BM_TaskManagerTrades` | Matching through a `Processor`, a sweep that takes four resting orders, each of its next matches finding the next (#477), and through the worker pool |
 | `OrderMatchingBench.cpp` | `BM_OrderBook*` | The book the matcher searches: add, remove, find, top of book |
 
 ---
