@@ -283,7 +283,7 @@ Tests for FX Swap data model, matching, validation, and codec support.
 | `SwapNoMatch_RestsOnBook` | Swap order with no contra → rests (no auto-cancel) |
 | `SwapDoesNotMatchLimitOrder` | Swap order does not match regular LIMIT order |
 | `SwapMatchExact` | Two contra swaps match → 1 SwapExecutionDeferedEvent |
-| `SwapMatchPartial_ChainsMatchEvent` | Partial qty → SwapExec + MatchSwapOrderDeferedEvent |
+| `SwapMatchPartial_QueuesOnlyTheTrade` | Partial qty → SwapExec alone: the next match waits for the fills (#477) |
 | `SwapSettlDateMismatch_NoMatch` | Different farSettlDate → no match |
 | `SwapFarPriceIncompatible_NoMatch` | Incompatible far price → no match |
 | `SwapCodecRoundTrip` | Encode/decode preserves farPrice + farSettlDate (v1) |

@@ -265,7 +265,7 @@ TEST_F(FxSwapTest, SwapMatchExact)
     EXPECT_EQ(1u, deferedContainer_->events_.size());
 }
 
-TEST_F(FxSwapTest, SwapMatchPartial_ChainsMatchEvent)
+TEST_F(FxSwapTest, SwapMatchPartial_QueuesOnlyTheTrade)
 {
     // Contra sell swap on book with qty 50
     OrderEntry *sellSwap = createAndSaveSwapOrder(SELL_SIDE, 1.0850, 1.0872, 50, 1000, 2000);
@@ -278,8 +278,9 @@ TEST_F(FxSwapTest, SwapMatchPartial_ChainsMatchEvent)
 
     matcher_->match(buySwap, context_);
 
-    // Should produce SwapExecutionDeferedEvent + MatchSwapOrderDeferedEvent
-    EXPECT_EQ(2u, deferedContainer_->events_.size());
+    // Only the SwapExecutionDeferedEvent: the sweep's next match waits for the trade's fills, which decide whether it
+    // goes on (OrderMatcher::afterSwapTrade(), #477)
+    EXPECT_EQ(1u, deferedContainer_->events_.size());
 }
 
 TEST_F(FxSwapTest, SwapSettlDateMismatch_NoMatch)

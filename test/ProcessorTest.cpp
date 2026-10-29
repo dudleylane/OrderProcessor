@@ -1376,6 +1376,48 @@ TEST_F(ProcessorTest, EachOfASwapFillsLegsIsReportedWithWhatTheFillLeft)
     EXPECT_EQ((Figures{ { 0, 30 } }), outQueues.tradeFiguresOf(a2->orderId_, FAR_LEG));
 }
 
+TEST_F(ProcessorTest, ASwapSweepsEverySwapItCrosses)
+{
+    // A swap's sweep goes on to the next swap it crosses once its fill has applied (#477): the trade's event decides both
+    // sides' near legs, then hands the swap to afterSwapTrade(). matchSwap() queued the next match from the trade's
+    // quantity, before either fill ran. A buy swap of 60 takes two resting sell swaps of 30, each trade reporting both
+    // legs on each side.
+    LegRecordingOutQueues outQueues;
+    ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
+                           &outQueues, inQueues_.get(), transMgr_.get());
+    Processor processor;
+    processor.init(params);
+    transMgr_->proc_ = &processor;
+
+    const auto submit = [this, &processor](Side side, QuantityT qty)
+    {
+        auto order = createTestOrder(instrId1_, side, 1.0850, qty);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->farPrice_ = 1.0872;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        const RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        processor.process();
+        return OrderStorage::instance()->locateByClOrderId(clOrdId);
+    };
+    const OrderEntry *first = submit(SELL_SIDE, 30);
+    const OrderEntry *second = submit(SELL_SIDE, 30);
+    const OrderEntry *buy = submit(BUY_SIDE, 60);
+    ASSERT_NE(nullptr, first);
+    ASSERT_NE(nullptr, second);
+    ASSERT_NE(nullptr, buy);
+
+    EXPECT_EQ(FILLED_ORDSTATUS, buy->status_);
+    EXPECT_EQ(60u, buy->cumQty_);
+    EXPECT_EQ(FILLED_ORDSTATUS, first->status_);
+    EXPECT_EQ(FILLED_ORDSTATUS, second->status_);
+    using Figures = std::vector<std::pair<QuantityT, QuantityT>>; // a trade report's LeavesQty and CumQty
+    EXPECT_EQ((Figures{ { 30, 30 }, { 0, 60 } }), outQueues.tradeFiguresOf(buy->orderId_, NEAR_LEG));
+    EXPECT_EQ((Figures{ { 30, 30 }, { 0, 60 } }), outQueues.tradeFiguresOf(buy->orderId_, FAR_LEG));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, SELL_SIDE).isValid()) << "a filled sell swap is still in the book";
+}
+
 // =============================================================================
 // Orders a crash left without their fills (#207)
 // =============================================================================

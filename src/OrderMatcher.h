@@ -43,6 +43,10 @@ public:
     /// machine drops (#432), ends the sweep as a match that finds nothing to trade with ends it: an order that never
     /// rests is canceled with what it has left, and any other rests with it.
     void afterTrade(OrderEntry *order, QuantityT leavesBefore);
+    /// afterTrade() for a swap, once its trade's event has decided both sides' near legs (#477): if the swap's fill
+    /// applied and left it something, its sweep goes on (matchSwap() again). A fill that didn't apply ends the sweep as
+    /// finding no swap to trade with ends it: the swap rests, whatever its time in force, as matchSwap() leaves it.
+    void afterSwapTrade(OrderEntry *order, QuantityT leavesBefore);
     /// Whether the book holds enough, on the other side of order's instrument, of what order trades with to fill it at
     /// once: the orders findContra() would take, in the order it takes them.
     static bool canFillAtOnce(OrderEntry *order, const OrderBook &book, Store::OrderDataStorage *storage);
