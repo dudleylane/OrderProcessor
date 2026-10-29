@@ -13,7 +13,11 @@
 #ifndef _STATE_MACHINE__H
 #define _STATE_MACHINE__H
 
+#include <cstdint>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <typeinfo>
 #include <vector>
 
 //#define BOOST_MPL_CFG_NO_PREPROCESSED_HEADERS
@@ -36,6 +40,15 @@ struct OrderEntry;
 namespace OrdState
 {
 
+/// What an action throws, once it has queued the reject that answers its event, to stop its row's transition (#432): an
+/// order its store refuses (a ClOrdID in use), a replacement whose receive fails, an external order or a replace refused.
+/// exception_caught() expects it and notes it: the reject is the outcome, not a failure.
+class TransitionRefused : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
 // Front-end state machine definition
 struct OrderState_ : public boost::msm::front::state_machine_def<OrderState_>
 {
@@ -48,6 +61,16 @@ public:
 
     OrderStatePersistence getPersistence() const;
     void setPersistance(const OrderStatePersistence &state);
+
+    /// What the state machines have swallowed since the process started (#432). Boost.MSM hands whatever an action, a
+    /// guard or no_transition() throws to exception_caught(), and process_event() then returns as if the event was
+    /// handled. Refused counts the TransitionRefused an action throws by design, failed every other: a missing row, or
+    /// an action that failed. Each failure is logged as an error.
+    static uint64_t refusedCount() noexcept;
+    static uint64_t failedCount() noexcept;
+    /// The line exception_caught() logs: the event, the order, its state in each zone, and why (#432)
+    static std::string describeSwallowed(bool refused, const std::type_info &event, const IdT &order, const int *states,
+                                         const char *what);
 
 public:
     /// main zone
@@ -274,18 +297,32 @@ public:
 	> {};
     // clang-format on
 
-    // Replaces the default no-transition response.
+    // Replaces the default no-transition response: the throw reaches exception_caught(), which logs it (#432)
     template <class FSM, class Event> void no_transition(Event const &, FSM &, int)
     {
-        throw std::runtime_error("no transition!");
-        /*std::cout << "no transition from state " << state
-            << " on event " << typeid(e).name() << std::endl;*/
-        //return state;
+        throw std::runtime_error("no transition");
     }
 
-    template <class FSM, class Event> void exception_caught(Event const &, FSM &, std::exception &) {}
+    /// Boost.MSM's catch of whatever an action, a guard or no_transition() throws in process_event(): counted, and a
+    /// failure logged (#432). It must not throw. MSM marks the machine busy before it dispatches an event, clears the
+    /// mark after this returns, and only then runs the events an action queued: a throw from here would drop a refused
+    /// order's reject, and leave this worker's machine queuing every later event without processing it.
+    template <class FSM, class Event> void exception_caught(Event const &evnt, FSM &fsm, std::exception &ex) noexcept
+    {
+        if constexpr (std::is_base_of_v<OrderStateEvent, Event>)
+        {
+            swallowed(typeid(Event), orderData_, evnt.orderId_, fsm.current_state(), ex);
+        }
+        else
+        {
+            swallowed(typeid(Event), orderData_, IdT(), fsm.current_state(), ex);
+        }
+    }
 
 private:
+    static void swallowed(const std::type_info &event, const OrderEntry *order, const IdT &eventOrder,
+                          const int *states, const std::exception &ex) noexcept;
+
     OrderEntry *orderData_;
 };
 
