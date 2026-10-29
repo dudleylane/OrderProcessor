@@ -653,7 +653,8 @@ void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope 
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, true);
 
     // A timer was set when the order was accepted (#240), and the order may have filled, been canceled, replaced or
-    // expired since: then it decides nothing. The state machine has no row for those, and its no_transition throws.
+    // expired since: then it decides nothing. The state machine has no row for those: its no_transition would leave the
+    // order persisted unchanged, the failure only counted and logged (#432).
     const OrderStatus status = order->status_;
     const bool live = (NEW_ORDSTATUS == status) || (PARTFILL_ORDSTATUS == status) || (SUSPENDED_ORDSTATUS == status);
     if ((OrderStateChange::EXPIRE == change) && !live)
