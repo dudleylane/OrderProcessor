@@ -314,6 +314,10 @@ protected:
         sellOrderTemp->orderQty_ = 100;
         sellOrderTemp->leavesQty_ = 100;
         sellOrder_ = OrderStorage::instance()->save(*sellOrderTemp, IdTGenerator::instance());
+        // Accepted, as the engine books an order: the matcher passes by an order in the book that isn't working (#432),
+        // and a saved order is still RECEIVEDNEW
+        buyOrder_->status_ = NEW_ORDSTATUS;
+        sellOrder_->status_ = NEW_ORDSTATUS;
     }
 
     void TearDown() override
