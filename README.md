@@ -270,15 +270,16 @@ Every row names the benchmark that produces it, so you can reproduce it:
 `./build/orderProcessorBench --benchmark_filter=BM_ProcessNewOrder`.
 
 Measured on the dev box (4 cores / 8 threads, Release, `-O3 -march=native -flto`). Your machine will
-differ; these numbers are a shape, not a specification. Every row but three comes from one session on
+differ; these numbers are a shape, not a specification. Every row but four comes from one session on
 2026-10-28, at master c4e7724: three runs of 5 repetitions each, pinned to CPUs 2-5, and each row gives the
-median of the three runs' medians (#429). Each of the other three comes from a session of its own on
+median of the three runs' medians (#429). Each of the other four comes from a session of its own on
 2026-10-29, taken the same way. #432 added two. `BM_ProcessFokFill`'s was taken at master 8017381 with the
 benchmark added: a new order took ~2.6 µs in it, a match ~5.0 and an IOC's remainder ~6.0.
 `BM_ProcessDuplicateClOrdId`'s was taken with #432's change to the matcher in as well: a new order took ~2.8 µs
 in it, and an order its checks refuse (`BM_ProcessInvalidOrder`) ~2.6. #477 added `BM_ProcessSweep`, taken at
 master a7804f7 with the benchmark added: a new order took ~2.8 µs in it, a match ~5.1 and an IOC's remainder
-~6.2.
+~6.2. #480 added `BM_ProcessStopRelease`, taken at master 0f4cdca with the benchmark added: a new order took
+~2.7 µs in it, a match ~5.2 and a sweep ~13.8.
 
 | Benchmark | Time | Throughput | What it covers |
 |-----------|------|------------|----------------|
@@ -289,6 +290,7 @@ master a7804f7 with the benchmark added: a new order took ~2.8 µs in it, a matc
 | `BM_ProcessIocRemainder` | ~6.1 µs | ~165K orders/sec | an IOC that trades part of itself: the trade, its deferred execution events, and the engine's cancel of the rest (#426) |
 | `BM_ProcessFokFill` | ~5.0 µs | ~200K orders/sec | a FOK order the book fills at once: the check that it can (`canFillAtOnce()`, #240), then the trade, its deferred execution events, and the book removal (#432) |
 | `BM_ProcessSweep` | ~13.4 µs | ~75K orders/sec | a buy that sweeps four resting sells: four trades, each with its deferred execution events and book removal, and the three matches between them that continue the sweep (#477) |
+| `BM_ProcessStopRelease` | ~8.9 µs | ~113K orders/sec | a buy whose trade releases a held stop: the trade, its deferred execution events and book removal, the release of the stops its price reaches, and the release's transaction, which matches the stop as a market order with the sell above it (#480) |
 | `BM_ProcessExpiry` | ~1.5 µs | ~677K orders/sec | a resting DAY order's expiry at its day's end: the transaction its `DAY_END` timer enqueues decides it, takes the order off the book, reports it (#426) |
 | `BM_ProcessRestatement` | ~1.2 µs | ~826K orders/sec | a resting GTC order restated as a business day starts: the transaction its `RESTATEMENT` timer enqueues begins the order's next day, persists it, reports it `RESTATED` (#451) |
 | `BM_ProcessInvalidOrder` | ~6.7 µs | ~150K orders/sec | an order `OrderEntry::isValid()` refuses: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
