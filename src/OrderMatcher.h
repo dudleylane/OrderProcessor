@@ -42,8 +42,9 @@ public:
     static bool canFillAtOnce(OrderEntry *order, const OrderBook &book, Store::OrderDataStorage *storage);
 
     /// The order the matcher trades order with first: the best working one (OrderParams::working(), #432) on the other
-    /// side of its instrument's book that it trades with, or an invalid id when there is none. match() starts from it, and a restore uses it to find the
-    /// orders that would have traded with a booked one (#207), so the two decide alike.
+    /// side of its instrument's book that it trades with, or an invalid id when there is none. match() starts from it,
+    /// and a restore uses it to find the orders that would have traded with a booked one (#207), so the two decide
+    /// alike.
     static IdT findContra(OrderEntry *order, const OrderBook &book, Store::OrderDataStorage *storage);
     /// Whether order trades with contra, an order on the other side of its instrument, by their types and prices: the
     /// test findContra() applies to each working order it comes to. Neither quantity nor status is part of it: an order

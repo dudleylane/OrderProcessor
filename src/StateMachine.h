@@ -41,8 +41,8 @@ namespace OrdState
 {
 
 /// What an action throws, once it has queued the reject that answers its event, to stop its row's transition (#432): an
-/// order its store refuses (a ClOrdID in use), a replacement whose receive fails, an external order or a replace refused.
-/// exception_caught() expects it and notes it: the reject is the outcome, not a failure.
+/// order its store refuses (a ClOrdID in use), a replacement whose receive fails, an external order or a replace
+/// refused. exception_caught() expects it and notes it: the reject is the outcome, not a failure.
 class TransitionRefused : public std::runtime_error
 {
 public:
