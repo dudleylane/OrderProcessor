@@ -434,18 +434,15 @@ COP (Concurrent Order Processor)
 │  │         │                                                  │  │
 │  │         ▼                                                  │  │
 │  │   ┌─────────────────────────────────────────────┐         │  │
-│  │   │ 6. For each held stop the trade reaches,    │         │  │
-│  │   │    queue a ReleaseStopDeferedEvent (#223)   │         │  │
-│  │   └─────────────────────────────────────────────┘         │  │
-│  │         │                                                  │  │
-│  │         ▼                                                  │  │
-│  │   ┌─────────────────────────────────────────────┐         │  │
-│  │   │ 7. Once the trade's fills are decided:      │         │  │
-│  │   │    continue if the order's applied and qty  │         │  │
-│  │   │    remains; if it didn't, end the sweep as  │         │  │
-│  │   │    finding nothing to trade with ends it:   │         │  │
-│  │   │    an IOC, FOK or market order is canceled, │         │  │
-│  │   │    any other rests (#477)                   │         │  │
+│  │   │ 6. Once the trade's fills are decided, if   │         │  │
+│  │   │    the order's applied: queue a             │         │  │
+│  │   │    ReleaseStopDeferedEvent for each held    │         │  │
+│  │   │    stop the trade reaches (#223, #480),     │         │  │
+│  │   │    then continue if qty remains. If it      │         │  │
+│  │   │    didn't, release nothing and end the      │         │  │
+│  │   │    sweep as finding nothing to trade with   │         │  │
+│  │   │    ends it: an IOC, FOK or market order is  │         │  │
+│  │   │    canceled, any other rests (#477)         │         │  │
 │  │   └─────────────────────────────────────────────┘         │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                  │
@@ -735,7 +732,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**What follows a trade (#477).** The matcher decides a trade from both orders' leaves before either fill runs, so what follows the trade waits for its fills. `ExecutionDeferedEvent::execute()` decides them, the contra's first and the aggressor's only if the contra's applied, then hands the aggressor to `OrderMatcher::afterTrade()` with what it had left before. A fill that applied and left the aggressor something queues the sweep's next match (`MatchOrderDeferedEvent`), which lands in the chain's next batch, after the releases of the held stops the trade reached (§4.5), so the transactions run in the order they did. A fill that didn't apply, which the state machine drops (§5.3), ends the sweep as a match that finds nothing to trade with ends it: an order that never rests (market, a released STOP, IOC, FOK) is canceled with what it has left, and any other rests with it, crossing the order it couldn't trade with. Until #477 `match()` queued the next match from the trade's quantity, before the fill: a fill that didn't apply was traded again without end, and an IOC whose one trade didn't apply was left NEW, neither booked nor canceled. The releases are still queued with the trade, before its fill: #480. On this branch a swap's sweep goes on the same way: `SwapExecutionDeferedEvent::execute()` decides both sides' near legs, then hands the swap to `OrderMatcher::afterSwapTrade()`. A fill that applied and left the swap something queues its next match (`MatchSwapOrderDeferedEvent`); one that didn't ends the sweep as finding no swap to trade with ends it, and the same way (#485): an IOC or FOK swap is canceled with what it has left, and any other rests with it. Until #485 a swap rested there whatever its time in force, as `matchSwap()` left one that found none to trade with, so an IOC swap stayed open, out of the book, and was never canceled. The swap's own near leg is filled, and each side's far leg reported, only if its contra's near fill applied (#481), as an outright aggressor is filled only with what its contras' fills applied: so a contra fill that didn't apply trades nothing, and ends the sweep. Until #481 the swap was filled whatever its contra's fill did, and both far legs were reported, so a dropped contra fill was a one-sided trade, which the sweep repeated with the same contra until the swap had nothing left.
+**What follows a trade (#477, #480).** The matcher decides a trade from both orders' leaves before either fill runs, so what follows the trade waits for its fills. `ExecutionDeferedEvent::execute()` decides them, the contra's first and the aggressor's only if the contra's applied, then hands the aggressor to `OrderMatcher::afterTrade()` with what it had left before and the trade's price. A fill that applied queues the releases of the held stops that price reaches (§4.5), then, if it left the aggressor something, the sweep's next match (`MatchOrderDeferedEvent`): both land in the chain's next batch, the releases first, so the transactions run in the order they did. A fill that didn't apply, which the state machine drops (§5.3), releases nothing and ends the sweep as a match that finds nothing to trade with ends it: an order that never rests (market, a released STOP, IOC, FOK) is canceled with what it has left, and any other rests with it, crossing the order it couldn't trade with. Until #477 `match()` queued the next match from the trade's quantity, before the fill: a fill that didn't apply was traded again without end, and an IOC whose one trade didn't apply was left NEW, neither booked nor canceled. Until #480 it queued the releases there too, so a trade whose fill didn't apply released the stops its price reached. A contra's fill that applied when the aggressor's didn't is #483. On this branch a swap's sweep goes on the same way: `SwapExecutionDeferedEvent::execute()` decides both sides' near legs, then hands the swap to `OrderMatcher::afterSwapTrade()`. A fill that applied and left the swap something queues its next match (`MatchSwapOrderDeferedEvent`); one that didn't ends the sweep as finding no swap to trade with ends it, and the same way (#485): an IOC or FOK swap is canceled with what it has left, and any other rests with it. Until #485 a swap rested there whatever its time in force, as `matchSwap()` left one that found none to trade with, so an IOC swap stayed open, out of the book, and was never canceled. The swap's own near leg is filled, and each side's far leg reported, only if its contra's near fill applied (#481), as an outright aggressor is filled only with what its contras' fills applied: so a contra fill that didn't apply trades nothing, and ends the sweep. Until #481 the swap was filled whatever its contra's fill did, and both far legs were reported, so a dropped contra fill was a one-sided trade, which the sweep repeated with the same contra until the swap had nothing left. A swap's trade releases no stop, as before #480: its legs' prices aren't the instrument's trades, and `matchSwap()` and `afterSwapTrade()` look at no held stop (`ASwapsTradesReleaseNoStop`).
 
 **A fill's own figures (#411).** A booking's transaction decides its fills as it drains its deferred events, and each fill's persist and reports go into a transaction of their own, which shares no object with the instrument's next booking. That booking can match the same resting order, and apply its own fill, before the first fill's transaction runs. So each decision's record and report carry what that decision left the order with (`OrderFigures`: status, LeavesQty, CumQty, AvgPx, the day figures, the stop's mark and the state machine's state), read under the order's write lock as the decision is made. `Processor::persistOrder()` hands them to the order's `PersistOrderTrOperation`, and `CreateTradeExecReportTrOperation` to its report's `ExecReportEvent::figures_`, which the WebSocket `order_update` writes, and on this branch the FIX gateway's ExecutionReport too (`FixOutQueues`: LeavesQty, CumQty, AvgPx, the day figures and the WorkingIndicator, §3.6). A swap's far leg is reported, with no decision of its own, just after its near leg's fill, and takes what that fill left under the order's read lock: the transaction draining the fill names the instrument, as every one that decides about the order does, so nothing decides about it between the two. A second decision about the order in the same transaction replaces the persist's figures, so the transaction still writes the order once (#148). `ReportRestatementTrOperation` takes a restatement's figures the same way (#441). A stop's release persists the order as it is when the transaction runs: its own operation decides as it executes, and its transaction names the instrument.
 
@@ -837,12 +834,20 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ OrderMatcher.match()                               (transaction worker)  │
 │   • Queue the trade's ExecutionDeferedEvent                              │
-│   • holdsStops(instrument)? Then triggeredStops(lastPx): buy stops at or │
-│     below it, lowest first; sell stops at or above it, highest first;    │
-│     each price in arrival order. Queue a ReleaseStopDeferedEvent for     │
-│     each, once per chain of events (claimStopRelease)                    │
-│   • Queued after the trade: a match rolled back, or a fill that throws,  │
-│     drops them with it                                                   │
+└──────────────────────────────────────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ ExecutionDeferedEvent.execute(), then afterTrade()        (same worker)  │
+│   • Decide the fills. Only if the aggressor's applied did the trade      │
+│     happen (#480): holdsStops(instrument)? Then triggeredStops(lastPx):  │
+│     buy stops at or below it, lowest first; sell stops at or above it,   │
+│     highest first; each price in arrival order. Queue a                  │
+│     ReleaseStopDeferedEvent for each, once per chain of events           │
+│     (claimStopRelease), ahead of the sweep's next match (#477)           │
+│   • Queued once the fills are decided: a match rolled back drops the     │
+│     trade's event, and a decision that throws drops the rest of the      │
+│     chain, so neither releases anything                                  │
 └──────────────────────────────────────────────────────────────────────────┘
        │
        ▼
@@ -885,7 +890,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 
 | Test File | Test Case | Description |
 |-----------|-----------|-------------|
-| `ProcessorTest.cpp` | `ProcessorTest.*Stop*` | Hold, release, order of release, cascade, cancel/replace/suspend, races with the release, restarts |
+| `ProcessorTest.cpp` | `ProcessorTest.*Stop*` | Hold, release, order of release, cascade, cancel/replace/suspend, races with the release, restarts, and no release by a trade whose fill didn't apply (#480) |
 | `OrderBookTest.cpp` | `OrderBookTest.*Stop*` | The stop book's order and bounds |
 | `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReleaseStop_*` | The release's execute, rollback and no-ops |
 | `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReportRelease_*` | The TRIGGERED report, and none for a release that released nothing |
@@ -1075,7 +1080,7 @@ A guard that refuses throws nothing, so the handler never sees one: MSM tries th
 
 The handler must not throw, and is `noexcept`. MSM marks the machine busy before it dispatches an event and clears the mark only after the handler returns; then it runs the events an action queued, such as a refused order's reject. A throw from the handler would drop that reject, and leave the worker's machine (one per TBB worker, `thread_local`) queuing every later event without processing it.
 
-A failure stops nothing else: the caller goes on as if the event had been handled, and where it persists the order, persists it unchanged. That is how a trade with an order the matcher shouldn't have taken disappeared without a word, an expired one before #386 and a suspended one before #432. A sweep queued its next match from the trade's quantity, so it could match a dropped fill forever; since #477 it goes on only if its fill applied (§4.3).
+A failure stops nothing else: the caller goes on as if the event had been handled, and where it persists the order, persists it unchanged. That is how a trade with an order the matcher shouldn't have taken disappeared without a word, an expired one before #386 and a suspended one before #432. A sweep queued its next match from the trade's quantity, so it could match a dropped fill forever, and its trade released the stops its price reached whatever its fill did; since #477 it goes on, and since #480 its trade releases them, only if its fill applied (§4.3).
 
 | Test File | Test Cases | Coverage |
 |-----------|------------|----------|

@@ -1016,8 +1016,8 @@ void Processor::releaseRestored(OrderEntry *stop)
     {
         throw std::runtime_error("Processor::releaseRestored: order pointer is null!");
     }
-    // The deferred event a trade that reached the stop queues (OrderMatcher::match), in a transaction of its own. Its
-    // release decides when it runs: a stop no longer held and working is left as it is.
+    // The deferred event a trade that reached the stop queues (OrderMatcher::afterTrade), in a transaction of its own.
+    // Its release decides when it runs: a stop no longer held and working is left as it is.
     ReleaseStopDeferedEvent release(stop);
     onEvent(&release);
 }

@@ -150,8 +150,9 @@ struct MatchSwapOrderDeferedEvent : public DeferedEventBase
     virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
 };
 
-/// The release of a held stop order that a trade reached, queued by the matcher (#223). Its transaction runs the
-/// release, then persists the order, which the release marks released: after it, so the record has the mark.
+/// The release of a held stop order that a trade reached (#223), queued once the trade's fills are decided, if the
+/// trade happened (OrderMatcher::afterTrade(), #480). Its transaction runs the release, then persists the order, which
+/// the release marks released: after it, so the record has the mark.
 struct ReleaseStopDeferedEvent : public DeferedEventBase
 {
     OrderEntry *order_;
