@@ -2983,8 +2983,8 @@ TEST_F(ProcessorTest, AMatchBetweenASuspendAndItsRemovalFromTheBookPassesTheSusp
 
 TEST_F(ProcessorTest, AFokOrderCountsNothingASuspendedOrderInTheBookHasLeft)
 {
-    // The FOK check walks the orders the sweep would take, so it passes by what the sweep passes by (#432). Counting the
-    // suspended order's 100, it found the book could fill a FOK order for 150 at once, which the sweep couldn't.
+    // The FOK check walks the orders the sweep would take, so it passes by what the sweep passes by (#432). Counting
+    // the suspended order's 100, it found the book could fill a FOK order for 150 at once, which the sweep couldn't.
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
     OrderEntry *suspended = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
     OrderEntry *other = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
