@@ -80,9 +80,9 @@ public:
             return false;
         }
         oneapi::tbb::spin_rw_mutex::scoped_lock contrLock(contrOrd->entryMutex_, false);
-        if (0 == contrOrd->leavesQty_)
+        if (!contrOrd->working())
         {
-            return false;
+            return false; // passed by, as findContra() passes it by: what it has left fills nothing (#432)
         }
         if (!OrderMatcher::tradesWith(*order_, *contrOrd))
         {
@@ -116,7 +116,10 @@ bool FindOpositeOrder::match(const IdT &order, bool *stop) const
     // read lock on contra order during field reads
     oneapi::tbb::spin_rw_mutex::scoped_lock contrLock(contrOrd->entryMutex_, false);
 
-    if (0 == contrOrd->leavesQty_)
+    // The book holds an order the state machine took out of trading until its removal, a transaction of its own, runs:
+    // a closed one has no leaves (#386), and a suspended one keeps them. Either is passed by, and the search goes on
+    // (#432): the state machine has no row for a trade with either, and dropped the trade without a word.
+    if (!contrOrd->working())
     {
         return false;
     }

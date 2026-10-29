@@ -712,9 +712,7 @@ void ReleaseStopTrOperation::execute(const Context &cnxt)
     booked_ = false;
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(order_->entryMutex_, true);
-        const bool working =
-            ((NEW_ORDSTATUS == order_->status_) || (PARTFILL_ORDSTATUS == order_->status_)) && (0 < order_->leavesQty_);
-        if (!order_->heldStop() || !working)
+        if (!order_->heldStop() || !order_->working())
         {
             return; // cancelled, replaced or finished first, or released by an earlier trade's release
         }

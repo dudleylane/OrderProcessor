@@ -2935,6 +2935,87 @@ TEST_F(ProcessorTest, AMatchBetweenAnExpiryAndItsRemovalFromTheBookPassesTheExpi
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
 }
 
+TEST_F(ProcessorTest, AMatchBetweenASuspendAndItsRemovalFromTheBookPassesTheSuspendedOrderBy)
+{
+    // A suspend is decided in one transaction, and the order leaves the book in another, as an expiry's does. A
+    // suspended order keeps what it has left, so its leaves don't keep the matcher off it, as a closed order's do
+    // (#386): the matcher passes by an order that isn't working, whatever it has left (#432). It took the suspended
+    // order, and the state machine, which has no row for a trade from Suspended, dropped the trade without a word.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *suspended = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
+    OrderEntry *other = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.5, 100));
+
+    // The first sell's suspend is decided, and the transaction that takes it out of the book is held back
+    inQueues_->push("test", suspendOf(suspended->orderId_));
+    engine.processor_.process();
+    ASSERT_EQ(SUSPENDED_ORDSTATUS, suspended->status_);
+    EXPECT_EQ(100u, suspended->leavesQty_);
+    ASSERT_EQ(suspended->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE))
+        << "out of the book only once the removal runs";
+
+    // A buy that crosses both sells arrives, and its match runs ahead of the removal
+    auto buy = createTestOrder(instrId1_, BUY_SIDE, 11.0, 100);
+    const RawDataEntry clOrdId = buy->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(buy.release()));
+    EXPECT_NO_THROW(engine.processor_.process());
+    engine.processQueued(0); // the removal, then the trade's reports
+
+    OrderEntry *bought = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, bought);
+    EXPECT_EQ(FILLED_ORDSTATUS, bought->status_) << "it trades with the other sell, passing the suspended one by";
+    EXPECT_EQ(std::vector<std::string>{ "100@10.5" }, engine.reports_.tradesOf(bought->orderId_));
+    EXPECT_EQ(FILLED_ORDSTATUS, other->status_);
+    EXPECT_EQ(SUSPENDED_ORDSTATUS, suspended->status_);
+    EXPECT_EQ(0u, suspended->cumQty_);
+    EXPECT_EQ(100u, suspended->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(suspended->orderId_).empty());
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, SELL_SIDE).isValid());
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+
+    // Resumed, it is booked again with what it has left, and trades
+    engine.request(OrderChangeStateEvent(suspended->orderId_, OrderChangeStateEvent::RESUME));
+    ASSERT_EQ(NEW_ORDSTATUS, suspended->status_);
+    ASSERT_EQ(suspended->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE));
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    EXPECT_EQ(FILLED_ORDSTATUS, suspended->status_);
+    EXPECT_EQ(std::vector<std::string>{ "100@10" }, engine.reports_.tradesOf(suspended->orderId_));
+}
+
+TEST_F(ProcessorTest, AFokOrderCountsNothingASuspendedOrderInTheBookHasLeft)
+{
+    // The FOK check walks the orders the sweep would take, so it passes by what the sweep passes by (#432). Counting the
+    // suspended order's 100, it found the book could fill a FOK order for 150 at once, which the sweep couldn't.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *suspended = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
+    OrderEntry *other = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
+
+    // The first sell's suspend is decided, and the transaction that takes it out of the book is held back
+    inQueues_->push("test", suspendOf(suspended->orderId_));
+    engine.processor_.process();
+    ASSERT_EQ(SUSPENDED_ORDSTATUS, suspended->status_);
+    ASSERT_EQ(suspended->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE))
+        << "out of the book only once the removal runs";
+
+    // A FOK buy that both sells would fill arrives, and its match runs ahead of the removal
+    auto fok = withTif(createTestOrder(instrId1_, BUY_SIDE, 10.0, 150), FOK_TIF);
+    const RawDataEntry clOrdId = fok->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(fok.release()));
+    EXPECT_NO_THROW(engine.processor_.process());
+    engine.processQueued(0); // the removal, then the cancel's report
+
+    const OrderEntry *killed = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, killed);
+    EXPECT_TRUE(engine.reports_.tradesOf(killed->orderId_).empty()) << "a FOK order traded part of itself";
+    EXPECT_EQ(CANCELED_ORDSTATUS, killed->status_);
+    EXPECT_EQ(0u, killed->cumQty_);
+    EXPECT_EQ(NEW_ORDSTATUS, other->status_);
+    EXPECT_EQ(100u, other->leavesQty_);
+    EXPECT_EQ(SUSPENDED_ORDSTATUS, suspended->status_);
+    EXPECT_EQ(100u, suspended->leavesQty_);
+    EXPECT_EQ(other->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+}
+
 TEST_F(ProcessorTest, ADayOrderExpiresAtTheEndOfItsDayAndAGtcOrderDoesNot)
 {
     // 17:00 New York (#240, ruled 2026-10-16): 21:00 UTC, as New York keeps daylight time in October
