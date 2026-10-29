@@ -890,6 +890,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 | `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReleaseStop_*` | The release's execute, rollback and no-ops |
 | `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReportRelease_*` | The TRIGGERED report, and none for a release that released nothing |
 | `IntegrationTest.cpp` | `IntegrationTest.Stops*` | A sweep that reaches a stop, on the real manager with four transaction workers |
+| `ProcessorBench.cpp` | `BM_ProcessStopRelease` | A trade that releases a held stop, and the release's transaction, which matches it (#480) |
 | `StorageRecordDispatcherTest.cpp` | `OnlyAWorkingOrderIsBookedOrLeftToMatch`, golden records | Restore placement, format version 2 |
 
 ---

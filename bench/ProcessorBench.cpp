@@ -814,6 +814,66 @@ static void BM_ProcessSweep(benchmark::State &state)
 }
 BENCHMARK(BM_ProcessSweep);
 
+static void BM_ProcessStopRelease(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // A buy STOP for 10, held until a trade reaches its stop: it has no price, and once released it is matched as a
+    // market order (#223)
+    auto stopAt = [&engine](PriceT stopPx)
+    {
+        OrderEntry *stop = engine.newOrder(BUY_SIDE, 0.0, 10);
+        stop->ordType_ = STOP_ORDERTYPE;
+        stop->stopPx_ = stopPx;
+        return stop;
+    };
+    // Where the timed path ends: the buy fills at the stop's price, and its trade releases the stop, which fills with
+    // the sell above it
+    engine.submit(engine.newOrder(SELL_SIDE, 50.0, 10));
+    const IdT warmUpStop = engine.submit(stopAt(50.0));
+    engine.submit(engine.newOrder(SELL_SIDE, 50.5, 10));
+    engine.submit(engine.newOrder(BUY_SIDE, 50.0, 10));
+    if (!engine.lastEndedAs(state, FILLED_ORDSTATUS, 10))
+    {
+        return;
+    }
+    const OrderEntry *released = OrderStorage::instance()->locateByOrderId(warmUpStop);
+    if ((nullptr == released) || !released->stopTriggered_ || (FILLED_ORDSTATUS != released->status_) ||
+        (10 != released->cumQty_))
+    {
+        state.SkipWithError("the warm-up's stop wasn't released and filled by the trade at its stop");
+        return;
+    }
+
+    // Per iteration, a point above the last: a sell for 10 at a price, a buy STOP held at that price, and a sell for 10
+    // half a point above. Each timed buy for 10 at the price takes the sell at it, and its trade releases that
+    // iteration's stop alone (every later stop is higher), whose release, in a transaction of its own, matches it as a
+    // market order with the sell above. The only benchmark that reaches a stop's release: the held stops a trade's
+    // price reaches, their claim and their release events (#480), and the release's transaction.
+    std::vector<OrderEntry *> aggressors;
+    aggressors.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        const PriceT price = 100.0 + static_cast<PriceT>(i);
+        engine.submit(engine.newOrder(SELL_SIDE, price, 10));
+        engine.submit(stopAt(price));
+        engine.submit(engine.newOrder(SELL_SIDE, price + 0.5, 10));
+        aggressors.push_back(engine.newOrder(BUY_SIDE, price, 10));
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessStopRelease);
+
 static void BM_ProcessExpiry(benchmark::State &state)
 {
     EngineFixture engine;

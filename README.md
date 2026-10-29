@@ -387,6 +387,11 @@ This branch's `BM_ProcessSwapSweep` does the same with swaps: a buy swap that sw
 reporting a near and a far leg for each side, and the three matches between them that continue the swap's sweep. It
 took ~15.9 µs, in runs where `BM_ProcessSwapWithMatch` took ~5.8 µs.
 
+`BM_ProcessStopRelease` drives a real `Processor` through a buy whose trade releases a held stop: the trade, its
+deferred execution events and book removal, the release of the stops its price reaches, and the release's
+transaction, which matches the stop as a market order with the sell above it (#480). Measured on 2026-10-30,
+pinned, it took ~9.3 µs, in runs where `BM_ProcessNewOrderWithMatch` took ~5.5 µs.
+
 ---
 
 ## Architecture
