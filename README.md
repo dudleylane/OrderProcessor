@@ -284,7 +284,7 @@ three runs' medians (#429).
 | `BM_ProcessExpiry` | ~1.5 µs | ~677K orders/sec | a resting DAY order's expiry at its day's end: the transaction its `DAY_END` timer enqueues decides it, takes the order off the book, reports it (#426) |
 | `BM_ProcessRestatement` | ~1.2 µs | ~826K orders/sec | a resting GTC order restated as a business day starts: the transaction its `RESTATEMENT` timer enqueues begins the order's next day, persists it, reports it `RESTATED` (#451) |
 | `BM_ProcessInvalidOrder` | ~6.7 µs | ~150K orders/sec | an order `OrderEntry::isValid()` refuses: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
-| `BM_ProcessMarketOrderWithNoMarket` | ~6.8 µs | ~148K orders/sec | a market order with nothing to trade with: stored, then rejected and reported (#435) |
+| `BM_ProcessMarketOrderWithNoMarket` | ~6.8 µs | ~148K orders/sec | a market order with nothing to trade with: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
 | `BM_ProcessNewOrderWithMatchRecorded` | ~6.9 µs | ~145K orders/sec | `BM_ProcessNewOrderWithMatch` with each order's record encoded as the server's storage dispatcher encodes it, into a storage that keeps nothing: the encoding, without LMDB's write (#442) |
 | `BM_WsOutQueuesPushTradeReport/1` | ~10.4 µs | ~97K reports/sec | a fill's report pushed through `WsOutQueues` to one WebSocket client: the report and its order serialized and sent, and the book serialized for its subscribers, none here (#442) |
 | `BM_TaskManagerThroughput/4` | ~2.5 ms per 500 orders | ~196K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
