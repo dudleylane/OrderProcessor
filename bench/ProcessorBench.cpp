@@ -1073,6 +1073,52 @@ static void BM_ProcessSwapWithMatch(benchmark::State &state)
 }
 BENCHMARK(BM_ProcessSwapWithMatch);
 
+// BM_ProcessSweep for swaps: a swap's sweep goes on through matchSwap()'s own next match, which is decided apart from an
+// outright order's (#477)
+static void BM_ProcessSwapSweep(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // Where the timed path ends: a buy swap for 100 that takes four sell swaps of 25, so only a sweep of all four fills it
+    for (int i = 0; i < 4; ++i)
+    {
+        engine.submit(newSwap(engine, SELL_SIDE, 50.0, 25));
+    }
+    engine.submit(newSwap(engine, BUY_SIDE, 50.0, 100));
+    if (!engine.lastEndedAs(state, FILLED_ORDSTATUS, 100))
+    {
+        return;
+    }
+
+    // Four resting sell swaps of 25 per iteration, all at one near and one far price, and a buy swap for 100 at them, so
+    // each timed swap sweeps the four oldest: four swap trades, each reporting a near and a far leg for each side and
+    // removing its sell from the book, and between them the three matches that continue the sweep. The only benchmark in
+    // which a swap's next match finds another swap to trade with: BM_ProcessSwapWithMatch's swap trades once.
+    for (u64 i = 0; i < 4 * static_cast<u64>(state.max_iterations); ++i)
+    {
+        engine.submit(newSwap(engine, SELL_SIDE, 100.0, 25));
+    }
+
+    std::vector<OrderEntry *> aggressors;
+    aggressors.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        aggressors.push_back(newSwap(engine, BUY_SIDE, 100.0, 100));
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessSwapSweep);
+
 // =============================================================================
 // End-to-end throughput through TaskManager's worker pool
 // =============================================================================
