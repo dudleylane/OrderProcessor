@@ -369,6 +369,10 @@ order's earlier transactions, the replacement stored, the original taken off the
 persisted and reported (#457). Measured on 2026-10-27, pinned, it took ~4.8 µs, in runs where `BM_ProcessCancelOrder`
 took ~1.7 µs.
 
+`BM_ProcessFokFill` drives a real `Processor` through a FOK order the book fills at once: the check that it can
+(`canFillAtOnce()`, #240), then the trade, its deferred execution events and the book removal (#432). Measured on
+2026-10-29, pinned, it took ~5.0 µs, in runs where `BM_ProcessNewOrderWithMatch` took ~5.2 µs.
+
 ---
 
 ## Architecture

@@ -674,6 +674,51 @@ static void BM_ProcessIocRemainder(benchmark::State &state)
 }
 BENCHMARK(BM_ProcessIocRemainder);
 
+static void BM_ProcessFokFill(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // Where the timed path ends: a FOK the book fills at once
+    engine.submit(engine.newOrder(SELL_SIDE, 50.0, 100));
+    OrderEntry *warmUp = engine.newOrder(BUY_SIDE, 50.0, 100);
+    warmUp->tif_ = FOK_TIF;
+    engine.submit(warmUp);
+    if (!engine.lastEndedAs(state, FILLED_ORDSTATUS, 100))
+    {
+        return;
+    }
+
+    // One resting sell per iteration, and a FOK buy for all of it at its price, so every timed order fills at once: the
+    // check that the book can fill it (OrderMatcher::canFillAtOnce(), #240), which walks the sells until what they have
+    // left is enough, then the trade, its deferred execution events, and the book removal that follows. The only
+    // benchmark that reaches the check: nothing else sends a FOK order.
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        engine.submit(engine.newOrder(SELL_SIDE, 100.0, 100));
+    }
+
+    std::vector<OrderEntry *> aggressors;
+    aggressors.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        OrderEntry *fok = engine.newOrder(BUY_SIDE, 100.0, 100);
+        fok->tif_ = FOK_TIF;
+        aggressors.push_back(fok);
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessFokFill);
+
 static void BM_ProcessExpiry(benchmark::State &state)
 {
     EngineFixture engine;
