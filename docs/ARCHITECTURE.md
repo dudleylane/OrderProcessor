@@ -26,7 +26,7 @@
 OrderProcessor is a high-performance, concurrent order processing library written in C++23. It provides:
 
 - **ACID-compliant** transaction processing
-- **State machine-based** order lifecycle management (<!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> states, <!-- DOC_CHECK:transition_count -->48<!-- /DOC_CHECK --> transitions)
+- **State machine-based** order lifecycle management (<!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> states, <!-- DOC_CHECK:transition_count -->49<!-- /DOC_CHECK --> transitions)
 - **Order matching** against an in-memory order book with price-time priority
 - **Lock-free** and fine-grained locking for maximum throughput
 - **File-based persistence** with versioned records
@@ -907,6 +907,7 @@ An order keeps FIX's day figures for the business day that began at its `dayStar
 |------------|-------|----------|--------|
 | INITIAL | onOrderReceived | RCVD_NEW | Create OrderEntry |
 | RCVD_NEW | onOrderReceived | NEW | Add to book, send ACK |
+| RCVD_NEW | onOrderReceived (refused) | REJECTED | An order `isValid()` refuses, or a market order with nothing to trade with: stored and reported, with no exception raised (#436) |
 | RCVD_NEW | onExternalOrderReject | REJECTED | Send REJECT |
 | RCVD_NEW | onRplOrderReceived | PEND_REPLACE | Queue replace (not driven since #74) |
 | RCVD_NEW | onReplace | NEW | An accepted replacement: into the book, matched (#74) |

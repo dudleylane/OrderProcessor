@@ -105,11 +105,36 @@ void OrderState_::receive(onOrderReceived const &evnt)
     }
     catch (const std::exception &ex)
     {
+        // What storing the order refuses, a ClOrdID already in use, which refused() can't decide before the store does.
+        // The reject is queued, and the rethrow stops the transition to New, so that the reject leaves Rcvd_New (#436).
         onRecvOrderRejected newEvnt(evnt, evnt.order_, ex.what());
         newEvnt.order4StateMachine_ = orderData_;
         static_cast<OrderState *>(this)->process_event(newEvnt);
         throw;
     }
+}
+
+/// Whether the order is refused before it is stored: isValid() refuses it, or it is a market order with nothing to trade
+/// with. A refused order takes its own row to Rejected, where processReceive() used to throw and receive() to rethrow:
+/// two exceptions raised, about 45% of a reject's time (#436). Test mode refuses what its check fails.
+bool OrderState_::refused(onOrderReceived const &evnt)
+{
+    if (evnt.testStateMachine_)
+    {
+        return !evnt.testStateMachineCheckResult_;
+    }
+    return OrdStateImpl::processRefused(evnt);
+}
+
+void OrderState_::reject(onOrderReceived const &evnt)
+{
+    if (evnt.testStateMachine_)
+    {
+        return;
+    }
+    assert(nullptr == orderData_);
+    OrdStateImpl::processReject(&orderData_, evnt);
+    evnt.order4StateMachine_ = orderData_;
 }
 
 void OrderState_::receive(onRplOrderReceived const &evnt)
