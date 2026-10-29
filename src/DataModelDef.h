@@ -310,9 +310,10 @@ public:
     bool startDay(DateTimeT dayStart) noexcept;
     void addExecution(const IdT &execId);
 
-    /// NEW or PARTFILL, with something left to trade: an order that trades. Every other status is closed, never accepted,
-    /// or suspended, which keeps what the order has left until it is resumed. The matcher trades only with a working
-    /// order (#432), a restore books only working orders (#215), and a release releases only a working stop (#223).
+    /// NEW or PARTFILL, with something left to trade: an order that trades. Every other status is closed, never
+    /// accepted, or suspended, which keeps what the order has left until it is resumed. The matcher trades only with a
+    /// working order (#432), a restore books only working orders (#215), and a release releases only a working stop
+    /// (#223).
     bool working() const noexcept
     {
         return ((NEW_ORDSTATUS == status_) || (PARTFILL_ORDSTATUS == status_)) && (0 < leavesQty_);
