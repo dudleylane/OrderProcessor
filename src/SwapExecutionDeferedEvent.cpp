@@ -41,6 +41,9 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
     assert(nullptr != farTrade_.order_);
     assert(nearTrade_.lastQty_ > 0);
 
+    // What the swap has left before any fill: whether its sweep goes on depends on whether its fill applied (#477)
+    const QuantityT baseBefore = baseOrder_->leavesQty_;
+
     // Stage the swap — if either leg fails, remove the stage and cancel
     size_t stageId = scope->startNewStage();
 
@@ -134,5 +137,12 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         cancelEvnt->cancelReason_ = "FX Swap: atomic two-leg execution failed.";
         cancelEvnt->order_ = baseOrder_;
         cnxt.deferedEvents_->addDeferedEvent(cancelEvnt.release());
+        return; // canceled: its sweep ends here
     }
+
+    // Then what follows the trade, as an outright trade's event decides it (#477): the sweep's next match if the swap's
+    // fill applied, or its end if it didn't. matchSwap() queued the next match from the trade's quantity, before either
+    // fill ran. Queued now, it lands in the chain's next batch, so the transactions run in the order they did.
+    assert(nullptr != cnxt.orderMatch_);
+    cnxt.orderMatch_->afterSwapTrade(baseOrder_, baseBefore);
 }

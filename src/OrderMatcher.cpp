@@ -473,18 +473,30 @@ void OrderMatcher::matchSwap(OrderEntry *order, const Context &ctxt)
     defEvnt->farTrade_.lastQty_ = matchQty;
     defEvnt->farTrade_.lastPx_ = contrOrd->farPrice_;
 
-    QuantityT remainingQty = order->leavesQty_ - matchQty;
-
     secondLock.release();
     firstLock.release();
 
+    // What follows the trade, the sweep's next match or its end, waits for the trade's fills, as an outright order's
+    // does: once they are decided, the trade's event hands the swap to afterSwapTrade() (#477)
     defered_->addDeferedEvent(defEvnt.release());
+}
 
-    /// add another swap match event to continue matching remaining quantity
-    if (remainingQty > 0)
+void OrderMatcher::afterSwapTrade(OrderEntry *order, QuantityT leavesBefore)
+{
+    assert(nullptr != order);
+    assert(FXSWAP_ORDERTYPE == order->ordType_);
+    QuantityT leaves = 0;
     {
-        std::unique_ptr<MatchSwapOrderDeferedEvent> defEvnt2(new MatchSwapOrderDeferedEvent(order));
-        defEvnt2->order_ = order;
-        defered_->addDeferedEvent(defEvnt2.release());
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
+        leaves = order->leavesQty_;
+    }
+    // The fill applied, all of it, so the sweep goes on with what the swap has left. One that didn't, which the state
+    // machine dropped and counted (#432), would be traded again with the same swap without end, so the sweep ends: the
+    // swap rests, as matchSwap() leaves one that finds no swap to trade with, whatever its time in force.
+    if ((leaves < leavesBefore) && (0 < leaves))
+    {
+        std::unique_ptr<MatchSwapOrderDeferedEvent> defEvnt(new MatchSwapOrderDeferedEvent(order));
+        defEvnt->order_ = order;
+        defered_->addDeferedEvent(defEvnt.release());
     }
 }
