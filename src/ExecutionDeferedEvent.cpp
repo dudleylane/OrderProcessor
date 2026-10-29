@@ -65,6 +65,8 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
     baseOrderParam.lastQty_ = 0;
     baseOrderParam.lastPx_ = 0.0;
     PriceT lastPrint = 0.0;
+    // What the base order has left before any fill: what follows the trade depends on whether its fill applied (#477)
+    const QuantityT baseBefore = baseOrder_->leavesQty_;
     // Every side of the match trades in one business day (#244): the clock is read once, so a match at a day's end
     // can't count in one day for one side and in the next for the other
     const DateTimeT dayStart = ExpiryScheduler::dayStartOf(cnxt.now());
@@ -99,4 +101,12 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
             new PersistLastTradeTrOperation(baseOrder_->instrument_.getId(), lastPrint, cnxt.idGenerator_->getId()));
         scope->addOperationFirst(lastTrade);
     }
+
+    // Then what follows the trade: the sweep's next match if the base order's fill applied, which it runs only once a
+    // contra's has, or the sweep's end if it didn't (#477). match() decided the trade before either fill ran, so it
+    // can't tell: it queued the next match from the trade's quantity, and a fill the state machine dropped was traded
+    // again without end. Queued now, the next match lands in the chain's next batch, after the releases match() queued
+    // with the trade, so the transactions run in the order they did: the trade's, the releases', the next match's.
+    assert(nullptr != cnxt.orderMatch_);
+    cnxt.orderMatch_->afterTrade(baseOrder_, baseBefore);
 }
