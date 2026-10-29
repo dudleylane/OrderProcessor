@@ -393,7 +393,14 @@ COP (Concurrent Order Processor)
 │  │         │                                                  │  │
 │  │         ▼                                                  │  │
 │  │   ┌─────────────────────────────────────────────┐         │  │
-│  │   │ 2. Check price compatibility                │         │  │
+│  │   │ 2. Pass by an order that isn't working:     │         │  │
+│  │   │    one not NEW or PARTFILL, or with         │         │  │
+│  │   │    nothing left (#386, #432)                │         │  │
+│  │   └─────────────────────────────────────────────┘         │  │
+│  │         │                                                  │  │
+│  │         ▼                                                  │  │
+│  │   ┌─────────────────────────────────────────────┐         │  │
+│  │   │ 3. Check price compatibility                │         │  │
 │  │   │    BUY price >= SELL price (for limit)      │         │  │
 │  │   │    Market orders, released STOPs: always    │         │  │
 │  │   │    match                                    │         │  │
@@ -401,25 +408,25 @@ COP (Concurrent Order Processor)
 │  │         │                                                  │  │
 │  │         ▼                                                  │  │
 │  │   ┌─────────────────────────────────────────────┐         │  │
-│  │   │ 3. Calculate fill quantity                  │         │  │
+│  │   │ 4. Calculate fill quantity                  │         │  │
 │  │   │    min(incoming_qty, resting_qty)           │         │  │
 │  │   └─────────────────────────────────────────────┘         │  │
 │  │         │                                                  │  │
 │  │         ▼                                                  │  │
 │  │   ┌─────────────────────────────────────────────┐         │  │
-│  │   │ 4. Create ExecutionDeferedEvent             │         │  │
+│  │   │ 5. Create ExecutionDeferedEvent             │         │  │
 │  │   │    (deferred for transaction processing)    │         │  │
 │  │   └─────────────────────────────────────────────┘         │  │
 │  │         │                                                  │  │
 │  │         ▼                                                  │  │
 │  │   ┌─────────────────────────────────────────────┐         │  │
-│  │   │ 5. For each held stop the trade reaches,    │         │  │
+│  │   │ 6. For each held stop the trade reaches,    │         │  │
 │  │   │    queue a ReleaseStopDeferedEvent (#223)   │         │  │
 │  │   └─────────────────────────────────────────────┘         │  │
 │  │         │                                                  │  │
 │  │         ▼                                                  │  │
 │  │   ┌─────────────────────────────────────────────┐         │  │
-│  │   │ 6. Continue matching if qty remaining       │         │  │
+│  │   │ 7. Continue matching if qty remaining       │         │  │
 │  │   └─────────────────────────────────────────────┘         │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                  │
@@ -433,6 +440,7 @@ COP (Concurrent Order Processor)
 | Test File | Test Case | Description |
 |-----------|-----------|-------------|
 | `OrderMatcherTest.cpp` | `OrderMatcherTest.*` | Order matching unit tests |
+| `OrderMatcherTest.cpp` | `OnlyAWorkingOrderIsTradedWith`, `AnOrderThatIsntWorkingDoesntEndTheSearch` | `findContra()` and `canFillAtOnce()` pass by every status but NEW and PARTFILL, whatever the order has left, and go on to the next order (#432) |
 | `IntegrationTest.cpp` | `IntegrationTest.*` | Order matching in full flow |
 | `ProcessorBench.cpp` | `BM_ProcessNewOrderWithMatch`, `BM_TaskManagerTrades` | Matching through a `Processor`, and through the worker pool |
 | `OrderMatchingBench.cpp` | `BM_OrderBook*` | The book the matcher searches: add, remove, find, top of book |
@@ -787,7 +795,7 @@ The engine read an order's time in force and acted on none of it until #240.
   - The processor sets an order's timer when it accepts the order, or a replacement (`Processor::scheduleExpiry()`). Its thread pushes each timer's event into the incoming queues when it comes due.
   - The change is decided on the transaction worker (`Processor::process(OrderStateChange)`), with the order's other transactions. An order that isn't live (filled, canceled, replaced or expired) decides nothing: `Processor` returns before the state machine, which has no row for it. Without the return the order would be persisted unchanged, and nothing would fail: the state machine's `no_transition` throws, but Boost.MSM hands the throw to `exception_caught`, which is empty (#432).
   - `DAY_END` expires a live DAY order and starts a done-for-day order's next day (`onNewDay`, as before). For any other order it does nothing.
-- **A closed order's LeavesQty is 0, whatever closed it** (#386, as ruled on 2026-10-26): its client's cancel or a replace (#73, #74), the engine's cancel of what an IOC, FOK, market or released stop order couldn't trade at once, an expiry, done for day, or a reject (#427). Each closing action in `OrdStateImpl` sets it at once, as the cancel did. That also keeps the matcher off an expired order until it leaves the book: the removal is a transaction of its own, enqueued as the decision ends, so a match enqueued before it runs first, and the matcher passes by only an order with no leaves. Before #386 such a match took the expired order, the state machine dropped the trade without a word (Expired has no row for one, and `exception_caught` is empty), and the matching order traded with nothing: one that crossed a further order was booked across it. The order's reports and its record carry the 0, so what was left is `orderQty_ - cumQty_`. Done for day isn't final: a new day (`onNewDay`) or a resume (`onContinue`) books the order again with what it hasn't filled, and its fills, not its leaves, make it NEW or PARTFILL. A reject's action sets it too, as ruled (#427): whether it stores the order, as it does one its checks refuse (since #436 a market order with nothing to trade with too, which its receive had stored before refusing it), or keeps a copy its receive stored, and in the legacy replace's and `onOrderRejected`'s rejects, which nothing produces.
+- **A closed order's LeavesQty is 0, whatever closed it** (#386, as ruled on 2026-10-26): its client's cancel or a replace (#73, #74), the engine's cancel of what an IOC, FOK, market or released stop order couldn't trade at once, an expiry, done for day, or a reject (#427). Each closing action in `OrdStateImpl` sets it at once, as the cancel did. That also kept the matcher off an expired order until it leaves the book: the removal is a transaction of its own, enqueued as the decision ends, so a match enqueued before it runs first, and the matcher passed by only an order with no leaves. Before #386 such a match took the expired order, the state machine dropped the trade without a word (Expired has no row for one, and `exception_caught` is empty), and the matching order traded with nothing: one that crossed a further order was booked across it. Since #432 the matcher, and the FOK check, pass by any order that isn't working (`OrderParams::working()`: NEW or PARTFILL, with something left), whatever it has left: a suspended order keeps its leaves, and in the same window a match took it, as one took an expired order before #386. The order's reports and its record carry the 0, so what was left is `orderQty_ - cumQty_`. Done for day isn't final: a new day (`onNewDay`) or a resume (`onContinue`) books the order again with what it hasn't filled, and its fills, not its leaves, make it NEW or PARTFILL. A reject's action sets it too, as ruled (#427): whether it stores the order, as it does one its checks refuse (since #436 a market order with nothing to trade with too, which its receive had stored before refusing it), or keeps a copy its receive stored, and in the legacy replace's and `onOrderRejected`'s rejects, which nothing produces.
 - **Restore:** `App::scheduleRestoredExpiries()` sets the restored live DAY and GTD orders' timers before the server takes orders. One whose time passed while the server was down fires as soon as the timers start.
 - **OPG and ATCLOSE** need auctions the engine doesn't have; they rest as GTC orders.
 
@@ -798,6 +806,7 @@ The engine read an order's time in force and acted on none of it until #240.
 | `ProcessorTest.cpp` | `*Ioc*`, `*Fok*` | IOC's rest canceled; FOK in full or not at all; a released IOC stop |
 | `ProcessorTest.cpp` | `*Gtd*`, `*Day*`, `ATimerOfAnOrderThatFilledDecidesNothing`, `AReplacementHasATimerOfItsOwn*` | Expiry at the order's time, and nothing for an order no longer live |
 | `ProcessorTest.cpp` | `AnOrderThatExpiresAfterAPartFill*`, `AnOrderDoneForTheDay*`, `AMarketOrdersRestTheEngineCanceled*`, `AMatchBetweenAnExpiry*` | A closed order's LeavesQty is 0, in its reports and its record; done for day, then booked again with what it hasn't filled; a match ahead of an expired order's removal from the book passes it by (#386) |
+| `ProcessorTest.cpp` | `AMatchBetweenASuspend*`, `AFokOrderCountsNothingASuspendedOrder*` | A match, and a FOK order's check, ahead of a suspended order's removal from the book pass it by, though it keeps its leaves (#432) |
 | `ProcessorTest.cpp` | `AnOrderTheEngineStoresAndRejects*` | A stored reject has no leaves, in its report and its record, both ways the engine stores one (#427) |
 | `StatesTest.cpp` | `ARejected*HasNoLeaves` | Each reject's action leaves none, whether it stores the order or keeps the copy its receive stored (#427) |
 | `StateMachineTest.cpp` | `New_To_DoneForDay_OnFinished`, `New_To_Rejected_OnOrderRejected` | No leaves done for the day, all of them back with the new day (#386); none rejected (#427) |

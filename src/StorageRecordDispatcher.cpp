@@ -257,17 +257,6 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
     };
 }
 
-namespace
-{
-/// Whether a restored order is working: NEW or PARTFILL, with quantity left. A live book holds only such orders, and a live
-/// market order is open only while it is one (#207). Every other status is out of the book: finished, never accepted, or
-/// suspended, which takes an order out until it is resumed (#215). A list of the statuses to leave out missed that one.
-bool isWorking(const OrderEntry &order)
-{
-    return ((NEW_ORDSTATUS == order.status_) || (PARTFILL_ORDSTATUS == order.status_)) && (0 < order.leavesQty_);
-}
-} // namespace
-
 bool StorageRecordDispatcher::crossesAnEarlierOrder(OrderEntry *order) const
 {
     assert(nullptr != orderBook_);
@@ -343,7 +332,10 @@ void StorageRecordDispatcher::finishLoad()
                 storage_->restore(executionsId, new ExecutionsT());
             }
         }
-        if ((nullptr == orderBook_) || !isWorking(*restored))
+        // Only a working order is booked: a live book holds only working orders, and a live market order is open only
+        // while it is one (#207). Every other status is out of the book: finished, never accepted, or suspended, which
+        // takes an order out until it is resumed (#215). A list of the statuses to leave out missed that one.
+        if ((nullptr == orderBook_) || !restored->working())
         {
             continue;
         }
