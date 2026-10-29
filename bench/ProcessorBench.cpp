@@ -231,6 +231,19 @@ public:
     void push(const ExecReportEvent &, const std::string &) override {}
     void push(const CancelRejectEvent &, const std::string &) override {}
     void push(const BusinessRejectEvent &, const std::string &) override {}
+    /// Counts the orders refused unstored for a ClOrdID in use, which a warm-up checks (#432)
+    void push(const OrderRejectEvent &evnt, const std::string &) override
+    {
+        duplicates_ += evnt.duplicateClOrderId_ ? 1 : 0;
+    }
+
+    u64 duplicateRejects() const
+    {
+        return duplicates_;
+    }
+
+private:
+    u64 duplicates_ = 0;
 };
 
 /// A whole engine minus the worker pool: one Processor whose transactions execute inline, reporting into a queue that
@@ -295,6 +308,22 @@ public:
         replacement->price_ = price;
         replacement->status_ = RECEIVEDNEW_ORDSTATUS;
         return replacement;
+    }
+
+    /// A new order that reuses a stored order's ClOrdID, made as the server's session makes a new order: a fresh one, as
+    /// newOrder() makes it, with the stored order's ClOrdID in a reference of its own. Null for an order not stored.
+    OrderEntry *duplicateOf(const IdT &orderId)
+    {
+        const OrderEntry *stored = OrderStorage::instance()->locateByOrderId(orderId);
+        if (nullptr == stored)
+        {
+            return nullptr;
+        }
+        const RawDataEntry &clOrdId = stored->clOrderId_.get();
+        OrderEntry *order = newOrder(stored->side_, stored->price_, stored->orderQty_);
+        order->clOrderId_ =
+            WideDataStorage::instance()->add(new RawDataEntry(STRING_RAWDATATYPE, clOrdId.data_, clOrdId.length_));
+        return order;
     }
 
     /// Has each order the engine persists encoded as the server has it, by the dispatcher it attaches, with the
@@ -410,6 +439,28 @@ public:
             return false;
         }
         return lastEndedAs(state, NEW_ORDSTATUS, 0);
+    }
+
+    /// Fails the benchmark unless the engine refused as the timed path refuses: each order given it so far reported to
+    /// its sender as refused unstored for a ClOrdID in use, and the stored order whose ClOrdID they reused untouched,
+    /// NEW with all it had left. An order the engine took instead would be stored, NEW, with no such report.
+    bool refusedAsDuplicates(benchmark::State &state, const IdT &storedId, u64 refusals)
+    {
+        if (refusals != outQueues_->duplicateRejects())
+        {
+            state.SkipWithError(("the engine refused " + std::to_string(outQueues_->duplicateRejects()) +
+                                 " orders for a ClOrdID in use, not " + std::to_string(refusals))
+                                    .c_str());
+            return false;
+        }
+        const OrderEntry *stored = OrderStorage::instance()->locateByOrderId(storedId);
+        if ((nullptr == stored) || (NEW_ORDSTATUS != stored->status_) || (stored->orderQty_ != stored->leavesQty_))
+        {
+            state.SkipWithError(
+                "the order whose ClOrdID the warm-up order reused is no longer NEW with all it had left");
+            return false;
+        }
+        return true;
     }
 
     Processor &processor()
@@ -874,6 +925,44 @@ static void BM_ProcessMarketOrderWithNoMarket(benchmark::State &state)
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_ProcessMarketOrderWithNoMarket);
+
+static void BM_ProcessDuplicateClOrdId(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // Where the timed path ends: a new order with the ClOrdID of the fixture's first order, which the store refuses and
+    // the engine rejects unstored, telling its sender directly (#67)
+    const IdT stored = engine.lastAccepted()->orderId_;
+    engine.inQueues().push("bench", OrderEvent(engine.duplicateOf(stored)));
+    engine.processor().process();
+    if (!engine.refusedAsDuplicates(state, stored, 1))
+    {
+        return;
+    }
+
+    // One such order per iteration, made as the fixture's first order was made, so that refused()'s checks pass it: only
+    // the store refuses it. receive() queues the reject and throws to stop the transition to New, the reject's own store
+    // refuses it again, and Processor reports it to its sender, with the transaction's scope unused: three exceptions
+    // raised, where since #436 every other refusal of a new order raises none (#432)
+    std::vector<OrderEntry *> orders;
+    orders.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        orders.push_back(engine.duplicateOf(stored));
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderEvent(orders[next++]));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessDuplicateClOrdId);
 
 // =============================================================================
 // End-to-end throughput through TaskManager's worker pool

@@ -812,7 +812,7 @@ The engine read an order's time in force and acted on none of it until #240.
 | `StateMachineTest.cpp` | `New_To_DoneForDay_OnFinished`, `New_To_Rejected_OnOrderRejected` | No leaves done for the day, all of them back with the new day (#386); none rejected (#427) |
 | `ExpirySchedulerTest.cpp` | `ExpirySchedulerTest.*` | The day's end, which orders have a timer, firing order, the thread |
 | `ServerDataTest.cpp` | `RestoredDayAndGtdOrdersThatAreLiveGetTheirTimersBack` | Timers set again at a restart |
-| `ProcessorBench.cpp` | `BM_ProcessIocRemainder`, `BM_ProcessFokFill`, `BM_ProcessExpiry`, `BM_ProcessInvalidOrder`, `BM_ProcessMarketOrderWithNoMarket` | Timed through a `Processor`: an IOC's rest canceled by the engine, an expiry decided by the transaction its timer enqueues (#426), a FOK order the book fills at once, checked first (#432), and both ways the engine rejects an order it stores (#435) |
+| `ProcessorBench.cpp` | `BM_ProcessIocRemainder`, `BM_ProcessFokFill`, `BM_ProcessExpiry`, `BM_ProcessInvalidOrder`, `BM_ProcessMarketOrderWithNoMarket`, `BM_ProcessDuplicateClOrdId` | Timed through a `Processor`: an IOC's rest canceled by the engine, an expiry decided by the transaction its timer enqueues (#426), a FOK order the book fills at once, checked first (#432), both ways the engine rejects an order it stores (#435), and its reject of an order the store refuses for a ClOrdID in use, the one refusal of a new order that raises exceptions (#432) |
 
 ### 4.7 Business Days and Day Figures (#244)
 

@@ -270,11 +270,13 @@ Every row names the benchmark that produces it, so you can reproduce it:
 `./build/orderProcessorBench --benchmark_filter=BM_ProcessNewOrder`.
 
 Measured on the dev box (4 cores / 8 threads, Release, `-O3 -march=native -flto`). Your machine will
-differ; these numbers are a shape, not a specification. Every row but one comes from one session on
+differ; these numbers are a shape, not a specification. Every row but two comes from one session on
 2026-10-28, at master c4e7724: three runs of 5 repetitions each, pinned to CPUs 2-5, and each row gives the
-median of the three runs' medians (#429). `BM_ProcessFokFill`'s, added by #432, comes from a session of its
-own on 2026-10-29, at master 8017381 with the benchmark added, taken the same way: a new order took ~2.6 µs
-in it, a match ~5.0 and an IOC's remainder ~6.0.
+median of the three runs' medians (#429). #432 added the other two, each from a session of its own on
+2026-10-29, taken the same way. `BM_ProcessFokFill`'s was taken at master 8017381 with the benchmark added: a
+new order took ~2.6 µs in it, a match ~5.0 and an IOC's remainder ~6.0. `BM_ProcessDuplicateClOrdId`'s was
+taken with #432's change to the matcher in as well: a new order took ~2.8 µs in it, and an order its checks
+refuse (`BM_ProcessInvalidOrder`) ~2.6.
 
 | Benchmark | Time | Throughput | What it covers |
 |-----------|------|------------|----------------|
@@ -288,6 +290,7 @@ in it, a match ~5.0 and an IOC's remainder ~6.0.
 | `BM_ProcessRestatement` | ~1.2 µs | ~826K orders/sec | a resting GTC order restated as a business day starts: the transaction its `RESTATEMENT` timer enqueues begins the order's next day, persists it, reports it `RESTATED` (#451) |
 | `BM_ProcessInvalidOrder` | ~6.7 µs | ~150K orders/sec | an order `OrderEntry::isValid()` refuses: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
 | `BM_ProcessMarketOrderWithNoMarket` | ~6.8 µs | ~148K orders/sec | a market order with nothing to trade with: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
+| `BM_ProcessDuplicateClOrdId` | ~8.9 µs | ~113K orders/sec | a new order whose ClOrdID is already in use: storing it fails, so the state machine queues the reject and throws to stop the order's move to New, and the engine tells the sender directly, storing nothing. Three exceptions raised, where since #436 the engine's other refusals of a new order raise none (#432) |
 | `BM_ProcessNewOrderWithMatchRecorded` | ~6.9 µs | ~145K orders/sec | `BM_ProcessNewOrderWithMatch` with each order's record encoded as the server's storage dispatcher encodes it, into a storage that keeps nothing: the encoding, without LMDB's write (#442) |
 | `BM_WsOutQueuesPushTradeReport/1` | ~10.4 µs | ~97K reports/sec | a fill's report pushed through `WsOutQueues` to one WebSocket client: the report and its order serialized and sent, and the book serialized for its subscribers, none here (#442) |
 | `BM_TaskManagerThroughput/4` | ~2.5 ms per 500 orders | ~196K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
