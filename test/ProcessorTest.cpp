@@ -3336,6 +3336,88 @@ TEST_F(ProcessorTest, AFokOrderCountsNothingASuspendedOrderInTheBookHasLeft)
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
 }
 
+namespace
+{
+/// Makes the order, resting in the book, one the matcher takes whose fill the state machine drops (#477): suspended by
+/// the engine, so its state machine is in Suspended, which has no row for a trade, then marked NEW again, which is what
+/// the matcher reads, with its machine left as it was. The suspend's removal from the book is held back. Nothing in the
+/// engine makes such an order since #432: it stands for whatever would let the matcher take one, a guard on the fill's
+/// rows or a change to the matcher.
+void makeUnfillable(StopEngine &engine, IncomingQueues *inQueues, OrderEntry *order)
+{
+    inQueues->push("test", suspendOf(order->orderId_));
+    engine.processor_.process();
+    ASSERT_EQ(SUSPENDED_ORDSTATUS, order->status_);
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, true);
+    order->status_ = NEW_ORDSTATUS;
+}
+} // namespace
+
+TEST_F(ProcessorTest, ASweepEndsAtAFillThatDoesntApply)
+{
+    // A sweep goes on only if its fill applied (#477). match() decides a trade from the orders' leaves before either
+    // fill runs, and it queued the sweep's next match from the trade's quantity: a fill the state machine dropped was
+    // traded again, with the same order, without end, each pass adding two transactions, until the process ran out of
+    // memory. A fill that didn't apply now ends the sweep, and a limit order rests with what it has left.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *other = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 50));
+    OrderEntry *unfillable = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
+    ASSERT_NO_FATAL_FAILURE(makeUnfillable(engine, inQueues_.get(), unfillable));
+
+    // A buy for 200 trades 50 with the first sell, goes on to the second, whose fill the state machine drops, and stops
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    auto buy = createTestOrder(instrId1_, BUY_SIDE, 10.0, 200);
+    const RawDataEntry clOrdId = buy->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(buy.release()));
+    EXPECT_NO_THROW(engine.processor_.process());
+    EXPECT_EQ(failed + 1, OrdState::OrderState::failedCount()) << "the dropped fill, once";
+
+    OrderEntry *bought = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, bought);
+    EXPECT_EQ(PARTFILL_ORDSTATUS, bought->status_);
+    EXPECT_EQ(50u, bought->cumQty_);
+    EXPECT_EQ(150u, bought->leavesQty_);
+    EXPECT_EQ(FILLED_ORDSTATUS, other->status_);
+    EXPECT_EQ(0u, unfillable->cumQty_);
+    EXPECT_EQ(100u, unfillable->leavesQty_);
+    EXPECT_EQ(bought->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE)) << "it rests with what it has left";
+    EXPECT_EQ(unfillable->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE)) << "crossing the order it couldn't fill";
+
+    engine.processQueued(0); // the removal, then the trade's reports
+    EXPECT_EQ(std::vector<std::string>{ "50@10" }, engine.reports_.tradesOf(bought->orderId_));
+    EXPECT_TRUE(engine.reports_.tradesOf(unfillable->orderId_).empty());
+}
+
+TEST_F(ProcessorTest, AnIocOrderWhoseFillDoesntApplyIsCanceled)
+{
+    // An order that never rests ends a sweep at a fill that didn't apply as it ends one that finds nothing to trade
+    // with: canceled with what it has left (#477). With nothing left to sweep for, nothing followed the IOC's one trade,
+    // so it was left NEW, neither booked nor canceled.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *unfillable = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
+    ASSERT_NO_FATAL_FAILURE(makeUnfillable(engine, inQueues_.get(), unfillable));
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    auto ioc = withTif(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), IOC_TIF);
+    const RawDataEntry clOrdId = ioc->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(ioc.release()));
+    EXPECT_NO_THROW(engine.processor_.process());
+    engine.processQueued(0); // the removal, then the reports
+    EXPECT_EQ(failed + 1, OrdState::OrderState::failedCount()) << "the dropped fill, once";
+
+    const OrderEntry *canceled = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, canceled);
+    EXPECT_EQ(CANCELED_ORDSTATUS, canceled->status_);
+    EXPECT_EQ(0u, canceled->cumQty_);
+    EXPECT_EQ(0u, canceled->leavesQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, CANCEL_EXECTYPE }),
+              engine.reports_.reportTypesOf(canceled->orderId_));
+    EXPECT_EQ(0u, unfillable->cumQty_);
+    EXPECT_EQ(100u, unfillable->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(unfillable->orderId_).empty());
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+}
+
 TEST_F(ProcessorTest, ADayOrderExpiresAtTheEndOfItsDayAndAGtcOrderDoesNot)
 {
     // 17:00 New York (#240, ruled 2026-10-16): 21:00 UTC, as New York keeps daylight time in October
