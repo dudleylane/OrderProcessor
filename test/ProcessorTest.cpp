@@ -3460,6 +3460,53 @@ TEST_F(ProcessorTest, AnIocOrderWhoseFillDoesntApplyIsCanceled)
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
 }
 
+TEST_F(ProcessorTest, ASwapTradesNothingWhenItsContrasFillDoesntApply)
+{
+    // On this branch a swap's near leg is filled, and each side's far leg reported, only if its contra's near fill
+    // applied (#481), as an outright trade's base is filled only with what its contras' fills applied. A contra fill
+    // the state machine dropped left the contra as it was, but the swap was filled and both far legs reported, and the
+    // sweep took the same contra again until the swap had nothing left: one-sided trades. Now nothing trades, the
+    // sweep ends there (#477), and the swap rests with what it has left.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const auto swap = [this](Side side, QuantityT qty)
+    {
+        auto order = createTestOrder(instrId1_, side, 1.0850, qty);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->farPrice_ = 1.0872;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        return order;
+    };
+    OrderEntry *other = engine.submit(swap(SELL_SIDE, 50));
+    OrderEntry *unfillable = engine.submit(swap(SELL_SIDE, 100));
+    ASSERT_NO_FATAL_FAILURE(makeUnfillable(engine, inQueues_.get(), unfillable));
+
+    // A buy swap for 200 trades 50 with the first sell swap, goes on to the second, whose fill the state machine drops,
+    // and stops
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    auto buy = swap(BUY_SIDE, 200);
+    const RawDataEntry clOrdId = buy->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(buy.release()));
+    EXPECT_NO_THROW(engine.processor_.process());
+    EXPECT_EQ(failed + 1, OrdState::OrderState::failedCount()) << "the dropped fill, once";
+
+    OrderEntry *bought = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, bought);
+    EXPECT_EQ(PARTFILL_ORDSTATUS, bought->status_);
+    EXPECT_EQ(50u, bought->cumQty_);
+    EXPECT_EQ(150u, bought->leavesQty_);
+    EXPECT_EQ(FILLED_ORDSTATUS, other->status_);
+    EXPECT_EQ(0u, unfillable->cumQty_);
+    EXPECT_EQ(100u, unfillable->leavesQty_);
+    EXPECT_EQ(bought->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE)) << "it rests with what it has left";
+    EXPECT_EQ(unfillable->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE)) << "crossing the swap it couldn't fill";
+
+    engine.processQueued(0); // the removal, then the trade's reports
+    EXPECT_EQ((std::vector<std::string>{ "50@1.085", "50@1.0872" }), engine.reports_.tradesOf(bought->orderId_))
+        << "the near and the far leg of the one trade that happened";
+    EXPECT_TRUE(engine.reports_.tradesOf(unfillable->orderId_).empty()) << "a far leg reported for a dropped near fill";
+}
+
 TEST_F(ProcessorTest, ADayOrderExpiresAtTheEndOfItsDayAndAGtcOrderDoesNot)
 {
     // 17:00 New York (#240, ruled 2026-10-16): 21:00 UTC, as New York keeps daylight time in October
