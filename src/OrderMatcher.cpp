@@ -261,17 +261,18 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
     }
     defEvnt->trades_.push_back(trade);
 
-    QuantityT remainingQty = order->leavesQty_ - trade.lastQty_;
-
     secondLock.release();
     firstLock.release();
 
+    // What follows the trade, the sweep's next match or its end, waits for the trade's fills: once they are decided, the
+    // trade's event hands the order to afterTrade() (#477)
     defered_->addDeferedEvent(defEvnt.release());
 
     // The held stops this trade reaches are released after it (#223): each in a transaction of its own, which runs once
     // this one is done, since both relate to the instrument. Queued after the trade, so a trade whose fill throws,
     // which throws away the rest of the chain (Processor::processDeferedEvent), releases nothing, and a rolled-back
-    // match drops them with its other events (MatchOrderTrOperation::rollback).
+    // match drops them with its other events (MatchOrderTrOperation::rollback). A fill the state machine drops throws
+    // nothing that leaves it (#432), so its trade releases them all the same: #480.
     const PriceT lastPx = trade.lastPx_;
     const SourceIdT instrument = order->instrument_.getId();
     if (ctxt.orderBook_->holdsStops(instrument)) [[unlikely]]
@@ -287,11 +288,37 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
             }
         }
     }
+}
 
-    /// add another match event to continue matching
-    if (remainingQty > 0)
+void OrderMatcher::afterTrade(OrderEntry *order, QuantityT leavesBefore)
+{
+    assert(nullptr != order);
+    QuantityT leaves = 0;
     {
-        std::unique_ptr<MatchOrderDeferedEvent> defEvnt(new MatchOrderDeferedEvent(order));
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
+        leaves = order->leavesQty_;
+    }
+    if (leaves < leavesBefore) [[likely]]
+    {
+        // The fill applied, all of it (OrderParams::applyTrade() takes a trade whole or not at all), so the sweep
+        // goes on with what the order has left
+        if (0 < leaves)
+        {
+            std::unique_ptr<MatchOrderDeferedEvent> defEvnt(new MatchOrderDeferedEvent(order));
+            defEvnt->order_ = order;
+            defered_->addDeferedEvent(defEvnt.release());
+        }
+        return;
+    }
+    // The fill didn't apply: the state machine dropped it, and counted and logged why (#432). Matched again, the order
+    // would trade the same quantity with the same order, without end, so the sweep ends here, as one that finds nothing
+    // to trade with ends. An order that never rests is canceled with what it has left: a FOK order that traded part of
+    // itself before is canceled with the rest, which beats leaving it working and unbooked. Any other rests with it,
+    // where it crosses the order it couldn't trade with.
+    if (order->cancelsWhatIsLeft())
+    {
+        std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
+        defEvnt->cancelReason_ = "A trade's fill didn't apply: what the order has left is canceled";
         defEvnt->order_ = order;
         defered_->addDeferedEvent(defEvnt.release());
     }
