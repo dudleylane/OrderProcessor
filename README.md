@@ -382,6 +382,9 @@ took ~2.4 µs.
 `BM_ProcessSweep` drives a real `Processor` through a buy that sweeps four resting sells at one price: four trades, each
 with its deferred execution events and book removal, and the three matches between them that continue the sweep
 (#477). Measured on 2026-10-29, pinned, it took ~13.1 µs, in runs where `BM_ProcessNewOrderWithMatch` took ~5.2 µs.
+This branch's `BM_ProcessSwapSweep` does the same with swaps: a buy swap that sweeps four resting sell swaps, each trade
+reporting a near and a far leg for each side, and the three matches between them that continue the swap's sweep. It
+took ~15.9 µs, in runs where `BM_ProcessSwapWithMatch` took ~5.8 µs.
 
 ---
 
