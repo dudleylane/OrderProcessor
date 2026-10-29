@@ -310,8 +310,8 @@ public:
         return replacement;
     }
 
-    /// A new order that reuses a stored order's ClOrdID, made as the server's session makes a new order: a fresh one, as
-    /// newOrder() makes it, with the stored order's ClOrdID in a reference of its own. Null for an order not stored.
+    /// A new order that reuses a stored order's ClOrdID, made as the server's session makes a new order: a fresh one,
+    /// as newOrder() makes it, with the stored order's ClOrdID in a reference of its own. Null for an order not stored.
     OrderEntry *duplicateOf(const IdT &orderId)
     {
         const OrderEntry *stored = OrderStorage::instance()->locateByOrderId(orderId);
@@ -943,10 +943,10 @@ static void BM_ProcessDuplicateClOrdId(benchmark::State &state)
         return;
     }
 
-    // One such order per iteration, made as the fixture's first order was made, so that refused()'s checks pass it: only
-    // the store refuses it. receive() queues the reject and throws to stop the transition to New, the reject's own store
-    // refuses it again, and Processor reports it to its sender, with the transaction's scope unused: three exceptions
-    // raised, where since #436 every other refusal of a new order raises none (#432)
+    // One such order per iteration, made as the fixture's first order was made, so that refused()'s checks pass it:
+    // only the store refuses it. receive() queues the reject and throws to stop the transition to New, the reject's own
+    // store refuses it again, and Processor reports it to its sender, with the transaction's scope unused: three
+    // exceptions raised, where since #436 every other refusal of a new order raises none (#432)
     std::vector<OrderEntry *> orders;
     orders.reserve(state.max_iterations);
     for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)

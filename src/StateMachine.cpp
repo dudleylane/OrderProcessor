@@ -130,8 +130,8 @@ void OrderState_::swallowed(const std::type_info &event, const OrderEntry *order
 {
     const bool refused = (nullptr != dynamic_cast<const TransitionRefused *>(&ex));
     (refused ? swallowedRefused : swallowedFailed).fetch_add(1, std::memory_order_relaxed);
-    // As in TaskManager::taskFailed(): nothing may leave here (exception_caught()), so a line lost, e.g. to bad_alloc, is
-    // the lesser harm, and the count above still records it
+    // As in TaskManager::taskFailed(): nothing may leave here (exception_caught()), so a line lost, e.g. to bad_alloc,
+    // is the lesser harm, and the count above still records it
     try
     {
         aux::Logger *log = aux::ExchLogger::instance();
