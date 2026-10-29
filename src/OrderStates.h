@@ -111,6 +111,7 @@ struct Rejected : public boost::msm::front::state<>
     template <class FSM> void on_entry(onRecvOrderRejected const &, FSM &);
     template <class FSM> void on_entry(onRecvRplOrderRejected const &, FSM &);
     template <class FSM> void on_entry(onExternalOrderRejected const &, FSM &);
+    template <class FSM> void on_entry(onOrderReceived const &, FSM &);
 };
 
 struct New : public boost::msm::front::state<>

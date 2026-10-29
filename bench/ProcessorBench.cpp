@@ -773,8 +773,8 @@ static void BM_ProcessInvalidOrder(benchmark::State &state)
     }
 
     // One limit buy at 0 per iteration, refused for its price (#188), which isValid() checks after everything else a
-    // limit order needs, so that every other check runs first: processReceive() throws before it stores the order, and
-    // the reject stores it (processReject(onRecvOrderRejected)) and reports it (#435)
+    // limit order needs, so that every other check runs first: refused() refuses it before it is stored, and the
+    // reject's row stores it (processReject(onOrderReceived)) and reports it, with no exception raised (#435, #436)
     std::vector<OrderEntry *> orders;
     orders.reserve(state.max_iterations);
     for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
@@ -799,7 +799,7 @@ static void BM_ProcessMarketOrderWithNoMarket(benchmark::State &state)
     {
         return;
     }
-    // Where the timed path ends: a market buy with nothing to buy, which the engine stores, then rejects
+    // Where the timed path ends: a market buy with nothing to buy, which the engine rejects, storing it
     OrderEntry *warmUp = engine.newOrder(BUY_SIDE, 0.0, 100);
     warmUp->ordType_ = MARKET_ORDERTYPE;
     engine.submit(warmUp);
@@ -808,9 +808,9 @@ static void BM_ProcessMarketOrderWithNoMarket(benchmark::State &state)
         return;
     }
 
-    // One market buy per iteration, with no sell in the book (the fixture's first order is a buy): processReceive()
-    // stores it and finds no market, and the reject keeps the stored order (processReject(onRecvOrderRejected) returns
-    // at alreadyStored()) and reports it (#435)
+    // One market buy per iteration, with no sell in the book (the fixture's first order is a buy): refused() finds no
+    // market before it is stored, and the reject's row stores it (processReject(onOrderReceived)) and reports it, with
+    // no exception raised (#435, #436)
     std::vector<OrderEntry *> orders;
     orders.reserve(state.max_iterations);
     for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)

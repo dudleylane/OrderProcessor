@@ -54,6 +54,9 @@ public:
 
     /// New order event was received
     void receive(onOrderReceived const &);
+    /// A new order that refused() refuses: stored as rejected, with no exception raised (#436)
+    void reject(onOrderReceived const &);
+    bool refused(onOrderReceived const &);
     /// Order replace event was received
     void receive(onRplOrderReceived const &);
 
@@ -104,12 +107,16 @@ public:
     // ToDo: add execCorrect, when qty not changed Fill->Fill for example
     // ToDo: add administrative switch to any state
     // clang-format off
-	struct transition_table : mpl::vector48<
+	struct transition_table : mpl::vector49<
 		//    Start                Event           Next           Action				Guard
 		//	  +-------------+------------------+-------------+------------+----------------------+
 		// create OrderEntry from received event and generate id
 		//a_row< Rcvd_New,	 onOrderReceived,	Pend_New,	  &os::receive   			         >,
 		a_row< Rcvd_New,	 onOrderReceived,	New,	  &os::receive   			         >,
+		/// after Rcvd_New->New, so that it is tried first: an order isValid() refuses, or a market order with nothing to
+		/// trade with, is stored as rejected and reported, with no exception raised (#436)
+		row  < Rcvd_New,	 onOrderReceived,	Rejected,	  &os::reject, &os::refused		 >,
+		// what storing the order refuses (a ClOrdID already in use): receive's exception, caught there, queues this
 		// generate id and create ExecReport Reject
 		a_row< Rcvd_New,	 onRecvOrderRejected,Rejected,	  &os::reject				         >,
 		// create OrderEntry from received event and generate id
