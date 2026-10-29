@@ -373,6 +373,12 @@ took ~1.7 µs.
 (`canFillAtOnce()`, #240), then the trade, its deferred execution events and the book removal (#432). Measured on
 2026-10-29, pinned, it took ~5.0 µs, in runs where `BM_ProcessNewOrderWithMatch` took ~5.2 µs.
 
+`BM_ProcessDuplicateClOrdId` drives a real `Processor` through a new order whose ClOrdID is already in use: storing it
+fails, so the state machine queues the reject and throws to stop the order's move to New, and the engine tells the
+sender directly, storing nothing. Three exceptions are raised, where since #436 the engine's other refusals of a new
+order raise none (#432). Measured on 2026-10-29, pinned, it took ~8.4 µs, in runs where `BM_ProcessInvalidOrder`
+took ~2.4 µs.
+
 ---
 
 ## Architecture
