@@ -427,6 +427,49 @@ TEST_F(StateMachineTest, New_To_Expired_OnExpired)
     EXPECT_TRUE(trCntxt.isOperationEnqueued(REMOVE_ORDERBOOK_TROPERATION));
 }
 
+TEST_F(StateMachineTest, AnEventWithNoRowFailsAndTheMachineGoesOn)
+{
+    // A missing row is counted and logged as a failure (#432). And the machine goes on: exception_caught() must not
+    // throw, or MSM would leave it busy, queuing every later event without processing it
+    TestTransactionContext trCntxt;
+    OrderStateWrapper p;
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+
+    assignClOrderId(order.get());
+    p.start();
+    onOrderReceived recvevnt;
+    recvevnt.order_ = order.get();
+    recvevnt.generator_ = IdTGenerator::instance();
+    recvevnt.transaction_ = &trCntxt;
+    recvevnt.orderStorage_ = OrderStorage::instance();
+    p.processEvent(recvevnt);
+    p.checkStates("New", "NoCnlReplace");
+    trCntxt.clear();
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    ASSERT_NE(nullptr, ord);
+
+    // A received order's reject has a row only from Rcvd_New, and the cancel/replace zone has none for it
+    const uint64_t refused = OrderState::refusedCount();
+    const uint64_t failed = OrderState::failedCount();
+    onRecvOrderRejected late(ord);
+    late.orderId_ = ord->orderId_;
+    late.transaction_ = &trCntxt;
+    EXPECT_NO_THROW(p.processEvent(late));
+    p.checkStates("New", "NoCnlReplace");
+    EXPECT_EQ(0u, trCntxt.op_.size());
+    EXPECT_EQ(failed + 1, OrderState::failedCount());
+    EXPECT_EQ(refused, OrderState::refusedCount());
+
+    onExpired expire;
+    expire.orderId_ = ord->orderId_;
+    expire.generator_ = IdTGenerator::instance();
+    expire.transaction_ = &trCntxt;
+    expire.orderStorage_ = OrderStorage::instance();
+    p.processEvent(expire);
+    p.checkStates("Expired", "NoCnlReplace");
+    EXPECT_EQ(failed + 1, OrderState::failedCount());
+}
+
 // =============================================================================
 // Rejection Tests
 // =============================================================================
@@ -1024,4 +1067,24 @@ TEST(OrderStateIdTest, ARestoredIdThatIsNoStateIsRefused)
     EXPECT_EQ(buf.data() + buf.size(), restored.restore(buf.data(), buf.size()));
     EXPECT_EQ(2, restored.stateZone1Id_);
     EXPECT_EQ(8, restored.stateZone2Id_);
+}
+
+// =============================================================================
+// What the state machine swallows (#432)
+// =============================================================================
+
+TEST(OrderStateSwallowedTest, TheLineNamesTheEventTheOrderItsStatesAndWhy)
+{
+    // Boost.MSM hands whatever process_event() throws to exception_caught(), which logs this line: what was swallowed
+    // must say where to look
+    const int suspended[] = { 7, 8 }; // Suspended, NoCnlReplace
+    EXPECT_EQ(
+        "State machine failed onTradeExecution for order 42 in Suspended/NoCnlReplace: no transition",
+        OrderState::describeSwallowed(false, typeid(onTradeExecution), IdT(42, 20261029), suspended, "no transition"));
+    const int received[] = { 0, 8 }; // Rcvd_New, NoCnlReplace: a new order has no id until it is stored
+    EXPECT_EQ("State machine refused onOrderReceived for a new order in Rcvd_New/NoCnlReplace: ClOrdID in use",
+              OrderState::describeSwallowed(true, typeid(onOrderReceived), IdT(), received, "ClOrdID in use"));
+    const int unknown[] = { 13, -1 }; // not states: their numbers stand in for names
+    EXPECT_EQ("State machine failed onExpired for order 7 in 13/-1: why",
+              OrderState::describeSwallowed(false, typeid(onExpired), IdT(7, 20261029), unknown, "why"));
 }

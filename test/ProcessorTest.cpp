@@ -3368,8 +3368,9 @@ TEST_F(ProcessorTest, ADayOrderExpiresAtTheEndOfItsDayAndAGtcOrderDoesNot)
 
 TEST_F(ProcessorTest, ATimerOfAnOrderThatFilledDecidesNothing)
 {
-    // The order traded before its time: its timer finds it filled. The state machine has no expiry from there, and
-    // its no_transition throws, failing the timer's transaction.
+    // The order traded before its time: its timer finds it filled, and decides nothing (#240). The state machine has no
+    // expiry from there: reached, it would find no row, and the order would be persisted unchanged, with the failure
+    // only counted and logged (#432).
     DateTimeT now = OCT15 + 9 * HOUR;
     ExpiryScheduler expiry(inQueues_.get(),
                            [&now]
@@ -3383,7 +3384,9 @@ TEST_F(ProcessorTest, ATimerOfAnOrderThatFilledDecidesNothing)
 
     now += HOUR;
     ASSERT_EQ(1u, expiry.fireDue());
+    const uint64_t failed = OrdState::OrderState::failedCount();
     EXPECT_NO_THROW(engine.processQueued(1));
+    EXPECT_EQ(failed, OrdState::OrderState::failedCount()) << "the timer reached the state machine";
     EXPECT_EQ(FILLED_ORDSTATUS, gtd->status_);
     EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRADE_EXECTYPE }), engine.reports_.reportTypesOf(gtd->orderId_));
 }
@@ -3435,8 +3438,8 @@ TEST_F(ProcessorTest, ADayReplacementExpiresAtTheEndOfTheDayItWasReplacedIn)
 
 TEST_F(ProcessorTest, AnExpiryOfAnOrderNoLongerLiveDecidesNothing)
 {
-    // The state machine has no expiry from a filled order, and its no_transition throws: decided for one, the timer's
-    // transaction failed, and logged an error, every time an order filled before its time (#240)
+    // The state machine has no expiry from a filled order, so Processor decides nothing for one, before the state
+    // machine: a missing row would leave the order persisted unchanged, the failure only counted and logged (#432)
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
     OrderEntry *buy = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30));
     engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30));
@@ -3446,7 +3449,9 @@ TEST_F(ProcessorTest, AnExpiryOfAnOrderNoLongerLiveDecidesNothing)
         TransactionScope scope;
         Context cnxt(OrderStorage::instance(), orderBook_.get(), inQueues_.get(), &engine.reports_, nullptr,
                      IdTGenerator::instance(), nullptr);
+        const uint64_t failed = OrdState::OrderState::failedCount();
         EXPECT_NO_THROW(engine.processor_.process(change, buy, &scope, cnxt));
+        EXPECT_EQ(failed, OrdState::OrderState::failedCount()) << "the decision reached the state machine";
         EXPECT_EQ(0u, scope.operationCount());
         EXPECT_EQ(FILLED_ORDSTATUS, buy->status_);
     }

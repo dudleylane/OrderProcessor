@@ -20,6 +20,7 @@
 #include "SubscrManager.h"
 #include "IdTGenerator.h"
 #include "TransactionScope.h"
+#include "StateMachine.h"
 #include "StateMachineHelper.h"
 #include "OrderStateMachineImpl.h"
 #include "OrderStorage.h"
@@ -264,8 +265,14 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_DuplicateClOrdId)
     recvevnt.transaction_ = &trCntxt;
     recvevnt.orderStorage_ = OrderStorage::instance();
 
+    // The store refuses the ClOrdID: the reject is the outcome, so the throw that stops the transition to New counts as
+    // refused, not as a failure (#432)
+    const uint64_t refused = OrderState::refusedCount();
+    const uint64_t failed = OrderState::failedCount();
     p.processEvent(recvevnt);
     p.checkStates("Rejected", "NoCnlReplace");
+    EXPECT_EQ(refused + 1, OrderState::refusedCount());
+    EXPECT_EQ(failed, OrderState::failedCount());
     EXPECT_FALSE(recvevnt.order_->orderId_.isValid());
     EXPECT_EQ(1u, trCntxt.op_.size());
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
