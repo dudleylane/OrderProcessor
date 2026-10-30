@@ -1643,6 +1643,254 @@ TEST_F(ProcessorTest, AnOpenMarketOrderACrashLeftTradesAndIsCanceledOnceRestarte
     std::filesystem::remove_all(dir);
 }
 
+TEST_F(ProcessorTest, AnIocOrderACrashLeftOpenIsCanceledOnceRestarted)
+{
+    // IOC buy I for 50 at 10 finds nothing to trade with, and is canceled. L, a sell at 9 that arrives after it, rests.
+    // A crash loses I's cancel (#489). Restored open, I was booked, as an open market order wasn't, and L, which
+    // crosses it, traded with it. I never rests: once restarted it must be canceled with nothing traded, and L rest as
+    // it did.
+    const std::string dir = test::uniqueTestPath("restart-ioc");
+    std::filesystem::remove_all(dir);
+    IdT i;
+    IdT l;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        crashed.transactions_.keepNested_ = true; // the cancel is lost
+        auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 50);
+        order->tif_ = IOC_TIF;
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        i = crashed.process(clOrdId)->orderId_;
+        ASSERT_EQ(CANCELED_ORDSTATUS, crashed.storage_.locateByOrderId(i)->status_);
+        order = createTestOrder(instrId1_, SELL_SIDE, 9.0, 10);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        l = crashed.process(clOrdId)->orderId_;
+        ASSERT_EQ(l, crashed.book_.getTop(instrId1_, SELL_SIDE));
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        ASSERT_EQ(NEW_ORDSTATUS, restarted.storage_.locateByOrderId(i)->status_);
+        ASSERT_EQ(50u, restarted.storage_.locateByOrderId(i)->leavesQty_);
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, BUY_SIDE).isValid()) << "the IOC order was booked";
+        ASSERT_EQ(2u, restarted.dispatcher_.ordersToMatch().size());
+        EXPECT_EQ(i, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+        EXPECT_EQ(l, restarted.dispatcher_.ordersToMatch()[1]->orderId_);
+
+        for (OrderEntry *order : restarted.dispatcher_.ordersToMatch())
+        {
+            restarted.processor_.matchRestored(order);
+        }
+
+        EXPECT_TRUE(reports.tradesOf(i).empty()) << "I traded with an order that arrived after it";
+        EXPECT_EQ(std::vector<ExecType>{ CANCEL_EXECTYPE }, reports.reportTypesOf(i));
+        EXPECT_EQ(CANCELED_ORDSTATUS, restarted.storage_.locateByOrderId(i)->status_);
+        EXPECT_EQ(0u, restarted.storage_.locateByOrderId(i)->leavesQty_);
+        EXPECT_EQ(l, restarted.book_.getTop(instrId1_, SELL_SIDE));
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory again(dir, instrId1_, inQueues_.get(), &reports);
+        EXPECT_TRUE(again.dispatcher_.ordersToMatch().empty());
+        EXPECT_EQ(CANCELED_ORDSTATUS, again.storage_.locateByOrderId(i)->status_);
+        EXPECT_EQ(0u, again.storage_.locateByOrderId(i)->cumQty_);
+        EXPECT_EQ(0u, again.storage_.locateByOrderId(i)->leavesQty_);
+        EXPECT_FALSE(again.book_.getTop(instrId1_, BUY_SIDE).isValid());
+        EXPECT_EQ(NEW_ORDSTATUS, again.storage_.locateByOrderId(l)->status_);
+        EXPECT_EQ(l, again.book_.getTop(instrId1_, SELL_SIDE));
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AnIocOrderACrashLeftWithItsFillIsCanceledOnceRestarted)
+{
+    // S rests with 20. IOC buy I for 50 at 10 trades 20 with it, and the 30 it has left are canceled. A crash keeps the
+    // fill and loses the cancel (#489). Restored with 30 left and nothing it crosses, I was booked, and rested. Once
+    // restarted it must be canceled with what it has left, its fill kept and nothing traded again.
+    const std::string dir = test::uniqueTestPath("restart-ioc-fill");
+    std::filesystem::remove_all(dir);
+    IdT s;
+    IdT i;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 20);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        s = crashed.process(clOrdId)->orderId_;
+        crashed.transactions_.keepNested_ = true;
+        order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 50);
+        order->tif_ = IOC_TIF;
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        i = crashed.process(clOrdId)->orderId_;
+        ASSERT_EQ(CANCELED_ORDSTATUS, crashed.storage_.locateByOrderId(i)->status_);
+        ASSERT_EQ(3u, crashed.transactions_.kept_.size()); // the fill's, the next match's, then the cancel's
+        crashed.transactions_.runKept(1);                  // the fill commits, and the crash loses the cancel
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        ASSERT_EQ(PARTFILL_ORDSTATUS, restarted.storage_.locateByOrderId(i)->status_);
+        ASSERT_EQ(30u, restarted.storage_.locateByOrderId(i)->leavesQty_);
+        EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(s)->status_);
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, BUY_SIDE).isValid()) << "the IOC order was booked";
+        ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+        EXPECT_EQ(i, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+
+        restarted.processor_.matchRestored(restarted.dispatcher_.ordersToMatch()[0]);
+
+        EXPECT_TRUE(reports.tradesOf(i).empty()) << "its fill was made again";
+        EXPECT_EQ(std::vector<ExecType>{ CANCEL_EXECTYPE }, reports.reportTypesOf(i));
+        EXPECT_EQ(0u, reports.leavesReportedWith(i, CANCEL_EXECTYPE));
+        EXPECT_EQ(CANCELED_ORDSTATUS, restarted.storage_.locateByOrderId(i)->status_);
+        EXPECT_EQ(20u, restarted.storage_.locateByOrderId(i)->cumQty_);
+        EXPECT_EQ(0u, restarted.storage_.locateByOrderId(i)->leavesQty_);
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory again(dir, instrId1_, inQueues_.get(), &reports);
+        EXPECT_TRUE(again.dispatcher_.ordersToMatch().empty());
+        EXPECT_EQ(CANCELED_ORDSTATUS, again.storage_.locateByOrderId(i)->status_);
+        EXPECT_EQ(20u, again.storage_.locateByOrderId(i)->cumQty_);
+        EXPECT_EQ(0u, again.storage_.locateByOrderId(i)->leavesQty_);
+        EXPECT_EQ(FILLED_ORDSTATUS, again.storage_.locateByOrderId(s)->status_);
+        EXPECT_FALSE(again.book_.getTop(instrId1_, BUY_SIDE).isValid());
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AFokOrderACrashLeftOpenIsCanceledOnceRestarted)
+{
+    // S rests with 20 at 11. FOK buy F for 50 at 10: nothing on the book reaches its price, so it is canceled with
+    // nothing traded. A crash loses the cancel (#489). Restored open and crossing nothing, F was booked, and rested.
+    // Once restarted its check must run again and cancel it, with S left as it was.
+    const std::string dir = test::uniqueTestPath("restart-fok");
+    std::filesystem::remove_all(dir);
+    IdT s;
+    IdT f;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, SELL_SIDE, 11.0, 20);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        s = crashed.process(clOrdId)->orderId_;
+        crashed.transactions_.keepNested_ = true; // the cancel is lost
+        order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 50);
+        order->tif_ = FOK_TIF;
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        f = crashed.process(clOrdId)->orderId_;
+        ASSERT_EQ(CANCELED_ORDSTATUS, crashed.storage_.locateByOrderId(f)->status_);
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        ASSERT_EQ(NEW_ORDSTATUS, restarted.storage_.locateByOrderId(f)->status_);
+        ASSERT_EQ(50u, restarted.storage_.locateByOrderId(f)->leavesQty_);
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, BUY_SIDE).isValid()) << "the FOK order was booked";
+        ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+        EXPECT_EQ(f, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+
+        restarted.processor_.matchRestored(restarted.dispatcher_.ordersToMatch()[0]);
+
+        EXPECT_TRUE(reports.tradesOf(f).empty());
+        EXPECT_EQ(std::vector<ExecType>{ CANCEL_EXECTYPE }, reports.reportTypesOf(f));
+        EXPECT_EQ(CANCELED_ORDSTATUS, restarted.storage_.locateByOrderId(f)->status_);
+        EXPECT_EQ(0u, restarted.storage_.locateByOrderId(f)->leavesQty_);
+        EXPECT_EQ(s, restarted.book_.getTop(instrId1_, SELL_SIDE));
+        EXPECT_EQ(20u, restarted.storage_.locateByOrderId(s)->leavesQty_);
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory again(dir, instrId1_, inQueues_.get(), &reports);
+        EXPECT_TRUE(again.dispatcher_.ordersToMatch().empty());
+        EXPECT_EQ(CANCELED_ORDSTATUS, again.storage_.locateByOrderId(f)->status_);
+        EXPECT_EQ(0u, again.storage_.locateByOrderId(f)->cumQty_);
+        EXPECT_FALSE(again.book_.getTop(instrId1_, BUY_SIDE).isValid());
+        EXPECT_EQ(NEW_ORDSTATUS, again.storage_.locateByOrderId(s)->status_);
+        EXPECT_EQ(s, again.book_.getTop(instrId1_, SELL_SIDE));
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AFokOrderACrashLeftHalfFilledFillsInFullOnceRestarted)
+{
+    // Four sells of 25 at 10 rest. FOK buy F for 100 at 10: the book fills it at once, a trade with each. A crash keeps
+    // the first two trades and loses the other two. Restored with 50 left, F is matched again, its check first: the two
+    // sells it lost its trades with have what it has left, as they had before the crash, so the check must pass and F
+    // fill in full (#489).
+    const std::string dir = test::uniqueTestPath("restart-fok-fill");
+    std::filesystem::remove_all(dir);
+    std::vector<IdT> sells;
+    IdT f;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        for (int n = 0; n < 4; ++n)
+        {
+            auto order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 25);
+            const RawDataEntry clOrdId = order->clOrderId_.get();
+            inQueues_->push("test", OrderEvent(order.release()));
+            sells.push_back(crashed.process(clOrdId)->orderId_);
+        }
+        crashed.transactions_.keepNested_ = true;
+        auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+        order->tif_ = FOK_TIF;
+        const RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        f = crashed.process(clOrdId)->orderId_;
+        ASSERT_EQ(FILLED_ORDSTATUS, crashed.storage_.locateByOrderId(f)->status_);
+        ASSERT_EQ(7u, crashed.transactions_.kept_.size()); // each sell's fill's, and a next match's between them
+        crashed.transactions_.runKept(3);                  // two fills commit, and the crash loses the other two
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        ASSERT_EQ(PARTFILL_ORDSTATUS, restarted.storage_.locateByOrderId(f)->status_);
+        ASSERT_EQ(50u, restarted.storage_.locateByOrderId(f)->leavesQty_);
+        EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(sells[0])->status_);
+        EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(sells[1])->status_);
+        EXPECT_EQ(NEW_ORDSTATUS, restarted.storage_.locateByOrderId(sells[2])->status_);
+        EXPECT_EQ(NEW_ORDSTATUS, restarted.storage_.locateByOrderId(sells[3])->status_);
+        ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+        EXPECT_EQ(f, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+
+        restarted.processor_.matchRestored(restarted.dispatcher_.ordersToMatch()[0]);
+
+        EXPECT_EQ((std::vector<std::string>{ "25@10", "25@10" }), reports.tradesOf(f));
+        EXPECT_EQ(std::vector<std::string>{ "25@10" }, reports.tradesOf(sells[2]));
+        EXPECT_EQ(std::vector<std::string>{ "25@10" }, reports.tradesOf(sells[3]));
+        EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(f)->status_);
+        EXPECT_EQ(100u, restarted.storage_.locateByOrderId(f)->cumQty_);
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, SELL_SIDE).isValid());
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory again(dir, instrId1_, inQueues_.get(), &reports);
+        EXPECT_TRUE(again.dispatcher_.ordersToMatch().empty());
+        EXPECT_EQ(FILLED_ORDSTATUS, again.storage_.locateByOrderId(f)->status_);
+        EXPECT_EQ(100u, again.storage_.locateByOrderId(f)->cumQty_);
+        for (const IdT &sell : sells)
+        {
+            EXPECT_EQ(FILLED_ORDSTATUS, again.storage_.locateByOrderId(sell)->status_);
+        }
+        EXPECT_FALSE(again.book_.getTop(instrId1_, SELL_SIDE).isValid());
+    }
+    std::filesystem::remove_all(dir);
+}
+
 TEST_F(ProcessorTest, AMarketOrderThatFillsCompletelyIsReportedFilled)
 {
     // A fill that leaves an order nothing removes it from the book, and a market order was never in it. The removal
