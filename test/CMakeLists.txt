@@ -49,6 +49,8 @@ target_sources(orderProcessorTest
         NumaAllocatorTest.cpp
         CacheAlignedAtomicTest.cpp
         CpuAffinityHugePagesTest.cpp
+        # A std::map's nodes in a pool of their own (#467)
+        NodePoolTest.cpp
 
         # LMDB storage backend tests
         LMDBStorageTest.cpp
