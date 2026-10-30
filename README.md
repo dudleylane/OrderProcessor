@@ -329,8 +329,8 @@ expiry at its day's end; both #426) drive a real `Processor` through the state m
 `OrderDataStorage::save`, the book and the transaction, executed inline, and
 `BM_TaskManagerThroughput/N` runs batches of orders through `TaskManager` with N event and N transaction
 processors (#162). This branch's `BM_ProcessSwapWithMatch` times a swap that crosses: OrderMatcher's swap
-matching, and the deferred events that report and book each leg. No `OrderSaver` is attached, so nothing
-reaches LMDB.
+matching, and the deferred events that report and book each leg. `BM_ProcessSwapIocRemainder` times an IOC swap
+that trades part of itself (#485). No `OrderSaver` is attached, so nothing reaches LMDB.
 
 `BM_TaskManagerTrades` runs the same pool while every order trades: sells and buys in pairs at one price,
 dealt over 1 or 8 instruments, into a queue that counts the trade reports and keeps nothing (#290).
