@@ -1134,6 +1134,7 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 | `CacheAlignedAtomicTest.cpp` | `CacheAlignedAtomicTest.*` | Cache-aligned atomics |
 | `CpuAffinityHugePagesTest.cpp` | `CpuAffinityHugePagesTest.*` | CPU pinning, huge pages |
 | `NumaAllocatorTest.cpp` | `NumaAllocatorTest.*` | NUMA-aware allocation |
+| `NodePoolTest.cpp` | `NodePoolTest.*` | A map's nodes in a pool of their own (#467) |
 
 ---
 
@@ -1394,6 +1395,17 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+**Map nodes (#467).** The lookups each order makes walk `std::map`s: `OrderDataStorage`'s maps by id and by ClOrdID,
+and `WideParamsDataStorage`'s strings, raw data and execution lists, behind `WideDataLazyRef`. Each of those maps takes
+its nodes from a pool of its own (`NodePool.h`'s `NodePool`, through `PooledMap`), so that they lie together. From the
+global heap each node lay among the orders, so an order's size moved every walk: FX #404's 72 bytes moved the per-order
+benchmarks +0.7 to +6.5% with the same instructions. **The pools aren't synchronised: every change to these maps must
+run under its store's write lock** (`orderRwLock_`, `rwLock_`), as each does. A map is made with its pool, and a
+temporary to swap with takes the map's allocator: `NodeAllocator` has no default, so a map without one doesn't compile.
+A copy of a map takes its nodes from the same pool, so it too must be made under the write lock, not under a read lock.
+Nodes are not all a walk touches: a ClOrdID key's bytes (`RawDataEntry`'s own allocation), the objects a lookup finds,
+and the book's own maps still lie among the orders.
+
 ### 8.2 Codec System
 
 ```
@@ -1491,7 +1503,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Transactions** | `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `NLinkTreeTest.cpp` | - |
 | **Concurrency** | `TaskManagerTest.cpp` | `ProcessorBench.cpp` (`BM_TaskManagerThroughput`, `BM_TaskManagerTrades`) |
 | **Storage** | `LMDBStorageTest.cpp`, `OrderStorageTest.cpp`, `WideDataStorageTest.cpp`; `FileStorageTest.cpp` for the legacy file storage | - |
-| **Low-Latency** | `CacheAlignedAtomicTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `NumaAllocatorTest.cpp`, `TransactionScopePoolTest.cpp` | `TransactionScopePoolBench.cpp`, `NumaAllocatorBench.cpp`, `OrderParamsLayoutBench.cpp` |
+| **Low-Latency** | `CacheAlignedAtomicTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `NodePoolTest.cpp`, `NumaAllocatorTest.cpp`, `TransactionScopePoolTest.cpp` | `TransactionScopePoolBench.cpp`, `NumaAllocatorBench.cpp`, `OrderParamsLayoutBench.cpp` |
 | **Server (`app/`)** | `ClientMessageParserTest.cpp`, `JsonSerializerTest.cpp`, `WsSessionTest.cpp`, `WsServerLimitsTest.cpp`, `WsAuthTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `SeedDataArgsTest.cpp`; the ctest scripts `ServerThatCannotStartExits` and `SeedDataIfEmptySeedsOnlyADirectoryWithoutInstruments`, and `SeedDataRunsCleanly`; with `BUILD_FUZZ=ON`, `test/fuzz/` | `SessionManagerBench.cpp` |
 | **PostgreSQL** | `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`; with `BUILD_PG=ON`, `PGWriteBehindTest.cpp`, whose integration cases need `PG_CONNECTION_STRING` | - |
 | **CI runner** | the ctest script `JobStartedHookDecides` (`JobStartedHookTest.sh`): the job-started hook's verdicts, a fork's pull request and anything Dependabot sent refused (#143, #168); the ctest script `CiTestedTreeDecides` (`CiTestedTreeTest.sh`): when the push of a merge may skip the jobs its pull request's run passed (#314) | - |
@@ -1536,7 +1548,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | **Data Models** | `DataModelDef.h/cpp`, `TypesDef.h`, `QueuesDef.h`, `EventDef.h`, `TasksDef.h` |
 | **Codecs** | `OrderCodec.h/cpp`, `InstrumentCodec.h/cpp`, `AccountCodec.h/cpp`, `ClearingCodec.h/cpp`, `RawDataCodec.h/cpp`, `StringTCodec.h/cpp`, `CodecChecks.h` |
 | **Concurrency** | `TaskManager.h/cpp`, `AllocateCache.h/cpp` |
-| **Low-Latency** | `TransactionScopePool.h`, `CacheAlignedAtomic.h`, `CpuAffinity.h`, `HugePages.h`, `NumaAllocator.h` |
+| **Low-Latency** | `TransactionScopePool.h`, `CacheAlignedAtomic.h`, `CpuAffinity.h`, `HugePages.h`, `NumaAllocator.h`, `NodePool.h` |
 | **Subscriptions** | `SubscrManager.h/cpp`, `SubscriptionLayerImpl.h/cpp`, `SubscriptionLayerDef.h`, `SubscriptionDef.h`, `FilterImpl.h/cpp`, `EntryFilter.h/cpp`, `OrderFilter.h/cpp` |
 | **Events** | `EventManager.h/cpp`, `DeferedEvents.h`, `CancelOrderDeferedEvent.cpp`, `ExecutionDeferedEvent.cpp`, `MatchOrderDeferedEvent.cpp`, `ReleaseStopDeferedEvent.cpp`, `ReplaceRequestDeferedEvent.cpp`, `StateChangeDeferedEvent.cpp` |
 | **PostgreSQL** | `PGWriteBehind.h/cpp`, `PGRequestBuilder.h/cpp`, `PGWriteRequest.h`, `PGEnumStrings.h` (optional) |
@@ -1546,7 +1558,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 
 | Category | Files |
 |----------|-------|
-| **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `ExpirySchedulerTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
+| **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `ExpirySchedulerTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NodePoolTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 | **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh`, `CpuBusyTest.sh`, `BenchmarkBaselineTest.sh`, `BenchmarkBusyStartTest.sh` |

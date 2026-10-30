@@ -17,6 +17,7 @@
 #include <oneapi/tbb/spin_rw_mutex.h>
 #include <oneapi/tbb/concurrent_hash_map.h>
 #include <map>
+#include "NodePool.h"
 #include "DataModelDef.h"
 
 namespace COP
@@ -142,10 +143,17 @@ private:
     /// Allows concurrent reads, exclusive writes
     mutable oneapi::tbb::spin_rw_mutex orderRwLock_;
 
-    typedef std::map<IdT, OrderEntry *> OrdersByIDT;
+    /// Each map's nodes in a pool of its own, so that they lie together rather than among the orders, whose size moved
+    /// every lookup (#467). Declared before the maps, so that they outlive them. The pools aren't synchronised: every
+    /// change to the maps runs under orderRwLock_'s write lock, and so must any copy of one, whose nodes come from the
+    /// same pool.
+    NodePool ordersByIdNodes_;
+    NodePool ordersByClIdNodes_;
+
+    typedef PooledMap<IdT, OrderEntry *> OrdersByIDT;
     OrdersByIDT ordersById_;
 
-    typedef std::map<RawDataEntry, OrderEntry *> OrdersByClientIDT;
+    typedef PooledMap<RawDataEntry, OrderEntry *> OrdersByClientIDT;
     OrdersByClientIDT ordersByClId_;
 
     /// Hash functor for SourceIdT in concurrent_hash_map

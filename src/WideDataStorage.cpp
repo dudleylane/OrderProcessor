@@ -46,19 +46,23 @@ inline void casUpdateWithBackoff(CacheAlignedAtomic<u64> &counter, u64 newVal)
 }
 } // namespace
 
-WideParamsDataStorage::WideParamsDataStorage(void) : subscrCounter_(1), storage_(nullptr)
+WideParamsDataStorage::WideParamsDataStorage(void)
+    : subscrCounter_(1), strings_(StringsT::allocator_type(&stringNodes_)),
+      rawDatas_(RawDataT::allocator_type(&rawDataNodes_)),
+      executions_(ExecutionListsT::allocator_type(&executionListNodes_)), storage_(nullptr)
 {
     aux::ExchLogger::instance()->note("WideParamsDataStorage created");
 }
 
 WideParamsDataStorage::~WideParamsDataStorage(void)
 {
+    // The pooled maps' temporaries take the maps' allocators, so their nodes go back to their pools (#467)
     InstrumentsT tmpInstr;
-    StringsT tmpStr;
-    RawDataT tmpRaw;
+    StringsT tmpStr(strings_.get_allocator());
+    RawDataT tmpRaw(rawDatas_.get_allocator());
     AccountsT tmpAcct;
     ClearingsT tmpClr;
-    ExecutionListsT tmpExec;
+    ExecutionListsT tmpExec(executions_.get_allocator());
     {
         // Exclusive lock for destruction
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, true);

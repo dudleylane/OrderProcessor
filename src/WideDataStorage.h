@@ -15,6 +15,7 @@
 #include <oneapi/tbb/spin_rw_mutex.h>
 #include <atomic>
 #include <map>
+#include "NodePool.h"
 #include "Singleton.h"
 #include "FileStorageDef.h"
 #include "CacheAlignedAtomic.h"
@@ -78,18 +79,27 @@ private:
     /// Cache-aligned to prevent false sharing with rwLock_
     CacheAlignedAtomic<u64> subscrCounter_;
 
+    /// The maps an order's lookups walk, its strings, its ClOrdIDs and its executions' list, keep their nodes in pools
+    /// of their own, so that they lie together rather than among the orders, whose size moved every lookup (#467).
+    /// Declared before the maps, so that they outlive them. The pools aren't synchronised: every change to the maps
+    /// runs under rwLock_'s write lock, and so must any copy of one, whose nodes come from the same pool. Reference
+    /// data is loaded before any order, so its maps keep the global heap.
+    NodePool stringNodes_;
+    NodePool rawDataNodes_;
+    NodePool executionListNodes_;
+
     typedef std::map<SourceIdT, InstrumentEntry *> InstrumentsT;
     InstrumentsT instruments_;
-    typedef std::map<SourceIdT, StringT *> StringsT;
+    typedef PooledMap<SourceIdT, StringT *> StringsT;
     StringsT strings_;
     typedef std::map<SourceIdT, AccountEntry *> AccountsT;
     AccountsT accounts_;
     typedef std::map<SourceIdT, ClearingEntry *> ClearingsT;
     ClearingsT clearings_;
-    typedef std::map<SourceIdT, RawDataEntry *> RawDataT;
+    typedef PooledMap<SourceIdT, RawDataEntry *> RawDataT;
     RawDataT rawDatas_;
 
-    typedef std::map<SourceIdT, ExecutionsT *> ExecutionListsT;
+    typedef PooledMap<SourceIdT, ExecutionsT *> ExecutionListsT;
     ExecutionListsT executions_;
 
     DataSaver *storage_;
