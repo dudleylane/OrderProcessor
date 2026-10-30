@@ -612,4 +612,57 @@ TEST_F(FxSwapTest, MarketOrderDoesNotMatchASwap)
         << "a market order traded a swap's near leg";
 }
 
+// The FOK check walks as the sweep does (#491): it passes over what findContra() passes over, so it finds what fills a
+// FOK order wherever the sweep would. It used to end at the first working order the FOK order didn't trade with, and
+// canceled a FOK order the book could fill.
+TEST_F(FxSwapTest, AnOutrightFoksCheckPassesOverASwap)
+{
+    // The swap has the best price, and the outright sell behind it fills the FOK buy
+    OrderEntry *sellSwap = createAndSaveSwapOrder(SELL_SIDE, 1.0840, 1.0862, 100, 1000, 2000);
+    sellSwap->status_ = NEW_ORDSTATUS;
+    orderBook_->add(*sellSwap);
+    OrderEntry *sellLimit = createAndSaveLimitOrder(SELL_SIDE, 1.0850, 100);
+    sellLimit->status_ = NEW_ORDSTATUS;
+    orderBook_->add(*sellLimit);
+
+    OrderEntry *buyFok = createAndSaveLimitOrder(BUY_SIDE, 1.0850, 100);
+    buyFok->status_ = NEW_ORDSTATUS;
+    buyFok->tif_ = FOK_TIF;
+    EXPECT_EQ(sellLimit->orderId_, OrderMatcher::findContra(buyFok, *orderBook_, OrderStorage::instance()));
+    EXPECT_TRUE(OrderMatcher::canFillAtOnce(buyFok, *orderBook_, OrderStorage::instance()));
+    buyFok->leavesQty_ = 101; // more than the outright sell has: the swap counts for nothing
+    EXPECT_FALSE(OrderMatcher::canFillAtOnce(buyFok, *orderBook_, OrderStorage::instance()));
+}
+
+TEST_F(FxSwapTest, AFokSwapsCheckPassesOverWhatItsSweepPassesOver)
+{
+    // Ahead of the sell swap that fills the FOK buy swap, with a better near price, one order the swap's sweep passes
+    // over: an outright sell, a sell swap of other dates, or a sell swap of the buy's dates whose far price doesn't cross
+    // (the buyer of the near leg sells the far one, here at 1.0872, which this swap buys at 1.0860)
+    OrderEntry *fills = createAndSaveSwapOrder(SELL_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    fills->status_ = NEW_ORDSTATUS;
+    orderBook_->add(*fills);
+    OrderEntry *buyFok = createAndSaveSwapOrder(BUY_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    buyFok->status_ = NEW_ORDSTATUS;
+    buyFok->tif_ = FOK_TIF;
+
+    const std::pair<const char *, OrderEntry *> aheads[] = {
+        { "an outright sell", createAndSaveLimitOrder(SELL_SIDE, 1.0840, 100) },
+        { "a swap of other dates", createAndSaveSwapOrder(SELL_SIDE, 1.0840, 1.0872, 100, 1100, 2100) },
+        { "a swap whose far price doesn't cross", createAndSaveSwapOrder(SELL_SIDE, 1.0840, 1.0860, 100, 1000, 2000) },
+    };
+    for (const auto &[what, ahead] : aheads)
+    {
+        ahead->status_ = NEW_ORDSTATUS;
+        orderBook_->add(*ahead);
+        ASSERT_EQ(ahead->orderId_, orderBook_->getTop(instrumentId1_, SELL_SIDE)) << what;
+        EXPECT_EQ(fills->orderId_, OrderMatcher::findContra(buyFok, *orderBook_, OrderStorage::instance())) << what;
+        EXPECT_TRUE(OrderMatcher::canFillAtOnce(buyFok, *orderBook_, OrderStorage::instance())) << what;
+        buyFok->leavesQty_ = 101; // more than the swap behind has: the order ahead counts for nothing
+        EXPECT_FALSE(OrderMatcher::canFillAtOnce(buyFok, *orderBook_, OrderStorage::instance())) << what;
+        buyFok->leavesQty_ = 100;
+        orderBook_->remove(*ahead);
+    }
+}
+
 } // namespace

@@ -50,7 +50,7 @@ public:
     /// other rests with it.
     void afterSwapTrade(OrderEntry *order, QuantityT leavesBefore);
     /// Whether the book holds enough, on the other side of order's instrument, of what order trades with to fill it at
-    /// once: the orders findContra() would take, in the order it takes them.
+    /// once: the orders findContra() would take, in the order it takes them, passing over what it passes over (#491).
     static bool canFillAtOnce(OrderEntry *order, const OrderBook &book, Store::OrderDataStorage *storage);
 
     /// The order the matcher trades order with first: the best working one (OrderParams::working(), #432) on the other
