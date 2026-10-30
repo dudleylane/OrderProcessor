@@ -301,6 +301,11 @@ master a7804f7 with the benchmark added: a new order took ~2.8 µs in it, a matc
 | `BM_TaskManagerThroughput/4` | ~2.5 ms per 500 orders | ~196K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
 | `BM_TaskManagerTrades/instruments:8/processors:4` | ~3.9 ms per 500 orders | ~127K orders/sec, ~63K trades/sec | the same pool while every order trades: 250 sells and 250 buys at one price a batch, dealt over 8 instruments |
 
+The rows predate #467, which keeps the stores' map nodes in pools of their own rather than among the orders. Timed
+against the tree before it on 2026-10-30 (20 × 3, pinned to CPUs 2-5), every per-order benchmark took 1.6 to 11.8%
+less time (median 4.1%: a new order 3.7%, a match 3.2%, a cancel 7.9%), and the pool's benchmarks
+(`BM_TaskManagerThroughput`, `BM_TaskManagerTrades`) 1.3 to 7.2% less (median 4.0%).
+
 Until #429 the rows came from sessions between 2026-10-05 (#76) and 2026-10-27. #429 timed #76's tree against
 master in one session, both reporting into a queue that keeps nothing: master took 8.8% longer for a new order,
 8.0% for a match and 1.2% for a cancel, for two reasons. The engine's work grew: the timed loop of a new order,

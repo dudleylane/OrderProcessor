@@ -20,7 +20,9 @@ using namespace COP;
 using namespace std;
 using namespace COP::Store;
 
-OrderDataStorage::OrderDataStorage() : saver_(nullptr)
+OrderDataStorage::OrderDataStorage()
+    : ordersById_(OrdersByIDT::allocator_type(&ordersByIdNodes_)),
+      ordersByClId_(OrdersByClientIDT::allocator_type(&ordersByClIdNodes_)), saver_(nullptr)
 {
     aux::ExchLogger::instance()->note("OrderDataStorage created");
 }
@@ -35,8 +37,9 @@ OrderDataStorage::~OrderDataStorage(void)
 {
     aux::ExchLogger::instance()->note("OrderDataStorage destroying");
 
-    // Clean up orders with exclusive write lock
-    OrdersByIDT tmp;
+    // Clean up orders with exclusive write lock. The temporary takes the map's allocator, so its nodes go back to
+    // their pool (#467)
+    OrdersByIDT tmp(ordersById_.get_allocator());
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, true);
         std::swap(tmp, ordersById_);
