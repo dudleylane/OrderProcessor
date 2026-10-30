@@ -3739,6 +3739,92 @@ TEST_F(ProcessorTest, ATradeWhoseFillDoesntApplyReleasesNoStop)
     EXPECT_EQ((OrderBook::OrdersT{ stop->orderId_, sellStop->orderId_ }), heldStops(*orderBook_, instrId1_));
 }
 
+namespace
+{
+/// Runs a trade of the aggressor with the contra, for qty at px, as the drain of the transaction that matched the
+/// aggressor runs the trade match() queued, then every transaction that follows (#483). match() decides a trade from
+/// both orders as that drain finds them, so nothing in the engine makes one its aggressor can't take: tests make it.
+void runTrade(StopEngine &engine, OrderEntry *aggressor, OrderEntry *contra, QuantityT qty, PriceT px)
+{
+    ExecutionDeferedEvent trade(aggressor);
+    trade.trades_.push_back(TradeParams{ qty, px, contra });
+    engine.processor_.onEvent(&trade);
+    engine.processQueued(0);
+}
+} // namespace
+
+TEST_F(ProcessorTest, ATradeItsAggressorHasTooLittleLeftForFillsNeitherSide)
+{
+    // A trade fills both sides or neither (#483). The trade's event fills each contra, then the aggressor with what the
+    // contras' fills applied: an aggressor's fill that didn't apply left each contra filled, persisted and reported,
+    // against nothing. Here a buy with 50 left is the aggressor of a trade for 100, which its fill can't take
+    // (OrderParams::applyTrade() takes a trade whole or not at all), with a sell that can: the sell was filled.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *sell = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 100));
+    OrderEntry *buy = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 50));
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    runTrade(engine, buy, sell, 100, 11.0);
+    EXPECT_EQ(failed, OrdState::OrderState::failedCount()) << "a fill was dropped";
+
+    EXPECT_EQ(NEW_ORDSTATUS, sell->status_);
+    EXPECT_EQ(0u, sell->cumQty_);
+    EXPECT_EQ(100u, sell->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(sell->orderId_).empty()) << "the sell traded with nothing";
+    EXPECT_EQ(NEW_ORDSTATUS, buy->status_);
+    EXPECT_EQ(0u, buy->cumQty_);
+    EXPECT_EQ(50u, buy->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(buy->orderId_).empty());
+    EXPECT_EQ(sell->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE));
+    EXPECT_EQ(buy->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
+}
+
+TEST_F(ProcessorTest, ATradeWhoseAggressorIsSuspendedFillsNeitherSide)
+{
+    // The aggressor must be working too, as each contra is (#432): a suspended order keeps what it has left, but its
+    // state machine has no row for a trade, so its fill was dropped and the sell's stood (#483)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *sell = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 100));
+    OrderEntry *buy = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    engine.request(suspendOf(buy->orderId_));
+    ASSERT_EQ(SUSPENDED_ORDSTATUS, buy->status_);
+    ASSERT_EQ(100u, buy->leavesQty_);
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    runTrade(engine, buy, sell, 100, 11.0);
+    EXPECT_EQ(failed, OrdState::OrderState::failedCount()) << "a fill was dropped";
+
+    EXPECT_EQ(NEW_ORDSTATUS, sell->status_);
+    EXPECT_EQ(0u, sell->cumQty_);
+    EXPECT_EQ(100u, sell->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(sell->orderId_).empty()) << "the sell traded with nothing";
+    EXPECT_EQ(SUSPENDED_ORDSTATUS, buy->status_);
+    EXPECT_EQ(100u, buy->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(buy->orderId_).empty());
+}
+
+TEST_F(ProcessorTest, ATradeWhoseAggressorIsClosedFillsNeitherSideAndCancelsNothing)
+{
+    // A trade that didn't happen ends the sweep as a fill that didn't apply ends it, and an order that never rests is
+    // canceled with what it has left (#477), but only a working one: a closed IOC has no row for the cancel, which the
+    // state machine would drop, as it dropped the closed IOC's fill while its contra's stood (#483)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *sell = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 100));
+    OrderEntry *ioc = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), IOC_TIF));
+    ASSERT_EQ(CANCELED_ORDSTATUS, ioc->status_) << "with nothing to trade with at its price";
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    runTrade(engine, ioc, sell, 100, 11.0);
+    EXPECT_EQ(failed, OrdState::OrderState::failedCount()) << "a fill or a cancel was dropped";
+
+    EXPECT_EQ(NEW_ORDSTATUS, sell->status_);
+    EXPECT_EQ(0u, sell->cumQty_);
+    EXPECT_EQ(100u, sell->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(sell->orderId_).empty()) << "the sell traded with nothing";
+    EXPECT_EQ(CANCELED_ORDSTATUS, ioc->status_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, CANCEL_EXECTYPE }), engine.reports_.reportTypesOf(ioc->orderId_));
+}
+
 TEST_F(ProcessorTest, ASwapTradesNothingWhenItsContrasFillDoesntApply)
 {
     // On this branch a swap's near leg is filled, and each side's far leg reported, only if its contra's near fill
