@@ -3892,6 +3892,99 @@ TEST_F(ProcessorTest, AFokSwapWhoseContrasFillDoesntApplyIsCanceled)
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
 }
 
+namespace
+{
+/// asSwap()'s swap, with the far price and the dates given
+std::unique_ptr<OrderEntry> asSwapOf(std::unique_ptr<OrderEntry> order, PriceT farPrice, DateTimeT near, DateTimeT far)
+{
+    order = asSwap(std::move(order));
+    order->farPrice_ = farPrice;
+    order->settlDate_ = near;
+    order->farSettlDate_ = far;
+    return order;
+}
+} // namespace
+
+TEST_F(ProcessorTest, AnOutrightFokOrderTheBookFillsBehindASwapFillsInFull)
+{
+    // The FOK check walks as the sweep does (#491). An outright order's sweep passes over a swap (#212): a sell swap at
+    // 10 rests ahead of the outright sell at 10.5 that fills a FOK buy for 30 at 11. The check ended at the swap, and the
+    // FOK was canceled with nothing traded, where an IOC sent in its place filled in full.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *swap =
+        engine.submit(asSwapOf(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100), 10.2, 1000, 2000));
+    const OrderEntry *sell = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.5, 30));
+    const OrderEntry *fok = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 11.0, 30), FOK_TIF));
+
+    EXPECT_EQ(FILLED_ORDSTATUS, fok->status_);
+    EXPECT_EQ(std::vector<std::string>{ "30@10.5" }, engine.reports_.tradesOf(fok->orderId_));
+    EXPECT_EQ(FILLED_ORDSTATUS, sell->status_);
+    EXPECT_EQ(100u, swap->leavesQty_);
+    EXPECT_EQ(swap->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE));
+}
+
+TEST_F(ProcessorTest, AFokSwapTheBookFillsBehindAnOutrightOrderFillsInFull)
+{
+    // A swap's sweep passes over an outright order, and so does its check now (#491)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *outright = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 1.0840, 50));
+    const OrderEntry *sell = engine.submit(asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0850, 200)));
+    const OrderEntry *fok = engine.submit(withTif(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 100)), FOK_TIF));
+
+    EXPECT_EQ(FILLED_ORDSTATUS, fok->status_);
+    EXPECT_EQ((std::vector<std::string>{ "100@1.085", "100@1.0872" }), engine.reports_.tradesOf(fok->orderId_));
+    EXPECT_EQ(100u, sell->leavesQty_);
+    EXPECT_EQ(50u, outright->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(outright->orderId_).empty());
+}
+
+TEST_F(ProcessorTest, AFokSwapTheBookFillsBehindASwapOfOtherDatesFillsInFull)
+{
+    // ... and over a swap of other dates (#491)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *other =
+        engine.submit(asSwapOf(createTestOrder(instrId1_, SELL_SIDE, 1.0840, 50), 1.0872, 1100, 2100));
+    const OrderEntry *sell = engine.submit(asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0850, 200)));
+    const OrderEntry *fok = engine.submit(withTif(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 100)), FOK_TIF));
+
+    EXPECT_EQ(FILLED_ORDSTATUS, fok->status_);
+    EXPECT_EQ((std::vector<std::string>{ "100@1.085", "100@1.0872" }), engine.reports_.tradesOf(fok->orderId_));
+    EXPECT_EQ(100u, sell->leavesQty_);
+    EXPECT_EQ(50u, other->leavesQty_);
+}
+
+TEST_F(ProcessorTest, AFokSwapTheBookFillsBehindASwapWhoseFarPriceDoesntCrossFillsInFull)
+{
+    // ... and over a swap of its dates whose near price crosses and far price doesn't: the buyer of the near leg sells
+    // the far one, at 1.0872, which this swap buys at 1.0860 (#491)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *farOff =
+        engine.submit(asSwapOf(createTestOrder(instrId1_, SELL_SIDE, 1.0840, 50), 1.0860, 1000, 2000));
+    const OrderEntry *sell = engine.submit(asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0850, 200)));
+    const OrderEntry *fok = engine.submit(withTif(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 100)), FOK_TIF));
+
+    EXPECT_EQ(FILLED_ORDSTATUS, fok->status_);
+    EXPECT_EQ((std::vector<std::string>{ "100@1.085", "100@1.0872" }), engine.reports_.tradesOf(fok->orderId_));
+    EXPECT_EQ(100u, sell->leavesQty_);
+    EXPECT_EQ(50u, farOff->leavesQty_);
+}
+
+TEST_F(ProcessorTest, AFokSwapTheBookCantFillBehindAnOutrightOrderIsCanceled)
+{
+    // What the check passes over counts for nothing: the outright sell ahead has 50, and the swap behind it 50 of the
+    // FOK swap's 100
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *outright = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 1.0840, 50));
+    const OrderEntry *sell = engine.submit(asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0850, 50)));
+    const OrderEntry *fok = engine.submit(withTif(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 100)), FOK_TIF));
+
+    EXPECT_EQ(CANCELED_ORDSTATUS, fok->status_);
+    EXPECT_EQ(0u, fok->cumQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, CANCEL_EXECTYPE }), engine.reports_.reportTypesOf(fok->orderId_));
+    EXPECT_EQ(50u, sell->leavesQty_);
+    EXPECT_EQ(50u, outright->leavesQty_);
+}
+
 TEST_F(ProcessorTest, AnIocSwapACrashLeftWithItsFillIsCanceledOnceRestarted)
 {
     // S rests: a sell swap for 40. IOC buy swap I for 100 trades 40 with it, and the 60 it has left are canceled
@@ -3957,8 +4050,7 @@ TEST_F(ProcessorTest, AFokSwapACrashLeftOpenIsCanceledOnceRestarted)
     // S rests: a sell swap for 20 at 1.0860, above the FOK swap's 1.0850. FOK buy swap F for 50: nothing on the book
     // reaches its price, so it is canceled with nothing traded. A crash loses the cancel (#489). Restored open and
     // crossing nothing, F was booked, and rested. Once restarted its check must run again and cancel it, with S left as
-    // it was. The book holds swaps of F's dates alone: a FOK swap's check stops early at an outright order or a swap of
-    // other dates, which the sweep would pass over (#491).
+    // it was.
     const std::string dir = test::uniqueTestPath("restart-fok-swap");
     std::filesystem::remove_all(dir);
     IdT s;
@@ -4006,6 +4098,82 @@ TEST_F(ProcessorTest, AFokSwapACrashLeftOpenIsCanceledOnceRestarted)
         EXPECT_FALSE(again.book_.getTop(instrId1_, BUY_SIDE).isValid());
         EXPECT_EQ(NEW_ORDSTATUS, again.storage_.locateByOrderId(s)->status_);
         EXPECT_EQ(s, again.book_.getTop(instrId1_, SELL_SIDE));
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AFokSwapACrashLeftHalfFilledFillsInFullOnceRestarted)
+{
+    // An outright sell O for 50 at 1.0840 rests ahead of four sell swaps of 25 at 1.0850. FOK buy swap F for 100: its
+    // check passes over O, as its sweep does (#491), and the book fills it at once, a trade with each swap. A crash keeps
+    // the first two trades and loses the other two (#489). Restored with 50 left, F is matched again, its check first,
+    // which must pass over O again and count the two swaps it lost its trades with: F fills in full, and O is left as it
+    // was. Until #491 the check ended at O, and F was canceled at once.
+    const std::string dir = test::uniqueTestPath("restart-fok-swap-fill");
+    std::filesystem::remove_all(dir);
+    IdT o;
+    std::vector<IdT> swaps;
+    IdT f;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, SELL_SIDE, 1.0840, 50);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        o = crashed.process(clOrdId)->orderId_;
+        for (int n = 0; n < 4; ++n)
+        {
+            order = asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0850, 25));
+            clOrdId = order->clOrderId_.get();
+            inQueues_->push("test", OrderEvent(order.release()));
+            swaps.push_back(crashed.process(clOrdId)->orderId_);
+        }
+        crashed.transactions_.keepNested_ = true;
+        order = withTif(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 100)), FOK_TIF);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        f = crashed.process(clOrdId)->orderId_;
+        ASSERT_EQ(FILLED_ORDSTATUS, crashed.storage_.locateByOrderId(f)->status_);
+        ASSERT_EQ(7u, crashed.transactions_.kept_.size()); // each swap's fill's, and a next match's between them
+        crashed.transactions_.runKept(3);                  // two fills commit, and the crash loses the other two
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        ASSERT_EQ(PARTFILL_ORDSTATUS, restarted.storage_.locateByOrderId(f)->status_);
+        ASSERT_EQ(50u, restarted.storage_.locateByOrderId(f)->leavesQty_);
+        EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(swaps[0])->status_);
+        EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(swaps[1])->status_);
+        EXPECT_EQ(NEW_ORDSTATUS, restarted.storage_.locateByOrderId(swaps[2])->status_);
+        EXPECT_EQ(NEW_ORDSTATUS, restarted.storage_.locateByOrderId(swaps[3])->status_);
+        EXPECT_EQ(o, restarted.book_.getTop(instrId1_, SELL_SIDE));
+        ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+        EXPECT_EQ(f, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+
+        restarted.processor_.matchRestored(restarted.dispatcher_.ordersToMatch()[0]);
+
+        EXPECT_EQ((std::vector<std::string>{ "25@1.085", "25@1.0872", "25@1.085", "25@1.0872" }), reports.tradesOf(f));
+        EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(f)->status_);
+        EXPECT_EQ(100u, restarted.storage_.locateByOrderId(f)->cumQty_);
+        EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(swaps[2])->status_);
+        EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(swaps[3])->status_);
+        EXPECT_TRUE(reports.tradesOf(o).empty());
+        EXPECT_EQ(o, restarted.book_.getTop(instrId1_, SELL_SIDE));
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory again(dir, instrId1_, inQueues_.get(), &reports);
+        EXPECT_TRUE(again.dispatcher_.ordersToMatch().empty());
+        EXPECT_EQ(FILLED_ORDSTATUS, again.storage_.locateByOrderId(f)->status_);
+        EXPECT_EQ(100u, again.storage_.locateByOrderId(f)->cumQty_);
+        for (const IdT &swap : swaps)
+        {
+            EXPECT_EQ(FILLED_ORDSTATUS, again.storage_.locateByOrderId(swap)->status_);
+        }
+        EXPECT_EQ(NEW_ORDSTATUS, again.storage_.locateByOrderId(o)->status_);
+        EXPECT_EQ(o, again.book_.getTop(instrId1_, SELL_SIDE));
     }
     std::filesystem::remove_all(dir);
 }

@@ -40,6 +40,51 @@ bool pricesCross(const OrderEntry &order, const OrderEntry &contra)
     return (BUY_SIDE == order.side_) ? (order.price_ >= contra.price_) : (order.price_ <= contra.price_);
 }
 
+/// What the matcher's walk of the other side of order's instrument does at contra, read-locked: takes it, passes over
+/// it and goes on, or ends there, as the side is sorted by price and no order further on trades with order either.
+/// The sweep's search (findContra()) and the FOK check (canFillAtOnce()) both walk by it, so the check counts what the
+/// sweep would take and stops only where the sweep would stop (#491).
+enum class Walk
+{
+    PASS,
+    TAKE,
+    END
+};
+
+Walk walk(const OrderEntry &order, const OrderEntry &contra)
+{
+    // The book holds an order the state machine took out of trading until its removal, a transaction of its own, runs:
+    // a closed one has no leaves (#386), and a suspended one keeps them. Either is passed by, and the search goes on
+    // (#432): the state machine has no row for a trade with either, and dropped the trade without a word.
+    if (!contra.working())
+    {
+        return Walk::PASS;
+    }
+    if (OrderMatcher::tradesWith(order, contra))
+    {
+        return Walk::TAKE;
+    }
+    const bool contraIsSwap = (FXSWAP_ORDERTYPE == contra.ordType_);
+    if (FXSWAP_ORDERTYPE != order.ordType_)
+    {
+        // A swap trades only with a swap, on both legs: an outright order passes over one, and keeps looking. It used to
+        // take a swap by its near price alone, and filled the swap's near leg without its far leg (#212). Any other
+        // order it doesn't trade with ends the walk.
+        return contraIsSwap ? Walk::PASS : Walk::END;
+    }
+    // A swap passes over an outright order, a swap of other dates, and one whose far price doesn't cross. A swap of the
+    // same dates whose near price doesn't cross ends the walk: the side is sorted by near price, so no swap further on
+    // crosses either.
+    if (contraIsSwap && (contra.settlDate_ == order.settlDate_) && (contra.farSettlDate_ == order.farSettlDate_) &&
+        !pricesCross(order, contra))
+    {
+        return Walk::END;
+    }
+    return Walk::PASS;
+}
+
+/// The sweep's search, an outright order's and a swap's: the first order on the other side of order's instrument that
+/// walk() takes
 class FindOpositeOrder : public OrderFunctor
 {
 public:
@@ -65,7 +110,9 @@ private:
 };
 
 /// Walks the orders findContra() would take, in its order, adding up what they have left, and finds the one that makes
-/// it enough to fill the order (#240)
+/// it enough to fill the order (#240). It walks by walk(), as the sweep does: until #491 it ended at the first working
+/// order the order didn't trade with, where on this branch the sweep passes over a swap, an outright order, or a swap
+/// of other dates or a far price that doesn't cross, so a FOK order the book could fill was canceled.
 class FindFillAtOnce : public OrderFunctor
 {
 public:
@@ -86,17 +133,18 @@ public:
             return false;
         }
         oneapi::tbb::spin_rw_mutex::scoped_lock contrLock(contrOrd->entryMutex_, false);
-        if (!contrOrd->working())
+        switch (walk(*order_, *contrOrd))
         {
-            return false; // passed by, as findContra() passes it by: what it has left fills nothing (#432)
-        }
-        if (!OrderMatcher::tradesWith(*order_, *contrOrd))
-        {
-            *stop = true; // sorted by price: no order further on trades with it either
+        case Walk::TAKE:
+            found_ += contrOrd->leavesQty_;
+            return found_ >= needed_;
+        case Walk::END:
+            *stop = true;
             return false;
+        case Walk::PASS:
+            break;
         }
-        found_ += contrOrd->leavesQty_;
-        return found_ >= needed_;
+        return false;
     }
 
 private:
@@ -121,89 +169,16 @@ bool FindOpositeOrder::match(const IdT &order, bool *stop) const
 
     // read lock on contra order during field reads
     oneapi::tbb::spin_rw_mutex::scoped_lock contrLock(contrOrd->entryMutex_, false);
-
-    // The book holds an order the state machine took out of trading until its removal, a transaction of its own, runs:
-    // a closed one has no leaves (#386), and a suspended one keeps them. Either is passed by, and the search goes on
-    // (#432): the state machine has no row for a trade with either, and dropped the trade without a word.
-    if (!contrOrd->working())
+    switch (walk(*order_, *contrOrd))
     {
-        return false;
-    }
-    // A swap trades only with a swap, on both legs (FindOppositeSwapOrder). An outright order passes over one, and keeps
-    // looking: it used to take a swap by its near price alone, and filled the swap's near leg without its far leg (#212).
-    if (FXSWAP_ORDERTYPE == contrOrd->ordType_)
-    {
-        return false;
-    }
-    if (OrderMatcher::tradesWith(*order_, *contrOrd))
-    {
+    case Walk::TAKE:
         return true;
-    }
-    // The side is sorted by price, so no order further on trades with it either
-    assert(nullptr != stop);
-    *stop = true;
-    return false;
-}
-
-/// Functor to find a matching contra FX Swap order.
-/// Checks: same instrument, opposite side, both FXSWAP, matching settlement dates,
-/// near-leg and far-leg price compatibility.
-class FindOppositeSwapOrder : public OrderFunctor
-{
-public:
-    FindOppositeSwapOrder(OrderEntry *order, OrderDataStorage *orderStorage)
-        : order_(order), orderStorage_(orderStorage)
-    {
-        assert(nullptr != order_);
-        assert(nullptr != orderStorage_);
-        if (BUY_SIDE == order_->side_)
-        {
-            side_ = SELL_SIDE;
-        }
-        else
-        {
-            side_ = BUY_SIDE;
-        }
-    }
-    virtual SourceIdT instrument() const
-    {
-        return order_->instrument_.getId();
-    }
-    virtual bool match(const IdT &order, bool *stop) const;
-
-private:
-    OrderEntry *order_;
-    OrderDataStorage *orderStorage_;
-};
-
-bool FindOppositeSwapOrder::match(const IdT &order, bool *stop) const
-{
-    OrderEntry *contrOrd = orderStorage_->locateByOrderId(order);
-    if (nullptr == contrOrd)
-    {
-        return false;
-    }
-
-    // read lock on contra order during field reads
-    oneapi::tbb::spin_rw_mutex::scoped_lock contrLock(contrOrd->entryMutex_, false);
-
-    // Must be a swap order that is working, as FindOpositeOrder requires (#432): the search passes over the rest of the
-    // side
-    if ((FXSWAP_ORDERTYPE != contrOrd->ordType_) || !contrOrd->working())
-    {
-        return false;
-    }
-    if (OrderMatcher::tradesWith(*order_, *contrOrd))
-    {
-        return true;
-    }
-    // The side is sorted by near price: a swap of the same dates whose near price doesn't cross ends the search, as no
-    // swap further on crosses either. One with other dates, or whose far price doesn't cross, doesn't end it.
-    if ((contrOrd->settlDate_ == order_->settlDate_) && (contrOrd->farSettlDate_ == order_->farSettlDate_) &&
-        !pricesCross(*order_, *contrOrd))
-    {
+    case Walk::END:
         assert(nullptr != stop);
         *stop = true;
+        return false;
+    case Walk::PASS:
+        break;
     }
     return false;
 }
@@ -241,10 +216,6 @@ bool OrderMatcher::tradesWith(const OrderEntry &order, const OrderEntry &contra)
 
 IdT OrderMatcher::findContra(OrderEntry *order, const OrderBook &book, OrderDataStorage *storage)
 {
-    if (FXSWAP_ORDERTYPE == order->ordType_)
-    {
-        return book.find(FindOppositeSwapOrder(order, storage));
-    }
     return book.find(FindOpositeOrder(order, storage));
 }
 
