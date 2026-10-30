@@ -1119,6 +1119,53 @@ static void BM_ProcessSwapSweep(benchmark::State &state)
 }
 BENCHMARK(BM_ProcessSwapSweep);
 
+// BM_ProcessIocRemainder for swaps (#485): an IOC swap that trades part of itself, then its sweep's next match, which
+// finds no swap to trade with
+static void BM_ProcessSwapIocRemainder(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // Where the timed path ends: an IOC swap for 100 that trades 40, then finds no swap for the rest. Until #485's fix
+    // the engine leaves the rest open, out of the book, so the swap ends PARTFILL with 40
+    engine.submit(newSwap(engine, SELL_SIDE, 50.0, 40));
+    OrderEntry *warmUp = newSwap(engine, BUY_SIDE, 50.0, 100);
+    warmUp->tif_ = IOC_TIF;
+    engine.submit(warmUp);
+    if (!engine.lastEndedAs(state, PARTFILL_ORDSTATUS, 40))
+    {
+        return;
+    }
+
+    // One resting sell swap for 40 per iteration, each a point above the last. Each IOC swap buys 100 at its own sell's
+    // near price, so it trades with that sell alone, the cheapest left: a swap trade, with its deferred events, which
+    // report a near and a far leg for each side, then the next match, which finds no swap to trade with.
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        engine.submit(newSwap(engine, SELL_SIDE, 100.0 + static_cast<PriceT>(i), 40));
+    }
+
+    std::vector<OrderEntry *> aggressors;
+    aggressors.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        OrderEntry *ioc = newSwap(engine, BUY_SIDE, 100.0 + static_cast<PriceT>(i), 100);
+        ioc->tif_ = IOC_TIF;
+        aggressors.push_back(ioc);
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessSwapIocRemainder);
+
 // =============================================================================
 // End-to-end throughput through TaskManager's worker pool
 // =============================================================================
