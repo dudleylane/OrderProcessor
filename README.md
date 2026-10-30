@@ -373,6 +373,9 @@ took ~1.7 µs.
 `BM_ProcessFokFill` drives a real `Processor` through a FOK order the book fills at once: the check that it can
 (`canFillAtOnce()`, #240), then the trade, its deferred execution events and the book removal (#432). Measured on
 2026-10-29, pinned, it took ~5.0 µs, in runs where `BM_ProcessNewOrderWithMatch` took ~5.2 µs.
+This branch's `BM_ProcessSwapFokFill` does the same with swaps: a FOK buy swap the book fills at once, its check, then
+the swap trade, which reports a near and a far leg for each side (#491). Measured on 2026-10-30, pinned, it took
+~5.9 µs, in runs where `BM_ProcessFokFill` took ~5.2 µs and `BM_ProcessSwapWithMatch` ~5.8 µs.
 
 `BM_ProcessDuplicateClOrdId` drives a real `Processor` through a new order whose ClOrdID is already in use: storing it
 fails, so the state machine queues the reject and throws to stop the order's move to New, and the engine tells the
