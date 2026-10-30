@@ -112,10 +112,12 @@ public:
     /// its restatement, if it outlives the business day (#244)
     void scheduleExpiry(const OrderEntry &order) const;
 
-    /// Matches a restored order that lost its fills, and books it if it is a limit order, as the transaction that booked
-    /// it did when it ran (#207). The fills go to the transaction manager, each in a transaction of its own, but they
-    /// are applied before this returns, so the next order matched sees them. Call it before the server takes orders,
-    /// for each of StorageRecordDispatcher::ordersToMatch() in turn. Throws if the order can't be matched or booked.
+    /// Matches a restored order that lost its fills, or the cancel of what it couldn't trade, as the transaction that
+    /// booked it did when it ran (#207, #489), and books it if it rests in the price book: a market, IOC or FOK order
+    /// never does, and what it can't trade is canceled. The fills and the cancel go to the transaction manager, each in
+    /// a transaction of its own, but they are applied before this returns, so the next order matched sees them. Call it
+    /// before the server takes orders, for each of StorageRecordDispatcher::ordersToMatch() in turn. Throws if the
+    /// order can't be matched or booked.
     void matchRestored(OrderEntry *order);
     /// Releases a restored held stop that its instrument's last trade reached (#237), as that trade's release would have:
     /// in a transaction of its own, on a transaction worker. Call it for each of StorageRecordDispatcher::stopsReached()
