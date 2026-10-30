@@ -305,10 +305,11 @@ int main(int argc, char *argv[])
 
     auto taskMgr = std::make_unique<Tasks::TaskManager>(taskParams);
 
-    // 9b. A crash after the transaction that booked an order committed, and before the one with its fills did, leaves
-    // the order restored without its fills: Phase 2 left each such order out of the book, which it would cross (#207).
-    // Match them now, in the order they arrived and before any client can send an order, as their bookings did. Their
-    // fills persist and report through the transaction workers. One that can't be matched is no reason not to start.
+    // 9b. A crash after the transaction that booked an order committed, and before the one with its fills, or with the
+    // cancel of what it couldn't trade, did, leaves the order restored as booked: Phase 2 left each such order out of
+    // the book, which it would cross (#207) or, as an order that never rests, rest in (#489). Match them now, in the
+    // order they arrived and before any client can send an order, as their bookings did. Their fills and cancels
+    // persist and report through the transaction workers. One that can't be matched is no reason not to start.
     auto *restoreProcessor = static_cast<Proc::Processor *>(evntProcessors[0]);
     const std::vector<OrderEntry *> &ordersToMatch = dispatcher->ordersToMatch();
     if (!ordersToMatch.empty())
@@ -323,8 +324,9 @@ int main(int argc, char *argv[])
             }
             catch (const std::exception &ex)
             {
-                aux::ExchLogger::instance()->error("Restored order " + std::to_string(order->orderId_.id_) +
-                                                   " lost its fills and could not be matched: " + ex.what());
+                aux::ExchLogger::instance()->error(
+                    "Restored order " + std::to_string(order->orderId_.id_) +
+                    " lost its fills or its cancel and could not be matched: " + ex.what());
             }
             // A trade here can release a held stop, and the release matches it in a transaction of its own, on a
             // transaction worker (#223). The next order is matched on this thread, outside the manager, so it waits for
@@ -335,7 +337,7 @@ int main(int argc, char *argv[])
             }
         }
         aux::ExchLogger::instance()->warn(std::to_string(ordersToMatch.size()) +
-                                          " restored order(s) had lost their fills; matched " +
+                                          " restored order(s) had lost their fills or their cancel; matched " +
                                           std::to_string(matched) + " of them before taking orders");
     }
 
