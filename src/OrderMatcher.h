@@ -40,9 +40,10 @@ public:
     /// What follows one of order's trades, at lastPx, once the trade's event has decided its fills (#477), given what
     /// order had left before them. match() decides a trade from the orders' leaves before either fill runs, so what
     /// follows waits for order's fill. If it applied, the held stops lastPx reaches are released (#480), and the sweep
-    /// goes on: with something left, match() again. A fill that didn't apply, which the state machine drops (#432),
-    /// releases nothing and ends the sweep as a match that finds nothing to trade with ends it: an order that never
-    /// rests is canceled with what it has left, and any other rests with it.
+    /// goes on: with something left, match() again. A fill that didn't apply, which the state machine drops (#432), or
+    /// a trade the event refused because order couldn't take it whole (#483), releases nothing and ends the sweep as a
+    /// match that finds nothing to trade with ends it: a working order that never rests is canceled with what it has
+    /// left, any other working order rests with it, and one that isn't working is left as it is.
     void afterTrade(OrderEntry *order, QuantityT leavesBefore, PriceT lastPx, const ACID::Context &ctxt);
     /// Whether the book holds enough, on the other side of order's instrument, of what order trades with to fill it at
     /// once: the orders findContra() would take, in the order it takes them.

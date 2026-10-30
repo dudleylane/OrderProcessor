@@ -11,6 +11,7 @@
 */
 
 #include <cassert>
+#include <string>
 #include "DeferedEvents.h"
 #include "Processor.h"
 #include "TransactionDef.h"
@@ -19,6 +20,8 @@
 #include "OrderStorage.h"
 #include "TrOperations.h"
 #include "ExpiryScheduler.h"
+#include "StateMachine.h"
+#include "Logger.h"
 
 using namespace COP;
 using namespace COP::Proc;
@@ -32,6 +35,30 @@ ExecutionDeferedEvent::ExecutionDeferedEvent() : baseOrder_(nullptr) {}
 ExecutionDeferedEvent::ExecutionDeferedEvent(OrderEntry *ord) : baseOrder_(ord)
 {
     assert(nullptr != baseOrder_);
+}
+
+bool ExecutionDeferedEvent::takesTrade(const OrderEntry &base, QuantityT qty, QuantityT *leaves)
+{
+    assert(nullptr != leaves);
+    OrderStatePersistence state;
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(base.entryMutex_, false);
+        *leaves = base.leavesQty_;
+        if (base.working() && (qty <= *leaves)) [[likely]]
+        {
+            return true;
+        }
+        state = base.stateMachinePersistance();
+    }
+    const auto name = [](int idx) -> std::string
+    {
+        return ((0 <= idx) && (idx < ORDER_STATE_COUNT)) ? OrderState::getStateName(idx) : std::to_string(idx);
+    };
+    aux::ExchLogger::instance()->error("A trade its base order can't take fills neither side: order " +
+                                       std::to_string(base.orderId_.id_) + " in " + name(state.stateZone1Id_) + "/" +
+                                       name(state.stateZone2Id_) + " has " + std::to_string(*leaves) +
+                                       " left, and the trade is for " + std::to_string(qty));
+    return false;
 }
 
 void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope,
@@ -65,8 +92,27 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
     baseOrderParam.lastQty_ = 0;
     baseOrderParam.lastPx_ = 0.0;
     PriceT lastPrint = 0.0;
+    // A trade fills both sides or neither (#483). The base order is filled after its contras, with what their fills
+    // applied, so before any is filled it must be able to take the whole trade, as the matcher found each contra able
+    // to: working, with the trade's quantity left at least. If it can't, no contra is filled: until #483 each was,
+    // persisted and reported, against a base order whose own fill then didn't apply. The base order could take it when
+    // match() decided the trade, and nothing changes it before this runs, in the drain of the transaction that matched
+    // it, which names the order: so this guards that. A base fill that fails for any other reason still leaves its
+    // contras filled, and is logged (#432).
+    QuantityT tradeQty = 0;
+    for (const TradeParams &trade : trades_)
+    {
+        tradeQty += trade.lastQty_;
+    }
     // What the base order has left before any fill: what follows the trade depends on whether its fill applied (#477)
-    const QuantityT baseBefore = baseOrder_->leavesQty_;
+    QuantityT baseBefore = 0;
+    if (!takesTrade(*baseOrder_, tradeQty, &baseBefore)) [[unlikely]]
+    {
+        // What follows a trade that didn't happen is what follows a fill that didn't apply: the sweep's end (#477)
+        assert(nullptr != cnxt.orderMatch_);
+        cnxt.orderMatch_->afterTrade(baseOrder_, baseBefore, 0.0, cnxt);
+        return;
+    }
     // Every side of the match trades in one business day (#244): the clock is read once, so a match at a day's end
     // can't count in one day for one side and in the next for the other
     const DateTimeT dayStart = ExpiryScheduler::dayStartOf(cnxt.now());
