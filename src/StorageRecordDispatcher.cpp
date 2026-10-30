@@ -346,12 +346,14 @@ void StorageRecordDispatcher::finishLoad()
             orderBook_->addStop(*restored);
             continue;
         }
-        // An open market order, or a STOP its stop released, or an order that crosses one that arrived before it, lost
-        // what its booking started: an order matched as a market order is never left open, and an order that crosses
-        // an earlier one trades with it. The transaction that booked it committed, and the one with its fills didn't
-        // (#207). It is left for the server to match, in this order, and not booked as it is, which would leave the
-        // book crossed.
-        if (restored->marketLike() || crossesAnEarlierOrder(restored))
+        // An open order that never rests, or one that crosses an order that arrived before it, lost what its booking
+        // started: the transaction that booked it committed, and the one with its fills, or with the cancel of what it
+        // couldn't trade, didn't (#207). One that never rests is a market order, a STOP its stop released, or an IOC or
+        // FOK order (#489): what it doesn't trade when it is matched is canceled, so it is never left open (its book()
+        // is NONE here, since a held stop went to the stop book above). One that crosses an earlier order trades with
+        // it. Each is left for the server to match, in this order, and not booked as it is: an IOC or FOK order booked
+        // so rested, and traded with an order that arrived after it, and a crossing order left the book crossed.
+        if (restored->cancelsWhatIsLeft() || crossesAnEarlierOrder(restored))
         {
             ordersToMatch_.push_back(restored);
         }
