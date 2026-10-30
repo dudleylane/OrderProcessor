@@ -41,8 +41,19 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
     assert(nullptr != farTrade_.order_);
     assert(nearTrade_.lastQty_ > 0);
 
+    // A swap trade fills both sides or neither, as an outright trade does (#483): the swap must be able to take its
+    // near leg whole, working with the leg's quantity left, before the contra's is filled. The stage's rollback below
+    // never sees a fill the state machine drops: Boost.MSM hands the throw to exception_caught() (#432), so a swap
+    // whose own near fill was dropped left the contra filled and both far legs reported.
     // What the swap has left before any fill: whether its sweep goes on depends on whether its fill applied (#477)
-    const QuantityT baseBefore = baseOrder_->leavesQty_;
+    QuantityT baseBefore = 0;
+    if (!ExecutionDeferedEvent::takesTrade(*baseOrder_, nearTrade_.lastQty_, &baseBefore)) [[unlikely]]
+    {
+        // What follows a trade that didn't happen is what follows a fill that didn't apply: the sweep's end (#477)
+        assert(nullptr != cnxt.orderMatch_);
+        cnxt.orderMatch_->afterSwapTrade(baseOrder_, baseBefore);
+        return;
+    }
 
     // Stage the swap — if either leg fails, remove the stage and cancel
     size_t stageId = scope->startNewStage();
