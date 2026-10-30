@@ -344,6 +344,11 @@ figures below were measured with it. On 2026-10-28, pinned, the queue that keeps
 per-order benchmark (a new order 5%, a cancel 13%, a match 19%, a swap's match 14%, an IOC's remainder 11%; median
 11% at 6 × 1) and about 4% off `BM_TaskManagerThroughput` (20 × 3): what that queue cost at the time.
 
+The figures below also predate #467, which keeps the stores' map nodes in pools of their own rather than among the
+orders. Timed against the tree before it on 2026-10-30 (20 × 3, pinned to CPUs 2-5), every per-order benchmark took 0.4
+to 12.7% less time (median 4.3%: a new order 5.4%, a match 2.3%, a cancel 8.7%, a swap's match 1.6%), and the pool's
+benchmarks (`BM_TaskManagerThroughput`, `BM_TaskManagerTrades`) 1.3 to 5.8% less (median 4.8%).
+
 `BM_ProcessInvalidOrder` and `BM_ProcessMarketOrderWithNoMarket` drive a real `Processor` with transactions executed
 inline through the engine's reject of an order it stores (#435): one that `OrderEntry::isValid()` refuses, and a market
 order with nothing to trade with. Until #436 a reject cost about 2.5 times a new order, and more than a match: the state
