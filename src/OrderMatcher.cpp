@@ -436,11 +436,22 @@ void OrderMatcher::matchSwap(OrderEntry *order, const Context &ctxt)
     IdT id = findContra(order, *ctxt.orderBook_, ctxt.orderStorage_);
     if (!id.isValid())
     {
-        // No swap match — rest on book (swaps don't auto-cancel like MARKET orders)
-        if (aux::ExchLogger::instance()->isNoteOn())
+        // An IOC or FOK swap never rests: what it couldn't trade at once is canceled, as match() cancels an outright
+        // order's (#485). It was left open, out of the book, where no swap finds it. Any other swap rests: its booking
+        // books it once this match is done (addBooking()).
+        if (order->cancelsWhatIsLeft())
         {
-            aux::ExchLogger::instance()->note(
-                "Unable to find opposite swap order during matching, order rests on book.");
+            std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
+            defEvnt->cancelReason_ = "Immediate or cancel: what the order couldn't trade at once is canceled";
+            defEvnt->order_ = order;
+            defered_->addDeferedEvent(defEvnt.release());
+        }
+        else
+        {
+            if (aux::ExchLogger::instance()->isNoteOn())
+            {
+                aux::ExchLogger::instance()->note("Unable to find opposite swap order during matching, stop matching.");
+            }
         }
         return;
     }
@@ -490,12 +501,26 @@ void OrderMatcher::afterSwapTrade(OrderEntry *order, QuantityT leavesBefore)
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
         leaves = order->leavesQty_;
     }
-    // The fill applied, all of it, so the sweep goes on with what the swap has left. One that didn't, which the state
-    // machine dropped and counted (#432), would be traded again with the same swap without end, so the sweep ends: the
-    // swap rests, as matchSwap() leaves one that finds no swap to trade with, whatever its time in force.
-    if ((leaves < leavesBefore) && (0 < leaves))
+    if (leaves < leavesBefore) [[likely]]
     {
-        std::unique_ptr<MatchSwapOrderDeferedEvent> defEvnt(new MatchSwapOrderDeferedEvent(order));
+        // The fill applied, all of it, so the sweep goes on with what the swap has left
+        if (0 < leaves)
+        {
+            std::unique_ptr<MatchSwapOrderDeferedEvent> defEvnt(new MatchSwapOrderDeferedEvent(order));
+            defEvnt->order_ = order;
+            defered_->addDeferedEvent(defEvnt.release());
+        }
+        return;
+    }
+    // The fill didn't apply: the state machine dropped the contra's near fill, so nothing traded (#481), or the swap's
+    // own, and counted and logged why (#432). Matched again, the swap would take the same swap without end, so the
+    // sweep ends here, as one that finds no swap to trade with ends, and the same way (#485): an IOC or FOK swap is
+    // canceled with what it has left, as afterTrade() cancels an outright order's, and any other rests with it,
+    // crossing the swap it couldn't trade with. Until #485 every swap rested, whatever its time in force.
+    if (order->cancelsWhatIsLeft())
+    {
+        std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
+        defEvnt->cancelReason_ = "A trade's fill didn't apply: what the order has left is canceled";
         defEvnt->order_ = order;
         defered_->addDeferedEvent(defEvnt.release());
     }
