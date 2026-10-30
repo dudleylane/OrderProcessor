@@ -91,11 +91,12 @@ public:
     {
         return restoredIdLimit_;
     }
-    /// The orders the last load restored without booking, in the order they arrived: each lost the fills its booking
-    /// started, because the transaction that booked it committed and the one with its fills didn't (#207). An open
-    /// market order is one, and so is an order that crosses one that arrived before it; booked as they were, they
-    /// would leave the book crossed. Processor::matchRestored() matches each as the transaction that booked it did,
-    /// and the server calls it for each, in this order, before it takes orders.
+    /// The orders the last load restored without booking, in the order they arrived: each lost what its booking
+    /// started, because the transaction that booked it committed and the one with its fills, or with the cancel of what
+    /// it couldn't trade, didn't (#207). An open order that never rests is one: a market order, a STOP its stop
+    /// released, or an IOC or FOK order (#489), which booked as it was would rest. So is an order that crosses one that
+    /// arrived before it, which booked as it was would leave the book crossed. Processor::matchRestored() matches each
+    /// as the transaction that booked it did, and the server calls it for each, in this order, before it takes orders.
     const std::vector<OrderEntry *> &ordersToMatch() const
     {
         return ordersToMatch_;
