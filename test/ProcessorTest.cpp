@@ -3980,6 +3980,91 @@ TEST_F(ProcessorTest, AFokSwapWhoseContrasFillDoesntApplyIsCanceled)
 
 namespace
 {
+/// Runs a swap trade of the aggressor with the contra, for qty at the contra's prices, as the drain of the transaction
+/// that matched the aggressor runs the trade matchSwap() queued, then every transaction that follows (#483). As with
+/// runTrade(), nothing in the engine makes one the aggressor can't take: tests make it.
+void runSwapTrade(StopEngine &engine, OrderEntry *aggressor, OrderEntry *contra, QuantityT qty)
+{
+    SwapExecutionDeferedEvent trade(aggressor);
+    trade.nearTrade_ = TradeParams{ qty, contra->price_, contra };
+    trade.farTrade_ = TradeParams{ qty, contra->farPrice_, contra };
+    engine.processor_.onEvent(&trade);
+    engine.processQueued(0);
+}
+} // namespace
+
+TEST_F(ProcessorTest, ASwapTradeItsAggressorHasTooLittleLeftForFillsNeitherSide)
+{
+    // A swap trade fills both sides or neither, as an outright trade does (#483). The swap's near fill comes after its
+    // contra's (#481), and the stage's rollback never sees a fill the state machine drops: a swap with 50 left, the
+    // aggressor of a trade for 100, left the sell swap filled and both sides' far legs reported.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *sell = engine.submit(asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0860, 100)));
+    OrderEntry *buy = engine.submit(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 50)));
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    runSwapTrade(engine, buy, sell, 100);
+    EXPECT_EQ(failed, OrdState::OrderState::failedCount()) << "a fill was dropped";
+
+    EXPECT_EQ(NEW_ORDSTATUS, sell->status_);
+    EXPECT_EQ(0u, sell->cumQty_);
+    EXPECT_EQ(100u, sell->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(sell->orderId_).empty()) << "the sell swap traded with nothing";
+    EXPECT_EQ(NEW_ORDSTATUS, buy->status_);
+    EXPECT_EQ(0u, buy->cumQty_);
+    EXPECT_EQ(50u, buy->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(buy->orderId_).empty()) << "a far leg reported for a dropped near fill";
+    EXPECT_EQ(sell->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE));
+    EXPECT_EQ(buy->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
+}
+
+TEST_F(ProcessorTest, ASwapTradeWhoseAggressorIsSuspendedFillsNeitherSide)
+{
+    // The swap must be working too, as an outright aggressor must (#483): a suspended swap keeps what it has left, but
+    // its state machine has no row for a trade, so its near fill was dropped and the sell swap's stood
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *sell = engine.submit(asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0860, 100)));
+    OrderEntry *buy = engine.submit(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 100)));
+    engine.request(suspendOf(buy->orderId_));
+    ASSERT_EQ(SUSPENDED_ORDSTATUS, buy->status_);
+    ASSERT_EQ(100u, buy->leavesQty_);
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    runSwapTrade(engine, buy, sell, 100);
+    EXPECT_EQ(failed, OrdState::OrderState::failedCount()) << "a fill was dropped";
+
+    EXPECT_EQ(NEW_ORDSTATUS, sell->status_);
+    EXPECT_EQ(0u, sell->cumQty_);
+    EXPECT_EQ(100u, sell->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(sell->orderId_).empty()) << "the sell swap traded with nothing";
+    EXPECT_EQ(SUSPENDED_ORDSTATUS, buy->status_);
+    EXPECT_EQ(100u, buy->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(buy->orderId_).empty());
+}
+
+TEST_F(ProcessorTest, ASwapTradeWhoseAggressorIsClosedFillsNeitherSideAndCancelsNothing)
+{
+    // An IOC swap is canceled with what it has left when its sweep ends at a fill that didn't apply (#485), but only a
+    // working one: a closed one has no row for the cancel, which the state machine would drop (#483)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *sell = engine.submit(asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0860, 100)));
+    OrderEntry *ioc = engine.submit(withTif(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 100)), IOC_TIF));
+    ASSERT_EQ(CANCELED_ORDSTATUS, ioc->status_) << "with no swap to trade with at its price";
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    runSwapTrade(engine, ioc, sell, 100);
+    EXPECT_EQ(failed, OrdState::OrderState::failedCount()) << "a fill or a cancel was dropped";
+
+    EXPECT_EQ(NEW_ORDSTATUS, sell->status_);
+    EXPECT_EQ(0u, sell->cumQty_);
+    EXPECT_EQ(100u, sell->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(sell->orderId_).empty()) << "the sell swap traded with nothing";
+    EXPECT_EQ(CANCELED_ORDSTATUS, ioc->status_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, CANCEL_EXECTYPE }), engine.reports_.reportTypesOf(ioc->orderId_));
+}
+
+namespace
+{
 /// asSwap()'s swap, with the far price and the dates given
 std::unique_ptr<OrderEntry> asSwapOf(std::unique_ptr<OrderEntry> order, PriceT farPrice, DateTimeT near, DateTimeT far)
 {

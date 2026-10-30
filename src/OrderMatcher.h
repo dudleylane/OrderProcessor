@@ -46,9 +46,10 @@ public:
     /// left, any other working order rests with it, and one that isn't working is left as it is.
     void afterTrade(OrderEntry *order, QuantityT leavesBefore, PriceT lastPx, const ACID::Context &ctxt);
     /// afterTrade() for a swap, once its trade's event has decided both sides' near legs (#477): if the swap's fill
-    /// applied and left it something, its sweep goes on (matchSwap() again). A fill that didn't apply ends the sweep as
-    /// finding no swap to trade with ends it (#485): an IOC or FOK swap is canceled with what it has left, and any
-    /// other rests with it.
+    /// applied and left it something, its sweep goes on (matchSwap() again). A fill that didn't apply, or a trade the
+    /// event refused because the swap couldn't take its near leg whole (#483), ends the sweep as finding no swap to
+    /// trade with ends it (#485): a working IOC or FOK swap is canceled with what it has left, any other working swap
+    /// rests with it, and one that isn't working is left as it is.
     void afterSwapTrade(OrderEntry *order, QuantityT leavesBefore);
     /// Whether the book holds enough, on the other side of order's instrument, of what order trades with to fill it at
     /// once: the orders findContra() would take, in the order it takes them, passing over what it passes over (#491).

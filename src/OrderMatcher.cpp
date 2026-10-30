@@ -494,11 +494,18 @@ void OrderMatcher::afterSwapTrade(OrderEntry *order, QuantityT leavesBefore)
         return;
     }
     // The fill didn't apply: the state machine dropped the contra's near fill, so nothing traded (#481), or the swap's
-    // own, and counted and logged why (#432). Matched again, the swap would take the same swap without end, so the
-    // sweep ends here, as one that finds no swap to trade with ends, and the same way (#485): an IOC or FOK swap is
-    // canceled with what it has left, as afterTrade() cancels an outright order's, and any other rests with it,
-    // crossing the swap it couldn't trade with. Until #485 every swap rested, whatever its time in force.
-    if (order->cancelsWhatIsLeft())
+    // own, and counted and logged why (#432), or the trade's event refused the trade, as the swap couldn't take its
+    // near leg whole (#483). Matched again, the swap would take the same swap without end, so the sweep ends here, as
+    // one that finds no swap to trade with ends, and the same way (#485): a working IOC or FOK swap is canceled with
+    // what it has left, as afterTrade() cancels an outright order's, any other working swap rests with it, crossing
+    // the swap it couldn't trade with, and one that isn't working is left as it is, as afterTrade() leaves an outright
+    // order (#483). Until #485 every swap rested, whatever its time in force.
+    bool cancels = false;
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
+        cancels = order->working() && order->cancelsWhatIsLeft();
+    }
+    if (cancels)
     {
         std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
         defEvnt->cancelReason_ = "A trade's fill didn't apply: what the order has left is canceled";
