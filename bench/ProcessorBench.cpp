@@ -1227,6 +1227,54 @@ static void BM_ProcessSwapIocRemainder(benchmark::State &state)
 }
 BENCHMARK(BM_ProcessSwapIocRemainder);
 
+// BM_ProcessFokFill for swaps: a FOK swap the book fills at once, its check first (OrderMatcher::canFillAtOnce()), which
+// walks the other side as the swap's sweep does (#491), then the swap trade
+static void BM_ProcessSwapFokFill(benchmark::State &state)
+{
+    EngineFixture engine;
+    if (!engine.acceptsOrders(state))
+    {
+        return;
+    }
+    // Where the timed path ends: a FOK swap the book fills at once
+    engine.submit(newSwap(engine, SELL_SIDE, 50.0, 100));
+    OrderEntry *warmUp = newSwap(engine, BUY_SIDE, 50.0, 100);
+    warmUp->tif_ = FOK_TIF;
+    engine.submit(warmUp);
+    if (!engine.lastEndedAs(state, FILLED_ORDSTATUS, 100))
+    {
+        return;
+    }
+
+    // One resting sell swap per iteration, and a FOK buy swap for all of it at its near price, so every timed swap fills
+    // at once: the check that the book can fill it, which walks the sell swaps until what they have left is enough,
+    // then the swap trade, its deferred events, which report a near and a far leg for each side, and the book removal.
+    // The book holds swaps of one date pair alone, so the check takes the first swap it comes to, with #491's fix or
+    // without it. The only benchmark that reaches a swap's check: BM_ProcessFokFill's book holds no swap.
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        engine.submit(newSwap(engine, SELL_SIDE, 100.0, 100));
+    }
+
+    std::vector<OrderEntry *> aggressors;
+    aggressors.reserve(state.max_iterations);
+    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    {
+        OrderEntry *fok = newSwap(engine, BUY_SIDE, 100.0, 100);
+        fok->tif_ = FOK_TIF;
+        aggressors.push_back(fok);
+    }
+
+    size_t next = 0;
+    for (auto _ : state)
+    {
+        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
+        engine.processor().process();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ProcessSwapFokFill);
+
 // =============================================================================
 // End-to-end throughput through TaskManager's worker pool
 // =============================================================================
