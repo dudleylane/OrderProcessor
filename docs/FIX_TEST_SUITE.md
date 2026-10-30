@@ -280,7 +280,8 @@ Tests for FX Swap data model, matching, validation, and codec support.
 | `SwapValidation_FarSettlDateMustBeAfterNear` | farSettlDate <= settlDate → rejected |
 | `SwapValidation_FarPriceMustBePositive` | farPrice == 0 → rejected |
 | `SwapValidation_ValidSwapOrder` | Valid swap fields → isValid() passes |
-| `SwapNoMatch_RestsOnBook` | Swap order with no contra → rests (no auto-cancel) |
+| `SwapNoMatch_RestsOnBook` | DAY swap with no contra → nothing queued: it rests |
+| `AnIocSwapWithNoContraIsCanceled` | IOC swap with no contra → CancelOrderDeferedEvent: it never rests (#485) |
 | `SwapDoesNotMatchLimitOrder` | Swap order does not match regular LIMIT order |
 | `SwapMatchExact` | Two contra swaps match → 1 SwapExecutionDeferedEvent |
 | `SwapMatchPartial_QueuesOnlyTheTrade` | Partial qty → SwapExec alone: the next match waits for the fills (#477) |

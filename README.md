@@ -330,7 +330,8 @@ expiry at its day's end; both #426) drive a real `Processor` through the state m
 `BM_TaskManagerThroughput/N` runs batches of orders through `TaskManager` with N event and N transaction
 processors (#162). This branch's `BM_ProcessSwapWithMatch` times a swap that crosses: OrderMatcher's swap
 matching, and the deferred events that report and book each leg. `BM_ProcessSwapIocRemainder` times an IOC swap
-that trades part of itself (#485). No `OrderSaver` is attached, so nothing reaches LMDB.
+that trades part of itself, and the engine's cancel of the rest (#485): ~7.4 µs, measured on 2026-10-30, pinned,
+in runs where `BM_ProcessSwapWithMatch` took ~5.8 µs. No `OrderSaver` is attached, so nothing reaches LMDB.
 
 `BM_TaskManagerTrades` runs the same pool while every order trades: sells and buys in pairs at one price,
 dealt over 1 or 8 instruments, into a queue that counts the trade reports and keeps nothing (#290).

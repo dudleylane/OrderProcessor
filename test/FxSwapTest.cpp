@@ -231,6 +231,20 @@ TEST_F(FxSwapTest, SwapNoMatch_RestsOnBook)
     EXPECT_EQ(0u, deferedContainer_->events_.size());
 }
 
+TEST_F(FxSwapTest, AnIocSwapWithNoContraIsCanceled)
+{
+    // An IOC swap never rests: with no contra, what it couldn't trade at once is canceled, as an IOC order's is (#485)
+    OrderEntry *buySwap = createAndSaveSwapOrder(BUY_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    buySwap->status_ = NEW_ORDSTATUS;
+    buySwap->tif_ = IOC_TIF;
+
+    matcher_->match(buySwap, context_);
+
+    ASSERT_EQ(1u, deferedContainer_->events_.size());
+    EXPECT_NE(nullptr, dynamic_cast<CancelOrderDeferedEvent *>(deferedContainer_->events_.front()))
+        << "an IOC swap with no contra was left open";
+}
+
 TEST_F(FxSwapTest, SwapDoesNotMatchLimitOrder)
 {
     // Add a regular LIMIT sell order

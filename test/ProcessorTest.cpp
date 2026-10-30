@@ -3507,6 +3507,112 @@ TEST_F(ProcessorTest, ASwapTradesNothingWhenItsContrasFillDoesntApply)
     EXPECT_TRUE(engine.reports_.tradesOf(unfillable->orderId_).empty()) << "a far leg reported for a dropped near fill";
 }
 
+namespace
+{
+/// The order, made a swap with the far leg and the dates every swap of these tests has: two on opposite sides trade
+/// when their near prices cross
+std::unique_ptr<OrderEntry> asSwap(std::unique_ptr<OrderEntry> order)
+{
+    order->ordType_ = FXSWAP_ORDERTYPE;
+    order->farPrice_ = 1.0872;
+    order->settlDate_ = 1000;
+    order->farSettlDate_ = 2000;
+    return order;
+}
+} // namespace
+
+TEST_F(ProcessorTest, AnIocSwapWithNoSwapToTradeWithIsCanceled)
+{
+    // An IOC swap never rests, as an IOC order doesn't (#240), but matchSwap() left one that found no swap to trade
+    // with as it was (#485): NEW with all of its quantity, out of the book, where no swap finds it, and never canceled
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0860, 100))); // above the IOC swap's price
+    const OrderEntry *ioc = engine.submit(withTif(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 100)), IOC_TIF));
+
+    EXPECT_TRUE(engine.reports_.tradesOf(ioc->orderId_).empty());
+    EXPECT_EQ(CANCELED_ORDSTATUS, ioc->status_);
+    EXPECT_EQ(0u, ioc->leavesQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, CANCEL_EXECTYPE }), engine.reports_.reportTypesOf(ioc->orderId_));
+    EXPECT_EQ(0u, engine.reports_.leavesReportedWith(ioc->orderId_, CANCEL_EXECTYPE));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "an IOC swap rests in the book";
+}
+
+TEST_F(ProcessorTest, AnIocSwapTradesWhatItCanAtOnceAndTheRestIsCanceled)
+{
+    // What its sweep left was left open too, PARTFILL, out of the book (#485)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *sell = engine.submit(asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0850, 40)));
+    const OrderEntry *ioc = engine.submit(withTif(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 100)), IOC_TIF));
+
+    EXPECT_EQ((std::vector<std::string>{ "40@1.085", "40@1.0872" }), engine.reports_.tradesOf(ioc->orderId_))
+        << "the near and the far leg of its one trade";
+    EXPECT_EQ(FILLED_ORDSTATUS, sell->status_);
+    EXPECT_EQ(CANCELED_ORDSTATUS, ioc->status_);
+    EXPECT_EQ(40u, ioc->cumQty_);
+    EXPECT_EQ(0u, ioc->leavesQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRADE_EXECTYPE, TRADE_EXECTYPE, CANCEL_EXECTYPE }),
+              engine.reports_.reportTypesOf(ioc->orderId_));
+    EXPECT_EQ(0u, engine.reports_.leavesReportedWith(ioc->orderId_, CANCEL_EXECTYPE));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "an IOC swap rests in the book";
+}
+
+TEST_F(ProcessorTest, AnIocSwapWhoseContrasFillDoesntApplyIsCanceled)
+{
+    // A swap's sweep ends at a fill that didn't apply as it ends where it finds no swap to trade with (#477, #481), and
+    // the same way (#485): an IOC swap is canceled with what it has left, as an IOC order is. It was left NEW, out of
+    // the book, and never canceled.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *unfillable = engine.submit(asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0850, 100)));
+    ASSERT_NO_FATAL_FAILURE(makeUnfillable(engine, inQueues_.get(), unfillable));
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    auto order = withTif(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 100)), IOC_TIF);
+    const RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    EXPECT_NO_THROW(engine.processor_.process());
+    engine.processQueued(0); // the removal, then the reports
+    EXPECT_EQ(failed + 1, OrdState::OrderState::failedCount()) << "the dropped fill, once";
+
+    const OrderEntry *ioc = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, ioc);
+    EXPECT_EQ(CANCELED_ORDSTATUS, ioc->status_);
+    EXPECT_EQ(0u, ioc->cumQty_);
+    EXPECT_EQ(0u, ioc->leavesQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, CANCEL_EXECTYPE }), engine.reports_.reportTypesOf(ioc->orderId_));
+    EXPECT_EQ(0u, unfillable->cumQty_);
+    EXPECT_EQ(100u, unfillable->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(unfillable->orderId_).empty());
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+}
+
+TEST_F(ProcessorTest, AFokSwapWhoseContrasFillDoesntApplyIsCanceled)
+{
+    // What the contra has left could fill it at once, so its check passed (#240), and then the contra's fill was
+    // dropped. Canceled with what it has left, as an IOC swap is (#485), where it was left NEW, out of the book.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *unfillable = engine.submit(asSwap(createTestOrder(instrId1_, SELL_SIDE, 1.0850, 100)));
+    ASSERT_NO_FATAL_FAILURE(makeUnfillable(engine, inQueues_.get(), unfillable));
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    auto order = withTif(asSwap(createTestOrder(instrId1_, BUY_SIDE, 1.0850, 100)), FOK_TIF);
+    const RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    EXPECT_NO_THROW(engine.processor_.process());
+    engine.processQueued(0); // the removal, then the reports
+    EXPECT_EQ(failed + 1, OrdState::OrderState::failedCount()) << "the dropped fill, once: the check passed";
+
+    const OrderEntry *fok = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, fok);
+    EXPECT_EQ(CANCELED_ORDSTATUS, fok->status_);
+    EXPECT_EQ(0u, fok->cumQty_);
+    EXPECT_EQ(0u, fok->leavesQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, CANCEL_EXECTYPE }), engine.reports_.reportTypesOf(fok->orderId_));
+    EXPECT_EQ(0u, unfillable->cumQty_);
+    EXPECT_EQ(100u, unfillable->leavesQty_);
+    EXPECT_TRUE(engine.reports_.tradesOf(unfillable->orderId_).empty());
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid());
+}
+
 TEST_F(ProcessorTest, ADayOrderExpiresAtTheEndOfItsDayAndAGtcOrderDoesNot)
 {
     // 17:00 New York (#240, ruled 2026-10-16): 21:00 UTC, as New York keeps daylight time in October
