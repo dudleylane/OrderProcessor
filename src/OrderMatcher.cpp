@@ -384,13 +384,21 @@ void OrderMatcher::afterTrade(OrderEntry *order, QuantityT leavesBefore, PriceT 
         }
         return;
     }
-    // The fill didn't apply: the state machine dropped it, and counted and logged why (#432). Matched again, the order
+    // The fill didn't apply: the state machine dropped it, and counted and logged why (#432), or the trade's event
+    // refused the trade, filling neither side, as the order couldn't take it whole (#483). Matched again, the order
     // would trade the same quantity with the same order, without end, so the sweep ends here, as one that finds nothing
-    // to trade with ends. An order that never rests is canceled with what it has left: a FOK order that traded part of
-    // itself before is canceled with the rest, which beats leaving it working and unbooked. Any other rests with it,
-    // where it crosses the order it couldn't trade with. No stop is released: a trade's price reaches the stops only
-    // once the trade has happened (#480). A contra's fill that applied without this one is #483.
-    if (order->cancelsWhatIsLeft())
+    // to trade with ends. A working order that never rests is canceled with what it has left: a FOK order that traded
+    // part of itself before is canceled with the rest, which beats leaving it working and unbooked. Any other working
+    // order rests with it, where it crosses the order it couldn't trade with. One that isn't working, which only a
+    // refused trade hands here, is left as it is: a closed order has no row for the cancel, and a suspended or
+    // done-for-day one is out of trading for now, not done with it. No stop is released: a trade's price reaches the
+    // stops only once the trade has happened (#480).
+    bool cancels = false;
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
+        cancels = order->working() && order->cancelsWhatIsLeft();
+    }
+    if (cancels)
     {
         std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));
         defEvnt->cancelReason_ = "A trade's fill didn't apply: what the order has left is canceled";

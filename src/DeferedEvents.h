@@ -102,6 +102,12 @@ struct ExecutionDeferedEvent : public DeferedEventBase
 
     virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
 
+    /// Whether a trade's base order can take all of it, qty, before either side is filled (#483): working, with qty
+    /// left at least, as the matcher finds each contra (#432). leaves gets what the order has left, read under its lock
+    /// with the rest. If it can't, the trade fills neither side, and this logs an error naming the order, its state in
+    /// each zone, what it has left and qty.
+    static bool takesTrade(const OrderEntry &base, QuantityT qty, QuantityT *leaves);
+
 private:
     void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope, const TradeParams &param,
                  DateTimeT dayStart);
