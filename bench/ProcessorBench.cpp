@@ -131,13 +131,20 @@ OrderEntry *makeOrder(const WideData &data, u64 sequence, const Side &side, Pric
     return order;
 }
 
-/// Runs each transaction on the thread that built it, as soon as it is enqueued, so the per-order
-/// benchmarks measure the processing path itself - state machine, operations, book, storage -
-/// rather than TaskManager's scheduling, which BM_TaskManagerThroughput and BM_TaskManagerTrades cover.
+/// Runs each transaction on the thread that built it, so the per-order benchmarks measure the processing path itself -
+/// state machine, operations, book, storage - rather than TaskManager's scheduling, which BM_TaskManagerThroughput and
+/// BM_TaskManagerTrades cover. It runs them in production's order (#486): a transaction added while another runs, a
+/// deferred event's from the drain of the chain that one began, runs once that one is done, in id order, as
+/// TransactionMgr runs a chain's transactions behind the one draining it. Run at once, inside that drain, the chain
+/// nested: each level's events and scopes stayed live until the innermost returned, and the allocator state that left
+/// could dominate a comparison. As TransactionMgr does, it takes each transaction it is given, and frees it once run.
 class InlineTransactionManager final : public TransactionManager
 {
 public:
-    InlineTransactionManager() : processor_(nullptr), nextId_(1) {}
+    InlineTransactionManager() : processor_(nullptr), nextId_(1), ran_(0), running_(false)
+    {
+        queued_.reserve(64);
+    }
 
     void attach(TransactionObserver *) override {}
     TransactionObserver *detach() override
@@ -148,9 +155,22 @@ public:
     void addTransaction(std::unique_ptr<Transaction> &tr) override
     {
         tr->setTransactionId(TransactionId(nextId_++, 1));
-        if (nullptr != processor_)
+        if (nullptr == processor_)
         {
-            processor_->process(tr->transactionId(), tr.get());
+            return;
+        }
+        queued_.push_back(std::move(tr));
+        if (running_)
+        {
+            return; // runs once the transaction running now is done
+        }
+        // The outermost call runs the queue empty. A transaction run here can add more, so the size is read each time,
+        // and each entry is moved out before it runs: an add can move the vector.
+        Draining draining(this);
+        for (; ran_ < queued_.size(); ++ran_)
+        {
+            std::unique_ptr<Transaction> next(std::move(queued_[ran_]));
+            processor_->process(next->transactionId(), next.get());
         }
     }
 
@@ -170,16 +190,44 @@ public:
     {
         return nullptr;
     }
-    /// Each transaction runs as it is added, so none is ever left
+    /// Those added and not yet done, the one running included: none between calls, since the outermost
+    /// addTransaction() returns only once every transaction added during it has run
     size_t pendingTransactions() const override
     {
-        return 0;
+        return queued_.size() - ran_;
     }
 
     Processor *processor_;
 
 private:
+    /// Marks a drain under way and, however it ends, a throw included, leaves the manager empty and idle, so that
+    /// nothing a failed drain left queued runs, or holds back, a later one
+    class Draining
+    {
+    public:
+        explicit Draining(InlineTransactionManager *mgr) : mgr_(mgr)
+        {
+            mgr_->running_ = true;
+        }
+        ~Draining()
+        {
+            mgr_->queued_.clear();
+            mgr_->ran_ = 0;
+            mgr_->running_ = false;
+        }
+        Draining(const Draining &) = delete;
+        Draining &operator=(const Draining &) = delete;
+
+    private:
+        InlineTransactionManager *mgr_;
+    };
+
     u64 nextId_;
+    /// The drain's transactions, in id order. Reserved well past the longest chain a benchmark makes, and clear()
+    /// keeps the capacity, so an add allocates nothing.
+    std::vector<std::unique_ptr<Transaction>> queued_;
+    size_t ran_;
+    bool running_;
 };
 
 /// Keeps nothing it is given: what a record costs before LMDB writes it, without the write
