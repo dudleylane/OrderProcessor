@@ -1577,7 +1577,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | `TransactionScopePoolBench.cpp` | Lock-free object pool allocation |
 | `NumaAllocatorBench.cpp` | NUMA-aware allocation performance |
 | `OrderParamsLayoutBench.cpp` | Field layout optimization |
-| `ProcessorBench.cpp` | The real path: new order, match, cancel and replace (#457) through a `Processor`, an IOC's remainder and an expiry (#426), a restatement (#451), the reject of an order `isValid()` refuses and of a market order with no market (#435), a match whose records are encoded as the server's dispatcher encodes them (#442), and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290), each reporting into a queue that keeps nothing, as production's keep none (#447) |
+| `ProcessorBench.cpp` | The real path: new order, match, cancel and replace (#457) through a `Processor`, an IOC's remainder and an expiry (#426), a restatement (#451), the reject of an order `isValid()` refuses and of a market order with no market (#435), a match whose records are encoded as the server's dispatcher encodes them (#442), and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290), each reporting into a queue that keeps nothing, as production's keep none (#447), and running a chain's transactions as production does, each after the one draining it, in id order (#486) |
 | `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159), and a fill's report pushed through `WsOutQueues` (#442) |
 
 ---
