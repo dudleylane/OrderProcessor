@@ -511,6 +511,21 @@ public:
         return true;
     }
 
+    /// Pushes the event and processes it, timed by hand (#503). The span holds the engine's work and one clock read,
+    /// 18.1 ns measured, which every row gains. Each benchmark makes its event's order just before, outside the span,
+    /// as a session makes each order as it arrives. Made beforehand, as one run on the heap, the orders left the
+    /// allocator in a state production never reaches: the replace ran about 6% fewer instructions, and they moved with
+    /// an order's size (#498). Out of line, so that the span is a function of its own, which
+    /// scripts/loop-instructions.sh counts under callgrind: nothing else calls it, since submit() and the warm-ups push
+    /// and process for themselves.
+    template <typename Event> [[gnu::noinline]] void timeEvent(benchmark::State &state, const Event &event)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        inQueues_->push(source_, event);
+        processor_->process();
+        state.SetIterationTime(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+    }
+
     Processor &processor()
     {
         return *processor_;
@@ -523,6 +538,8 @@ public:
 private:
     WideData data_;
     u64 counter_;
+    /// The source timeEvent() pushes from, made once: a literal would make a std::string inside the timed span
+    const std::string source_ = "bench";
 
     DiscardingFileSaver discarded_;
     StorageRecordDispatcher dispatcher_;
@@ -572,23 +589,14 @@ static void BM_ProcessNewOrder(benchmark::State &state)
         return;
     }
 
-    // Built outside the timed region: the measurement is the processing, not order construction.
-    std::vector<OrderEntry *> orders;
-    orders.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
-    {
-        orders.push_back(engine.newOrder(BUY_SIDE, 100.0, 100));
-    }
-
-    size_t next = 0;
+    // Each order made just before its event, outside the timed span (timeEvent())
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderEvent(orders[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(engine.newOrder(BUY_SIDE, 100.0, 100)));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessNewOrder);
+BENCHMARK(BM_ProcessNewOrder)->UseManualTime();
 
 static void BM_ProcessNewOrderWithMatch(benchmark::State &state)
 {
@@ -605,22 +613,13 @@ static void BM_ProcessNewOrderWithMatch(benchmark::State &state)
         engine.submit(engine.newOrder(SELL_SIDE, 100.0, 100));
     }
 
-    std::vector<OrderEntry *> aggressors;
-    aggressors.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
-    {
-        aggressors.push_back(engine.newOrder(BUY_SIDE, 100.0, 100));
-    }
-
-    size_t next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(engine.newOrder(BUY_SIDE, 100.0, 100)));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessNewOrderWithMatch);
+BENCHMARK(BM_ProcessNewOrderWithMatch)->UseManualTime();
 
 // BM_ProcessNewOrderWithMatch with each persist's record encoded, as the dispatcher the server attaches encodes it for
 // LMDB, which keeps nothing here: the booking's record and both of the trade's
@@ -643,22 +642,13 @@ static void BM_ProcessNewOrderWithMatchRecorded(benchmark::State &state)
         engine.submit(engine.newOrder(SELL_SIDE, 100.0, 100));
     }
 
-    std::vector<OrderEntry *> aggressors;
-    aggressors.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
-    {
-        aggressors.push_back(engine.newOrder(BUY_SIDE, 100.0, 100));
-    }
-
-    size_t next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(engine.newOrder(BUY_SIDE, 100.0, 100)));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessNewOrderWithMatchRecorded);
+BENCHMARK(BM_ProcessNewOrderWithMatchRecorded)->UseManualTime();
 
 static void BM_ProcessCancelOrder(benchmark::State &state)
 {
@@ -678,12 +668,11 @@ static void BM_ProcessCancelOrder(benchmark::State &state)
     size_t next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderCancelEvent(resting[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderCancelEvent(resting[next++]));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessCancelOrder);
+BENCHMARK(BM_ProcessCancelOrder)->UseManualTime();
 
 static void BM_ProcessReplaceOrder(benchmark::State &state)
 {
@@ -704,30 +693,22 @@ static void BM_ProcessReplaceOrder(benchmark::State &state)
     // One resting buy per iteration, each replaced by a buy at a new price, which crosses nothing: the book holds no sell
     // (#457). The event enqueues a transaction, which runs inline: it decides the replace under the original's lock,
     // stores the replacement, takes the original off the book and books the replacement, persists both and reports
-    // both. The replacements are made first, as a session makes them on the IO thread.
+    // both. Each replacement is made just before its event, outside the timed span, as a session makes it on arrival.
     std::vector<IdT> resting;
     resting.reserve(state.max_iterations);
     for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
     {
         resting.push_back(engine.submit(engine.newOrder(BUY_SIDE, 100.0, 100)));
     }
-    std::vector<OrderEntry *> replacements;
-    replacements.reserve(state.max_iterations);
-    for (const IdT &original : resting)
-    {
-        replacements.push_back(engine.replacementOf(original, 101.0));
-    }
-
     size_t next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderReplaceEvent(resting[next], replacements[next]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderReplaceEvent(resting[next], engine.replacementOf(resting[next], 101.0)));
         ++next;
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessReplaceOrder);
+BENCHMARK(BM_ProcessReplaceOrder)->UseManualTime();
 
 static void BM_ProcessIocRemainder(benchmark::State &state)
 {
@@ -754,24 +735,16 @@ static void BM_ProcessIocRemainder(benchmark::State &state)
         engine.submit(engine.newOrder(SELL_SIDE, 100.0 + static_cast<PriceT>(i), 40));
     }
 
-    std::vector<OrderEntry *> aggressors;
-    aggressors.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
-    {
-        OrderEntry *ioc = engine.newOrder(BUY_SIDE, 100.0 + static_cast<PriceT>(i), 100);
-        ioc->tif_ = IOC_TIF;
-        aggressors.push_back(ioc);
-    }
-
-    size_t next = 0;
+    u64 next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
-        engine.processor().process();
+        OrderEntry *ioc = engine.newOrder(BUY_SIDE, 100.0 + static_cast<PriceT>(next++), 100);
+        ioc->tif_ = IOC_TIF;
+        engine.timeEvent(state, OrderEvent(ioc));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessIocRemainder);
+BENCHMARK(BM_ProcessIocRemainder)->UseManualTime();
 
 static void BM_ProcessFokFill(benchmark::State &state)
 {
@@ -799,24 +772,15 @@ static void BM_ProcessFokFill(benchmark::State &state)
         engine.submit(engine.newOrder(SELL_SIDE, 100.0, 100));
     }
 
-    std::vector<OrderEntry *> aggressors;
-    aggressors.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    for (auto _ : state)
     {
         OrderEntry *fok = engine.newOrder(BUY_SIDE, 100.0, 100);
         fok->tif_ = FOK_TIF;
-        aggressors.push_back(fok);
-    }
-
-    size_t next = 0;
-    for (auto _ : state)
-    {
-        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(fok));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessFokFill);
+BENCHMARK(BM_ProcessFokFill)->UseManualTime();
 
 static void BM_ProcessSweep(benchmark::State &state)
 {
@@ -845,22 +809,13 @@ static void BM_ProcessSweep(benchmark::State &state)
         engine.submit(engine.newOrder(SELL_SIDE, 100.0, 25));
     }
 
-    std::vector<OrderEntry *> aggressors;
-    aggressors.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
-    {
-        aggressors.push_back(engine.newOrder(BUY_SIDE, 100.0, 100));
-    }
-
-    size_t next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(engine.newOrder(BUY_SIDE, 100.0, 100)));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessSweep);
+BENCHMARK(BM_ProcessSweep)->UseManualTime();
 
 static void BM_ProcessStopRelease(benchmark::State &state)
 {
@@ -901,26 +856,22 @@ static void BM_ProcessStopRelease(benchmark::State &state)
     // iteration's stop alone (every later stop is higher), whose release, in a transaction of its own, matches it as a
     // market order with the sell above. The only benchmark that reaches a stop's release: the held stops a trade's
     // price reaches, their claim and their release events (#480), and the release's transaction.
-    std::vector<OrderEntry *> aggressors;
-    aggressors.reserve(state.max_iterations);
     for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
     {
         const PriceT price = 100.0 + static_cast<PriceT>(i);
         engine.submit(engine.newOrder(SELL_SIDE, price, 10));
         engine.submit(stopAt(price));
         engine.submit(engine.newOrder(SELL_SIDE, price + 0.5, 10));
-        aggressors.push_back(engine.newOrder(BUY_SIDE, price, 10));
     }
 
-    size_t next = 0;
+    u64 next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(engine.newOrder(BUY_SIDE, 100.0 + static_cast<PriceT>(next++), 10)));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessStopRelease);
+BENCHMARK(BM_ProcessStopRelease)->UseManualTime();
 
 static void BM_ProcessExpiry(benchmark::State &state)
 {
@@ -950,12 +901,11 @@ static void BM_ProcessExpiry(benchmark::State &state)
     size_t next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", TimerEvent(resting[next++], TimerEvent::DAY_END));
-        engine.processor().process();
+        engine.timeEvent(state, TimerEvent(resting[next++], TimerEvent::DAY_END));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessExpiry);
+BENCHMARK(BM_ProcessExpiry)->UseManualTime();
 
 static void BM_ProcessRestatement(benchmark::State &state)
 {
@@ -999,12 +949,11 @@ static void BM_ProcessRestatement(benchmark::State &state)
     size_t next = 1;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", TimerEvent(resting[next++], TimerEvent::RESTATEMENT));
-        engine.processor().process();
+        engine.timeEvent(state, TimerEvent(resting[next++], TimerEvent::RESTATEMENT));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessRestatement);
+BENCHMARK(BM_ProcessRestatement)->UseManualTime();
 
 static void BM_ProcessInvalidOrder(benchmark::State &state)
 {
@@ -1023,22 +972,13 @@ static void BM_ProcessInvalidOrder(benchmark::State &state)
     // One limit buy at 0 per iteration, refused for its price (#188), which isValid() checks after everything else a
     // limit order needs, so that every other check runs first: refused() refuses it before it is stored, and the
     // reject's row stores it (processReject(onOrderReceived)) and reports it, with no exception raised (#435, #436)
-    std::vector<OrderEntry *> orders;
-    orders.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
-    {
-        orders.push_back(engine.newOrder(BUY_SIDE, 0.0, 100));
-    }
-
-    size_t next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderEvent(orders[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(engine.newOrder(BUY_SIDE, 0.0, 100)));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessInvalidOrder);
+BENCHMARK(BM_ProcessInvalidOrder)->UseManualTime();
 
 static void BM_ProcessMarketOrderWithNoMarket(benchmark::State &state)
 {
@@ -1059,24 +999,15 @@ static void BM_ProcessMarketOrderWithNoMarket(benchmark::State &state)
     // One market buy per iteration, with no sell in the book (the fixture's first order is a buy): refused() finds no
     // market before it is stored, and the reject's row stores it (processReject(onOrderReceived)) and reports it, with
     // no exception raised (#435, #436)
-    std::vector<OrderEntry *> orders;
-    orders.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    for (auto _ : state)
     {
         OrderEntry *order = engine.newOrder(BUY_SIDE, 0.0, 100);
         order->ordType_ = MARKET_ORDERTYPE;
-        orders.push_back(order);
-    }
-
-    size_t next = 0;
-    for (auto _ : state)
-    {
-        engine.inQueues().push("bench", OrderEvent(orders[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(order));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessMarketOrderWithNoMarket);
+BENCHMARK(BM_ProcessMarketOrderWithNoMarket)->UseManualTime();
 
 static void BM_ProcessDuplicateClOrdId(benchmark::State &state)
 {
@@ -1099,22 +1030,13 @@ static void BM_ProcessDuplicateClOrdId(benchmark::State &state)
     // only the store refuses it. receive() queues the reject and throws to stop the transition to New, the reject's own
     // store refuses it again, and Processor reports it to its sender, with the transaction's scope unused: three
     // exceptions raised, where since #436 every other refusal of a new order raises none (#432)
-    std::vector<OrderEntry *> orders;
-    orders.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
-    {
-        orders.push_back(engine.duplicateOf(stored));
-    }
-
-    size_t next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderEvent(orders[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(engine.duplicateOf(stored)));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessDuplicateClOrdId);
+BENCHMARK(BM_ProcessDuplicateClOrdId)->UseManualTime();
 
 // =============================================================================
 // End-to-end throughput through TaskManager's worker pool
