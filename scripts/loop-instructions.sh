@@ -24,8 +24,8 @@
 #     --iterations N    N, run as N and as 2N iterations (2000)
 # With two binaries, the benchmarks both list are counted in each, and the report adds
 # the second's counts less the first's. Both must time their span with timeEvent(), as
-# every build since #503 does. The 14 BM_Process* at N = 2000 take about a minute and
-# a half a binary under callgrind.
+# every build since #503 does. The 18 BM_Process* at N = 2000 take about two minutes a
+# binary under callgrind.
 #
 # Exit codes: 0 = every count made, 2 = usage or setup error, or a run or a count failed
 

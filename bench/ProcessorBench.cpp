@@ -1079,18 +1079,9 @@ static void BM_ProcessSwapWithMatch(benchmark::State &state)
         engine.submit(newSwap(engine, SELL_SIDE, 100.0, 100));
     }
 
-    std::vector<OrderEntry *> aggressors;
-    aggressors.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
-    {
-        aggressors.push_back(newSwap(engine, BUY_SIDE, 100.0, 100));
-    }
-
-    size_t next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(newSwap(engine, BUY_SIDE, 100.0, 100)));
     }
     state.SetItemsProcessed(state.iterations());
 
@@ -1101,7 +1092,7 @@ static void BM_ProcessSwapWithMatch(benchmark::State &state)
         state.SkipWithError("the timed swaps didn't fill");
     }
 }
-BENCHMARK(BM_ProcessSwapWithMatch);
+BENCHMARK(BM_ProcessSwapWithMatch)->UseManualTime();
 
 // BM_ProcessSweep for swaps: a swap's sweep goes on through matchSwap()'s own next match, which is decided apart from an
 // outright order's (#477)
@@ -1132,22 +1123,13 @@ static void BM_ProcessSwapSweep(benchmark::State &state)
         engine.submit(newSwap(engine, SELL_SIDE, 100.0, 25));
     }
 
-    std::vector<OrderEntry *> aggressors;
-    aggressors.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
-    {
-        aggressors.push_back(newSwap(engine, BUY_SIDE, 100.0, 100));
-    }
-
-    size_t next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(newSwap(engine, BUY_SIDE, 100.0, 100)));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessSwapSweep);
+BENCHMARK(BM_ProcessSwapSweep)->UseManualTime();
 
 // BM_ProcessIocRemainder for swaps (#485): an IOC swap that trades part of itself, then its sweep's next match, which
 // finds no swap to trade with, and the engine's cancel of the rest
@@ -1178,24 +1160,16 @@ static void BM_ProcessSwapIocRemainder(benchmark::State &state)
         engine.submit(newSwap(engine, SELL_SIDE, 100.0 + static_cast<PriceT>(i), 40));
     }
 
-    std::vector<OrderEntry *> aggressors;
-    aggressors.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
-    {
-        OrderEntry *ioc = newSwap(engine, BUY_SIDE, 100.0 + static_cast<PriceT>(i), 100);
-        ioc->tif_ = IOC_TIF;
-        aggressors.push_back(ioc);
-    }
-
-    size_t next = 0;
+    u64 next = 0;
     for (auto _ : state)
     {
-        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
-        engine.processor().process();
+        OrderEntry *ioc = newSwap(engine, BUY_SIDE, 100.0 + static_cast<PriceT>(next++), 100);
+        ioc->tif_ = IOC_TIF;
+        engine.timeEvent(state, OrderEvent(ioc));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessSwapIocRemainder);
+BENCHMARK(BM_ProcessSwapIocRemainder)->UseManualTime();
 
 // BM_ProcessFokFill for swaps: a FOK swap the book fills at once, its check first (OrderMatcher::canFillAtOnce()), which
 // walks the other side as the swap's sweep does (#491), then the swap trade
@@ -1226,24 +1200,15 @@ static void BM_ProcessSwapFokFill(benchmark::State &state)
         engine.submit(newSwap(engine, SELL_SIDE, 100.0, 100));
     }
 
-    std::vector<OrderEntry *> aggressors;
-    aggressors.reserve(state.max_iterations);
-    for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
+    for (auto _ : state)
     {
         OrderEntry *fok = newSwap(engine, BUY_SIDE, 100.0, 100);
         fok->tif_ = FOK_TIF;
-        aggressors.push_back(fok);
-    }
-
-    size_t next = 0;
-    for (auto _ : state)
-    {
-        engine.inQueues().push("bench", OrderEvent(aggressors[next++]));
-        engine.processor().process();
+        engine.timeEvent(state, OrderEvent(fok));
     }
     state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_ProcessSwapFokFill);
+BENCHMARK(BM_ProcessSwapFokFill)->UseManualTime();
 
 // =============================================================================
 // End-to-end throughput through TaskManager's worker pool
