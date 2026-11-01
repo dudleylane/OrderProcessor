@@ -161,8 +161,10 @@ private:
     {
         size_t hash(const SourceIdT &key) const
         {
-            // Combine id_ and date_ for hash
-            return std::hash<u64>()(key.id_) ^ (std::hash<u32>()(key.date_) << 1);
+            // The id alone (#505): every execution id comes from IdTGenerator, whose ids never repeat (#58, #81), so
+            // date_, the second the id was drawn in, added nothing to the key but the clock: which bucket an insert
+            // reached, and the lazy rehashing that took, moved with it. equal() still compares both.
+            return std::hash<u64>()(key.id_);
         }
         bool equal(const SourceIdT &a, const SourceIdT &b) const
         {
