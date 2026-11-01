@@ -303,7 +303,7 @@ Export to JSON for comparison:
 ./scripts/benchmark-regression.sh --no-build --pinned 2-5 --filter 'Pool|StateMachine'
 ```
 
-The two binaries run in alternating rounds, and the order flips every round, so drift between runs (clock frequency, temperature, other load) falls on both alike. Each benchmark is judged by the median, over rounds, of its after/before ratio: by real time for benchmarks that ask for it (`/real_time`), by CPU time otherwise. The report lists every benchmark that moved more than the threshold, with the number of rounds in which it was slower and its range across rounds. The script exits 1 if a benchmark got slower by more than the threshold, 2 if one failed to run or anything else went wrong, and 3 if the machine was too busy to judge.
+The two binaries run in alternating rounds, and the order flips every round, so drift between runs (clock frequency, temperature, other load) falls on both alike. Each benchmark is judged by the median, over rounds, of its after/before ratio: by real time for benchmarks that ask for it (`/real_time`) or time themselves by hand (`/manual_time`), by CPU time otherwise. The report lists every benchmark that moved more than the threshold, with the number of rounds in which it was slower and its range across rounds. The script exits 1 if a benchmark got slower by more than the threshold, 2 if one failed to run or anything else went wrong, and 3 if the machine was too busy to judge.
 
 This laptop is rarely idle, since other repositories' CI runners share it, so a comparison copes with load the way QuickFIX's perf gate does (#265). Each run waits for the one-minute load average to fall under `--settle-load` (2.0), and starts when it does, or after `--settle-max` seconds (600) regardless. A pinned run also waits, within the same `--settle-max`, for each pinned CPU and each hyperthread sibling of one to be under `--settle-busy` percent busy (20) over a one-second sample (#406). The load average can't say which CPUs its load is on: a job pinned to CPUs 1-3 held it near 2 while it saturated three of the four cores that `--pinned 2-5` covers on this laptop, whose CPU n and n+4 share a core. The report gives each run's busiest watched CPU. A run that started with one at `--settle-busy` or more anyway, once the wait was up, shared its cores with something else, so the comparison is then INCONCLUSIVE and exits 3, naming each such run (#422, as ruled on 2026-10-26). The rounds in which the baseline ran first, and those in which it ran second, give two estimates of each benchmark's change. When they disagree by more than 25 points on more than a quarter of the benchmarks, the machine was too busy to judge: the script reports INCONCLUSIVE and exits 3, and the comparison wants a re-run when the machine is quieter. A benchmark faster than `--min-time` (200 ns) is reported but can't fail the comparison.
 
@@ -335,11 +335,12 @@ so nothing reaches LMDB.
 `BM_TaskManagerTrades` runs the same pool while every order trades: sells and buys in pairs at one price,
 dealt over 1 or 8 instruments, into a queue that counts the trade reports and keeps nothing (#290).
 
-Each benchmark's own time below comes from one session on 2026-10-31, at this branch's 6a04944 with the change #486
+Each benchmark's own time below comes from one session on 2026-11-01, at this branch's 0f25bc0 with the change #503
 makes to the per-order benchmarks (below): three runs of 5 repetitions each, pinned to CPUs 2-5, each time the median
-of the three runs' medians, as master's README takes its rows. The comparisons below give their own dates. A new order
-takes ~2.6 µs, a match ~5.0 µs, a cancel ~1.5 µs, an IOC's remainder ~6.0 µs and an expiry ~1.4 µs; a swap's match
-~5.7 µs, and an IOC swap's remainder ~6.5 µs.
+of the three runs' medians, as master's README takes its rows. The comparisons below give their own dates. A per-order
+benchmark's time is the real time of the span it times by hand, the event's push and its processing, so its full name
+ends `/manual_time` (`BM_ProcessNewOrder/manual_time`). A new order takes ~2.9 µs, a match ~5.3 µs, a cancel ~1.5 µs,
+an IOC's remainder ~6.3 µs and an expiry ~1.5 µs; a swap's match ~6.1 µs, and an IOC swap's remainder ~7.2 µs.
 
 The per-order benchmarks (`BM_Process*`) and `BM_TaskManagerThroughput` report into a queue that keeps nothing too, as
 production's queues keep none (#447). Until #447 they reported into `OutgoingQueues`, which keeps a copy of every
@@ -370,20 +371,40 @@ counts 261 and 1,145 more per iteration). Six took more, an expiry 4.2%, a resta
 it runs, and in some the allocator's, which the order of frees moves the other way there. A new order and a FOK fill
 moved under 0.1%. So a figure measured before #486 times another harness, and so does a baseline built before it.
 
+Since #503 each per-order benchmark makes its incoming order in its loop, just before its event, as a session makes
+one as it arrives, and times the event's push and processing by hand: each figure is that span's real time, one clock
+read included (about 18 ns), and each name ends `/manual_time`. Until #503 the fifteen that take an incoming order,
+this branch's four swaps among them, made all of theirs before the loop, one per iteration, which left glibc's
+allocator in a state production never reaches, and each figure was the loop's CPU time. Timed against the tree before
+it on 2026-11-01 (20 × 3, pinned to CPUs 2-5, only the bench file changed, both by real time), fourteen of those
+fifteen took 0.9 to 13.7% more and a sweep 0.9% less (median +4.4%: the two rejects 12.6% and 13.7%, an IOC swap's
+remainder 10.7%, a new order 9.2%, a swap's FOK fill 8.0%, a swap's match 6.3%, an IOC's remainder 5.9%, a match 2.7%,
+a replace 1.8%, a swap's sweep 0.9%), and their spans run 146 to 1,224 more instructions per iteration than the old
+loops did, 0.6 to 6.3% (callgrind, iterations 2,001 to 4,000, each binary's count the mean of two runs, which differed
+by up to 267). In the three broken down, the old loop's window against the span, most of a new order's rise is glibc's
+allocator, 385 of 594, and of an IOC swap's remainder's, 885 of 1,145, but none of a swap's match's: its allocator ran
+159 fewer and the rest 209 more. Time doesn't follow the instructions one for one: a swap's FOK fill took 8.0% more
+for 0.6% more instructions, a swap's match 6.3% for 0.6%, a replace 1.8% for 4.6%. The other three, whose events carry
+an order's id, run as many instructions within 2.2% (110 more each), and took 0.3% (a cancel) and 0.2% (an expiry)
+more and 0.7% (a restatement) less. `BM_TaskManagerTrades`, which the change doesn't reach, moved 1.1% or less either
+way (median +0.7%). So a per-order figure measured before #503 times another harness, and since the names differ,
+`scripts/benchmark-regression.sh` doesn't compare the two: it lists each name as only in its own binary.
+`scripts/loop-instructions.sh` counts each span's instructions per iteration, in one build or two (docs/DEBUGGING.md).
+
 `BM_ProcessInvalidOrder` and `BM_ProcessMarketOrderWithNoMarket` drive a real `Processor` with transactions executed
 inline through the engine's reject of an order it stores (#435): one that `OrderEntry::isValid()` refuses, and a
 market order with nothing to trade with. Until #436 a reject cost about 2.5 times a new order, and more than a match:
 the state machine refused the order by raising an exception, caught it to queue the reject as an event of its own, and
 raised it again. Since #436 an order its checks refuse takes a transition of its own to Rejected, with no exception
 raised, and both rejects took about 63% less time (20 × 3 against c841b18, pinned to CPUs 2-5, both with the harness
-before #486): ~2.3 µs each now, about 0.9 times a new order.
+before #486): ~2.6 µs and ~2.7 µs now, about 0.9 times a new order.
 
 `BM_ProcessNewOrderWithMatchRecorded` is `BM_ProcessNewOrderWithMatch` with each order's record encoded as the
 server's storage dispatcher encodes it, into a storage that keeps nothing: the encoding, without LMDB's write.
 `BM_WsOutQueuesPushTradeReport/K` pushes a fill's report through `WsOutQueues` to K WebSocket clients: the report and
 its order serialized and sent, and the book serialized for its subscribers, none here (#442). The recorded match takes
-~7.2 µs: a match's three records (the booking's and the trade's two) take about 2.2 µs to encode. A report takes
-~10.5 µs to push to one client and ~12.4 µs to eight. Its two broadcasts, the report's and the order's, take about
+~7.2 µs: a match's three records (the booking's and the trade's two) take about 2.0 µs to encode. A report takes
+~10.4 µs to push to one client and ~12.8 µs to eight. Its two broadcasts, the report's and the order's, take about
 0.3 µs of the first and 1.5 µs of the second, and most of the rest is building and serializing its JSON.
 
 `BM_ProcessRestatement` drives a real `Processor` through a resting GTC order's restatement as a business day starts:
@@ -396,23 +417,23 @@ persisted and reported (#457). It takes ~4.0 µs.
 
 `BM_ProcessFokFill` drives a real `Processor` through a FOK order the book fills at once: the check that it can
 (`canFillAtOnce()`, #240), then the trade, its deferred execution events and the book removal (#432). It takes
-~5.0 µs. This branch's `BM_ProcessSwapFokFill` does the same with swaps: a FOK buy swap the book fills at once, its
-check, then the swap trade, which reports a near and a far leg for each side (#491). It takes ~5.4 µs.
+~5.2 µs. This branch's `BM_ProcessSwapFokFill` does the same with swaps: a FOK buy swap the book fills at once, its
+check, then the swap trade, which reports a near and a far leg for each side (#491). It takes ~6.1 µs.
 
 `BM_ProcessDuplicateClOrdId` drives a real `Processor` through a new order whose ClOrdID is already in use: storing it
 fails, so the state machine queues the reject and throws to stop the order's move to New, and the engine tells the
 sender directly, storing nothing. Three exceptions are raised, where since #436 the engine's other refusals of a new
-order raise none (#432). It takes ~8.3 µs, about 3.7 times an invalid order's reject.
+order raise none (#432). It takes ~8.4 µs, about 3.2 times an invalid order's reject.
 
 `BM_ProcessSweep` drives a real `Processor` through a buy that sweeps four resting sells at one price: four trades,
 each with its deferred execution events and book removal, and the three matches between them that continue the sweep
-(#477). It takes ~13.1 µs. This branch's `BM_ProcessSwapSweep` does the same with swaps: a buy swap that sweeps four
+(#477). It takes ~12.5 µs. This branch's `BM_ProcessSwapSweep` does the same with swaps: a buy swap that sweeps four
 resting sell swaps, each trade reporting a near and a far leg for each side, and the three matches between them that
-continue the swap's sweep. It takes ~15.3 µs.
+continue the swap's sweep. It takes ~15.5 µs.
 
 `BM_ProcessStopRelease` drives a real `Processor` through a buy whose trade releases a held stop: the trade, its
 deferred execution events and book removal, the release of the stops its price reaches, and the release's transaction,
-which matches the stop as a market order with the sell above it (#480). It takes ~9.1 µs.
+which matches the stop as a market order with the sell above it (#480). It takes ~9.3 µs.
 
 ---
 
@@ -624,7 +645,8 @@ OrderProcessor/
 │   ├── init-db/            # PostgreSQL schema initialization
 │   └── .env.example        # PostgreSQL credentials and the access token, a template
 ├── scripts/                # Tooling
-│   └── benchmark-regression.sh  # Before/after benchmark comparison
+│   ├── benchmark-regression.sh  # Before/after benchmark comparison
+│   └── loop-instructions.sh     # Instructions per iteration in each per-order benchmark's timed span (#503)
 ├── docs/                   # Architecture documentation
 │   └── ARCHITECTURE.md     # Comprehensive architecture document
 ├── CMakeLists.txt          # Root build configuration
