@@ -252,7 +252,7 @@ Export to JSON for comparison:
 ./scripts/benchmark-regression.sh --no-build --pinned 2-5 --filter 'Pool|StateMachine'
 ```
 
-The two binaries run in alternating rounds, and the order flips every round, so drift between runs (clock frequency, temperature, other load) falls on both alike. Each benchmark is judged by the median, over rounds, of its after/before ratio: by real time for benchmarks that ask for it (`/real_time`), by CPU time otherwise. The report lists every benchmark that moved more than the threshold, with the number of rounds in which it was slower and its range across rounds. The script exits 1 if a benchmark got slower by more than the threshold, 2 if one failed to run or anything else went wrong, and 3 if the machine was too busy to judge.
+The two binaries run in alternating rounds, and the order flips every round, so drift between runs (clock frequency, temperature, other load) falls on both alike. Each benchmark is judged by the median, over rounds, of its after/before ratio: by real time for benchmarks that ask for it (`/real_time`) or time themselves by hand (`/manual_time`), by CPU time otherwise. The report lists every benchmark that moved more than the threshold, with the number of rounds in which it was slower and its range across rounds. The script exits 1 if a benchmark got slower by more than the threshold, 2 if one failed to run or anything else went wrong, and 3 if the machine was too busy to judge.
 
 This laptop is rarely idle, since other repositories' CI runners share it, so a comparison copes with load the way QuickFIX's perf gate does (#265). Each run waits for the one-minute load average to fall under `--settle-load` (2.0), and starts when it does, or after `--settle-max` seconds (600) regardless. A pinned run also waits, within the same `--settle-max`, for each pinned CPU and each hyperthread sibling of one to be under `--settle-busy` percent busy (20) over a one-second sample (#406). The load average can't say which CPUs its load is on: a job pinned to CPUs 1-3 held it near 2 while it saturated three of the four cores that `--pinned 2-5` covers on this laptop, whose CPU n and n+4 share a core. The report gives each run's busiest watched CPU. A run that started with one at `--settle-busy` or more anyway, once the wait was up, shared its cores with something else, so the comparison is then INCONCLUSIVE and exits 3, naming each such run (#422, as ruled on 2026-10-26). The rounds in which the baseline ran first, and those in which it ran second, give two estimates of each benchmark's change. When they disagree by more than 25 points on more than a quarter of the benchmarks, the machine was too busy to judge: the script reports INCONCLUSIVE and exits 3, and the comparison wants a re-run when the machine is quieter. A benchmark faster than `--min-time` (200 ns) is reported but can't fail the comparison.
 
@@ -270,29 +270,31 @@ Every row names the benchmark that produces it, so you can reproduce it:
 `./build/orderProcessorBench --benchmark_filter=BM_ProcessNewOrder`.
 
 Measured on the dev box (4 cores / 8 threads, Release, `-O3 -march=native -flto`). Your machine will differ;
-these numbers are a shape, not a specification. Every row comes from one session on 2026-10-31, at master
-762ff81 with the change #486 makes to the per-order benchmarks (below): three runs of 5 repetitions each, pinned
-to CPUs 2-5, and each row gives the median of the three runs' medians, as #429 took them.
+these numbers are a shape, not a specification. Every row comes from one session on 2026-11-01, at master
+5fc245c with the change #503 makes to the per-order benchmarks (below): three runs of 5 repetitions each, pinned
+to CPUs 2-5, and each row gives the median of the three runs' medians, as #429 took them. A per-order row
+(`BM_Process*`) gives the real time of the span its benchmark times by hand, the event's push and its
+processing, so its full name ends `/manual_time` (`BM_ProcessNewOrder/manual_time`).
 
 | Benchmark | Time | Throughput | What it covers |
 |-----------|------|------------|----------------|
-| `BM_ProcessNewOrder` | ~2.5 µs | ~397K orders/sec | `Processor::onEvent` through the state machine, `OrderDataStorage::save`, the book, and the transaction, executed inline |
-| `BM_ProcessNewOrderWithMatch` | ~5.0 µs | ~200K orders/sec | the same, for an order that crosses: trade, deferred execution events, book removal |
-| `BM_ProcessCancelOrder` | ~1.4 µs | ~692K orders/sec | cancel of a resting order, completed: decided after the order's earlier transactions, removed from the book, reported |
-| `BM_ProcessReplaceOrder` | ~3.9 µs | ~259K orders/sec | replace of a resting order's price, completed: decided after the order's earlier transactions, the replacement stored, the original taken off the book and the replacement booked, both persisted and reported (#457) |
-| `BM_ProcessIocRemainder` | ~5.7 µs | ~175K orders/sec | an IOC that trades part of itself: the trade, its deferred execution events, and the engine's cancel of the rest (#426) |
-| `BM_ProcessFokFill` | ~4.9 µs | ~205K orders/sec | a FOK order the book fills at once: the check that it can (`canFillAtOnce()`, #240), then the trade, its deferred execution events, and the book removal (#432) |
-| `BM_ProcessSweep` | ~12.5 µs | ~80K orders/sec | a buy that sweeps four resting sells: four trades, each with its deferred execution events and book removal, and the three matches between them that continue the sweep (#477) |
-| `BM_ProcessStopRelease` | ~8.9 µs | ~113K orders/sec | a buy whose trade releases a held stop: the trade, its deferred execution events and book removal, the release of the stops its price reaches, and the release's transaction, which matches the stop as a market order with the sell above it (#480) |
-| `BM_ProcessExpiry` | ~1.4 µs | ~713K orders/sec | a resting DAY order's expiry at its day's end: the transaction its `DAY_END` timer enqueues decides it, takes the order off the book, reports it (#426) |
-| `BM_ProcessRestatement` | ~1.1 µs | ~921K orders/sec | a resting GTC order restated as a business day starts: the transaction its `RESTATEMENT` timer enqueues begins the order's next day, persists it, reports it `RESTATED` (#451) |
-| `BM_ProcessInvalidOrder` | ~2.3 µs | ~435K orders/sec | an order `OrderEntry::isValid()` refuses: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
-| `BM_ProcessMarketOrderWithNoMarket` | ~2.3 µs | ~428K orders/sec | a market order with nothing to trade with: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
-| `BM_ProcessDuplicateClOrdId` | ~8.2 µs | ~121K orders/sec | a new order whose ClOrdID is already in use: storing it fails, so the state machine queues the reject and throws to stop the order's move to New, and the engine tells the sender directly, storing nothing. Three exceptions raised, where since #436 the engine's other refusals of a new order raise none (#432) |
-| `BM_ProcessNewOrderWithMatchRecorded` | ~6.8 µs | ~146K orders/sec | `BM_ProcessNewOrderWithMatch` with each order's record encoded as the server's storage dispatcher encodes it, into a storage that keeps nothing: the encoding, without LMDB's write (#442) |
+| `BM_ProcessNewOrder` | ~2.8 µs | ~352K orders/sec | `Processor::onEvent` through the state machine, `OrderDataStorage::save`, the book, and the transaction, executed inline |
+| `BM_ProcessNewOrderWithMatch` | ~5.5 µs | ~181K orders/sec | the same, for an order that crosses: trade, deferred execution events, book removal |
+| `BM_ProcessCancelOrder` | ~1.5 µs | ~660K orders/sec | cancel of a resting order, completed: decided after the order's earlier transactions, removed from the book, reported |
+| `BM_ProcessReplaceOrder` | ~4.1 µs | ~243K orders/sec | replace of a resting order's price, completed: decided after the order's earlier transactions, the replacement stored, the original taken off the book and the replacement booked, both persisted and reported (#457) |
+| `BM_ProcessIocRemainder` | ~6.6 µs | ~152K orders/sec | an IOC that trades part of itself: the trade, its deferred execution events, and the engine's cancel of the rest (#426) |
+| `BM_ProcessFokFill` | ~5.6 µs | ~179K orders/sec | a FOK order the book fills at once: the check that it can (`canFillAtOnce()`, #240), then the trade, its deferred execution events, and the book removal (#432) |
+| `BM_ProcessSweep` | ~13.4 µs | ~75K orders/sec | a buy that sweeps four resting sells: four trades, each with its deferred execution events and book removal, and the three matches between them that continue the sweep (#477) |
+| `BM_ProcessStopRelease` | ~9.6 µs | ~105K orders/sec | a buy whose trade releases a held stop: the trade, its deferred execution events and book removal, the release of the stops its price reaches, and the release's transaction, which matches the stop as a market order with the sell above it (#480) |
+| `BM_ProcessExpiry` | ~1.5 µs | ~667K orders/sec | a resting DAY order's expiry at its day's end: the transaction its `DAY_END` timer enqueues decides it, takes the order off the book, reports it (#426) |
+| `BM_ProcessRestatement` | ~1.1 µs | ~880K orders/sec | a resting GTC order restated as a business day starts: the transaction its `RESTATEMENT` timer enqueues begins the order's next day, persists it, reports it `RESTATED` (#451) |
+| `BM_ProcessInvalidOrder` | ~2.6 µs | ~384K orders/sec | an order `OrderEntry::isValid()` refuses: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
+| `BM_ProcessMarketOrderWithNoMarket` | ~2.7 µs | ~370K orders/sec | a market order with nothing to trade with: the state machine stores it as it rejects it, and its transaction reports the reject (#435) |
+| `BM_ProcessDuplicateClOrdId` | ~8.8 µs | ~113K orders/sec | a new order whose ClOrdID is already in use: storing it fails, so the state machine queues the reject and throws to stop the order's move to New, and the engine tells the sender directly, storing nothing. Three exceptions raised, where since #436 the engine's other refusals of a new order raise none (#432) |
+| `BM_ProcessNewOrderWithMatchRecorded` | ~7.6 µs | ~132K orders/sec | `BM_ProcessNewOrderWithMatch` with each order's record encoded as the server's storage dispatcher encodes it, into a storage that keeps nothing: the encoding, without LMDB's write (#442) |
 | `BM_WsOutQueuesPushTradeReport/1` | ~10.8 µs | ~93K reports/sec | a fill's report pushed through `WsOutQueues` to one WebSocket client: the report and its order serialized and sent, and the book serialized for its subscribers, none here (#442) |
-| `BM_TaskManagerThroughput/4` | ~2.4 ms per 500 orders | ~207K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
-| `BM_TaskManagerTrades/instruments:8/processors:4` | ~3.8 ms per 500 orders | ~133K orders/sec, ~66K trades/sec | the same pool while every order trades: 250 sells and 250 buys at one price a batch, dealt over 8 instruments |
+| `BM_TaskManagerThroughput/4` | ~2.5 ms per 500 orders | ~198K orders/sec | end to end through `TaskManager` with 4 event and 4 transaction processors |
+| `BM_TaskManagerTrades/instruments:8/processors:4` | ~3.8 ms per 500 orders | ~132K orders/sec, ~66K trades/sec | the same pool while every order trades: 250 sells and 250 buys at one price a batch, dealt over 8 instruments |
 
 The rows include #467, which keeps the stores' map nodes in pools of their own rather than among the orders.
 Timed against the tree before it on 2026-10-30 (20 × 3, pinned to CPUs 2-5, both with the per-order benchmarks'
@@ -314,6 +316,25 @@ allocator's, which the order of frees moves the other way there (in the stop rel
 3.0 times an iteration where it ran 2.0). So a figure measured before #486 times another harness, and so does a
 baseline built before it.
 
+Since #503 each per-order benchmark makes its incoming order in its loop, just before its event, as a session
+makes one as it arrives, and times the event's push and processing by hand: each figure is that span's real
+time, one clock read included (about 18 ns), and each name ends `/manual_time`. Until #503 the eleven that take
+an incoming order made all of theirs before the loop, one per iteration, which left glibc's allocator in a state
+production never reaches, and each figure was the loop's CPU time. Timed against the tree before it on
+2026-11-01 (20 × 3, pinned to CPUs 2-5, only the bench file changed, both by real time), those eleven took 0.9
+to 11.8% more (median 6.7%: an IOC's remainder 11.8%, the two rejects 11.2% and 11.6%, a new order 8.5%, a match
+6.7%, a sweep 3.6%, a replace 1.8%), and their spans run 569 to 1,275 more instructions per iteration than the
+old loops did, 0.9 to 6.6% (callgrind, iterations 2,001 to 4,000). Most of that is glibc's allocator, in the
+four broken down: 390 of a new order's 569, 430 of an invalid order's 609, 614 of an IOC's remainder's 863 and
+813 of a replace's 1,023. Time doesn't follow the instructions one for one: a replace took 1.8% more for 6.6%
+more instructions, an IOC's remainder 11.8% for 3.4%. The other three, whose events carry an order's id, run as
+many instructions within 2%, and took 0.0% (a cancel), 2.7% (an expiry) and 1.7% (a restatement) more, where the
+clock read alone adds about 1.3 to 1.7%. `BM_TaskManagerTrades`, which the change doesn't reach, moved 1.7% or
+less either way (median +0.1%). So a per-order figure measured before #503 times another harness, and since the
+names differ, `scripts/benchmark-regression.sh` doesn't compare the two: it lists each name as only in its own
+binary. `scripts/loop-instructions.sh` counts each span's instructions per iteration, in one build or two
+(docs/DEBUGGING.md).
+
 Until #429 the rows came from sessions between 2026-10-05 (#76) and 2026-10-27. #429 timed #76's tree against
 master in one session, both reporting into a queue that keeps nothing: master took 8.8% longer for a new order,
 8.0% for a match and 1.2% for a cancel, for two reasons. The engine's work grew: the timed loop of a new order,
@@ -328,24 +349,24 @@ At c4e7724 a reject cost about 2.5 times a new order, and more than a match: the
 by raising an exception, caught it to queue the reject as an event of its own, and raised it again. Since #436
 an order its checks refuse takes a transition of its own to Rejected, with no exception raised, and both rejects
 took about 63% less time (20 × 3 against 1ead67a, pinned to CPUs 2-5, both with the harness before #486): in the
-rows, about 0.9 times a new order. A match's three records (the booking's and the trade's two) take about 1.9 µs
-to encode (`BM_ProcessNewOrderWithMatchRecorded` less `BM_ProcessNewOrderWithMatch`). A report takes ~12.6 µs to
-push to eight clients (`BM_WsOutQueuesPushTradeReport/8`). Its two broadcasts, the report's and the order's,
-take about 1.5 µs of that (`BM_SessionManagerBroadcastToAccount/8/0`, ~0.74 µs each), and most of the rest is
-building and serializing its JSON.
+rows, 0.92 and 0.95 times a new order (an invalid order's and a market order's). A match's three records (the
+booking's and the trade's two) take about 2.0 µs to encode (`BM_ProcessNewOrderWithMatchRecorded` less
+`BM_ProcessNewOrderWithMatch`). A report takes ~12.7 µs to push to eight clients
+(`BM_WsOutQueuesPushTradeReport/8`). Its two broadcasts, the report's and the order's, take about 1.5 µs of that
+(`BM_SessionManagerBroadcastToAccount/8/0`, ~0.76 µs each), and most of the rest is building and serializing its
+JSON.
 
-`BM_TaskManagerThroughput` takes the processor count as its argument: ~205K orders/sec at 2, ~207K at 4
-and ~206K at 8. #76's ~205K, ~265K and ~270K timed something else: a batch could end once the pool looked
+`BM_TaskManagerThroughput` takes the processor count as its argument: ~196K orders/sec at 2, ~198K at 4
+and ~209K at 8. #76's ~205K, ~265K and ~270K timed something else: a batch could end once the pool looked
 idle, with transactions still to run. Since #263 (3dad39e) a batch ends when its transactions are done, which
 made the benchmark 31% slower at 4 and at 8 processors and 2.5% slower at 2, with the engine's hot path
 unchanged (#429). The rest of the difference is the engine's work and the build variance above.
 
 `BM_TaskManagerTrades` (#290) sends its orders in pairs, a sell and a buy at one price, so each pair
 trades. It takes the number of instruments the pairs are dealt over, 1 or 8, and the processor count.
-In one instrument every booking, match and fill relates to the same instrument: ~140K, ~139K and ~137K
-orders/sec at 2, 4 and 8 processors, against ~151K, ~133K and ~132K over 8 instruments. More processors didn't
-raise it, and more instruments did only at 2 processors, by less than the runs there varied (3.2 to 3.7 ms per
-batch).
+In one instrument every booking, match and fill relates to the same instrument: ~157K, ~136K and ~137K
+orders/sec at 2, 4 and 8 processors, against ~147K, ~132K and ~131K over 8 instruments: neither more processors
+nor more instruments raised it.
 
 Two things these numbers deliberately exclude, both real in production:
 
@@ -580,7 +601,8 @@ OrderProcessor/
 │   ├── init-db/            # PostgreSQL schema initialization
 │   └── .env.example        # PostgreSQL credentials and the access token, a template
 ├── scripts/                # Tooling
-│   └── benchmark-regression.sh  # Before/after benchmark comparison
+│   ├── benchmark-regression.sh  # Before/after benchmark comparison
+│   └── loop-instructions.sh     # Instructions per iteration in each per-order benchmark's timed span (#503)
 ├── docs/                   # Architecture documentation
 │   └── ARCHITECTURE.md     # Comprehensive architecture document
 ├── CMakeLists.txt          # Root build configuration
