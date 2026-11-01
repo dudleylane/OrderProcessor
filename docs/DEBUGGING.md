@@ -41,6 +41,10 @@ valgrind --tool=cachegrind ./build/orderProcessorBench --benchmark_filter="Pool"
 
 # Call graph profiling
 valgrind --tool=callgrind ./build/orderProcessorBench --benchmark_filter="Pool"
+
+# Instructions per iteration in each per-order benchmark's timed span, under callgrind at N and 2N iterations,
+# and with two binaries the second's less the first's: the instruction count CLAUDE.md's layout check reads (#503)
+./scripts/loop-instructions.sh before/orderProcessorBench build/orderProcessorBench
 ```
 
 ### clang-tidy
