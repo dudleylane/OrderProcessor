@@ -60,7 +60,7 @@ A single test that submits two FIX orders (sell + buy limit) through the entire 
 **File:** `test/FixEndToEndTest.cpp`
 **Requires:** `BUILD_FIX=ON`
 
-Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBook. Orders enter via `FixGateway::onMessage()` and flow through the complete pipeline. The engine's reports go to the gateway too, through `MultiOutQueues` and `FixOutQueues` as in the server, and the gateway pushes through `HoldingInQueues`, which can hold the engine's input back so that an order isn't stored yet (#380). `CapturingOutQueues` builds each report as the gateway builds one for a session, as it goes out, and keeps its WorkingIndicator (636) (#387) and LeavesQty (151) (#386).
+Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBook. Orders enter via `FixGateway::onMessage()` and flow through the complete pipeline. The engine's reports go to the gateway too, through `MultiOutQueues` and `FixOutQueues` as in the server, and the gateway pushes through `HoldingInQueues`, which can hold the engine's input back so that an order isn't stored yet (#380). `CapturingOutQueues` builds each report as the gateway builds one for a session, as it goes out, and keeps its WorkingIndicator (636) (#387), LeavesQty (151) (#386) and Text (58) (#510).
 
 | Test | Description |
 |------|-------------|
@@ -88,6 +88,7 @@ Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBo
 | `StopOrder_IsNotWorkingUntilATradeReleasesIt` | EP284's E.1.f through the engine: a buy stop, held off the book, is acknowledged with WorkingIndicator (636) N; a trade at its stop, whose buy is held back until that acknowledgement is out, releases it, 150=L with 636 Y, and it buys at the market. The orders booked at once are acknowledged with 636 Y, and no trade report has one (#387) |
 | `AnOrderTheEngineCloses_IsReportedWithNoLeaves` | An IOC for 100 that trades 40, whose rest the engine cancels, and a DAY order at its day's end (a `TimerEvent` pushed as the expiry scheduler sends one) → reported Canceled (150=4) and Expired (150=C) with LeavesQty (151) 0, as after a client's cancel, and a status request finds each with OrderQty 100, its CumQty and LeavesQty 0; they were reported with what they hadn't traded, 60 and 100 (#386) |
 | `AnOrderTheEngineStoresAndRejects_IsReportedWithNoLeaves` | A market buy for 100 with nothing to trade with, which the engine's receive stores before refusing it → reported Rejected (150=8, 39=8) with LeavesQty (151) 0, and a status request finds it Rejected with OrderQty 100, CumQty 0 and LeavesQty 0; it was reported with all 100 left, where the gateway's own refusals carry 0 (#427) |
+| `AnOrderOnASideTheBookDoesntHold_IsRejectedWithItsReason` | A GTC limit with Side (54) 5, which the gateway takes as SELL_SHORT, and one with 6, which it takes as CROSS (#549) → each reported Rejected (150=8, 39=8) with Text (58) "Only BUY and SELL orders are traded!" and LeavesQty (151) 0, and nothing else. The book holds only buys and sells: such an order that rested was stored NEW in no book, with no report, and stopped every later start (#510) |
 
 ---
 

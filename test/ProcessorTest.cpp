@@ -3342,6 +3342,115 @@ TEST_F(ProcessorTest, AnOrderItsChecksRefuseIsReportedWithTheirReason)
     EXPECT_EQ("There is no market for this instrument!", engine.reports_.rejectReasonOf(market->orderId_));
 }
 
+TEST_F(ProcessorTest, AnOrderOnASideTheBookDoesntHoldIsRejected)
+{
+    // The book has two sides (#510). An order on any of the protocol's other four that rested was stored NEW in no book,
+    // with no report, and stopped every later start. One that didn't rest was matched as a sell, so a BUY_MINUS IOC
+    // traded with a resting buy: two buyers. Each is refused as its checks refuse an order, with their reason.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *bid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 10));
+    const OrderEntry *ask = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 10));
+    for (const Side side : { BUY_MINUS_SIDE, SELL_PLUS_SIDE, SELL_SHORT_SIDE, CROSS_SIDE })
+    {
+        auto market = createTestOrder(instrId1_, side, 0.0, 5);
+        market->ordType_ = MARKET_ORDERTYPE;
+        const OrderEntry *refused[] = {
+            engine.submit(createTestOrder(instrId1_, side, 10.5, 5)),                   // rests, between the two
+            engine.submit(withTif(createTestOrder(instrId1_, side, 10.0, 5), IOC_TIF)), // at the bid
+            engine.submit(withTif(createTestOrder(instrId1_, side, 11.0, 5), IOC_TIF)), // at the ask
+            engine.submit(std::move(market)),
+            engine.submit(asStop(createTestOrder(instrId1_, side, 0.0, 5), STOP_ORDERTYPE, 10.0)),
+        };
+        for (const OrderEntry *order : refused)
+        {
+            ASSERT_NE(nullptr, order);
+            EXPECT_EQ(REJECTED_ORDSTATUS, order->status_) << "side " << side;
+            EXPECT_EQ(0u, order->leavesQty_) << "side " << side;
+            EXPECT_EQ("Only BUY and SELL orders are traded!", engine.reports_.rejectReasonOf(order->orderId_))
+                << "side " << side;
+            EXPECT_TRUE(engine.reports_.tradesOf(order->orderId_).empty()) << "side " << side;
+        }
+    }
+    EXPECT_TRUE(engine.reports_.tradesOf(bid->orderId_).empty()) << "the bid traded";
+    EXPECT_TRUE(engine.reports_.tradesOf(ask->orderId_).empty()) << "the ask traded";
+    EXPECT_EQ(10u, bid->leavesQty_);
+    EXPECT_EQ(10u, ask->leavesQty_);
+    EXPECT_EQ(bid->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
+    EXPECT_EQ(ask->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE));
+    EXPECT_FALSE(orderBook_->holdsStops(instrId1_));
+}
+
+TEST_F(ProcessorTest, AnOpenOrderStoredOnASideTheBookDoesntHoldIsRestoredOutOfItAndCanBeCanceled)
+{
+    // Until #510 a resting order on a side the book doesn't hold was stored NEW, in no book, and every later start failed
+    // to restore it ("Unable to restore order into book - side is not supported!"), as it failed to hold a stop on one.
+    // Such a directory loads now, each order out of the book, and its client can still cancel it: the book has nothing to
+    // take out.
+    const std::string dir = test::uniqueTestPath("side-restart");
+    std::filesystem::remove_all(dir);
+    IdT limit;
+    IdT stop;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory before(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, SELL_SIDE, 200.0, 10);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        OrderEntry *resting = before.process(clOrdId);
+        order = asStop(createTestOrder(instrId1_, BUY_SIDE, 0.0, 10), STOP_ORDERTYPE, 150.0);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        OrderEntry *held = before.process(clOrdId);
+        ASSERT_EQ(NEW_ORDSTATUS, resting->status_);
+        ASSERT_EQ(NEW_ORDSTATUS, held->status_);
+        ASSERT_TRUE(held->heldStop());
+        // Their records as a server before #510 wrote them, on sides isValid() now refuses
+        resting->side_ = SELL_SHORT_SIDE;
+        held->side_ = CROSS_SIDE;
+        before.dispatcher_.save(*resting);
+        before.dispatcher_.save(*held);
+        limit = resting->orderId_;
+        stop = held->orderId_;
+    }
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        for (const IdT &id : { limit, stop })
+        {
+            const OrderEntry *restored = restarted.storage_.locateByOrderId(id);
+            ASSERT_NE(nullptr, restored);
+            ASSERT_EQ(NEW_ORDSTATUS, restored->status_);
+        }
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, BUY_SIDE).isValid());
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, SELL_SIDE).isValid());
+        EXPECT_FALSE(restarted.book_.holdsStops(instrId1_));
+        EXPECT_TRUE(restarted.dispatcher_.ordersToMatch().empty()) << "an order on such a side is matched";
+
+        for (const IdT &id : { limit, stop })
+        {
+            inQueues_->push("test", OrderCancelEvent(id, "closing it"));
+            restarted.processor_.process();
+            const OrderEntry *canceled = restarted.storage_.locateByOrderId(id);
+            EXPECT_EQ(CANCELED_ORDSTATUS, canceled->status_) << "order " << id.id_;
+            EXPECT_EQ(0u, canceled->leavesQty_) << "order " << id.id_;
+            const std::vector<ExecType> types = reports.reportTypesOf(id);
+            EXPECT_NE(types.end(), std::find(types.begin(), types.end(), CANCEL_EXECTYPE))
+                << "order " << id.id_ << ": its cancel wasn't reported";
+        }
+    }
+    {
+        TradeRecorder reports;
+        EngineOverDirectory again(dir, instrId1_, inQueues_.get(), &reports);
+        for (const IdT &id : { limit, stop })
+        {
+            const OrderEntry *restored = again.storage_.locateByOrderId(id);
+            ASSERT_NE(nullptr, restored);
+            EXPECT_EQ(CANCELED_ORDSTATUS, restored->status_) << "order " << id.id_ << ": its cancel wasn't persisted";
+        }
+    }
+    std::filesystem::remove_all(dir);
+}
+
 TEST_F(ProcessorTest, AFokOrderTheBookCanFillTradesInFullAcrossLevels)
 {
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());

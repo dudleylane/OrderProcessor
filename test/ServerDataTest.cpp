@@ -180,6 +180,39 @@ TEST_F(ServerDataTest, ARestingOrderIsRestoredIntoTheBook)
     EXPECT_EQ(7u, data.lastOrderNumber);
 }
 
+TEST_F(ServerDataTest, AnOpenOrderOnASideTheBookDoesntHoldDoesntStopTheLoad)
+{
+    // An order on BUY_MINUS, SELL_PLUS, SELL_SHORT or CROSS that rested was stored NEW until isValid() refused one, and
+    // every later start failed: "Can't start: Unable to restore order into book - side is not supported!" (#510). The
+    // directory loads now, that order out of the book.
+    SourceIdT instrument;
+    IdT resting;
+    IdT unheld;
+    {
+        LMDBStorage lmdb(MAP_SIZE);
+        StorageRecordDispatcher writer;
+        writer.init(WideDataStorage::instance(), nullptr, &lmdb, OrderStorage::instance());
+        lmdb.load(dir_, &writer);
+        WideDataStorage::instance()->bindStorage(&writer);
+        instrument = test::addInstrument("SIDES");
+        std::unique_ptr<OrderEntry> val = order(instrument, 7, NEW_ORDSTATUS, 100);
+        val->side_ = SELL_SHORT_SIDE;
+        unheld = val->orderId_;
+        writer.save(*val);
+        val = order(instrument, 8, NEW_ORDSTATUS, 100);
+        resting = val->orderId_;
+        writer.save(*val);
+    }
+    restart();
+    App::ServerData data = load();
+    EXPECT_EQ(resting, data.orderBook->getTop(instrument, BUY_SIDE));
+    EXPECT_FALSE(data.orderBook->getTop(instrument, SELL_SIDE).isValid());
+    const OrderEntry *restored = OrderStorage::instance()->locateByOrderId(unheld);
+    ASSERT_NE(nullptr, restored);
+    EXPECT_EQ(NEW_ORDSTATUS, restored->status_);
+    EXPECT_EQ(8u, data.lastOrderNumber);
+}
+
 TEST_F(ServerDataTest, RestoredDayAndGtdOrdersThatAreLiveGetTheirTimersBack)
 {
     // A restart lost every timer, and nothing set them again (#240). One whose time passed while the server was down
