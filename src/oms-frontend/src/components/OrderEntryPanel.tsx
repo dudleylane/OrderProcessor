@@ -10,8 +10,8 @@ interface OrderEntryPanelProps {
   connected: boolean;
 }
 
-const BASIC_SIDES: Side[] = [Side.BUY, Side.SELL];
-const ADVANCED_SIDES: Side[] = [Side.BUY_MINUS, Side.SELL_PLUS, Side.SELL_SHORT, Side.CROSS];
+// The engine trades only these two of the protocol's six sides, and rejects an order on any other (#510)
+const SIDES: Side[] = [Side.BUY, Side.SELL];
 
 export function OrderEntryPanel({
   instruments,
@@ -143,8 +143,8 @@ export function OrderEntryPanel({
         {/* Side */}
         <div>
           <label className="block text-xs text-gray-500 mb-1">Side</label>
-          <div className="flex gap-2 mb-1">
-            {BASIC_SIDES.map(s => (
+          <div className="flex gap-2">
+            {SIDES.map(s => (
               <button
                 key={s}
                 onClick={() => setSide(s)}
@@ -157,16 +157,6 @@ export function OrderEntryPanel({
               </button>
             ))}
           </div>
-          <select
-            value={ADVANCED_SIDES.includes(side) ? side : ''}
-            onChange={e => { if (e.target.value) setSide(e.target.value as Side); }}
-            className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-500"
-          >
-            <option value="">Advanced sides...</option>
-            {ADVANCED_SIDES.map(s => (
-              <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
-            ))}
-          </select>
         </div>
 
         {/* Order Type */}

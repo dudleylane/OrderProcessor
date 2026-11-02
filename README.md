@@ -26,7 +26,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **Branch Prediction:** `[[likely]]`, `[[unlikely]]`, `[[assume]]` (C++23) throughout hot path
 
 ### OMS Frontend (React + TypeScript)
-- **Order Entry:** Full form with symbol, side (<!-- DOC_CHECK:side_count -->6<!-- /DOC_CHECK --> types), order type (<!-- DOC_CHECK:order_type_count -->5<!-- /DOC_CHECK --> types: Market/Limit/Stop/StopLimit/FxSwap), time-in-force (<!-- DOC_CHECK:tif_count -->7<!-- /DOC_CHECK --> types), capacity, currency
+- **Order Entry:** Full form with symbol, side (Buy or Sell, the two of the protocol's <!-- DOC_CHECK:side_count -->6<!-- /DOC_CHECK --> sides the engine trades, #510), order type (<!-- DOC_CHECK:order_type_count -->5<!-- /DOC_CHECK --> types: Market/Limit/Stop/StopLimit/FxSwap), time-in-force (<!-- DOC_CHECK:tif_count -->7<!-- /DOC_CHECK --> types), capacity, currency
 - **Order Blotter:** Live table with inline Cancel and Replace actions
 - **Execution Blotter:** Trades, rejects, corrections, cancels with CSV export
 - **Order Book Panel:** 8-level bid/ask depth with staleness indicator and per-instrument subscription
@@ -559,7 +559,7 @@ Every order clears through the server's clearing firm (`--clearing-firm`), and a
 
 **SystemMetrics** — 19 fields: event/transaction counters (created/processed/finished), processor availability, `queueDepth`, `poolSize`, `poolCacheMisses`, `poolArenaSize`, `activeSessions`, `activeOrders`, `storageMapSize` and `storageMapUsed` (LMDB's map and how much of it is in use, in bytes), `timestamp`.
 
-**Enums** — `Side` (BUY, SELL, BUY_MINUS, SELL_PLUS, SELL_SHORT, CROSS), `OrderType` (MARKET, LIMIT, STOP, STOPLIMIT, FXSWAP), `TimeInForce` (DAY, GTD, GTC, FOK, IOC, OPG, ATCLOSE), `OrderStatus` (<!-- DOC_CHECK:order_status_count -->12<!-- /DOC_CHECK --> statuses), `ExecType` (<!-- DOC_CHECK:exec_type_count -->14<!-- /DOC_CHECK --> types), `Currency` (USD, EUR, GBP, JPY, CHF, AUD, CAD, NZD), `Capacity` (<!-- DOC_CHECK:capacity_count -->6<!-- /DOC_CHECK --> types).
+**Enums** — `Side` (BUY, SELL, BUY_MINUS, SELL_PLUS, SELL_SHORT, CROSS; the engine trades only BUY and SELL, and rejects an order on any of the other four, #510), `OrderType` (MARKET, LIMIT, STOP, STOPLIMIT, FXSWAP), `TimeInForce` (DAY, GTD, GTC, FOK, IOC, OPG, ATCLOSE), `OrderStatus` (<!-- DOC_CHECK:order_status_count -->12<!-- /DOC_CHECK --> statuses), `ExecType` (<!-- DOC_CHECK:exec_type_count -->14<!-- /DOC_CHECK --> types), `Currency` (USD, EUR, GBP, JPY, CHF, AUD, CAD, NZD), `Capacity` (<!-- DOC_CHECK:capacity_count -->6<!-- /DOC_CHECK --> types).
 
 ---
 

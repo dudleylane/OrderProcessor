@@ -235,7 +235,9 @@ void OrderBookImpl::remove(const OrderEntry &order)
     }
     else
     {
-        throw std::runtime_error("Unable to remove order into book - side is not supported!");
+        // No order on another side is in the book: add() and restore() refuse one. An order stored on one before
+        // isValid() refused it is restored out of the book, so its cancel or expiry has nothing to take out (#510).
+        return;
     }
 
     if (aux::ExchLogger::instance()->isNoteOn())
@@ -294,11 +296,14 @@ void OrderBookImpl::removeStop(const OrderEntry &order)
     {
         throw std::runtime_error("Unable to remove stop order - instrument not registered!");
     }
+    if ((BUY_SIDE != order.side_) && (SELL_SIDE != order.side_))
+    {
+        return; // never held: addStop() refuses it, and a restore leaves it out (#510), as remove() says
+    }
     OrdersGroup &group = *it->second;
     tbb::mutex::scoped_lock lock(group.stopLock_);
-    const bool erased = (BUY_SIDE == order.side_)    ? eraseStop(&group.buyStops_, order.stopPx_, order.orderId_)
-                        : (SELL_SIDE == order.side_) ? eraseStop(&group.sellStops_, order.stopPx_, order.orderId_)
-                                                     : false;
+    const bool erased = (BUY_SIDE == order.side_) ? eraseStop(&group.buyStops_, order.stopPx_, order.orderId_)
+                                                  : eraseStop(&group.sellStops_, order.stopPx_, order.orderId_);
     if (!erased)
     {
         throw std::runtime_error("Unable to remove stop order - order not held!");

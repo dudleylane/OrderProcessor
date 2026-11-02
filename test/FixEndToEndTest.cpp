@@ -73,6 +73,7 @@ struct CapturedExecReport
     std::string source;
     std::string workingIndicator; // WorkingIndicator (636) of the report a session gets, or "(not set)" (#387)
     std::string leavesQty;        // its LeavesQty (151) (#386)
+    std::string text;             // its Text (58), a reject's reason (#510)
 };
 
 class CapturingOutQueues : public Queues::OutQueues
@@ -148,6 +149,7 @@ private:
         {
             r->workingIndicator = "(not sent)";
             r->leavesQty = "(not sent)";
+            r->text = "(not sent)";
             return;
         }
         if (!evnt.figures_)
@@ -155,12 +157,14 @@ private:
             // The engine gives every report it makes its figures
             r->workingIndicator = "(no figures)";
             r->leavesQty = "(no figures)";
+            r->text = "(no figures)";
             return;
         }
         const FIX50SP2::ExecutionReport report =
             FixGateway::buildExecutionReport(evnt.exec_, *order, *evnt.figures_, evnt.requestClOrdId_);
         r->workingIndicator = fieldOf(report, FIX::FIELD::WorkingIndicator);
         r->leavesQty = fieldOf(report, FIX::FIELD::LeavesQty);
+        r->text = fieldOf(report, FIX::FIELD::Text);
     }
 
     mutable std::mutex mtx_;
@@ -510,6 +514,19 @@ protected:
             if ((order.orderId_ == r.orderId) && (type == r.execType))
             {
                 return r.leavesQty;
+            }
+        }
+        return "(no report)";
+    }
+
+    /// The Text (58) a session got in the order's first report of this ExecType, or "(no report)" (#510)
+    std::string textSentWith(const OrderEntry &order, ExecType type) const
+    {
+        for (const auto &r : outQueues_->reports())
+        {
+            if ((order.orderId_ == r.orderId) && (type == r.execType))
+            {
+                return r.text;
             }
         }
         return "(no report)";
@@ -1318,6 +1335,26 @@ TEST_F(FixEndToEndTest, AnOrderTheEngineStoresAndRejects_IsReportedWithNoLeaves)
     EXPECT_EQ("100", fieldOf(status, FIX::FIELD::OrderQty));
     EXPECT_EQ("0", fieldOf(status, FIX::FIELD::CumQty));
     EXPECT_EQ("0", fieldOf(status, FIX::FIELD::LeavesQty));
+}
+
+TEST_F(FixEndToEndTest, AnOrderOnASideTheBookDoesntHold_IsRejectedWithItsReason)
+{
+    // The gateway takes Side (54) 5 as SELL_SHORT and 6 as CROSS (#549), and the book holds only buys and sells
+    // (#510). A resting one was stored NEW in no book, with no report, and stopped every later start; the engine now
+    // rejects it at its receive, and the reject (150=8, 39=8) says why.
+    for (const char side : { FIX::Side_SELL_SHORT, '6' })
+    {
+        const std::string clOrdId = std::string("RJ-SIDE-") + side;
+        gateway_->onMessage(makeNOS(clOrdId, side, FIX::OrdType_LIMIT, 1.0850, 100, FIX::TimeInForce_GOOD_TILL_CANCEL),
+                            fixSid_);
+        waitForProcessing();
+        OrderEntry *rejected = orderOf(clOrdId);
+        ASSERT_NE(nullptr, rejected) << "54=" << side;
+        EXPECT_EQ(REJECTED_ORDSTATUS, rejected->status_) << "54=" << side;
+        EXPECT_EQ((std::vector<ExecType>{ REJECT_EXECTYPE }), reportsOf(*rejected)) << "54=" << side;
+        EXPECT_EQ("Only BUY and SELL orders are traded!", textSentWith(*rejected, REJECT_EXECTYPE)) << "54=" << side;
+        EXPECT_EQ("0", leavesSentWith(*rejected, REJECT_EXECTYPE)) << "54=" << side;
+    }
 }
 
 } // anonymous namespace
