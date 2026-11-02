@@ -22,11 +22,11 @@
 #include "OrderCodec.h"
 #include "OrderStorage.h"
 #include "OrderMatcher.h"
+#include "Logger.h"
 
 #ifdef BUILD_PG
 #include <memory>
 
-#include "Logger.h"
 #include "PGRequestBuilder.h"
 #include "PGWriteBehind.h"
 #include "WideDataStorage.h"
@@ -337,6 +337,15 @@ void StorageRecordDispatcher::finishLoad()
         // takes an order out until it is resumed (#215). A list of the statuses to leave out missed that one.
         if ((nullptr == orderBook_) || !restored->working())
         {
+            continue;
+        }
+        // The book has two sides (#510). An open order on another side, stored before isValid() refused one, stopped
+        // every start: the book refuses to restore it. It is left out of the book, and isn't matched, and stays open
+        // until its client cancels it or it expires.
+        if ((BUY_SIDE != restored->side_) && (SELL_SIDE != restored->side_))
+        {
+            aux::ExchLogger::instance()->error("Order " + std::to_string(restored->orderId_.id_) +
+                                               " is on a side the book doesn't hold: restored out of the book (#510)");
             continue;
         }
         // A held stop goes back into its instrument's stop book, in id order, so stops at one price keep their order,
