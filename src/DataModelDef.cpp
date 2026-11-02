@@ -369,9 +369,12 @@ bool OrderEntry::isValid(std::string *invalid) const
             *invalid = "Invalid value of the order status!";
             return false;
         }
-        if (INVALID_SIDE == side_)
+        // The book has two sides, and the engine trades only on them (#510). An order on BUY_MINUS, SELL_PLUS,
+        // SELL_SHORT or CROSS that rested was stored NEW in no book, with no report, and stopped every later start,
+        // and one that didn't rest was matched as a sell against the buys.
+        if ((BUY_SIDE != side_) && (SELL_SIDE != side_))
         {
-            *invalid = "Invalid value of the side!";
+            *invalid = (INVALID_SIDE == side_) ? "Invalid value of the side!" : "Only BUY and SELL orders are traded!";
             return false;
         }
         if (INVALID_ORDERTYPE == ordType_)
