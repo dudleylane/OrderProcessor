@@ -3,7 +3,7 @@
  *
  * Measures throughput of FIX protocol components:
  *   - Enum conversion (FIX↔COP)
- *   - FIX message translation (NewOrderSingle → OrderEntry)
+ *   - FIX message translation (NewOrderSingle → OrderEntry, and NewOrderMultileg's FX swap, #516)
  *   - ExecutionReports: the gateway's builder, and a report's way to a logged-on session; a new order and its
  *     acknowledgement, without the engine between them (#395)
  *   - A session's cancels, replaces and status requests, and the refusals it is sent: the gateway's own and the
@@ -17,6 +17,7 @@
 
 // QuickFIX headers MUST come before any <flat_map> include (see FixGateway.h)
 #include <quickfix/fix50sp2/NewOrderSingle.h>
+#include <quickfix/fix50sp2/NewOrderMultileg.h>
 #include <quickfix/fix50sp2/ExecutionReport.h>
 #include <quickfix/fix50sp2/OrderCancelReplaceRequest.h>
 #include <quickfix/fix50sp2/OrderCancelRequest.h>
@@ -198,6 +199,36 @@ FIX50SP2::NewOrderSingle makeBenchNOS(const std::string &clOrdId, char side, cha
     return msg;
 }
 
+/// An FX swap as a counterparty sends one, a NewOrderMultileg (35=AB) with its two legs: the near leg on the order's
+/// side, the far leg on the other
+FIX50SP2::NewOrderMultileg makeBenchSwap(const std::string &clOrdId)
+{
+    FIX50SP2::NewOrderMultileg msg;
+    msg.set(FIX::ClOrdID(clOrdId));
+    msg.set(FIX::Side(FIX::Side_BUY));
+    msg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    msg.set(FIX::OrdType(FIX::OrdType_FOREX_SWAP));
+    msg.set(FIX::Symbol("BENCHFX"));
+    msg.set(FIX::OrderQty(100));
+    msg.set(FIX::Account("BENCHACCT"));
+    msg.set(FIX::Currency("USD"));
+
+    FIX50SP2::NewOrderMultileg::NoLegs nearLeg;
+    nearLeg.set(FIX::LegSymbol("BENCHFX"));
+    nearLeg.set(FIX::LegSide(FIX::Side_BUY));
+    nearLeg.set(FIX::LegPrice(1.2650));
+    nearLeg.set(FIX::LegSettlDate("20261027"));
+    msg.addGroup(nearLeg);
+
+    FIX50SP2::NewOrderMultileg::NoLegs farLeg;
+    farLeg.set(FIX::LegSymbol("BENCHFX"));
+    farLeg.set(FIX::LegSide(FIX::Side_SELL));
+    farLeg.set(FIX::LegPrice(1.2660));
+    farLeg.set(FIX::LegSettlDate("20261127"));
+    msg.addGroup(farLeg);
+    return msg;
+}
+
 /// Polls until the queue has counted `due` reports and the pool has finished, for a minute at most; whether it got
 /// there. The blocking form of waitUntilTransactionsFinished() can't time a cycle: it sleeps a second between its two
 /// checks (#309). The count is read first, since asking the pool takes the locks its workers need.
@@ -302,6 +333,39 @@ static void BM_FixNewOrderSingleTranslation(benchmark::State &state)
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_FixNewOrderSingleTranslation)->UseManualTime();
+
+/// The gateway's handling of an FX swap, a NewOrderMultileg, timed and answered as BM_FixNewOrderSingleTranslation times
+/// and answers a NewOrderSingle. Every swap a counterparty sends enters here, and nothing timed it until #516, which
+/// checks one more field in it. Each swap must reach the engine's queue, or the benchmark fails: a refusal times another
+/// path.
+static void BM_FixNewOrderMultilegTranslation(benchmark::State &state)
+{
+    FixBenchSetup setup;
+    IncomingQueues inQueues;
+    FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    const std::string source = FixGateway::makeSourceString(BENCH_SID);
+
+    int ordNum = 0;
+    for (auto _ : state)
+    {
+        std::string clOrdId = "SWAP-" + std::to_string(++ordNum);
+        auto msg = makeBenchSwap(clOrdId);
+        const auto start = std::chrono::steady_clock::now();
+        gateway.onMessage(msg, BENCH_SID);
+        state.SetIterationTime(secondsSince(start));
+
+        OrderRejectEvent answer;
+        answer.clOrderId_ = FixGateway::sessionClOrdId(source, clOrdId); // as the engine names it, stored (#71)
+        gateway.sendOrderReject(answer, source);
+    }
+    // The queue has no processor, so it holds every order it was handed
+    if (inQueues.size() != static_cast<u32>(ordNum))
+    {
+        state.SkipWithError("the gateway didn't hand every swap to the engine's queue");
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_FixNewOrderMultilegTranslation)->UseManualTime();
 
 // =============================================================================
 // 3. ExecutionReports: the gateway's builder, and a report's way to its session (#395)
