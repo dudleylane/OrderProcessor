@@ -25,13 +25,15 @@ inline constexpr std::size_t DEFAULT_MAX_SESSION_QUEUE_MB = 16;
 inline constexpr std::size_t MAX_CLIENT_MESSAGE_BYTES = 64 * 1024;
 
 /// What WebSocket clients may hold of the server (#159). The defaults bound what slow clients can make the server keep:
-/// 256 x 16 MiB, at most, and less when they wait on the same broadcasts, which share one copy.
+/// 256 x 16 MiB, at most, and less when they wait on the same broadcasts, which share one copy. Each also holds the state
+/// it got as it connected, its order snapshot included, until it has read it (#512).
 struct WsLimits
 {
     /// Clients connected at once. One more is closed as soon as it is accepted.
     std::size_t maxConnections = DEFAULT_MAX_CONNECTIONS;
-    /// Bytes waiting to be sent to one client. A client past this, one that doesn't read, is dropped. A single message
-    /// is always taken, however large: the order snapshot a client gets when it connects can be.
+    /// Bytes waiting to be sent to one client after the state it gets as it connects, which isn't counted: its order
+    /// snapshot alone can be larger (#512). A client past this, one that doesn't read, is dropped. A message is taken
+    /// whatever its size when nothing waits after that state.
     std::size_t maxQueuedBytes = DEFAULT_MAX_SESSION_QUEUE_MB << 20;
     /// The largest message a client may send. A larger one ends its session.
     std::size_t maxMessageBytes = MAX_CLIENT_MESSAGE_BYTES;
