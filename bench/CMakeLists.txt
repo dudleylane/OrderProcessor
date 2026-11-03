@@ -30,6 +30,7 @@ if(BUILD_FIX)
         ${CMAKE_SOURCE_DIR}/app/FixCredentials.cpp
         ${CMAKE_SOURCE_DIR}/app/FixGateway.cpp
         ${CMAKE_SOURCE_DIR}/app/FixOutQueues.cpp
+        ${CMAKE_SOURCE_DIR}/app/FixStores.cpp
         ${CMAKE_SOURCE_DIR}/app/MultiOutQueues.cpp)
     target_include_directories(orderProcessorBench PRIVATE
         ${CMAKE_SOURCE_DIR}/app)
