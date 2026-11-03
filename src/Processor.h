@@ -192,7 +192,8 @@ public:
     typedef std::vector<DeferedEventBase *> DeferedEventsT;
 
 private:
-    /// Pool for TransactionScope objects to eliminate heap allocations
+    /// Pool for TransactionScope objects. Each transaction enqueued takes its scope with it, so its slot allocates
+    /// another (#515)
     std::unique_ptr<ACID::TransactionScopePool> scopePool_;
 };
 

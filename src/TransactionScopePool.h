@@ -47,8 +47,13 @@ namespace ACID
 /**
  * Lock-free object pool for TransactionScope objects.
  *
- * Eliminates heap allocations from the hot path by pre-allocating
- * TransactionScope objects and reusing them via acquire()/release().
+ * Pre-allocates a TransactionScope for each slot and hands them out
+ * via acquire(). A scope given back unused (releaseByIndex()) is
+ * reused. One whose transaction takes it (detach(), through
+ * PooledTransactionScope::release()) leaves for good, since the
+ * transaction manager deletes it, so its slot allocates a new one at
+ * its next acquire(): each transaction enqueued costs one heap
+ * allocation, which allocations() counts (#515).
  *
  * Implementation uses a lock-free circular buffer with CAS operations
  * and exponential backoff to reduce cache-line contention.
@@ -68,7 +73,7 @@ public:
     };
 
     explicit TransactionScopePool(size_t poolSize = DEFAULT_POOL_SIZE, AllocMode mode = ALLOC_DEFAULT)
-        : poolSize_(poolSize), pool_(nullptr), allocMode_(ALLOC_DEFAULT), head_(0), cacheMisses_(0)
+        : poolSize_(poolSize), pool_(nullptr), allocMode_(ALLOC_DEFAULT), head_(0), allocations_(0), cacheMisses_(0)
     {
         const size_t allocBytes = poolSize * sizeof(Node);
 
@@ -157,10 +162,11 @@ public:
             if (pool_[idx].inUse.compare_exchange_strong(expected, true, std::memory_order_acquire,
                                                          std::memory_order_relaxed)) [[likely]]
             {
-                // Successfully acquired a slot — lazily replenish if detached
+                // Successfully acquired a slot — lazily replenish if detached, as a transaction took its scope
                 if (!pool_[idx].scope)
                 {
                     pool_[idx].scope = new TransactionScope();
+                    allocations_.fetch_add(1, std::memory_order_relaxed);
                 }
                 else
                 {
@@ -180,8 +186,10 @@ public:
 
         // Pool exhausted — fall back to heap allocation
         cacheMisses_.fetch_add(1, std::memory_order_relaxed);
+        TransactionScope *scope = new TransactionScope();
+        allocations_.fetch_add(1, std::memory_order_relaxed);
         outIndex = INVALID_INDEX;
-        return new TransactionScope();
+        return scope;
     }
 
     /**
@@ -196,7 +204,8 @@ public:
 
     /**
      * Detach a scope from its pool slot and return it for external ownership.
-     * The pool slot is marked empty and will be lazily replenished on next acquire.
+     * The pool slot is marked empty and will be lazily replenished on next acquire,
+     * a heap allocation that allocations() counts (#515).
      * This avoids the second heap allocation previously needed in release().
      */
     TransactionScope *detach(size_t index)
@@ -208,9 +217,17 @@ public:
         return scope;
     }
 
+    /// Acquires that found every slot in use, and fell back to the heap
     size_t cacheMisses() const noexcept
     {
         return cacheMisses_.load(std::memory_order_relaxed);
+    }
+
+    /// Scopes acquire() allocated since the pool was made: a slot's new scope for the one a transaction took, one per
+    /// transaction once the pool's own have been used, and a scope for each miss (#515)
+    size_t allocations() const noexcept
+    {
+        return allocations_.load(std::memory_order_relaxed);
     }
 
     size_t poolSize() const noexcept
@@ -236,6 +253,7 @@ private:
 
     // Cache-line aligned to prevent false sharing
     alignas(64) std::atomic<size_t> head_;
+    std::atomic<size_t> allocations_; ///< in head_'s line, which every acquire() writes already (#515)
     alignas(64) std::atomic<size_t> cacheMisses_;
 
     TransactionScopePool(const TransactionScopePool &) = delete;
@@ -248,7 +266,8 @@ private:
  *
  * On destruction (no release() called): scope is returned to the pool.
  * On release(): scope is detached from the pool and given to the caller
- * without a second heap allocation.
+ * without a second heap allocation; its slot allocates a new one at its
+ * next acquire (#515).
  */
 class PooledTransactionScope
 {
@@ -297,7 +316,7 @@ public:
 
     /**
      * Release ownership for external use (e.g., TransactionManager).
-     * If pooled: detaches the scope from its pool slot (zero allocation).
+     * If pooled: detaches the scope from its pool slot, which allocates a new one at its next acquire (#515).
      * If heap-allocated: transfers ownership directly.
      * Caller takes full ownership of the returned pointer.
      */
