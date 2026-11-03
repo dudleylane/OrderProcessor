@@ -89,3 +89,9 @@ export const REPLACEABLE_STATUSES = new Set<OrderStatus>([
   OrderStatus.NEW,
   OrderStatus.PARTIAL_FILL,
 ]);
+
+/** The latest expiry the server takes, in milliseconds since the epoch: 2262-04-11T23:47:16.854Z, the last millisecond
+ *  its clock can wait until (#511) */
+export const LATEST_EXPIRE_TIME = 9223372036854;
+/** The latest an expiry input offers, in local time: a day before the above, so no time zone's is past it */
+export const LATEST_EXPIRE_INPUT = '2262-04-10T23:59';

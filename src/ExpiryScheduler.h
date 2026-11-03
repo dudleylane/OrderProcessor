@@ -12,9 +12,11 @@
 
 #pragma once
 
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <thread>
 #include <vector>
@@ -52,6 +54,10 @@ public:
     /// Where the business day ends, and when: 17:00 New York (ruled 2026-10-16), the FX market's roll
     static constexpr const char *DAY_ZONE = "America/New_York";
     static constexpr int DAY_END_HOUR = 17;
+    /// The latest time the thread can wait until (#511): the system clock counts nanoseconds in an int64, which end at
+    /// 2262-04-11T23:47:16.854775807Z, and this is its last whole millisecond. An order's expireTime past it is refused
+    /// as the order arrives.
+    static constexpr DateTimeT LATEST_TIME = 9223372036854ULL;
 
     /// The first business day end after the time given: when a DAY order created then expires. 21:00 UTC while New
     /// York keeps daylight time, 22:00 UTC while it keeps standard time.
@@ -73,6 +79,10 @@ public:
 
     /// Fires the timer at the time given, or at once if it has passed. Thread-safe.
     void schedule(const IdT &orderId, DateTimeT when, Queues::TimerEvent::TimerType type);
+    /// When the thread wakes for a timer at the time given: none past LATEST_TIME, which the system clock can't hold.
+    /// Converted all the same, such a time overflowed, and the wait returned at once without letting go of the lock:
+    /// the thread spun holding it, and every schedule() and stop() after it waited for good (#511).
+    static std::optional<std::chrono::system_clock::time_point> deadlineOf(DateTimeT when);
 
     /// Starts the thread that fires the timers as they come due. stop() joins it, and the destructor stops it.
     void start();
