@@ -1283,11 +1283,11 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 
 | Operation Type | Description | Rollback Action |
 |----------------|-------------|-----------------|
-| `CreateExecReportTrOperation` | Create execution report | Remove report |
-| `CreateTradeExecReportTrOperation` | Create trade execution | Remove execution |
-| `CreateRejectExecReportTrOperation` | Create rejection report | Remove report |
-| `CreateReplaceExecReportTrOperation` | Create replace report | Remove report |
-| `CreateCorrectExecReportTrOperation` | Create correction | Remove correction |
+| `CreateExecReportTrOperation` | Create execution report | None: a report pushed stands (§7.4) |
+| `CreateTradeExecReportTrOperation` | Create trade execution | None: a report pushed stands (§7.4) |
+| `CreateRejectExecReportTrOperation` | Create rejection report | None: a report pushed stands (§7.4) |
+| `CreateReplaceExecReportTrOperation` | Create replace report | None: a report pushed stands (§7.4) |
+| `CreateCorrectExecReportTrOperation` | Create correction | None: a report pushed stands (§7.4) |
 | `AddToOrderBookTrOperation` | Add order to book | Remove from book |
 | `RemoveFromOrderBookTrOperation` | Remove order from book | Re-add to book |
 | `EnqueueEventTrOperation` | Queue deferred event | Dequeue event |
@@ -1301,6 +1301,28 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 | `TransactionMgrTest.cpp` | `TransactionMgrTest.*` | Transaction manager tests |
 | `TransactionScopeTest.cpp` | `TransactionScopeTest.*` | Transaction scope tests |
 | `IntegrationTest.cpp` | `IntegrationTest.*` | Full transaction flow |
+
+### 7.4 What a Failed Transaction Does (#514)
+
+A transaction fails when one of its operations throws, or when its persists' group throws as it begins or commits (#163). `TransactionScope::executeTransaction()` then does three things:
+- It counts the failure. `TransactionScope::failedCount()` covers every engine in the process and is sent as `transactionsFailed` in `metrics_update`. The UI raises a CRITICAL alert when it rises.
+- It logs the failure at error level, naming the transaction, the operation that threw and why. For example: `Transaction 7 failed in its operation 1 of 4, PERSIST_ORDER_TROPERATION for 1001: No space left on device. Its operations are rolled back; what it decided stays in memory (#659)`.
+- It rolls back from the operation that threw to the first, each rollback on its own. A rollback that throws is logged (`... couldn't roll back its operation 2 of 4, ...`), and the rest still run.
+
+Until #514 nothing was logged or counted, and the first rollback that threw ended the rollback. `Processor` then drops the deferred events the transaction queued.
+
+The rollback undoes only the operations' own effects. Two things stay as they were:
+- The decision itself. The state machine's actions set the order's figures under its write lock before the transaction runs.
+- A report already pushed, since the report operations' rollbacks are empty (§7.3).
+
+So after a failure, memory, disk and clients can disagree. #659 holds the structural question of what a failure should do about that.
+
+| Test File | Test Cases | Coverage |
+|-----------|------------|----------|
+| `TransactionScopeTest.cpp` | `AFailedTransactionIsCountedOnce`, `AFailedTransactionIsLoggedNamingTheOperationThatThrew`, `RollbackGoesOn_WhenARollbackThrows`, `AFailureNamesItsTransactionTheOperationThatThrewAndWhy` | One count per failed transaction, the lines logged for it and for a rollback that threw (read through `test::CapturedLog`, which sends the log to a file of the test's own), every rollback run, and the lines' wording |
+| `TrOperationsTest.cpp` | `MatchOrderOperationTest.ATradeWhosePersistsFailToCommitPublishesNothing`, `ATradeWhosePersistsCantBeginPublishesNothing` | The persists' group failing as it commits or begins is counted, logged as the group's failure, and publishes nothing |
+| `ProcessorTest.cpp` | `ATransactionThatCantPersistIsCountedAndPublishesNothing` | A new order whose record can't be written is counted, and gets no report |
+| `JsonSerializerTest.cpp` | `JsonSerializerMetricsTest.MetricsUpdateCarriesTheFailedTransactions` | `transactionsFailed` on the wire |
 
 ---
 
