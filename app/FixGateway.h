@@ -44,6 +44,8 @@ class OrderDataStorage;
 namespace App
 {
 
+class FixCarryingStoreFactory;
+
 class FixGateway : public FIX::Application
 {
 public:
@@ -64,6 +66,11 @@ public:
     /// acceptor starts. Throws std::runtime_error if it lists an account the data directory doesn't have. Without it, as
     /// in tests, every Logon of FIX 5.0 SP2 is accepted and an order trades the account it names.
     void setCredentials(const FixCredentials *credentials);
+
+    /// The stores of the sessions QuickFIX makes from now on, to each of which onCreate hands its session, so that the
+    /// store tells a message its client was sent from one it wasn't (#513); none to hand them to no store. The factory
+    /// sets it as it is made and clears it as it goes.
+    void setStores(FixCarryingStoreFactory *stores);
 
     // Application interface
     void onCreate(const FIX::SessionID &) override;
@@ -256,6 +263,7 @@ private:
     SourceIdT defaultClearingId_;                 // pre-resolved clearing for FIX orders
     SourceIdT defaultAccountId_;                  // pre-resolved account for FIX orders that name none (#34)
     const FixCredentials *credentials_ = nullptr; // who may log on and what each may trade (#147); owned by FixServer
+    std::atomic<FixCarryingStoreFactory *> stores_{ nullptr }; // the sessions' stores (#513); owned by FixServer
 
     /// Hashes a key and a view of one alike, so that a report's ClOrdID is looked up without a copy
     struct KeyHash

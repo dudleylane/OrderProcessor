@@ -475,7 +475,7 @@ COP (Concurrent Order Processor)
 
 ### 3.6 FIX Gateway (Optional, `BUILD_FIX=ON`)
 
-**Location:** `app/FixGateway.h`, `app/FixGateway.cpp`, `app/FixOutQueues.cpp`, `app/MultiOutQueues.cpp`
+**Location:** `app/FixGateway.h`, `app/FixGateway.cpp`, `app/FixOutQueues.cpp`, `app/MultiOutQueues.cpp`, `app/FixStores.h/cpp`
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -536,6 +536,8 @@ COP (Concurrent Order Processor)
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+**What a client hasn't received when its session day ends (#513).** QuickFIX starts each session day from MsgSeqNum 1 with an empty store, and a report sent while its client wasn't logged on was only stored, so it went with the old day's store, when the client came back or the server started. The server's stores (`makeFixStores()`) are FileStore's, each in a `FixCarryingStore`. It marks the first application message stored while its session's client isn't logged on, which it learns from the session the gateway hands it in `onCreate()`. When QuickFIX resets the store for a new day, the messages from the mark on are stored again first, from 1 and with PossResend (97) Y, so the client's ResendRequest at logon gets them. A ResendRequest that reaches the mark moves it past what it resends, and a reset within the day, a Logon's ResetSeqNumFlag (141) Y, carries nothing. The mark is kept in a file beside FileStore's, so a server that starts after the day's end carries them too. The wrapper relies on what QuickFIX does with a store (docs/QUICKFIX_DEPENDENCY.md).
+
 **Associated Test Cases:**
 
 | Test File | Test Case | Description |
@@ -547,6 +549,7 @@ COP (Concurrent Order Processor)
 | `FixGatewayTest.cpp` | `FixtSessionTest.*` | A real FIXT.1.1 session from `config/fix.cfg`: what it sends, validated with FIX 5.0 SP2 |
 | `FixGatewayTest.cpp` | `MultiOutQueuesTest.*` | Fan-out adapter |
 | `FixRotatingLogTest.cpp` | `FixRotatingLogTest.*` | The FIX log's files rotate and stay bounded (#160) |
+| `FixStoresTest.cpp` | `FixStoresTest.*`, `FixCarryingStoreTest.*` | A report a client hasn't received begins the next session day's store, after a restart too, and nothing else is carried (#513) |
 | `FixCredentialsTest.cpp` | `FixCredentialsTest.*` | The FIX credentials file, and its PBKDF2 password hashes (#147) |
 | `FixRefusalTest.py` | `FixRefusalsReachOnlyTheirSender` (ctest) | A real server: an order the gateway refuses is answered to its sender alone (#189) |
 | `FixLogonTest.py` | `FixLogonNeedsCredentials` (ctest) | A real server: only a counterparty with its password logs on, and it trades only its accounts (#147) |
@@ -1675,7 +1678,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | Category | Files |
 |----------|-------|
 | **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `ExpirySchedulerTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NodePoolTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
-| **This branch's** | `EnumCouplingTest.cpp`, `FxSwapTest.cpp`, and with `BUILD_FIX=ON`: `FixCredentialsTest.cpp`, `FixEndToEndTest.cpp`, `FixFullPipelineTest.cpp`, `FixGatewayTest.cpp`, `FixRotatingLogTest.cpp`, `FixTlsTest.cpp` |
+| **This branch's** | `EnumCouplingTest.cpp`, `FxSwapTest.cpp`, and with `BUILD_FIX=ON`: `FixCredentialsTest.cpp`, `FixEndToEndTest.cpp`, `FixFullPipelineTest.cpp`, `FixGatewayTest.cpp`, `FixRotatingLogTest.cpp`, `FixStoresTest.cpp`, `FixTlsTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 | **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh`, `CpuBusyTest.sh`, `BenchmarkBaselineTest.sh`, `BenchmarkBusyStartTest.sh` |

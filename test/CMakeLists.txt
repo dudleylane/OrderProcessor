@@ -120,11 +120,13 @@ if(BUILD_FIX)
         FixEndToEndTest.cpp
         FixFullPipelineTest.cpp
         FixRotatingLogTest.cpp
+        FixStoresTest.cpp
         FixTlsTest.cpp
         ${CMAKE_SOURCE_DIR}/app/FixCredentials.cpp
         ${CMAKE_SOURCE_DIR}/app/FixGateway.cpp
         ${CMAKE_SOURCE_DIR}/app/FixOutQueues.cpp
         ${CMAKE_SOURCE_DIR}/app/FixRotatingLog.cpp
+        ${CMAKE_SOURCE_DIR}/app/FixStores.cpp
         ${CMAKE_SOURCE_DIR}/app/MultiOutQueues.cpp)
 endif()
 
