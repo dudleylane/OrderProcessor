@@ -49,6 +49,7 @@ struct SystemMetrics
     int32_t transactionsCreated;
     int32_t transactionsProcessed;
     int32_t transactionsFinished;
+    u64 transactionsFailed; ///< transactions that failed and were rolled back, each logged at error level too (#514)
     int32_t availableEventProcessors;
     int32_t totalEventProcessors;
     int32_t availableTransactProcessors;

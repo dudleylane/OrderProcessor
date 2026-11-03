@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
@@ -1095,9 +1096,42 @@ TEST_F(MatchOrderOperationTest, ATradeWhosePersistsFailToCommitPublishesNothing)
     TransactionScope scope;
     buildTrade(&scope, *buyOrder_, *sellOrder_,
                new PublishingOperation(buyOrder_->orderId_, &committed, &ran, &ranAfterCommit));
+    const uint64_t failed = TransactionScope::failedCount();
+    test::CapturedLog log;
 
     EXPECT_FALSE(scope.executeTransaction(createContext()));
     EXPECT_FALSE(ran) << "a transaction whose orders aren't durable published";
+    EXPECT_EQ(failed + 1, TransactionScope::failedCount()) << "the failed commit wasn't counted (#514)";
+    // The commit is what threw, not the operation after it
+    const std::vector<std::string> lines = log.lines();
+    EXPECT_EQ(1, std::count_if(lines.begin(), lines.end(),
+                               [](const std::string &line)
+                               {
+                                   return std::string::npos !=
+                                          line.find("failed as its 2 persists were written together (#163): "
+                                                    "injected: the commit failed");
+                               }));
+}
+
+TEST_F(MatchOrderOperationTest, ATradeWhosePersistsCantBeginPublishesNothing)
+{
+    // The group's begin throws before any persist runs, and is counted as the transaction's failure (#514)
+    ::testing::NiceMock<MockOrderSaver> saver;
+    OrderStorage::instance()->attach(&saver);
+    EXPECT_CALL(saver, beginGroup()).WillOnce(::testing::Throw(std::runtime_error("injected: the begin failed")));
+    EXPECT_CALL(saver, save(::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(saver, erase(::testing::_, ::testing::_)).Times(0);
+    bool committed = false;
+    bool ran = false;
+    bool ranAfterCommit = false;
+    TransactionScope scope;
+    buildTrade(&scope, *buyOrder_, *sellOrder_,
+               new PublishingOperation(buyOrder_->orderId_, &committed, &ran, &ranAfterCommit));
+    const uint64_t failed = TransactionScope::failedCount();
+
+    EXPECT_FALSE(scope.executeTransaction(createContext()));
+    EXPECT_FALSE(ran) << "a transaction whose orders aren't durable published";
+    EXPECT_EQ(failed + 1, TransactionScope::failedCount());
 }
 
 TEST_F(MatchOrderOperationTest, OnePersistIsWrittenAsBefore)

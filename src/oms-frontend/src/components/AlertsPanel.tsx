@@ -25,6 +25,7 @@ const METRIC_OPTIONS = [
   { value: 'activeSessions', label: 'Active Sessions' },
   { value: 'eventsProcessed', label: 'Events Processed' },
   { value: 'transactionsProcessed', label: 'Transactions Processed' },
+  { value: 'transactionsFailed', label: 'Transactions Failed' },
 ];
 
 export function AlertsPanel({ alerts }: Props) {

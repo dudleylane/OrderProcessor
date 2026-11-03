@@ -16,6 +16,8 @@
 #include <deque>
 #include <memory>
 #include <filesystem>
+#include <optional>
+#include <vector>
 
 #include <unistd.h>
 
@@ -60,6 +62,31 @@ inline std::string uniqueTestPath(const std::string &tag)
  * (OP_SOURCE_DIR, test/CMakeLists.txt). Defined in TestAux.cpp, since the benchmarks include this header without it.
  */
 std::filesystem::path sourceRoot();
+
+/**
+ * The engine's log, sent to a file of this test's own while this lives, for a test that checks what is logged (#514).
+ * spdlog writes on a thread of its own, so a line is surely in the file only once the logger is gone: lines() closes
+ * the log, reads the file and opens the log again where it was, as the destructor does if lines() wasn't called. Not
+ * for a test with threads of its own that log, nor one holding the logger's pointer. Defined in TestAux.cpp.
+ */
+class CapturedLog
+{
+public:
+    CapturedLog();
+    ~CapturedLog();
+    CapturedLog(const CapturedLog &) = delete;
+    CapturedLog &operator=(const CapturedLog &) = delete;
+
+    /// Every line logged since this was made
+    std::vector<std::string> lines();
+
+private:
+    void restore();
+
+    const std::string path_;
+    std::optional<std::string> before_; ///< EXCHANGE_LOG as it was
+    bool restored_ = false;
+};
 
 // =============================================================================
 // Legacy Assertion Helper (for migration from legacy tests)

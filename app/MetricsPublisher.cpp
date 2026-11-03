@@ -64,6 +64,7 @@ void MetricsPublisher::collectAndBroadcast()
     m.transactionsCreated = taskMgr_->transactionsCreated();
     m.transactionsProcessed = taskMgr_->transactionsProcessed();
     m.transactionsFinished = taskMgr_->transactionsFinished();
+    m.transactionsFailed = ACID::TransactionScope::failedCount(); // every engine in the process (#514)
     m.availableEventProcessors = taskMgr_->availableEventProcessors();
     m.totalEventProcessors = taskMgr_->totalEventProcessors();
     m.availableTransactProcessors = taskMgr_->availableTransactProcessors();

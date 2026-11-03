@@ -365,4 +365,14 @@ TEST(JsonSerializerMetricsTest, MetricsUpdateCarriesLmdbsMap)
     EXPECT_EQ(300UL * 1024 * 1024, msg["data"].value("storageMapUsed", size_t(0)));
 }
 
+// The metrics count the transactions that failed, which nothing reported (#514)
+TEST(JsonSerializerMetricsTest, MetricsUpdateCarriesTheFailedTransactions)
+{
+    App::SystemMetrics metrics{};
+    metrics.transactionsFailed = 5000000000ULL; // past 32 bits
+
+    nlohmann::json msg = nlohmann::json::parse(App::serializeMetricsUpdate(metrics));
+    EXPECT_EQ(5000000000ULL, msg["data"].value("transactionsFailed", uint64_t(0)));
+}
+
 } // namespace
