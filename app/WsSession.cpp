@@ -167,8 +167,9 @@ void WsSession::onAccept(beast::error_code ec)
 
     sessionMgr_->addSession(shared_from_this());
 
-    // Send initial state. Handlers run inside io_context::run(), so an exception leaving one terminates the
-    // server (#36): contain it, tell the client, and keep the session open.
+    // Send initial state, which the limit on what waits for the client doesn't count (#512). Handlers run inside
+    // io_context::run(), so an exception leaving one terminates the server (#36): contain it, tell the client, and keep
+    // the session open.
     try
     {
         // Under an identity, only its own accounts and their orders (#225)
@@ -176,20 +177,20 @@ void WsSession::onAccept(beast::error_code ec)
         {
             return maySee(account);
         };
-        send(serializeConnected());
-        send(serializeInstrumentList(wideData_));
-        send(serializeAccountList(wideData_, maySeeAccount));
-        send(serializeOrderSnapshot(orderStorage_, maySeeAccount));
+        sendInitial(serializeConnected());
+        sendInitial(serializeInstrumentList(wideData_));
+        sendInitial(serializeAccountList(wideData_, maySeeAccount));
+        sendInitial(serializeOrderSnapshot(orderStorage_, maySeeAccount));
     }
     catch (const std::exception &ex)
     {
         logContained("initial state", std::string(), ex.what());
-        send(serializeError("Internal error: initial state is incomplete"));
+        sendInitial(serializeError("Internal error: initial state is incomplete"));
     }
     catch (...)
     {
         logContained("initial state", std::string(), "unknown exception");
-        send(serializeError("Internal error: initial state is incomplete"));
+        sendInitial(serializeError("Internal error: initial state is incomplete"));
     }
 
     doRead();
@@ -506,14 +507,28 @@ void WsSession::send(std::shared_ptr<const std::string> msg)
     {
         return;
     }
-    // A client that doesn't read made the server keep everything sent to it, without limit (#159). A message is always
-    // taken when nothing waits: the order snapshot a client gets when it connects can be larger than the limit.
-    if (!writeQueue_.empty() && (queuedBytes_ + msg->size() > limits_.maxQueuedBytes))
+    // A client that doesn't read made the server keep everything sent to it, without limit (#159). The limit counts what
+    // waits after the client's initial state (#512), and a message is taken whatever its size when nothing does.
+    if ((writeQueue_.size() > initialMessages_) && (queuedBytes_ + msg->size() > limits_.maxQueuedBytes))
     {
-        drop();
+        drop(msg->size());
         return;
     }
     queuedBytes_ += msg->size();
+    enqueue(std::move(msg));
+}
+
+void WsSession::sendInitial(const std::string &msg)
+{
+    // Not counted. It used to be, and the first message waits until its write completes, which it can't while
+    // onAccept() runs: so the order snapshot was always checked against the limit, and once the store had grown past
+    // it, every client was dropped as it connected (#512).
+    ++initialMessages_;
+    enqueue(std::make_shared<const std::string>(msg));
+}
+
+void WsSession::enqueue(std::shared_ptr<const std::string> msg)
+{
     writeQueue_.push_back(std::move(msg));
     if (writeQueue_.size() == 1)
     {
@@ -521,7 +536,7 @@ void WsSession::send(std::shared_ptr<const std::string> msg)
     }
 }
 
-void WsSession::drop()
+void WsSession::drop(std::size_t refused)
 {
     dropped_ = true;
     beast::error_code ec;
@@ -529,15 +544,22 @@ void WsSession::drop()
     aux::ExchLogger::instance()->warn(
         "WsSession: dropped the client at " +
         (ec ? std::string("an unknown address") : peer.address().to_string() + ":" + std::to_string(peer.port())) +
-        ", which isn't reading: " + std::to_string(queuedBytes_) + " bytes were waiting for it, and the limit is " +
-        std::to_string(limits_.maxQueuedBytes) + " (--max-session-queue-mb)");
+        ", which isn't reading: " + std::to_string(queuedBytes_) +
+        " bytes were waiting for it after the state it got as it connected, and a message of " +
+        std::to_string(refused) + " bytes would have passed the limit, " + std::to_string(limits_.maxQueuedBytes) +
+        " (--max-session-queue-mb)");
     sessionMgr_->removeSession(shared_from_this());
     // The write in progress still uses the first message; the rest go now
     if (writeQueue_.size() > 1)
     {
         writeQueue_.erase(writeQueue_.begin() + 1, writeQueue_.end());
     }
-    queuedBytes_ = writeQueue_.empty() ? 0 : writeQueue_.front()->size();
+    // What is left is counted unless it is part of the initial state (#512)
+    if (writeQueue_.size() < initialMessages_)
+    {
+        initialMessages_ = writeQueue_.size();
+    }
+    queuedBytes_ = (writeQueue_.empty() || (0 < initialMessages_)) ? 0 : writeQueue_.front()->size();
     // Ends the read and the write in progress, which then fail and let the session go
     beast::get_lowest_layer(ws_).close();
 }
@@ -605,7 +627,15 @@ void WsSession::onWrite(beast::error_code ec, std::size_t /*bytesTransferred*/)
         return;
     }
 
-    queuedBytes_ -= writeQueue_.front()->size();
+    // The initial state is written first, and wasn't counted (#512)
+    if (0 < initialMessages_)
+    {
+        --initialMessages_;
+    }
+    else
+    {
+        queuedBytes_ -= writeQueue_.front()->size();
+    }
     writeQueue_.pop_front();
     if (!writeQueue_.empty() && !dropped_)
     {
