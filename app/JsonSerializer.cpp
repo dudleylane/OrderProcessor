@@ -307,6 +307,7 @@ std::string App::serializeMetricsUpdate(const SystemMetrics &m)
     data["queueDepth"] = m.queueDepth;
     data["poolSize"] = m.poolSize;
     data["poolCacheMisses"] = m.poolCacheMisses;
+    data["poolAllocations"] = m.poolAllocations;
     data["poolArenaSize"] = m.poolArenaSize;
     data["activeSessions"] = m.activeSessions;
     data["activeOrders"] = m.activeOrders;

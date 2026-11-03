@@ -46,7 +46,7 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 
 | Optimization | Implementation | Benefit |
 |--------------|---------------|---------|
-| Zero-Allocation Hot Path | `TransactionScopePool` | Eliminates heap allocations during event processing |
+| Pooled Transaction Scopes | `TransactionScopePool` | Scopes made up front and acquired lock-free; each transaction still allocates one, since the manager deletes the scope it took (#515) |
 | Cache Line Alignment | `alignas(64)` / `CacheAlignedAtomic` | Prevents false sharing on contended atomics |
 | Relaxed Memory Ordering | `memory_order_relaxed` | Reduces memory barrier overhead for counters |
 | CAS Backoff | `_mm_pause()` with exponential backoff | Reduces contention on CAS loops |
@@ -1004,15 +1004,17 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
 │   │                  TransactionScopePool                               │   │
 │   │                                                                      │   │
-│   │   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐                       │   │
-│   │   │Scp1│──►│Scp2│──►│Scp3│──►│Scp4│──►│... │  (1024 pre-allocated) │   │
-│   │   └────┘   └────┘   └────┘   └────┘   └────┘                       │   │
-│   │      ▲                                   ▲                          │   │
-│   │      │                                   │                          │   │
-│   │   head_ (alignas(64))              tail_ (alignas(64))             │   │
-│   │                                                                      │   │
-│   │   acquire(): atomic_compare_exchange_strong                         │   │
-│   │   release(): atomic_compare_exchange_strong                         │   │
+│   │   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐                        │   │
+│   │   │Scp1│   │Scp2│   │Scp3│   │Scp4│   │... │  1024 slots, each with │   │
+│   │   └────┘   └────┘   └────┘   └────┘   └────┘  a scope made up front │   │
+│   │      ▲                                                              │   │
+│   │      │                                                              │   │
+│   │   head_ (alignas(64)): fetch_add picks the next slot to try         │   │
+│   │                                                                     │   │
+│   │   acquire(): CAS on the slot's inUse; a slot that detach() emptied  │   │
+│   │              allocates a new scope (allocations(), #515)            │   │
+│   │   releaseByIndex(): the scope stays for reuse. detach(): it leaves  │   │
+│   │              with its transaction, which the manager deletes        │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │

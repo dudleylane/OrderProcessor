@@ -365,6 +365,18 @@ TEST(JsonSerializerMetricsTest, MetricsUpdateCarriesLmdbsMap)
     EXPECT_EQ(300UL * 1024 * 1024, msg["data"].value("storageMapUsed", size_t(0)));
 }
 
+// The metrics count the scopes the pool allocated, one per transaction, which its misses never showed (#515)
+TEST(JsonSerializerMetricsTest, MetricsUpdateCarriesThePoolsAllocations)
+{
+    App::SystemMetrics metrics{};
+    metrics.poolAllocations = 5000000000ULL; // past 32 bits
+    metrics.poolCacheMisses = 3;
+
+    nlohmann::json msg = nlohmann::json::parse(App::serializeMetricsUpdate(metrics));
+    EXPECT_EQ(5000000000ULL, msg["data"].value("poolAllocations", uint64_t(0)));
+    EXPECT_EQ(3u, msg["data"].value("poolCacheMisses", size_t(0)));
+}
+
 // The metrics count the transactions that failed, which nothing reported (#514)
 TEST(JsonSerializerMetricsTest, MetricsUpdateCarriesTheFailedTransactions)
 {
