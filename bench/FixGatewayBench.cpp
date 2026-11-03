@@ -31,6 +31,7 @@
 #include <quickfix/Utility.h>
 #include "FixGateway.h"
 #include "FixOutQueues.h"
+#include "FixStores.h"
 #include "MultiOutQueues.h"
 
 #include <benchmark/benchmark.h>
@@ -43,6 +44,8 @@
 #include <memory>
 #include <thread>
 #include <utility>
+#include <unistd.h>
+#include <vector>
 
 #include "DataModelDef.h"
 #include "WideDataStorage.h"
@@ -395,12 +398,47 @@ std::filesystem::path benchConfigDir()
     return std::filesystem::path(OP_SOURCE_DIR) / "config";
 }
 
+/// A directory of its own under the system's temporary directory, which goes with what it holds when this does
+class BenchDirectory final
+{
+public:
+    explicit BenchDirectory(const std::string &tag)
+        : path_(std::filesystem::temp_directory_path() /
+                ("orderProcessorBench-" + tag + "-" + std::to_string(::getpid()) + "-" + std::to_string(next())))
+    {
+        std::filesystem::remove_all(path_);
+        std::filesystem::create_directories(path_);
+    }
+    ~BenchDirectory()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(path_, ec);
+    }
+    BenchDirectory(const BenchDirectory &) = delete;
+    BenchDirectory &operator=(const BenchDirectory &) = delete;
+
+    const std::filesystem::path &path() const
+    {
+        return path_;
+    }
+
+private:
+    static unsigned next()
+    {
+        static std::atomic<unsigned> made{ 0 };
+        return made++;
+    }
+
+    std::filesystem::path path_;
+};
+
 /// fix.cfg's session with BENCH_CLIENT, logged on, as FixtSessionTest makes CLIENT_A's: what it sends goes to this
-/// Responder, which counts it and keeps nothing, and its store keeps nothing either
+/// Responder, which counts it and keeps nothing. Its store keeps nothing either, unless it is given a directory for the
+/// stores the server makes (makeFixStores()), FileStore's, which keep every message (#513).
 class BenchSession final : public FIX::Responder
 {
 public:
-    explicit BenchSession(FIX::Application &application) : factory_(application, stores_, nullptr)
+    explicit BenchSession(FixGateway &gateway, const std::filesystem::path &storeDir = {})
     {
         const std::filesystem::path config = benchConfigDir();
         try
@@ -423,7 +461,19 @@ public:
             }
             sid_ = FIX::SessionID(settings.getString(FIX::BEGINSTRING), settings.getString(FIX::SENDERCOMPID),
                                   "BENCH_CLIENT");
-            session_ = factory_.create(sid_, settings);
+            if (storeDir.empty())
+            {
+                stores_ = std::make_unique<FIX::NullStoreFactory>();
+            }
+            else
+            {
+                settings.setString(FIX::FILE_STORE_PATH, storeDir.string());
+                FIX::SessionSettings sessions;
+                sessions.set(sid_, settings);
+                stores_ = makeFixStores(sessions, gateway);
+            }
+            factory_ = std::make_unique<FIX::SessionFactory>(gateway, *stores_, nullptr);
+            session_ = factory_->create(sid_, settings);
             session_->setResponder(this);
 
             FIXT11::Logon logon(FIX::EncryptMethod(FIX::EncryptMethod_NONE_OTHER), FIX::HeartBtInt(30),
@@ -449,7 +499,7 @@ public:
     {
         if (nullptr != session_)
         {
-            factory_.destroy(session_); // before the gateway, its application
+            factory_->destroy(session_); // before the gateway, its application
         }
     }
     BenchSession(const BenchSession &) = delete;
@@ -480,6 +530,18 @@ public:
     {
         return sent_;
     }
+    /// The number the session's store gives the next message the session sends
+    FIX::SEQNUM nextSenderMsgSeqNum() const
+    {
+        return session_->getExpectedSenderNum();
+    }
+    /// Whether the session's store keeps the message it numbered seq
+    bool keeps(FIX::SEQNUM seq) const
+    {
+        std::vector<std::string> messages;
+        session_->getStore()->get(seq, seq, messages);
+        return !messages.empty();
+    }
     /// Hands what the session sends to connection from now on, or back to this when it is null: a warm-up reads what
     /// the session was sent there, while a timed send only counts the message (#423)
     void sendTo(FIX::Responder *connection)
@@ -488,8 +550,8 @@ public:
     }
 
 private:
-    FIX::NullStoreFactory stores_;
-    FIX::SessionFactory factory_;
+    std::unique_ptr<FIX::MessageStoreFactory> stores_; // keeps nothing, or the server's (makeFixStores())
+    std::unique_ptr<FIX::SessionFactory> factory_;
     FIX::SessionID sid_;
     FIX::Session *session_ = nullptr;
     std::string problem_;
@@ -564,6 +626,44 @@ static void BM_FixSendExecutionReport(benchmark::State &state)
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_FixSendExecutionReport);
+
+/// BM_FixSendExecutionReport with the session's store as the server makes it (makeFixStores()), in a directory of its
+/// own: QuickFIX writes each report to FileStore's two files before it sends it. What a report costs the server with
+/// the store it keeps reports in, which a change to that store reaches (#513)
+static void BM_FixSendExecutionReportStored(benchmark::State &state)
+{
+    FixBenchSetup setup;
+    IncomingQueues inQueues;
+    FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    FixOutQueues outQueues(&gateway, OrderStorage::instance());
+    const BenchDirectory storeDir("fix-store");
+    BenchSession session(gateway, storeDir.path());
+    if (!session.problem().empty())
+    {
+        state.SkipWithError(session.problem().c_str());
+        return;
+    }
+    const OrderEntry *order = storeBenchOrder(setup, session.source(), LIMIT_ORDERTYPE);
+    TradeExecEntry trade = benchTrade(*order, SINGLE_LEG);
+    ExecReportEvent evnt(&trade);
+    evnt.figures_.emplace(*order); // as the engine gives every report it makes (#411)
+    const std::string target;
+    const u64 before = session.sent();
+    for (auto _ : state)
+    {
+        outQueues.push(evnt, target);
+    }
+    if (session.sent() - before != static_cast<u64>(state.iterations()))
+    {
+        state.SkipWithError("the session wasn't sent a report on every iteration");
+    }
+    else if (!session.keeps(session.nextSenderMsgSeqNum() - 1))
+    {
+        state.SkipWithError("the session's store didn't keep the last report");
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_FixSendExecutionReportStored);
 
 /// A new order through the gateway to the engine's queue, then its acknowledgement through FixOutQueues to the session:
 /// what the session's thread and the transaction worker do for each order, without the engine's work between them. Each

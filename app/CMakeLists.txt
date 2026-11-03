@@ -17,5 +17,6 @@ if(BUILD_FIX)
         FixGateway.cpp
         FixOutQueues.cpp
         FixRotatingLog.cpp
+        FixStores.cpp
         MultiOutQueues.cpp)
 endif()

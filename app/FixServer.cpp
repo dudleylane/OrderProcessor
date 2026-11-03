@@ -3,7 +3,6 @@
 // QuickFIX headers isolated in this TU via PIMPL (FixServer::Impl).
 #include <quickfix/ThreadedSSLSocketAcceptor.h>
 #include <quickfix/ThreadedSocketAcceptor.h>
-#include <quickfix/FileStore.h>
 #include <quickfix/FixValues.h>
 #include <quickfix/Message.h>
 #include <quickfix/SessionSettings.h>
@@ -16,6 +15,7 @@
 #include "FixGateway.h"
 #include "FixOutQueues.h"
 #include "FixRotatingLog.h"
+#include "FixStores.h"
 #include "FixTls.h"
 #include "Logger.h"
 
@@ -98,9 +98,9 @@ struct FixServer::Impl
     std::unique_ptr<FixGateway> gateway;
     std::unique_ptr<FixOutQueues> fixOutQueues;
     std::unique_ptr<FIX::SessionSettings> settings;
-    std::unique_ptr<FIX::FileStoreFactory> storeFactory;
-    std::unique_ptr<FixRotatingLogFactory> logFactory; // FileLog's files, bounded (#160)
-    std::unique_ptr<FIX::Acceptor> acceptor;           // ThreadedSSLSocketAcceptor with TLS (#228)
+    std::unique_ptr<FIX::MessageStoreFactory> storeFactory; // FileStore's (makeFixStores())
+    std::unique_ptr<FixRotatingLogFactory> logFactory;      // FileLog's files, bounded (#160)
+    std::unique_ptr<FIX::Acceptor> acceptor;                // ThreadedSSLSocketAcceptor with TLS (#228)
 };
 
 FixServer::FixServer(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
@@ -143,7 +143,7 @@ void FixServer::start(const std::string &configFile, const std::string &credenti
         }
     }
     aux::ExchLogger::instance()->note("FIX counterparties, from " + credentialsFile + ": " + compIds);
-    impl_->storeFactory = std::make_unique<FIX::FileStoreFactory>(*impl_->settings);
+    impl_->storeFactory = makeFixStores(*impl_->settings, *impl_->gateway);
     impl_->logFactory = std::make_unique<FixRotatingLogFactory>(*impl_->settings);
     if (tls.enabled())
     {
