@@ -136,7 +136,7 @@ Server options:
 | `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock |
 | `--lmdb-map-mb` | 256 | LMDB's starting map, in MiB. A write that finds the map full doubles it, and logs a warning |
 | `--max-connections` | <!-- DOC_CHECK:ws_max_connections -->256<!-- /DOC_CHECK --> | WebSocket clients connected at once. One more is closed as soon as it's accepted |
-| `--max-session-queue-mb` | <!-- DOC_CHECK:ws_max_session_queue_mb -->16<!-- /DOC_CHECK --> | What may wait to be sent to one client, in MiB. A client that doesn't read is dropped once more waits, and gets the current state again when it reconnects |
+| `--max-session-queue-mb` | <!-- DOC_CHECK:ws_max_session_queue_mb -->16<!-- /DOC_CHECK --> | What may wait to be sent to one client, in MiB, after the state it gets as it connects, which isn't counted: its order snapshot alone can be larger (#512). A client that doesn't read is dropped once more waits, and gets the current state again when it reconnects |
 
 Without `--ws-token-file` or `OMS_WS_TOKEN`, any client that reaches the server may connect, and the server warns once at startup (#146). A token has at least <!-- DOC_CHECK:ws_min_token_length -->16<!-- /DOC_CHECK --> letters, digits, `.`, `_` or `-` (`openssl rand -hex 32` makes one); see [Connecting](#connecting) for how a client offers it. A token file with nothing on its first line, or `OMS_WS_TOKEN` set but empty, is refused rather than taken as no token.
 
@@ -488,7 +488,7 @@ A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through
 | `subscribe_book` | `{symbol}` | Subscribe to order book updates for a symbol the server trades. Another symbol gets an `error` |
 | `unsubscribe_book` | `{symbol}` | Unsubscribe from order book updates |
 
-A client's message may be at most <!-- DOC_CHECK:ws_max_client_message_kib -->64<!-- /DOC_CHECK --> KiB; a larger one ends its session. What the server holds for clients is bounded too: `--max-connections` clients, and up to `--max-session-queue-mb` waiting for each.
+A client's message may be at most <!-- DOC_CHECK:ws_max_client_message_kib -->64<!-- /DOC_CHECK --> KiB; a larger one ends its session. What the server holds for clients is bounded too: `--max-connections` clients, and up to `--max-session-queue-mb` waiting for each after the state it got as it connected, which it holds until it has read it (#512).
 
 A `STOP` or `STOPLIMIT` order is held until a trade in its instrument reaches its `stopPx`: a trade at or above it for a buy, at or below it for a sell (#223).
 - **While held,** the order is `NEW`, and it is in neither side of the book, so `book_update` doesn't show it. A cancel, replace or suspend works on it as on any order.

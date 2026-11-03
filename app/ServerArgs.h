@@ -73,7 +73,8 @@ inline std::string serverUsage()
            "  --max-connections N       WebSocket clients at once (default " +
            std::to_string(DEFAULT_MAX_CONNECTIONS) +
            ")\n"
-           "  --max-session-queue-mb N  MiB of messages that may wait for one client (default " +
+           "  --max-session-queue-mb N  MiB that may wait for one client after the state it gets as it\n"
+           "                            connects (default " +
            std::to_string(DEFAULT_MAX_SESSION_QUEUE_MB) +
            ")\n"
            "  --ws-token-file FILE      the access token every WebSocket client must offer, from FILE; or set\n"

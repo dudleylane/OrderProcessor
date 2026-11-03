@@ -90,10 +90,19 @@ private:
     std::string source() const;
     /// Whether the session may see an order of the account: always, without an identity (#225)
     bool maySee(const SourceIdT &account) const;
+    /// Queues part of the state a client gets as it connects, which the limit on what waits for it doesn't count: the
+    /// state is an answer, not a backlog, and its order snapshot alone can be larger than the limit (#512). Only
+    /// onAccept() calls it, before anything else is queued: the session's own handlers start after it, and every other
+    /// sender posts to the session's strand, which runs nothing else until onAccept() returns. So the initial state is
+    /// the queue's first messages, which onWrite() and drop() rely on.
+    void sendInitial(const std::string &msg);
+    /// Queues a message, and starts writing when it is the only one
+    void enqueue(std::shared_ptr<const std::string> msg);
     void doWrite();
     void onWrite(boost::beast::error_code ec, std::size_t bytesTransferred);
-    /// Ends the session of a client that doesn't read, once what waits for it passes the limit (#159)
-    void drop();
+    /// Ends the session of a client that doesn't read, once what waits for it after its initial state would pass the
+    /// limit with the refused message's bytes (#159)
+    void drop(std::size_t refused);
 
     boost::beast::websocket::stream<boost::beast::tcp_stream> ws_;
     boost::beast::flat_buffer buffer_;
@@ -114,7 +123,10 @@ private:
     std::shared_ptr<std::atomic<std::size_t>> connections_;
 
     std::deque<std::shared_ptr<const std::string>> writeQueue_;
-    std::size_t queuedBytes_ = 0; // what writeQueue_ holds, against limits_.maxQueuedBytes (#159)
+    /// What writeQueue_ holds after the initial state, against limits_.maxQueuedBytes (#159, #512)
+    std::size_t queuedBytes_ = 0;
+    /// How many of writeQueue_'s first messages are the initial state, which queuedBytes_ doesn't count (#512)
+    std::size_t initialMessages_ = 0;
     bool dropped_ = false;
 };
 
