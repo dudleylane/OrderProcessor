@@ -26,7 +26,7 @@ ParsedClientMessage parse(const std::string &json)
 TEST(ClientMessageParserTest, NewOrderParsesFields)
 {
     auto msg = parse(R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
-                     R"("price":150.25,"stopPx":0,"orderQty":100,"minQty":5,"account":"ACC1"}})");
+                     R"("price":150.25,"stopPx":0,"orderQty":100,"minQty":0,"account":"ACC1"}})");
 
     EXPECT_EQ("new_order", msg.type);
     EXPECT_TRUE(msg.error.empty());
@@ -35,7 +35,7 @@ TEST(ClientMessageParserTest, NewOrderParsesFields)
     EXPECT_EQ(LIMIT_ORDERTYPE, msg.newOrder.ordType);
     EXPECT_DOUBLE_EQ(150.25, msg.newOrder.price);
     EXPECT_EQ(100u, msg.newOrder.orderQty);
-    EXPECT_EQ(5u, msg.newOrder.minQty);
+    EXPECT_EQ(0u, msg.newOrder.minQty);
     EXPECT_EQ("ACC1", msg.newOrder.account);
 }
 
@@ -176,6 +176,24 @@ TEST(ClientMessageParserTest, QuantityAboveUnsignedRangeIsRejected)
 
     EXPECT_EQ("error", msg.type);
     EXPECT_NE(std::string::npos, msg.error.find("minQty"));
+}
+
+// --- A minimum quantity (issue #516: nothing enforces one, so the matcher filled below it) ---
+
+TEST(ClientMessageParserTest, AMinQtyOtherThanZeroIsRefused)
+{
+    // From 1 up to the largest quantity, the order's own included: each is in range, and each is refused for itself
+    for (const char *minQty : { "1", "5", "100", "4294967295" })
+    {
+        auto msg = parse(R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","price":10,)"
+                         R"("orderQty":100,"minQty":)" +
+                         std::string(minQty) + "}}");
+
+        EXPECT_EQ("error", msg.type) << minQty;
+        EXPECT_EQ("invalid minQty: the server doesn't enforce a minimum quantity, so it must be 0 or left out",
+                  msg.error)
+            << minQty;
+    }
 }
 
 // --- A limit order's price (issue #188: an absent one was 0, and a limit sell at 0 sold at any bid) ---

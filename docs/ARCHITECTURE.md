@@ -439,6 +439,8 @@ COP (Concurrent Order Processor)
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+The matcher has no minimum quantity. An order's `minQty_` is stored, persisted and reported, but nothing reads it, so the WebSocket parser refuses a `minQty` other than 0 rather than ignore it (#516; on the FX branch the FIX gateway refuses MinQty (110) too). An order stored before #516 keeps its own, still unenforced. Making it a matching rule is #666.
+
 **Associated Test Cases:**
 
 | Test File | Test Case | Description |
@@ -447,6 +449,7 @@ COP (Concurrent Order Processor)
 | `OrderMatcherTest.cpp` | `OnlyAWorkingOrderIsTradedWith`, `AnOrderThatIsntWorkingDoesntEndTheSearch` | `findContra()` and `canFillAtOnce()` pass by every status but NEW and PARTFILL, whatever the order has left, and go on to the next order (#432) |
 | `ProcessorTest.cpp` | `ASweepEndsAtAFillThatDoesntApply`, `AnIocOrderWhoseFillDoesntApplyIsCanceled` | A sweep goes on only if its fill applied: one that didn't ends it, a limit order resting with what it has left and an IOC canceled with it (#477) |
 | `ProcessorTest.cpp` | `ATradeItsAggressorHasTooLittleLeftForFillsNeitherSide`, `ATradeWhoseAggressorIsSuspendedFillsNeitherSide`, `ATradeWhoseAggressorIsClosedFillsNeitherSideAndCancelsNothing` | A trade fills both sides or neither: one its aggressor can't take whole, with too little left or not working, fills no contra, and an aggressor that isn't working isn't canceled (#483) |
+| `ClientMessageParserTest.cpp` | `AMinQtyOtherThanZeroIsRefused` | A `new_order`'s `minQty` other than 0 is refused, since nothing enforces it (#516) |
 | `IntegrationTest.cpp` | `IntegrationTest.*` | Order matching in full flow |
 | `ProcessorBench.cpp` | `BM_ProcessNewOrderWithMatch`, `BM_ProcessSweep`, `BM_TaskManagerTrades` | Matching through a `Processor`, a sweep that takes four resting orders, each of its next matches finding the next (#477), and through the worker pool |
 | `OrderMatchingBench.cpp` | `BM_OrderBook*` | The book the matcher searches: add, remove, find, top of book |
