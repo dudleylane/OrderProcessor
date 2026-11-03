@@ -76,6 +76,7 @@ void MetricsPublisher::collectAndBroadcast()
     // Pool stats
     m.poolSize = scopePool_->poolSize();
     m.poolCacheMisses = scopePool_->cacheMisses();
+    m.poolAllocations = scopePool_->allocations(); // one per transaction (#515)
     m.poolArenaSize = ACID::TransactionScope::ARENA_SIZE;
 
     // Sessions

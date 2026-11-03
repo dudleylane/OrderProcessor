@@ -56,7 +56,8 @@ struct SystemMetrics
     int32_t totalTransactProcessors;
     u32 queueDepth;
     size_t poolSize;
-    size_t poolCacheMisses;
+    size_t poolCacheMisses; ///< acquires that found every slot in use
+    size_t poolAllocations; ///< scopes the pool allocated: one per transaction, and one per miss (#515)
     size_t poolArenaSize;
     size_t activeSessions;
     size_t activeOrders;

@@ -70,7 +70,7 @@ export function MemoryAdminTab({ metricsHistory }: Props) {
       </div>
 
       {/* Pool overview */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
           <div className="text-xs text-gray-500 mb-1">Pool Size</div>
           <div className="text-xl font-semibold text-gray-100 font-mono">{latest.poolSize}</div>
@@ -86,7 +86,12 @@ export function MemoryAdminTab({ metricsHistory }: Props) {
           <div className={`text-xl font-semibold font-mono ${latest.poolCacheMisses > 0 ? 'text-red-400' : 'text-gray-100'}`}>
             {latest.poolCacheMisses}
           </div>
-          <div className="text-xs text-gray-500 mt-1">cumulative heap fallbacks</div>
+          <div className="text-xs text-gray-500 mt-1">acquires that found every slot in use</div>
+        </div>
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+          <div className="text-xs text-gray-500 mb-1">Scope Allocations</div>
+          <div className="text-xl font-semibold text-gray-100 font-mono">{latest.poolAllocations}</div>
+          <div className="text-xs text-gray-500 mt-1">one per transaction, and one per miss</div>
         </div>
         <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
           <div className="text-xs text-gray-500 mb-1">Allocation Mode</div>

@@ -256,7 +256,10 @@ export interface SystemMetrics {
   totalTransactProcessors: number;
   queueDepth: number;
   poolSize: number;
+  /** acquires that found every slot in use */
   poolCacheMisses: number;
+  /** scopes the pool allocated: one per transaction, and one per miss (#515) */
+  poolAllocations: number;
   poolArenaSize: number;
   activeSessions: number;
   activeOrders: number;
