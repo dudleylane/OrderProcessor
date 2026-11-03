@@ -313,7 +313,8 @@ public:
     static std::string toLocalMktDate(DateTimeT date);
     /// Why an order of tif is refused for its ExpireTime (126), or nothing, with *expireTime set to it for a GTD order
     /// (#240): the engine expires a GTD order then, in milliseconds since the epoch, and refuses one without it. A GTD
-    /// order needs one ahead of now, which no other order may have, as on WebSocket. ExpireDate (432) isn't read.
+    /// order needs one ahead of now, and no later than ExpiryScheduler::LATEST_TIME (#511), which no other order may
+    /// have, as on WebSocket. ExpireDate (432) isn't read.
     static std::optional<std::string> expiryRefusal(const FIX::FieldMap &msg, TimeInForce tif, DateTimeT now,
                                                     DateTimeT *expireTime);
     /// An expiry the engine keeps as an ExpireTime (126) carries it, to the millisecond (#240)

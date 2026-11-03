@@ -11,7 +11,12 @@
 
 #include <gtest/gtest.h>
 #include <chrono>
+#include <functional>
+#include <future>
+#include <limits>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -52,6 +57,22 @@ private:
     mutable std::mutex lock_;
     std::vector<std::pair<IdT, TimerEvent::TimerType>> fired_;
 };
+
+/// Runs the call on a thread of its own, and says whether it returned within five seconds. One that didn't is left
+/// running, detached, so a test that finds a call hung fails instead of hanging: it must leave what the call uses alive.
+bool returnsWithinFiveSeconds(std::function<void()> call)
+{
+    auto returned = std::make_shared<std::promise<void>>();
+    std::future<void> done = returned->get_future();
+    std::thread(
+        [call = std::move(call), returned]
+        {
+            call();
+            returned->set_value();
+        })
+        .detach();
+    return std::future_status::ready == done.wait_for(std::chrono::seconds(5));
+}
 } // namespace
 
 TEST(ExpirySchedulerTest, ADayEndsAt1700NewYork)
@@ -311,4 +332,82 @@ TEST(ExpirySchedulerTest, TheThreadFiresAPastTimerAtOnceAndASoonerOneBeforeALate
     EXPECT_EQ(IdT(7, 1792022400), fired[0].first);
     EXPECT_EQ(IdT(8, 1792022400), fired[1].first);
     EXPECT_EQ(1u, expiry.pending());
+}
+
+TEST(ExpirySchedulerTest, ATimePastWhatTheSystemClockCanHoldHasNoDeadline)
+{
+    // The thread waits on the system clock, nanoseconds in an int64. Past its last whole millisecond a timer's time
+    // overflowed as it was converted, and the wait returned at once without letting go of the lock (#511)
+    using namespace std::chrono;
+    EXPECT_EQ(sys_days{ year(2262) / April / 11 } + hours(23) + minutes(47) + seconds(16) + milliseconds(854),
+              sys_time<milliseconds>(milliseconds(ExpiryScheduler::LATEST_TIME)));
+
+    for (const DateTimeT when : { DateTimeT(1792022400000ULL), ExpiryScheduler::LATEST_TIME })
+    {
+        const std::optional<system_clock::time_point> deadline = ExpiryScheduler::deadlineOf(when);
+        ASSERT_TRUE(deadline.has_value()) << when;
+        EXPECT_EQ(milliseconds(when), deadline->time_since_epoch()) << when;
+    }
+    const DateTimeT lastSecondOf9999 = 253402300799000ULL; // 9999-12-31T23:59:59Z, which a datetime-local input allows
+    for (const DateTimeT when :
+         { ExpiryScheduler::LATEST_TIME + 1, lastSecondOf9999, std::numeric_limits<DateTimeT>::max() })
+    {
+        EXPECT_FALSE(ExpiryScheduler::deadlineOf(when).has_value()) << when;
+    }
+}
+
+TEST(ExpirySchedulerTest, ATimerPastWhatTheSystemClockCanHoldLetsTheThreadFireTheOthersAndStop)
+{
+    // A GTD order's expireTime past what the system clock can hold, at the timers' top, made the thread spin holding its
+    // lock (#511): every schedule() after it, an event worker's for each new order among them, and stop() waited for
+    // good. The thread now waits for it with no deadline: a timer scheduled meanwhile fires, and the thread stops. At the
+    // bound itself it waits until that deadline, the latest the clock holds, and the same holds.
+    const DateTimeT lastSecondOf9999 = 253402300799000ULL; // 9999-12-31T23:59:59Z
+    for (const DateTimeT far : { ExpiryScheduler::LATEST_TIME, ExpiryScheduler::LATEST_TIME + 1, lastSecondOf9999,
+                                 std::numeric_limits<DateTimeT>::max() })
+    {
+        auto queues = std::make_unique<TimerRecorder>();
+        auto expiry = std::make_unique<ExpiryScheduler>(queues.get(),
+                                                        []
+                                                        {
+                                                            return aux::currentDateTime();
+                                                        });
+        ExpiryScheduler *const scheduler = expiry.get();
+        scheduler->schedule(IdT(1, 1792022400), far, TimerEvent::EXPIRATION);
+        scheduler->start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // the thread waits, the far timer at the top
+
+        const DateTimeT passed = aux::currentDateTime() - 1000;
+        if (!returnsWithinFiveSeconds(
+                [scheduler, passed]
+                {
+                    scheduler->schedule(IdT(2, 1792022400), passed, TimerEvent::EXPIRATION);
+                }))
+        {
+            // Left to the threads that use them: the one that hung, and the scheduler's own
+            (void)queues.release();
+            (void)expiry.release();
+            FAIL() << "schedule() didn't return, with a timer at " << far << " waiting";
+        }
+        for (int i = 0; (i < 500) && queues->fired().empty(); ++i)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (!returnsWithinFiveSeconds(
+                [scheduler]
+                {
+                    scheduler->stop();
+                }))
+        {
+            (void)queues.release();
+            (void)expiry.release();
+            FAIL() << "stop() didn't return, with a timer at " << far << " waiting";
+        }
+
+        EXPECT_EQ(
+            (std::vector<std::pair<IdT, TimerEvent::TimerType>>{ { IdT(2, 1792022400), TimerEvent::EXPIRATION } }),
+            queues->fired())
+            << "the timer scheduled after one at " << far;
+        EXPECT_EQ(1u, scheduler->pending()) << "the one at " << far << " waits on";
+    }
 }

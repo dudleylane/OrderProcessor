@@ -159,6 +159,21 @@ bool ExpiryScheduler::restatementOf(const OrderEntry &order, DateTimeT *when)
     return true;
 }
 
+static_assert(
+    ExpiryScheduler::LATEST_TIME ==
+        static_cast<DateTimeT>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::duration::max()).count()),
+    "LATEST_TIME is the system clock's last whole millisecond");
+
+std::optional<std::chrono::system_clock::time_point> ExpiryScheduler::deadlineOf(DateTimeT when)
+{
+    if (LATEST_TIME < when)
+    {
+        return std::nullopt;
+    }
+    return std::chrono::system_clock::time_point(std::chrono::milliseconds(when));
+}
+
 void ExpiryScheduler::schedule(const IdT &orderId, DateTimeT when, TimerEvent::TimerType type)
 {
     {
@@ -243,11 +258,16 @@ void ExpiryScheduler::run()
         {
             wake_.wait(lock);
         }
-        else
+        else if (const auto next = deadlineOf(timers_.top().when_))
         {
             // The clock is the system's in the server: wait until the next timer's time, or a sooner one's schedule()
-            const auto next = std::chrono::system_clock::time_point(std::chrono::milliseconds(timers_.top().when_));
-            wake_.wait_until(lock, next);
+            wake_.wait_until(lock, *next);
+        }
+        else
+        {
+            // Past what the system clock can hold, the next timer's time has no deadline: only a sooner one's
+            // schedule() or stop() wakes the thread (#511)
+            wake_.wait(lock);
         }
     }
 }
