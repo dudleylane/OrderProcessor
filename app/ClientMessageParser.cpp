@@ -60,6 +60,22 @@ bool readQuantity(const json &data, const char *key, u64 max, u64 *out, ParsedCl
     return true;
 }
 
+// A minimum quantity: only 0, or none, since nothing enforces one (#516). The matcher filled below it, so a client that
+// asked for one got fills it had excluded; it is refused rather than ignored, until a matching rule enforces it (#666).
+bool readMinQty(const json &data, u64 max, u64 *out, ParsedClientMessage *msg)
+{
+    if (!readUnsigned(data, "minQty", max, out, msg))
+    {
+        return false;
+    }
+    if (0 != *out)
+    {
+        markInvalid(msg, "invalid minQty: the server doesn't enforce a minimum quantity, so it must be 0 or left out");
+        return false;
+    }
+    return true;
+}
+
 bool readPrice(const json &data, const char *key, double *out, ParsedClientMessage *msg)
 {
     json::const_iterator it = data.find(key);
@@ -109,8 +125,7 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
             u64 minQty = 0;
             if (requireObject(d, &msg) && readPrice(d, "price", &msg.newOrder.price, &msg) &&
                 readPrice(d, "stopPx", &msg.newOrder.stopPx, &msg) &&
-                readQuantity(d, "orderQty", maxQty, &orderQty, &msg) &&
-                readUnsigned(d, "minQty", maxQty, &minQty, &msg) &&
+                readQuantity(d, "orderQty", maxQty, &orderQty, &msg) && readMinQty(d, maxQty, &minQty, &msg) &&
                 readUnsigned(d, "expireTime", maxId, &msg.newOrder.expireTime, &msg))
             {
                 msg.newOrder.symbol = d.value("symbol", "");

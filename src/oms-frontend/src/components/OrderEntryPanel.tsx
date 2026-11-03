@@ -25,7 +25,6 @@ export function OrderEntryPanel({
   const [price, setPrice] = useState('');
   const [stopPx, setStopPx] = useState('');
   const [orderQty, setOrderQty] = useState('');
-  const [minQty, setMinQty] = useState('');
   const [tif, setTif] = useState<TimeInForce>(TimeInForce.DAY);
   // A GTD order expires at this local date and time (#240)
   const [expireAt, setExpireAt] = useState('');
@@ -78,7 +77,6 @@ export function OrderEntryPanel({
     if (needsPrice) req.price = parseFloat(price);
     if (needsStopPx) req.stopPx = parseFloat(stopPx);
     if (tif === TimeInForce.GTD) req.expireTime = Date.parse(expireAt);
-    if (minQty) req.minQty = parseInt(minQty);
     if (account) req.account = account;
 
     sendOrder(req);
@@ -173,7 +171,7 @@ export function OrderEntryPanel({
           )}
         </div>
 
-        {/* Qty + Min Qty */}
+        {/* Qty. No Min Qty: the server refuses a minimum it doesn't enforce (#516), until it does (#666) */}
         <div className="flex gap-2">
           <div className="flex-1">
             <label className="block text-xs text-gray-500 mb-1">Quantity</label>
@@ -193,16 +191,6 @@ export function OrderEntryPanel({
                     : ''}
               </div>
             )}
-          </div>
-          <div className="flex-1">
-            <label className="block text-xs text-gray-500 mb-1">Min Qty</label>
-            <input
-              type="text"
-              value={minQty}
-              onChange={e => setMinQty(e.target.value.replace(/[^0-9]/g, ''))}
-              className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm font-mono"
-              placeholder="Optional"
-            />
           </div>
         </div>
 
