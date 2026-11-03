@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { OrderType, Side, TimeInForce, Currency, Capacity } from '../types/enums';
 import type { Instrument, Account, NewOrderRequest } from '../types';
+import { LATEST_EXPIRE_INPUT, LATEST_EXPIRE_TIME } from '../utils/constants';
 
 interface OrderEntryPanelProps {
   instruments: Instrument[];
@@ -52,6 +53,7 @@ export function OrderEntryPanel({
       const at = Date.parse(expireAt);
       if (Number.isNaN(at)) return 'A GTD order needs an expiry';
       if (at <= Date.now()) return 'The expiry has passed';
+      if (at > LATEST_EXPIRE_TIME) return 'The expiry is past the latest the server takes, 2262-04-11';
     }
     return null;
   };
@@ -221,6 +223,7 @@ export function OrderEntryPanel({
               <input
                 type="datetime-local"
                 aria-label="Expires at"
+                max={LATEST_EXPIRE_INPUT}
                 value={expireAt}
                 onChange={e => setExpireAt(e.target.value)}
                 className="w-full mt-1 bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm"

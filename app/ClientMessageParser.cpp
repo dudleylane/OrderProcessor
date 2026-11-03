@@ -1,5 +1,6 @@
 #include "ClientMessageParser.h"
 #include "EnumStrings.h"
+#include "ExpiryScheduler.h"
 #include <cmath>
 #include <limits>
 #include <nlohmann/json.hpp>
@@ -76,6 +77,15 @@ bool readPrice(const json &data, const char *key, double *out, ParsedClientMessa
     return true;
 }
 
+// Why an expireTime past the latest time the expiry thread can wait until is refused (#511): converted for the wait, it
+// overflowed the system clock, and the thread spun holding its lock, so every order after it, and the server's stop,
+// waited for good. A datetime-local input allows the year 9999.
+std::string pastLatestTime()
+{
+    return "invalid expireTime: expected milliseconds since the epoch, up to " +
+           std::to_string(Proc::ExpiryScheduler::LATEST_TIME) + " (2262-04-11T23:47:16.854Z)";
+}
+
 } // namespace
 
 ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
@@ -137,6 +147,10 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
                 {
                     markInvalid(&msg, "invalid expireTime: only a GTD order has one");
                 }
+                else if (Proc::ExpiryScheduler::LATEST_TIME < msg.newOrder.expireTime)
+                {
+                    markInvalid(&msg, pastLatestTime());
+                }
             }
         }
         else if (msg.type == "cancel_order")
@@ -177,6 +191,10 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
                 else if (msg.replaceOrder.hasExpireTime && (0 == msg.replaceOrder.expireTime))
                 {
                     markInvalid(&msg, "invalid expireTime: expected milliseconds since the epoch, above 0");
+                }
+                else if (Proc::ExpiryScheduler::LATEST_TIME < msg.replaceOrder.expireTime)
+                {
+                    markInvalid(&msg, pastLatestTime());
                 }
             }
         }

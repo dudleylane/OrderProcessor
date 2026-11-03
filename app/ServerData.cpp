@@ -107,6 +107,14 @@ size_t App::scheduleRestoredExpiries(const Store::OrderDataStorage &storage, Pro
                               (SUSPENDED_ORDSTATUS == order.status_);
             if (live && Proc::ExpiryScheduler::expiryOf(order, &when, &type))
             {
+                // Taken before #511 refused one: the timers wait for it with no deadline, so it never comes due
+                if (Proc::ExpiryScheduler::LATEST_TIME < when)
+                {
+                    aux::ExchLogger::instance()->warn(
+                        "Order " + std::to_string(order.orderId_.id_) + " expires at " + std::to_string(when) +
+                        " ms, past the latest time the server can wait until: it won't expire, and stays open until "
+                        "it is canceled (#511)");
+                }
                 expiry->schedule(order.orderId_, when, type);
                 ++timers;
             }

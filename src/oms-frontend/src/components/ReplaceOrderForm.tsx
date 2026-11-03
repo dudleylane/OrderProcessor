@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { OrderType, TimeInForce } from '../types/enums';
 import type { Order, ReplaceOrderRequest } from '../types';
+import { LATEST_EXPIRE_INPUT, LATEST_EXPIRE_TIME } from '../utils/constants';
 
 interface ReplaceOrderFormProps {
   order: Order;
@@ -62,6 +63,8 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
     problem = 'A GTD order needs an expiry';
   } else if (expireTimeChanged && newExpireTime <= Date.now()) {
     problem = 'The expiry has passed';
+  } else if (expireTimeChanged && newExpireTime > LATEST_EXPIRE_TIME) {
+    problem = 'The expiry is past the latest the server takes, 2262-04-11';
   } else if (!priceChanged && !stopPxChanged && !qtyChanged && !tifChanged && !expireTimeChanged) {
     problem = isHeldStop
       ? 'Change the price, stop price, quantity or time in force'
@@ -146,6 +149,7 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
           <label className="block text-xs text-gray-500 mb-1">Expires</label>
           <input
             type="datetime-local"
+            max={LATEST_EXPIRE_INPUT}
             value={expireAt}
             onChange={e => setExpireAt(e.target.value)}
             className="bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm"
