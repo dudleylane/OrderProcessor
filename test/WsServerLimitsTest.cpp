@@ -218,6 +218,23 @@ protected:
         return sessionMgr_.sessionCount() == count;
     }
 
+    /// Stores orders numbered first to last, as restore does, each with a ClOrdID of its own, for a new client's order
+    /// snapshot (#512)
+    static void storeOrders(std::size_t first, std::size_t last)
+    {
+        const SourceIdT instrument = WideDataStorage::instance()->findInstrumentBySymbol("AAPL");
+        for (std::size_t i = first; i <= last; ++i)
+        {
+            const std::string clOrdId = "CL-" + std::to_string(i);
+            const SourceIdT clOrderId = WideDataStorage::instance()->add(
+                new RawDataEntry(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size())));
+            auto *order = new OrderEntry(SourceIdT(), SourceIdT(), clOrderId, SourceIdT(), instrument, SourceIdT(),
+                                         SourceIdT(), SourceIdT());
+            order->orderId_ = IdT(i, 1);
+            OrderStorage::instance()->restore(order);
+        }
+    }
+
     net::io_context ioc_{ 1 };
     std::thread serverThread_;
     std::shared_ptr<App::WsServer> server_;
@@ -266,6 +283,58 @@ TEST_F(WsServerLimitsTest, AClientThatDoesNotReadIsDroppedOnceItsQueueIsFull)
     EXPECT_TRUE(waitForSessions(1, 10s)) << "the client that doesn't read is still connected";
     readerThread.join();
     EXPECT_EQ(broadcasts, received.load()) << "the client that reads lost broadcasts";
+}
+
+TEST_F(WsServerLimitsTest, AnOrderSnapshotLargerThanTheLimitIsSentWhole)
+{
+    // The state a client gets as it connects was counted against the limit, and queued behind its first message, whose
+    // write can't complete while the rest is queued: so an order snapshot larger than the limit dropped every client as
+    // it connected, for good once the store had grown past it (#512). The limit counts what waits after that state now.
+    // Here it is 1 MiB. A client that reads connects to 5,000 orders, a snapshot of about 2.3 MB, and gets it whole. One
+    // that doesn't read connects to 10,000, about 4.6 MB, with a receive buffer of 4 KiB: the kernel then holds under
+    // 2 MB of it on loopback, so the rest still waits when the broadcasts come. Building a snapshot takes seconds under
+    // the sanitizers, on the server's one IO thread, so the waits for it are long.
+    App::WsLimits limits;
+    limits.maxQueuedBytes = 1 << 20;
+    storeOrders(1, 5000);
+    start(limits);
+
+    Client reader;
+    ASSERT_TRUE(connect(reader, 60s));
+    auto snapshot = readUntil(reader, "order_snapshot", 60s);
+    ASSERT_TRUE(snapshot.has_value()) << "the client was dropped as it connected";
+    EXPECT_EQ(5000u, (*snapshot)["data"].size());
+    ASSERT_LT(limits.maxQueuedBytes, snapshot->dump().size()) << "the snapshot isn't larger than the limit";
+    storeOrders(5001, 10000);
+    Client sleeper;
+    beast::get_lowest_layer(sleeper.ws).socket().open(tcp::v4());
+    beast::get_lowest_layer(sleeper.ws).socket().set_option(net::socket_base::receive_buffer_size(4096));
+    ASSERT_TRUE(connect(sleeper, 60s));
+    ASSERT_TRUE(waitForSessions(2));
+    // Answered once the IO thread has built and queued the sleeper's initial state
+    send(reader, R"({"type":"no_such_type"})");
+    ASSERT_TRUE(readUntil(reader, "error", 60s).has_value()) << "the client that reads isn't answered";
+
+    // 8 MiB of broadcasts in bursts of eight messages of 64 KiB, each burst read before the next. The client that reads
+    // gets eight times the limit, but never has more than 512 KiB waiting, though a burst queues eight messages; the one
+    // that doesn't is dropped once 1 MiB waits behind its snapshot.
+    const std::string payload = R"({"type":"test","pad":")" + std::string(64 * 1024, 'x') + R"("})";
+    const int bursts = 16;
+    const int burst = 8;
+    int received = 0;
+    for (int b = 0; (b < bursts) && (received == b * burst); ++b)
+    {
+        for (int i = 0; i < burst; ++i)
+        {
+            sessionMgr_.broadcast(payload);
+        }
+        for (int i = 0; (i < burst) && readUntil(reader, "test"); ++i)
+        {
+            ++received;
+        }
+    }
+    EXPECT_EQ(bursts * burst, received) << "the client that reads lost broadcasts";
+    EXPECT_TRUE(waitForSessions(1, 10s)) << "the client that doesn't read is still connected";
 }
 
 TEST_F(WsServerLimitsTest, AMessageLargerThanTheLimitEndsItsSession)
