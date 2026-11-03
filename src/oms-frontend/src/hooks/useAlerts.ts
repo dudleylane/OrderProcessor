@@ -8,6 +8,17 @@ const COOLDOWN_MS = 30_000; // 30 seconds between repeated alerts per rule
 
 const DEFAULT_RULES: AlertRule[] = [
   {
+    // A failed transaction leaves the engine's memory and its storage disagreeing (#514, #659)
+    id: 'default-transaction-failed',
+    name: 'Transaction Failed',
+    metric: 'transactionsFailed',
+    operator: '>',
+    threshold: 0,
+    severity: 'CRITICAL',
+    enabled: true,
+    useDelta: true,
+  },
+  {
     id: 'default-cache-miss',
     name: 'Pool Cache Misses',
     metric: 'poolCacheMisses',

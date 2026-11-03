@@ -13,12 +13,14 @@
  */
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <memory>
 #include <vector>
 #include <stdexcept>
 
 #include "TransactionScope.h"
 #include "TransactionDef.h"
+#include "TestAux.h"
 
 using namespace COP;
 using namespace COP::ACID;
@@ -333,10 +335,10 @@ TEST_F(TransactionScopeTest, RollbackNotCalled_ForUnexecutedOperations)
     EXPECT_EQ(1, rollbackOrder_[0]);
 }
 
-TEST_F(TransactionScopeTest, RollbackStops_WhenRollbackThrows)
+TEST_F(TransactionScopeTest, RollbackGoesOn_WhenARollbackThrows)
 {
-    // Documents current behavior: rollback stops on first exception
-    // This is a design trade-off; some systems continue rollback on exception
+    // Each rollback runs on its own: one that throws is logged, and those before it still run (#514). The first that
+    // threw used to end the rollback, leaving op1 done.
     TransactionScope scope;
 
     // Op1: normal, Op2: throws during rollback, Op3: normal, Op4: fails during execute
@@ -363,11 +365,108 @@ TEST_F(TransactionScopeTest, RollbackStops_WhenRollbackThrows)
 
     EXPECT_FALSE(result);
 
-    // Rollback order is: 4, 3, 2 (throws), stops
-    // Op1's rollback is NOT called because op2's rollback throws first
-    EXPECT_FALSE(op1Ptr->wasRolledBack());
-    // Op3's rollback IS called (before op2)
+    // Rollback order is: 4, 3, 2 (throws), 1
+    EXPECT_EQ((std::vector<int>{ 4, 3, 2, 1 }), rollbackOrder_);
+    EXPECT_TRUE(op1Ptr->wasRolledBack());
     EXPECT_TRUE(op3Ptr->wasRolledBack());
+}
+
+TEST_F(TransactionScopeTest, AFailedTransactionIsCountedOnce)
+{
+    // metrics_update carries the count, and each failure is logged at error level too (#514): until then nothing said
+    // that a transaction had failed. One whose rollback throws as well is still one failure.
+    const uint64_t failed = TransactionScope::failedCount();
+    {
+        TransactionScope scope;
+        std::unique_ptr<Operation> op1(new FailingRollbackOperation(1, &rollbackOrder_));
+        std::unique_ptr<Operation> op2(new FailingOperation(2, &rollbackOrder_));
+        scope.addOperation(op1);
+        scope.addOperation(op2);
+        EXPECT_FALSE(scope.executeTransaction(createContext()));
+    }
+    EXPECT_EQ(failed + 1, TransactionScope::failedCount());
+
+    TransactionScope empty;
+    EXPECT_TRUE(empty.executeTransaction(createContext()));
+    TransactionScope fine;
+    std::unique_ptr<Operation> op(new TrackingOperation(3, &execOrder_, &rollbackOrder_));
+    fine.addOperation(op);
+    EXPECT_TRUE(fine.executeTransaction(createContext()));
+    EXPECT_EQ(failed + 1, TransactionScope::failedCount()) << "a transaction that didn't fail was counted";
+}
+
+TEST_F(TransactionScopeTest, AFailedTransactionIsLoggedNamingTheOperationThatThrew)
+{
+    // Its line names the operation that threw, and each rollback that threw has a line too (#514); a transaction that
+    // didn't fail logs nothing
+    test::CapturedLog log;
+    TransactionScope scope;
+    scope.setTransactionId(TransactionId(77, 20261103));
+    std::unique_ptr<Operation> op1(new TrackingOperation(1, &execOrder_, &rollbackOrder_));
+    std::unique_ptr<Operation> op2(new FailingRollbackOperation(2, &rollbackOrder_));
+    std::unique_ptr<Operation> op3(new FailingOperation(3, &rollbackOrder_));
+    scope.addOperation(op1);
+    scope.addOperation(op2);
+    scope.addOperation(op3);
+    EXPECT_FALSE(scope.executeTransaction(createContext()));
+    TransactionScope fine;
+    fine.setTransactionId(TransactionId(78, 20261103));
+    std::unique_ptr<Operation> op4(new TrackingOperation(4, &execOrder_, &rollbackOrder_));
+    fine.addOperation(op4);
+    EXPECT_TRUE(fine.executeTransaction(createContext()));
+
+    const std::vector<std::string> lines = log.lines();
+    const auto logged = [&lines](const std::string &text)
+    {
+        return std::count_if(lines.begin(), lines.end(),
+                             [&text](const std::string &line)
+                             {
+                                 return std::string::npos != line.find(text);
+                             });
+    };
+    EXPECT_EQ(1, logged("Transaction 77 failed in its operation 3 of 3, MATCH_ORDER_TROPERATION for 3: Intentional "
+                        "failure for testing. Its operations are rolled back"));
+    EXPECT_EQ(1, logged("Transaction 77 couldn't roll back its operation 2 of 3, MATCH_ORDER_TROPERATION for 2: "
+                        "Rollback failure for testing"));
+    EXPECT_EQ(2, logged("Transaction 77"));
+    EXPECT_EQ(0, logged("Transaction 78"));
+}
+
+namespace
+{
+/// An operation of any type, which does nothing
+class NamedOperation final : public Operation
+{
+public:
+    NamedOperation(OperationType type, const IdT &id) : Operation(type, id) {}
+    void execute(const Context &) override {}
+    void rollback(const Context &) override {}
+};
+} // namespace
+
+TEST_F(TransactionScopeTest, AFailureNamesItsTransactionTheOperationThatThrewAndWhy)
+{
+    // The error line a failed transaction is logged with (#514)
+    const TransactionId id(42, 20261103);
+    const TrackingOperation match(1001, nullptr, nullptr);
+    EXPECT_EQ("Transaction 42 failed in its operation 3 of 5, MATCH_ORDER_TROPERATION for 1001: the book threw. Its "
+              "operations are rolled back; what it decided stays in memory (#659)",
+              TransactionScope::describeFailure(id, &match, 2, 5, "the book threw"));
+    // Processor's match of a restored order runs a transaction with no id
+    EXPECT_EQ("A transaction without an id failed in its operation 1 of 1, MATCH_ORDER_TROPERATION for 1001: why. Its "
+              "operations are rolled back; what it decided stays in memory (#659)",
+              TransactionScope::describeFailure(TransactionId(), &match, 0, 1, "why"));
+    // A trade's persists are written as one commit (#163), which is what threw
+    EXPECT_EQ("Transaction 42 failed as its 3 persists were written together (#163): mdb_txn_commit: No space left on "
+              "device. Its operations are rolled back; what it decided stays in memory (#659)",
+              TransactionScope::describeFailure(id, nullptr, 3, 7, "mdb_txn_commit: No space left on device"));
+    const NamedOperation persist(PERSIST_ORDER_TROPERATION, IdT(7, 20261103));
+    EXPECT_EQ(
+        "Transaction 42 failed in its operation 1 of 2, PERSIST_ORDER_TROPERATION for 7: full. Its operations are "
+        "rolled back; what it decided stays in memory (#659)",
+        TransactionScope::describeFailure(id, &persist, 0, 2, "full"));
+    EXPECT_EQ("Transaction 42 couldn't roll back its operation 2 of 5, MATCH_ORDER_TROPERATION for 1001: gone",
+              TransactionScope::describeFailedRollback(id, match, 1, 5, "gone"));
 }
 
 // =============================================================================
