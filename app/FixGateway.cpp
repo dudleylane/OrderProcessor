@@ -1,6 +1,7 @@
 #ifdef BUILD_FIX
 
 #include "FixGateway.h"
+#include "FixStores.h"
 #include "ExchUtils.h"
 #include "WideDataStorage.h"
 #include "OrderStorage.h"
@@ -591,6 +592,12 @@ void FixGateway::onCreate(const FIX::SessionID &sid)
     aux::ExchLogger::instance()->note("FIX session created: " + sid.toString());
     // Known from now on, logged on or not (#160). The map used to hold a session only while it was logged on, so a report
     // for its order was dropped while the client was away, and a ResendRequest couldn't get it back.
+    if (FixCarryingStoreFactory *stores = stores_.load())
+    {
+        // QuickFIX has made the session's store already, and registers the session before it calls this. The store asks
+        // the session whether its client is logged on as each message is stored (#513).
+        stores->attach(sid, FIX::Session::lookupSession(sid));
+    }
     std::string source = makeSourceString(sid);
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, true);
     sessionMap_[source] = sid;
@@ -611,6 +618,11 @@ void FixGateway::onLogout(const FIX::SessionID &sid)
     std::string source = makeSourceString(sid);
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, true);
     loggedOn_.erase(source); // the session stays known: QuickFIX keeps what it is sent for the client's return (#160)
+}
+
+void FixGateway::setStores(FixCarryingStoreFactory *stores)
+{
+    stores_.store(stores);
 }
 
 void FixGateway::setCredentials(const FixCredentials *credentials)

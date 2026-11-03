@@ -425,7 +425,7 @@ The checks the gateway makes on a quantity, a price and an ExpireTime before the
 **File:** `test/FixGatewayTest.cpp`
 **Requires:** `BUILD_FIX=ON`
 
-The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's messages to a real QuickFIX session that `config/fix.cfg` makes, as the acceptor makes one, with the gateway as its application, and reads what the session sends as a counterparty does: parsed with the session's dictionaries, this tree's `config/spec`, and validated as QuickFIX validates by default. "Taken" means such a counterparty accepts every message sent. Each test loads FIX 5.0 SP2's dictionary, most of a second.
+The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's messages to a real QuickFIX session that `config/fix.cfg` makes, as the acceptor makes one, with the gateway as its application, and reads what the session sends as a counterparty does: parsed with the session's dictionaries, this tree's `config/spec`, and validated as QuickFIX validates by default. "Taken" means such a counterparty accepts every message sent. Each test loads FIX 5.0 SP2's dictionary, most of a second. The session's store is the server's, `FixCarryingStore` (#513), over memory.
 
 | Test | Description |
 |------|-------------|
@@ -472,6 +472,7 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `ARefusalForAClOrdIdInUseIsNotRemembered` | A replacement refused for a ClOrdID in use (102=6), by the engine, or by the gateway while the new order with that ClOrdID was on its way and was then refused: a replace or cancel naming the ClOrdID is answered as unknown (102=1) and never pushed (#398) |
 | `ARefusedReplacementsClOrdIdNamesWhatItWasLastSentFor` | A refused replacement's ClOrdID sent again for a new order that is refused, by the gateway or by the engine, names no order: a replace or cancel naming it is answered as unknown (102=1); sent again for another replace that is refused, it names that replace's order (#398) |
 | `AHeldStopSaysItIsNotWorkingUntilItsRelease` | A held stop's acknowledgement, a status answer for it and the refusal of a new order that repeats its ClOrdID say WorkingIndicator (636) N; its release and a status answer after it, Y; a limit order's acknowledgement and status, Y, and a status answer once it has traded, none; a validating counterparty takes each (EP284's E.1.f, #387) |
+| `TheGatewayHandsEachStoreItsSession` | The gateway hands the server's store its session as QuickFIX makes it (`onCreate()`): a report sent while CLIENT_A is logged on isn't marked unsent, and the first one stored after its connection goes is (#513) |
 
 ---
 
@@ -485,6 +486,27 @@ Runs `BM_FixSendExecutionReport` once, in a scratch directory, for each of five 
 - naming a copy of `config/`, it reads the copy, and runs;
 - naming a directory without `fix.cfg`, it stops with an error that names the file it tried;
 - naming a directory with `fix.cfg` but no `spec/`, it stops with an error that names the dictionary it tried, so the dictionaries come from the same directory as the settings.
+
+---
+
+## 22. FixStoresTest and FixCarryingStoreTest — Reports Across the Session Day's End
+
+**File:** `test/FixStoresTest.cpp`
+**Requires:** `BUILD_FIX=ON`
+
+QuickFIX starts each session day from sequence number 1 with an empty store, and a report stored while its client wasn't logged on went with the old day's (#513). The server's store, `FixCarryingStore` (`app/FixStores.h`), carries what the client hasn't received into the new day. FixStoresTest drives CLIENT_A's session, made as the server makes it but on a clock of the test's own, across the day's end, with FileStore in a directory of its own. CLIENT_A logs on, and asks for what it hasn't received when the session's Logon is numbered past what it expects, as a counterparty does.
+
+| Test | Description |
+|------|-------------|
+| `AReportItsClientDidntGetIsResentOnTheNextSessionDay` | Two reports stored while CLIENT_A was away go into the next day's store as 1 and 2 when it connects the next morning; the session's Logon is 3, and its ResendRequest gets them with 43=Y and 97=Y. The report it got before it went isn't carried, and the day after carries nothing |
+| `AServerThatStartsAfterTheSessionDayEndedCarriesThemToo` | A restart within the day keeps the mark, from its file; a server that starts the next morning carries the two as QuickFIX makes the session, before CLIENT_A connects |
+| `AClientLoggedOnAsTheDayEndsGetsWhatWasSentBeforeItLoggedOnAgain` | QuickFIX ends the day at its first check in 16:59:59 and logs CLIENT_A out (#656); a report at 17:00:00.5 is stored, and carried when CLIENT_A connects at 17:00:10, when QuickFIX begins the day again |
+| `ALogonThatAsksToStartAgainFrom1GetsNothingCarried` | A Logon with ResetSeqNumFlag (141) Y the next morning: both sides start from 1, and nothing is resent |
+| `AReportResentWithinTheDayIsntCarried` | CLIENT_A's ResendRequest within the day gets the two, with 43=Y and without 97, and the next day carries nothing |
+| `ASessionThatNeverEndsCarriesNothing` | NonStopSession: no session time, and a reset carries nothing |
+| `TheSessionTimeIsTheSessionFactorys` | `FixCarryingStoreFactory::sessionTime()` reads `config/fix.cfg` as QuickFIX's SessionFactory does: 17:00 to 16:59:59 New York, the process's local time |
+| `ARenumberedMessageIsWholeAndMayHaveBeenSentBefore` (FixCarryingStoreTest) | `restamped()`: a report renumbered, with 97=Y, its BodyLength and CheckSum right as QuickFIX checks them, and its body as it was; carried twice, one 97; a message cut short, or without MsgSeqNum, gives none |
+| `OnlyAnApplicationMessageIsCarried` (FixCarryingStoreTest) | `isApplication()`: an ExecutionReport and a BusinessMessageReject are carried; a Logon, Heartbeat, Reject, ResendRequest and SequenceReset aren't |
 
 ---
 

@@ -27,6 +27,7 @@
 #include "FixGateway.h"
 #include "FixOutQueues.h"
 #include "FixServer.h"
+#include "FixStores.h"
 #include "MultiOutQueues.h"
 
 #include <gtest/gtest.h>
@@ -2747,7 +2748,7 @@ std::string fieldOf(const FIX::FieldMap &fields, int tag)
 /// config/fix.cfg, as the server's acceptor makes one, with the gateway as its application, and read what the session
 /// sends as a counterparty reads it: parsed with the session's own dictionaries, this tree's config/spec, and validated
 /// as QuickFIX validates by default. The session never ends, where the cfg's ends at 17:00 New York, so that no test
-/// sees it roll.
+/// sees it roll. Its store is the server's, a FixCarryingStore (#513), over memory.
 class FixtSessionTest : public FixGatewayInboundTest, public FIX::Responder
 {
 protected:
@@ -2789,10 +2790,15 @@ protected:
             session_ = nullptr;
         }
         factory_.reset();
+        stores_.reset(); // before the gateway it hands sessions to
         gateway_ =
             std::make_unique<FixGateway>(mockInQueues_.get(), WideDataStorage::instance(), OrderStorage::instance(),
                                          defaultClearingId_, defaultAccountId_, answerWait);
-        factory_ = std::make_unique<FIX::SessionFactory>(*gateway_, stores_, nullptr);
+        FIX::SessionSettings sessions;
+        sessions.set(sid_, settings_);
+        stores_ = std::make_unique<FixCarryingStoreFactory>(sessions, std::make_unique<FIX::MemoryStoreFactory>(),
+                                                            false, gateway_.get());
+        factory_ = std::make_unique<FIX::SessionFactory>(*gateway_, *stores_, nullptr);
         session_ = factory_->create(sid_, settings_);
         session_->setResponder(this);
         sent_.clear();
@@ -2806,6 +2812,7 @@ protected:
             factory_->destroy(session_); // before the gateway, its application
         }
         factory_.reset();
+        stores_.reset();
         FixGatewayInboundTest::TearDown();
     }
 
@@ -2915,7 +2922,7 @@ protected:
         }
     }
 
-    FIX::MemoryStoreFactory stores_;
+    std::unique_ptr<FixCarryingStoreFactory> stores_; // the server's (#513), over memory
     std::unique_ptr<FIX::SessionFactory> factory_;
     FIX::Session *session_ = nullptr;
     FIX::Dictionary settings_; // config/fix.cfg's, for a session that never ends
@@ -4563,6 +4570,33 @@ TEST_F(FixtSessionTest, AHeldStopSaysItIsNotWorkingUntilItsRelease)
     expectStatus(reports[7], FIX::OrdStatus_PARTIALLY_FILLED, std::to_string(limit->orderId_.id_), 100, 40, 60);
     EXPECT_EQ("(not set)", fieldOf(reports[7], FIX::FIELD::WorkingIndicator));
     expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, TheGatewayHandsEachStoreItsSession)
+{
+    // The server's store tells a report its client was sent from one it wasn't, which it keeps for the next session day,
+    // by asking the session whether the client is logged on: the gateway hands it the session as QuickFIX makes it, and
+    // until then every report would count as unsent (#513)
+    FixCarryingStore *store = stores_->storeOf(sid_);
+    ASSERT_NE(nullptr, store);
+    auto report = [](const std::string &execId)
+    {
+        return FIX50SP2::ExecutionReport(FIX::OrderID("ORDER-1"), FIX::ExecID(execId), FIX::ExecType(FIX::ExecType_NEW),
+                                         FIX::OrdStatus(FIX::OrdStatus_NEW), FIX::Side(FIX::Side_BUY),
+                                         FIX::LeavesQty(100), FIX::CumQty(0));
+    };
+    logOn();
+    FIX50SP2::ExecutionReport sent = report("E1");
+    session_->send(sent);
+    EXPECT_EQ(1u, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText();
+    EXPECT_EQ(0u, store->unsentFrom());
+    // CLIENT_A's connection goes, and the next report is only stored
+    session_->disconnect();
+    const FIX::SEQNUM unsent = session_->getExpectedSenderNum();
+    FIX50SP2::ExecutionReport stored = report("E2");
+    session_->send(stored);
+    EXPECT_EQ(1u, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText();
+    EXPECT_EQ(unsent, store->unsentFrom());
 }
 
 } // anonymous namespace

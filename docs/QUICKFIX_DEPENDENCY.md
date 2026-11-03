@@ -54,6 +54,14 @@ FIX 5.0 SP2 over FIXT.1.1 only (#377):
 
 - **Transport and sessions:** `ThreadedSocketAcceptor`, or `ThreadedSSLSocketAcceptor` with `--fix-tls-cert` and
   `--fix-tls-key` (#228), `Session`, `SessionSettings`, `SessionID`, `FileStore`, `FileLog`, `Application`.
+- **Stores (#513):** `MessageStore`, `MessageStoreFactory` and `TimeRange`, for `FixCarryingStore` (`app/FixStores.h`),
+  which wraps each session's FileStore and carries what its client hasn't received into the next session day. It
+  relies on three things QuickFIX does, the same in 22.1 and 22.3: a session stores each message it sends (`set()`)
+  before it decides, under the same lock, whether to send it, which only a client that is logged on gets; it reads
+  its store (`get()`) only to answer a ResendRequest, at logon (789) too, with what it then resends; and it resets
+  the store for a new day only when `TimeRange::isInSameRange()` puts now in another day than the store's creation,
+  any other reset coming from a Logon within the day. A QuickFIX release that changes any of them needs
+  `FixStoresTest` read again, not only run.
 - **TLS (#228):** the SSL acceptor exists only in a build with `HAVE_SSL`. The pinned release's install defines it in
   `QuickFIXBuildConfig.h`, which `ThreadedSSLSocketAcceptor.h` includes, so the gateway needs no define of its own;
   `scripts/build-quickfix.sh` builds with `-DHAVE_SSL=ON`. The server puts `ServerCertificateFile`,
