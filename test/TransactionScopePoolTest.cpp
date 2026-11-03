@@ -130,6 +130,55 @@ TEST_F(TransactionScopePoolTest, CacheMissCounterIncrementsOnExhaustion)
 }
 
 // =============================================================================
+// Allocations (#515)
+// =============================================================================
+
+TEST_F(TransactionScopePoolTest, EachTransactionTakesItsScopeSoItsSlotAllocatesAnother)
+{
+    // A transaction takes its scope out of the pool for good, so once the pool's own scopes have each been used, every
+    // transaction costs a heap allocation, which allocations() counts (#515). The misses never saw it.
+    TransactionScopePool pool(4);
+    for (int i = 0; i < 12; ++i)
+    {
+        PooledTransactionScope ps(&pool);
+        delete ps.release(); // as the transaction manager deletes it once it has run
+    }
+    EXPECT_EQ(8u, pool.allocations()) << "the first 4 transactions took the pool's own scopes";
+    EXPECT_EQ(0u, pool.cacheMisses());
+}
+
+TEST_F(TransactionScopePoolTest, AScopeGivenBackUnusedIsReusedNotAllocated)
+{
+    // An event that enqueues no transaction gives its scope back, and the slot's next acquire reuses it
+    TransactionScopePool pool(2);
+    for (int i = 0; i < 10; ++i)
+    {
+        PooledTransactionScope ps(&pool);
+        ASSERT_NE(nullptr, ps.get());
+    }
+    EXPECT_EQ(0u, pool.allocations());
+}
+
+TEST_F(TransactionScopePoolTest, AnAcquireThatFindsEverySlotInUseIsAnAllocationAndAMiss)
+{
+    TransactionScopePool pool(2);
+    size_t idx1, idx2, idx3;
+    TransactionScope *s1 = pool.acquire(idx1);
+    TransactionScope *s2 = pool.acquire(idx2);
+    EXPECT_NE(s1, s2);
+    EXPECT_EQ(0u, pool.allocations());
+
+    TransactionScope *s3 = pool.acquire(idx3);
+    EXPECT_EQ(TransactionScopePool::INVALID_INDEX, idx3);
+    EXPECT_EQ(1u, pool.cacheMisses());
+    EXPECT_EQ(1u, pool.allocations());
+
+    delete s3; // heap allocated
+    pool.releaseByIndex(idx2);
+    pool.releaseByIndex(idx1);
+}
+
+// =============================================================================
 // Detach Mechanism
 // =============================================================================
 

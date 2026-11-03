@@ -355,10 +355,11 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
     EXPECT_FALSE(topBid.isValid()) << "[OrderBookImpl] no bids remaining after full fill";
     EXPECT_FALSE(topAsk.isValid()) << "[OrderBookImpl] no asks remaining after full fill";
 
-    // --- [TransactionScopePool] Arena allocation used (zero cache misses) ---
+    // --- [TransactionScopePool] No acquire found every slot in use (zero cache misses) ---
+    // Each transaction's scope is still a heap allocation, which allocations() counts (#515)
     const TransactionScopePool *pool = evtProc->scopePool();
     ASSERT_NE(nullptr, pool);
-    EXPECT_EQ(0u, pool->cacheMisses()) << "[TransactionScopePool] zero heap fallback — arena allocation worked";
+    EXPECT_EQ(0u, pool->cacheMisses()) << "[TransactionScopePool] an acquire found every slot in use";
 
     // --- [MultiOutQueues] Fan-out verified — both delegates received events ---
     EXPECT_GT(recordingOut->reportCount(), 0u) << "[MultiOutQueues] recording delegate received reports";

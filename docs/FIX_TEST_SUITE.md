@@ -44,7 +44,7 @@ A single test that submits two FIX orders (sell + buy limit) through the entire 
 | **WideDataStorage** | `instrument_.get().symbol_ == "GBPUSD"` | Reference data resolution |
 | **OrderBookImpl** | `getTop() == invalid` (empty after fill) | Orders added then removed |
 | **OrderMatcher** | `cumQty_ == 500, leavesQty_ == 0` | Price match + trade execution |
-| **TransactionScopePool** | `cacheMisses() == 0` | Arena allocation, no heap fallback |
+| **TransactionScopePool** | `cacheMisses() == 0` | No acquire found every slot in use. Each transaction's scope is still a heap allocation (#515) |
 | **TransactionMgr** | Orders reach terminal state | Transaction dependency tracking + execution |
 | **DeferedEvents** | Both orders filled from single match | ExecutionDeferedEvent chain completed |
 | **TrOperations** | `executions_` contains TRADE_EXECTYPE entry | CreateTradeExecReportTrOperation ran |

@@ -17,7 +17,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **Subscription Filtering:** Selective event delivery per client via SubscrManager
 
 ### Low-Latency Infrastructure
-- **Zero-Allocation Hot Path:** 5-tier memory hierarchy — stack, arena (<!-- DOC_CHECK:arena_size -->2048<!-- /DOC_CHECK -->-byte bump), CAS pool (<!-- DOC_CHECK:pool_size -->1024<!-- /DOC_CHECK --> slots), TBB scalable allocator, heap fallback
+- **Memory Tiers:** 5-tier memory hierarchy — stack, arena (<!-- DOC_CHECK:arena_size -->2048<!-- /DOC_CHECK -->-byte bump), CAS pool (<!-- DOC_CHECK:pool_size -->1024<!-- /DOC_CHECK --> slots), TBB scalable allocator, heap fallback. A transaction takes its `TransactionScope` out of the pool for good, and the slot allocates another: one heap allocation per transaction, counted as `poolAllocations` (#515)
 - **Lock-Free Pool:** TransactionScopePool with exponential backoff CAS and cache miss tracking
 - **CPU Affinity:** Thread-to-core pinning, for the main thread (`--cpu-affinity`) and the TaskManager's workers. `CpuAffinity` can also set SCHED_FIFO priority, but nothing calls it
 - **NUMA-Aware Allocation:** `TransactionScopePool` can bind its slots to the local NUMA node (`mbind()` via NumaAllocator). The server builds its pools in the default mode, so it doesn't use this
@@ -467,7 +467,7 @@ which matches the stop as a market order with the sell above it (#480). It takes
 | **OrderMatcher** | Price-time priority matching engine |
 | **OrderBook** | Price-sorted buy/sell order sides per instrument, and its held stop orders |
 | **TransactionManager** | ACID transaction coordination with dependency tree |
-| **TransactionScopePool** | Lock-free CAS object pool for zero-allocation hot path |
+| **TransactionScopePool** | Lock-free CAS pool of `TransactionScope`s made up front; each transaction takes one, and its slot allocates another (#515) |
 | **TaskManager** | oneTBB-based parallel task scheduling with CPU pinning |
 | **LMDBStorage** | LMDB-backed persistent key-value storage with versioning |
 | **MetricsPublisher** | Periodic system metrics broadcast over WebSocket |
@@ -478,7 +478,7 @@ which matches the stop as a market order with the sell above it (#480). It takes
 | Component | Implementation | Benefit |
 |-----------|---------------|---------|
 | **IncomingQueues** | `tbb::concurrent_queue` + `std::variant` | Lock-free MPMC event ingestion |
-| **TransactionScopePool** | CAS ring buffer with exponential backoff | Zero-allocation transaction processing |
+| **TransactionScopePool** | CAS ring buffer with exponential backoff | Lock-free acquire; a transaction's scope is still one heap allocation (#515) |
 | **OrderStorage** | `tbb::spin_rw_mutex` + `tbb::concurrent_hash_map` | Concurrent lookups, fine-grained access |
 | **WideDataStorage** | `tbb::spin_rw_mutex` | Concurrent reads for reference data |
 | **CacheAlignedAtomic** | `alignas(64)` wrapper | Prevents false sharing on contended atomics |
@@ -490,9 +490,9 @@ which matches the stop as a market order with the sell above it (#480). It takes
 |------|-----------|-----------|
 | 1. Stack | `Context` struct, local vars | Always — pointers to shared components |
 | 2. Arena | 2KB bump allocator per TransactionScope | Operations within a transaction (~12 ops fit) |
-| 3. Pool | 1024-slot CAS ring buffer | TransactionScope lifecycle — zero-alloc acquire/release |
+| 3. Pool | 1024-slot CAS ring buffer | TransactionScope acquire. A scope given back unused is reused; one a transaction takes leaves the pool, and its slot allocates another (#515) |
 | 4. TBB scalable | `tbb::scalable_allocator<T>` | NLinkedTree node allocation |
-| 5. Heap | `::operator new` fallback | Pool exhaustion (tracked via `cacheMisses()`) |
+| 5. Heap | `::operator new` | A slot's new scope after a transaction took its own, and pool exhaustion: `allocations()` counts both, `cacheMisses()` exhaustion alone |
 
 ---
 
@@ -557,7 +557,7 @@ Every order clears through the server's clearing firm (`--clearing-firm`), and a
 
 **ExecutionReport** — Base fields: `execId`, `orderId`, `type`, `orderStatus`, `market`, `transactTime`. Type-specific fields: `lastQty`/`lastPx`, `currency` and `tradeDate` (trade, and correct), `rejectReason` (reject, and a rejected replace), `origOrderId` (replace/correct), `execRefId` (trade cancel/correct), and `execLegType` (`NEAR` or `FAR`) on an FX swap's fill, which is reported once per leg. An order cancel carries only the base fields. A report with `orderId` 0 is for an order the server refused without storing it, such as one whose ClOrdID is already in use; `rejectReason` says why. `tradeDate` is the business day the trade counts in, as a number YYYYMMDD, FIX's TradeDate (#258): the date the day ends on, 17:00 New York, so a trade after 17:00 has the next day's date. Both legs of a swap's fill have it, though they settle on different dates (#445).
 
-**SystemMetrics** — 20 fields: event/transaction counters (created/processed/finished), `transactionsFailed` (transactions that failed and were rolled back since the server started, each also logged at error level, #514; the UI raises a CRITICAL alert when it rises), processor availability, `queueDepth`, `poolSize`, `poolCacheMisses`, `poolArenaSize`, `activeSessions`, `activeOrders`, `storageMapSize` and `storageMapUsed` (LMDB's map and how much of it is in use, in bytes), `timestamp`.
+**SystemMetrics** — 21 fields: event/transaction counters (created/processed/finished), `transactionsFailed` (transactions that failed and were rolled back since the server started, each also logged at error level, #514; the UI raises a CRITICAL alert when it rises), processor availability, `queueDepth`, `poolSize`, `poolCacheMisses` (acquires that found every slot in use) and `poolAllocations` (the scopes the pool allocated: one per transaction, and one per miss, #515), all three the first event processor's pool's (#542), `poolArenaSize`, `activeSessions`, `activeOrders`, `storageMapSize` and `storageMapUsed` (LMDB's map and how much of it is in use, in bytes), `timestamp`.
 
 **Enums** — `Side` (BUY, SELL, BUY_MINUS, SELL_PLUS, SELL_SHORT, CROSS; the engine trades only BUY and SELL, and rejects an order on any of the other four, #510), `OrderType` (MARKET, LIMIT, STOP, STOPLIMIT, FXSWAP), `TimeInForce` (DAY, GTD, GTC, FOK, IOC, OPG, ATCLOSE), `OrderStatus` (<!-- DOC_CHECK:order_status_count -->12<!-- /DOC_CHECK --> statuses), `ExecType` (<!-- DOC_CHECK:exec_type_count -->14<!-- /DOC_CHECK --> types), `Currency` (USD, EUR, GBP, JPY, CHF, AUD, CAD, NZD), `Capacity` (<!-- DOC_CHECK:capacity_count -->6<!-- /DOC_CHECK --> types).
 
