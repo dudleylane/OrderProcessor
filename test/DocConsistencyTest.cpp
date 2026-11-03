@@ -51,6 +51,7 @@
 #include <boost/mpl/size.hpp>
 
 #include "DataModelDef.h"
+#include "ExpiryScheduler.h"
 #include "ServerDefaults.h"
 #include "StateMachine.h"
 #include "StateMachineDef.h"
@@ -279,6 +280,13 @@ TEST_F(DocConsistencyTest, WebSocketLimits)
 TEST_F(DocConsistencyTest, WebSocketAccessToken)
 {
     expectDocEq("ws_min_token_length", COP::App::WS_MIN_TOKEN_LENGTH);
+}
+
+// The latest expireTime the server takes: the system clock's last whole millisecond, which the expiry thread can wait
+// until (#511)
+TEST_F(DocConsistencyTest, LatestExpireTime)
+{
+    expectDocEq("latest_expire_time", COP::Proc::ExpiryScheduler::LATEST_TIME);
 }
 
 // docs/ARCHITECTURE.md's section 10 names the sources, tests and benchmarks one by one, and nothing compared it with

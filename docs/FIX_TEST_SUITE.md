@@ -405,17 +405,18 @@ Runs `orderProcessorServer` with a certificate made for the run, and checks, on 
 
 ---
 
-## 19. FixQuantityTest and FixPriceTest — What the Gateway Takes
+## 19. FixQuantityTest, FixPriceTest and FixExpireTimeTest — What the Gateway Takes
 
 **File:** `test/FixGatewayTest.cpp`
 **Requires:** `BUILD_FIX=ON`
 
-The checks the gateway makes on a quantity and a price before the engine sees them (#145).
+The checks the gateway makes on a quantity, a price and an ExpireTime before the engine sees them (#145, #511).
 
 | Test | Description |
 |------|-------------|
 | `OrderQtyIsAWholeNumberTheEngineCanHold` (FixQuantityTest) | `toQuantity()`: 1, 100 and 4294967295 → those; -5, 4294967296, 0.5, 0, -0, 4294967295.5, 1e300, both infinities and NaN → none |
 | `APriceIsFiniteAndAboveZeroUnlessTheOrderIsAMarketOrder` (FixPriceTest) | `isTradablePrice()`: a limit order's or a swap's price is finite and above 0; a market order's may be 0, but not infinite |
+| `AnExpireTimePastWhatTheServerCanWaitUntilIsRefused` (FixExpireTimeTest) | `expiryRefusal()`: a GTD order's ExpireTime (126) at 22620411-23:47:16.854, the last millisecond the engine's expiry thread can wait until, is taken; one a millisecond later, or at 99991231-23:59:59, is refused with the reason (#511) |
 
 ---
 

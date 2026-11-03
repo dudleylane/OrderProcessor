@@ -23,6 +23,7 @@
 #include <quickfix/SessionSettings.h>
 #include <quickfix/TimeRange.h>
 #include <quickfix/Utility.h>
+#include "ExpiryScheduler.h"
 #include "FixGateway.h"
 #include "FixOutQueues.h"
 #include "FixServer.h"
@@ -1555,6 +1556,31 @@ TEST(FixPriceTest, APriceIsFiniteAndAboveZeroUnlessTheOrderIsAMarketOrder)
     EXPECT_TRUE(FixGateway::isTradablePrice(0.0, MARKET_ORDERTYPE));
     EXPECT_FALSE(FixGateway::isTradablePrice(huge, MARKET_ORDERTYPE));
     EXPECT_FALSE(FixGateway::isTradablePrice(-huge, MARKET_ORDERTYPE));
+}
+
+TEST(FixExpireTimeTest, AnExpireTimePastWhatTheServerCanWaitUntilIsRefused)
+{
+    // A UTCTimestamp goes to 9999, and the engine's expiry thread can't wait past the system clock's last millisecond,
+    // 2262-04-11T23:47:16.854Z: a later time overflowed its wait, and the thread spun holding its lock (#511)
+    const DateTimeT now = 1792022400000ULL; // 2026-10-15T00:00:00Z
+    const auto expiryOf = [now](const char *expireTime, DateTimeT *when)
+    {
+        FIX::Message msg;
+        msg.setField(FIX::FIELD::ExpireTime, expireTime);
+        return FixGateway::expiryRefusal(msg, GTD_TIF, now, when);
+    };
+    DateTimeT when = 0;
+    EXPECT_EQ(std::nullopt, expiryOf("22620411-23:47:16.854", &when));
+    EXPECT_EQ(COP::Proc::ExpiryScheduler::LATEST_TIME, when);
+    for (const char *far : { "22620411-23:47:16.855", "99991231-23:59:59" })
+    {
+        when = 0;
+        EXPECT_EQ(std::optional<std::string>(
+                      "ExpireTime (126) is past 22620411-23:47:16.854, the latest the server can wait until"),
+                  expiryOf(far, &when))
+            << far;
+        EXPECT_EQ(0u, when) << far << " was taken";
+    }
 }
 
 // =============================================================================

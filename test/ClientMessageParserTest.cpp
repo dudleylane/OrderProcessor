@@ -129,6 +129,44 @@ TEST(ClientMessageParserTest, AGtdOrderNeedsAnExpireTimeAndNoOtherOrderHasOne)
     EXPECT_EQ(1792108800000ULL, msg.replaceOrder.expireTime);
 }
 
+TEST(ClientMessageParserTest, AnExpireTimePastWhatTheServerCanWaitUntilIsRefused)
+{
+    // Past 2262-04-11T23:47:16.854Z an expireTime overflowed the system clock in the expiry thread's wait, and the thread
+    // spun holding its lock, so every order after it, and the server's stop, waited for good (#511). A datetime-local
+    // input allows the year 9999.
+    const std::string base = R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","price":10,)"
+                             R"("orderQty":5,"currency":"USD","capacity":"AGENCY","tif":"GTD","expireTime":)";
+    const std::string replace = R"({"type":"replace_order","data":{"orderId":7,"expireTime":)";
+    const std::string swap = R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,)"
+                             R"("farPrice":1.087,"settlDate":1000,"farSettlDate":2000,"orderQty":5,"currency":"USD",)"
+                             R"("capacity":"AGENCY","tif":"GTD","expireTime":)";
+    const std::string refused =
+        "invalid expireTime: expected milliseconds since the epoch, up to 9223372036854 (2262-04-11T23:47:16.854Z)";
+
+    auto msg = parse(base + "9223372036854}}");
+    EXPECT_EQ("new_order", msg.type) << msg.error;
+    EXPECT_EQ(9223372036854ULL, msg.newOrder.expireTime);
+    msg = parse(replace + "9223372036854}}");
+    EXPECT_EQ("replace_order", msg.type) << msg.error;
+    EXPECT_EQ(9223372036854ULL, msg.replaceOrder.expireTime);
+    msg = parse(swap + "9223372036854}}");
+    EXPECT_EQ("new_swap_order", msg.type) << msg.error;
+    EXPECT_EQ(9223372036854ULL, msg.swapOrder.expireTime);
+
+    for (const char *far : { "9223372036855", "253402300799000", "18446744073709551615" })
+    {
+        msg = parse(base + far + "}}");
+        EXPECT_EQ("error", msg.type) << far;
+        EXPECT_EQ(refused, msg.error) << far;
+        msg = parse(replace + far + "}}");
+        EXPECT_EQ("error", msg.type) << far;
+        EXPECT_EQ(refused, msg.error) << far;
+        msg = parse(swap + far + "}}");
+        EXPECT_EQ("error", msg.type) << far;
+        EXPECT_EQ(refused, msg.error) << far;
+    }
+}
+
 TEST(ClientMessageParserTest, ReplaceOrderTakesAStopPxAboveZero)
 {
     // A replace moves a stop order's stop (#238), as a new order gives it one: above 0

@@ -7,6 +7,7 @@
 #include "IdTGenerator.h"
 #include "Logger.h"
 #include "EnumStrings.h"
+#include "ExpiryScheduler.h"
 
 #include <algorithm>
 #include <atomic>
@@ -2533,6 +2534,12 @@ std::optional<std::string> FixGateway::expiryRefusal(const FIX::FieldMap &msg, T
     if (when <= now)
     {
         return std::string("ExpireTime (126) has passed");
+    }
+    // A UTCTimestamp goes to 9999, and the engine's expiry thread can't wait past the system clock's last millisecond: a
+    // later time overflowed its wait, and the thread spun holding its lock (#511)
+    if (Proc::ExpiryScheduler::LATEST_TIME < when)
+    {
+        return std::string("ExpireTime (126) is past 22620411-23:47:16.854, the latest the server can wait until");
     }
     *expireTime = when;
     return std::nullopt;
