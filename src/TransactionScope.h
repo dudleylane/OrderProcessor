@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <memory>
 #include <vector>
@@ -87,9 +88,26 @@ public:
     virtual void getRelatedObjects(ObjectsInTransactionT *obj) const;
     virtual bool executeTransaction(const Context &cnxt);
 
+    /// How many transactions have failed in this process: an operation threw, or their persists' group did as it began
+    /// or committed (#163), and their operations were rolled back. Each is logged at error level too (#514).
+    static uint64_t failedCount() noexcept;
+    /// The error line for a transaction that failed (#514). id: its own, invalid for one with none (Processor's match
+    /// of a restored order). failed: the operation that threw, the pos'th of count from 0, or null when the persists'
+    /// group did, the first pos of them.
+    static std::string describeFailure(const TransactionId &id, const Operation *failed, size_t pos, size_t count,
+                                       const char *what);
+    /// The error line for a rollback that threw, that of the pos'th operation of count from 0 (#514)
+    static std::string describeFailedRollback(const TransactionId &id, const Operation &op, size_t pos, size_t count,
+                                              const char *what);
+
 private:
     /// Destroy an operation: calls destructor, frees memory only if heap-allocated.
     void destroyOperation(Operation *op) noexcept;
+    /// What executeTransaction() does once something threw: counts and logs the failure, then rolls back from the
+    /// operation at pos to the first, each rollback on its own (#514). groupCall: the persists' group threw, as it
+    /// began (pos 0) or committed (pos persists), not the operation at pos.
+    void fail(const Context &cnxt, size_t pos, bool groupOpen, bool groupCall, size_t persists,
+              const char *what) noexcept;
 
     std::string invalidReason_;
 

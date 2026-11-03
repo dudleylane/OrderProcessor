@@ -13,6 +13,9 @@
 #include "TestAux.h"
 #include <sstream>
 #include <atomic>
+#include <cstdlib>
+#include <fstream>
+#include "Logger.h"
 
 using namespace std;
 using namespace test;
@@ -27,6 +30,61 @@ using namespace COP::Store;
 std::filesystem::path test::sourceRoot()
 {
     return std::filesystem::path(OP_SOURCE_DIR);
+}
+
+// =============================================================================
+// The Log
+// =============================================================================
+
+CapturedLog::CapturedLog() : path_(uniqueTestPath("log") + ".log")
+{
+    if (const char *before = std::getenv("EXCHANGE_LOG"))
+    {
+        before_ = before;
+    }
+    std::filesystem::remove(path_);
+    // The logger reads EXCHANGE_LOG as it is made (#156)
+    aux::ExchLogger::destroy();
+    ::setenv("EXCHANGE_LOG", path_.c_str(), 1);
+    aux::ExchLogger::create();
+}
+
+CapturedLog::~CapturedLog()
+{
+    restore();
+    std::error_code ignored;
+    std::filesystem::remove(path_, ignored);
+}
+
+std::vector<std::string> CapturedLog::lines()
+{
+    restore();
+    std::vector<std::string> read;
+    std::ifstream file(path_);
+    for (std::string line; std::getline(file, line);)
+    {
+        read.push_back(line);
+    }
+    return read;
+}
+
+void CapturedLog::restore()
+{
+    if (restored_)
+    {
+        return;
+    }
+    restored_ = true;
+    aux::ExchLogger::destroy(); // spdlog's shutdown joins its thread, which writes out what it holds first
+    if (before_)
+    {
+        ::setenv("EXCHANGE_LOG", before_->c_str(), 1);
+    }
+    else
+    {
+        ::unsetenv("EXCHANGE_LOG");
+    }
+    aux::ExchLogger::create();
 }
 
 // =============================================================================

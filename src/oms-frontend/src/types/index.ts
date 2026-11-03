@@ -248,6 +248,8 @@ export interface SystemMetrics {
   transactionsCreated: number;
   transactionsProcessed: number;
   transactionsFinished: number;
+  /** transactions that failed and were rolled back, each logged at error level too (#514) */
+  transactionsFailed: number;
   availableEventProcessors: number;
   totalEventProcessors: number;
   availableTransactProcessors: number;

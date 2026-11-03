@@ -309,6 +309,7 @@ std::string App::serializeMetricsUpdate(const SystemMetrics &m)
     data["transactionsCreated"] = m.transactionsCreated;
     data["transactionsProcessed"] = m.transactionsProcessed;
     data["transactionsFinished"] = m.transactionsFinished;
+    data["transactionsFailed"] = m.transactionsFailed;
     data["availableEventProcessors"] = m.availableEventProcessors;
     data["totalEventProcessors"] = m.totalEventProcessors;
     data["availableTransactProcessors"] = m.availableTransactProcessors;

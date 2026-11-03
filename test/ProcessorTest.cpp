@@ -834,6 +834,45 @@ TEST_F(ProcessorTest, OrderIsDurableBeforeItsExecutionReportIsPublished)
     EXPECT_NE(std::find(sequence.begin(), sequence.end(), "publish"), sequence.end());
 }
 
+namespace
+{
+/// Storage that can't write: every save fails, as LMDB's does on a full or failing disk
+class FailingOrderSaver final : public COP::OrderSaver
+{
+public:
+    COP::u32 save(const COP::OrderEntry &, const COP::OrderFigures &) override
+    {
+        throw std::runtime_error("injected: No space left on device");
+    }
+    void erase(const COP::IdT &, COP::u32) override {}
+};
+} // namespace
+
+TEST_F(ProcessorTest, ATransactionThatCantPersistIsCountedAndPublishesNothing)
+{
+    // A new order whose record can't be written: its transaction fails before its report goes out (#28), and is
+    // counted for metrics_update and logged at error level (#514), where nothing said it had failed. What its decision
+    // left in memory is #659's.
+    std::vector<std::string> sequence;
+    FailingOrderSaver saver;
+    RecordingOutQueues outQueues(&sequence);
+    OrderStorage::instance()->attach(&saver);
+
+    ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
+                           &outQueues, inQueues_.get(), transMgr_.get());
+    Processor processor;
+    processor.init(params);
+    transMgr_->proc_ = &processor;
+    const uint64_t failed = TransactionScope::failedCount();
+
+    auto order = test::createCorrectOrder(instrId1_);
+    inQueues_->push("test", OrderEvent(order.release()));
+    processor.process();
+
+    EXPECT_EQ(failed + 1, TransactionScope::failedCount());
+    EXPECT_TRUE(sequence.empty()) << "a report went out for an order that isn't durable";
+}
+
 TEST_F(ProcessorTest, AnOrderIsPersistedOncePerTransaction)
 {
     // LMDBStorage::update() keeps the newest version it finds besides the one it writes (#148). That is safe because
