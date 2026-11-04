@@ -492,7 +492,7 @@ IdT PersistLastTradeTrOperation::lastTradeObject(const SourceIdT &instrument)
 void PersistLastTradeTrOperation::execute(const Context &cnxt)
 {
     assert(nullptr != cnxt.orderStorage_);
-    written_ = cnxt.orderStorage_->persistLastTrade(instrument_, lastPx_, tradeId_, &version_);
+    written_ = cnxt.orderStorage_->persistLastTrade(instrument_, lastPx_, tradeId_, pendingReleases_, &version_);
 }
 
 void PersistLastTradeTrOperation::rollback(const Context &cnxt)

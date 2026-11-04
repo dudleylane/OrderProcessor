@@ -3079,6 +3079,216 @@ TEST_F(ProcessorTest, AStopThatArrivedAfterTheLastTradeWaitsForTheNextOneAfterAR
 }
 
 // =============================================================================
+// A restart releases what the running server would have (#518)
+// =============================================================================
+
+TEST_F(ProcessorTest, AStopBookedAfterATradeWasDecidedIsNotReleasedByItLiveOrOnceRestarted)
+{
+    // The stop arrives before the trade, so its id is the smaller, but the transaction that books it runs after the trade
+    // is decided. The stop book didn't hold it then, so the trade doesn't release it, and neither may a restart. From
+    // the trade's price and id alone, the restore released it (#518).
+    const std::string dir = test::uniqueTestPath("stop-booked-after-trade");
+    std::filesystem::remove_all(dir);
+    IdT id;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory first(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        first.process(clOrdId);
+        first.transactions_.keep_ = true; // the stop's booking waits
+        order = asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        id = first.process(clOrdId)->orderId_;
+        first.transactions_.keep_ = false;
+        ASSERT_EQ(1u, first.transactions_.kept_.size()) << "the stop's booking";
+
+        order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        ASSERT_EQ(FILLED_ORDSTATUS, first.process(clOrdId)->status_) << "the trade at 10";
+        first.transactions_.runKept();
+        ASSERT_FALSE(first.storage_.locateByOrderId(id)->stopTriggered_)
+            << "a trade decided before the stop was booked released it";
+        ASSERT_EQ(OrderBook::OrdersT{ id }, heldStops(first.book_, instrId1_));
+    }
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    ASSERT_NE(nullptr, restarted.storage_.locateByOrderId(id));
+    EXPECT_TRUE(restarted.dispatcher_.stopsReached().empty()) << "the restart released a stop the trade didn't";
+    EXPECT_EQ(OrderBook::OrdersT{ id }, heldStops(restarted.book_, instrId1_));
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AReleasePendingWhenAnotherOrdersTradeIsTheLastIsReleasedOnceRestarted)
+{
+    // A trade at 9 reaches a sell stop at 9.5 and queues its release. Before the release runs, another order's booking,
+    // enqueued first, trades at 10, which doesn't reach the stop, and a crash loses the release. The last trade, at 10,
+    // names the release still pending (#518): from its price alone, the restore left the stop held.
+    const std::string dir = test::uniqueTestPath("stop-release-pending");
+    std::filesystem::remove_all(dir);
+    IdT id;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, BUY_SIDE, 8.0, 100);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        order = createTestOrder(instrId1_, BUY_SIDE, 9.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        order = asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 9.5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        id = crashed.process(clOrdId)->orderId_;
+
+        crashed.transactions_.keepNested_ = true;
+        order = createTestOrder(instrId1_, SELL_SIDE, 9.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        ASSERT_EQ(2u, crashed.transactions_.kept_.size()) << "the trade's transaction and the stop's release";
+        crashed.transactions_.runKept(1);
+        crashed.transactions_.keepNested_ = false;
+
+        order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        ASSERT_EQ(FILLED_ORDSTATUS, crashed.process(clOrdId)->status_) << "the trade at 10";
+        ASSERT_EQ(1u, crashed.transactions_.kept_.size()) << "the release is lost";
+        ASSERT_FALSE(crashed.storage_.locateByOrderId(id)->stopTriggered_);
+    }
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    OrderEntry *restored = restarted.storage_.locateByOrderId(id);
+    ASSERT_NE(nullptr, restored);
+    ASSERT_FALSE(restored->stopTriggered_);
+    ASSERT_EQ(std::vector<OrderEntry *>{ restored }, restarted.dispatcher_.stopsReached())
+        << "the restart lost the release pending when the last trade was made";
+
+    restarted.processor_.releaseRestored(restored);
+    EXPECT_EQ(std::vector<std::string>{ "10@8" }, reports.tradesOf(id));
+    EXPECT_EQ(FILLED_ORDSTATUS, restored->status_);
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, ATradeTheRestartMatchesStillNamesTheReleasesPendingBeforeTheyRun)
+{
+    // A crash loses a stop's release, and then the fills of another order's trade, which doesn't reach the stop. The
+    // restart matches that order before it releases the stop (#207), and the trade writes the last trade first. If the
+    // server stops again between the two, the next start must still release the stop: the restore marked it pending, so
+    // the record names it (#518).
+    const std::string dir = test::uniqueTestPath("stop-release-pending-twice");
+    std::filesystem::remove_all(dir);
+    IdT id;
+    IdT crossing;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, BUY_SIDE, 8.0, 100);
+        RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        order = createTestOrder(instrId1_, BUY_SIDE, 9.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        order = asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 9.5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        id = crashed.process(clOrdId)->orderId_;
+
+        crashed.transactions_.keepNested_ = true; // from here, every transaction a trade queues is lost but the first
+        order = createTestOrder(instrId1_, SELL_SIDE, 9.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        ASSERT_EQ(2u, crashed.transactions_.kept_.size()) << "the trade's transaction and the stop's release";
+        crashed.transactions_.runKept(1);
+        order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crashed.process(clOrdId);
+        order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 5);
+        clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        crossing = crashed.process(clOrdId)->orderId_;
+        ASSERT_EQ(2u, crashed.transactions_.kept_.size()) << "the release, and the fills of the trade at 10";
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        ASSERT_EQ(1u, restarted.dispatcher_.stopsReached().size());
+        ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+        OrderEntry *order = restarted.dispatcher_.ordersToMatch()[0];
+        ASSERT_EQ(crossing, order->orderId_);
+        restarted.processor_.matchRestored(order);
+        ASSERT_EQ(std::vector<std::string>{ "5@10" }, reports.tradesOf(crossing));
+        // and it stops before it releases the stop
+    }
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    OrderEntry *restored = restarted.storage_.locateByOrderId(id);
+    ASSERT_NE(nullptr, restored);
+    EXPECT_TRUE(restarted.dispatcher_.ordersToMatch().empty());
+    ASSERT_EQ(std::vector<OrderEntry *>{ restored }, restarted.dispatcher_.stopsReached())
+        << "the last trade the first restart wrote dropped the release it hadn't run";
+    restarted.processor_.releaseRestored(restored);
+    EXPECT_EQ(std::vector<std::string>{ "10@8" }, reports.tradesOf(id));
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AReleaseStaysPendingUntilACancelOrAReplaceTakesItsStopOut)
+{
+    // A trade reaches two stops and queues their releases, which the instrument's last trade names as pending (#518).
+    // One stop is canceled and the other replaced before the releases run, which then release nothing. Each stays named
+    // until its cancel's or its replace's transaction takes it out of the stop book, and then no record names it.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    OrderEntry *canceled = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+    OrderEntry *replaced = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+    const auto pending = [this]()
+    {
+        std::vector<IdT> ids;
+        orderBook_->pendingReleases(instrId1_, &ids);
+        return ids;
+    };
+
+    inQueues_->push("test", OrderEvent(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5).release()));
+    engine.processor_.process();
+    ASSERT_EQ(3u, transMgr_->kept_.size()) << "the trade's transaction and the two releases";
+    EXPECT_EQ((std::vector<IdT>{ canceled->orderId_, replaced->orderId_ }), pending());
+
+    inQueues_->push("test", OrderCancelEvent(canceled->orderId_));
+    engine.processor_.process();
+    inQueues_->push("test", OrderReplaceEvent(replaced->orderId_, replacementFor(*replaced)));
+    engine.processor_.process();
+    transMgr_->runKept(3);
+    EXPECT_FALSE(canceled->stopTriggered_);
+    EXPECT_FALSE(replaced->stopTriggered_);
+    EXPECT_EQ((std::vector<IdT>{ canceled->orderId_, replaced->orderId_ }), pending())
+        << "released nothing, and neither stop has left the stop book yet";
+
+    transMgr_->runKept();
+    EXPECT_EQ(CANCELED_ORDSTATUS, canceled->status_);
+    EXPECT_EQ(REPLACED_ORDSTATUS, replaced->status_);
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
+    EXPECT_TRUE(pending().empty()) << "a stop out of the stop book is pending";
+}
+
+// =============================================================================
 // Time in force (#240)
 // =============================================================================
 

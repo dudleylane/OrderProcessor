@@ -351,6 +351,8 @@ COP (Concurrent Order Processor)
 │   addStop/removeStop → hold a stop order, or stop holding it    │
 │   holdsStops         → whether the instrument holds any         │
 │   triggeredStops(px) → the held stops a trade at px reaches     │
+│   markReleasePending → a release claimed, until it runs (#518)  │
+│   pendingReleases    → those pending, named by the last trade   │
 ├─────────────────────────────────────────────────────────────────┤
 │ Data Structure:                                                  │
 │   std::multimap<Price, OrderEntry*, PriceComparator>            │
@@ -792,20 +794,24 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 
 - **Records:** `stopTriggered_` is persisted (`OrderCodec` format version 2). Version 0 and 1 records decode as held.
 - **Restore:** a working held stop goes back into the stop book. A released STOP is left to match, as an open market order is, and a released STOPLIMIT as a limit order is: booked, or left to match if it is IOC or FOK (#489). `app/main.cpp` waits for the transaction manager to hold nothing (`pendingTransactions()`) between the restored orders it matches, since a release matches on a transaction worker.
-- **Last trade (#237):** each trade's transaction persists its instrument's last price, and an id drawn when the trade was made, in the commit that holds its fills (`PersistLastTradeTrOperation`, record type `LASTTRADE`, keyed by the instrument's number with date 2). A restore releases the held stops that price reached and that arrived before the trade, through `Processor::releaseRestored()`, once `app/main.cpp` has matched the orders that lost their fills: a lost release ran after the trades that crossing orders lost.
+- **Last trade (#237, #518):** each trade's transaction persists its instrument's last price, an id drawn when the trade was made, and the stops whose releases are pending, in the commit that holds its fills (`PersistLastTradeTrOperation`, record type `LASTTRADE` in format version 1, keyed by the instrument's number with date 2).
+  - **Pending releases.** The stop book keeps each instrument's. `OrderMatcher::afterTrade()` marks a stop as it claims the stop's release (`OrderBook::markReleasePending()`; a stop is marked once, since a chain claims a release once and another order's trade can reach the stop again). `removeStop()` ends the mark, whether its release, a cancel, a replace or an expiry takes the stop out, and `addStop()` never sets one, so a release rolled back puts its stop back unmarked. `ExecutionDeferedEvent::execute()` gives the record every pending release once `afterTrade()` has claimed the trade's own, not only those: a sweep decides all its trades before any release they queue runs, and another order's booking, enqueued before those releases, can trade first.
+  - **Restore.** The newest record's stops that are restored held are released, in its order and whatever its price, through `Processor::releaseRestored()`, once `app/main.cpp` has matched the orders that lost their fills: a lost release ran after the trades that crossing orders lost. Each is marked pending again first, so that a record those matches write still names it. A record in format version 0 names none: the held stops its price reaches that arrived before the trade are released, as before #518, and marked pending too.
+  - **Known gap.** A release rolled back stays named in the records written before it ran, until the instrument's next trade writes one without it; a restart in between releases a stop the running server left held. A failed transaction is counted and raises the CRITICAL alert (#514).
 
 **Associated Test Cases:**
 
 | Test File | Test Case | Description |
 |-----------|-----------|-------------|
 | `ProcessorTest.cpp` | `ProcessorTest.*Stop*` | Hold, release, order of release, cascade, cancel/replace/suspend, races with the release, restarts, and no release by a trade whose fill didn't apply (#480) |
-| `OrderBookTest.cpp` | `OrderBookTest.*Stop*` | The stop book's order and bounds |
+| `OrderBookTest.cpp` | `OrderBookTest.*Stop*` | The stop book's order and bounds, and its pending releases (#518) |
 | `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReleaseStop_*` | The release's execute, rollback and no-ops |
 | `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReportRelease_*` | The TRIGGERED report, and none for a release that released nothing |
 | `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReportTrigger_*` | The TRIGGERED report for a replacement its replace released, with the replace's figures (#517) |
 | `IntegrationTest.cpp` | `IntegrationTest.Stops*` | A sweep that reaches a stop, on the real manager with four transaction workers |
 | `ProcessorBench.cpp` | `BM_ProcessStopRelease` | A trade that releases a held stop, and the release's transaction, which matches it (#480) |
 | `StorageRecordDispatcherTest.cpp` | `OnlyAWorkingOrderIsBookedOrLeftToMatch`, golden records | Restore placement, format version 2 |
+| `StorageRecordDispatcherTest.cpp` | `ARestoreReleasesTheStopsTheLastTradeNamesOrInVersion0ThoseItsPriceReached`, `ALastTradeRecord*` | The last trade's two formats, and the bounds on version 1's count (#518) |
 
 ---
 
@@ -1508,7 +1514,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 
 **A record has what its decision left (#411).** The transaction that persists a fill can run after a later fill of the order was applied (§4.3), so a record is written from the figures its decision left (`OrderSaver::save(order, figures)`, which `OrderCodec::encode()` and `PGRequestBuilder::fromOrder()` take), not from the order as it is when the transaction runs. A record that counted the later fill, committed before that fill's own transaction, left the order on disk with a trade its counterparty never had: restored, the counterparty was open, and the restart matching above filled it from the order a second time. The layout is unchanged, so the codec's version is too.
 
-**Record format (#149).** A record's first 4 bytes hold its type in the low 16 bits and, in the high 16, the version of the layout its codec wrote (`FORMAT_VERSION`). The order codec's is 4: version 1 added an order's execution instructions (#172), 2 whether a stop order's stop was reached (#223), 3 its ClOrdID, its original's, its source and its destination (#192), and 4 the start of the business day its day figures are for (#244). Every other codec's is 0, so their records' first bytes are the type alone, as they always were. The dispatcher refuses a version newer than the codec reads, by name. Each decoder checks that the record holds every field it reads and that it has read the whole record, so a record cut short or with bytes after its last field is refused rather than misread. `static_assert`s pin the size of every field stored as its in-memory bytes.
+**Record format (#149).** A record's first 4 bytes hold its type in the low 16 bits and, in the high 16, the version of the layout its codec wrote (`FORMAT_VERSION`). The order codec's is 4: version 1 added an order's execution instructions (#172), 2 whether a stop order's stop was reached (#223), 3 its ClOrdID, its original's, its source and its destination (#192), and 4 the start of the business day its day figures are for (#244). The last trade's is 1: version 1 adds the stops whose releases are pending (#518). Every other codec's is 0, so their records' first bytes are the type alone, as they always were. The dispatcher refuses a version newer than the codec reads, by name. Each decoder checks that the record holds every field it reads and that it has read the whole record, so a record cut short or with bytes after its last field is refused rather than misread. `static_assert`s pin the size of every field stored as its in-memory bytes.
 
 `StorageRecordDispatcherTest` holds golden records: the bytes each record type was written as before #149, and an order's in every format version since. The build must write the newest of each and read every field back from all of them, and every prefix of them, and every one with a byte more, must be refused. To change a layout on purpose, bump that codec's `FORMAT_VERSION`, keep decoding the old version, and add golden records for the new one; running the suite with `GOLDEN_PRINT=1` prints what the build writes.
 

@@ -101,17 +101,20 @@ public:
     {
         return ordersToMatch_;
     }
-    /// The held stops the last load found reached by their instrument's last trade, which arrived before it (#237): a
-    /// trade's transaction committed, and the release of a stop it reached didn't. In the order that trade would have
-    /// released them. Processor::releaseRestored() releases each; the server calls it once it has matched
-    /// ordersToMatch(), since a lost release ran after the trades that crossing orders lost.
+    /// The held stops whose releases the last load found lost (#237): a trade's transaction committed, and the release
+    /// of a stop it reached didn't. Since #518 the stops the instrument's last trade names as pending that are restored
+    /// held, in the order their trades reached them, each marked pending in the stop book again; from a record in the
+    /// format before, the stops its price reaches that arrived before it, in the order that trade would have released
+    /// them. Processor::releaseRestored() releases each; the server calls it once it has matched ordersToMatch(), since
+    /// a lost release ran after the trades that crossing orders lost.
     const std::vector<OrderEntry *> &stopsReached() const
     {
         return stopsReached_;
     }
 
     /// reimplemented from OrderSaver: a new version of the instrument's last-trade record (#237)
-    u32 saveLastTrade(const SourceIdT &instrument, PriceT lastPx, const IdT &tradeId) override;
+    u32 saveLastTrade(const SourceIdT &instrument, PriceT lastPx, const IdT &tradeId,
+                      const std::vector<IdT> &pendingReleases) override;
     void eraseLastTrade(const SourceIdT &instrument, u32 version) override;
 
 #ifdef BUILD_PG
@@ -140,9 +143,11 @@ public:
         EXECUTION_RECORDTYPE,
         EXECUTIONS_RECORDTYPE,
         IDLIMIT_RECORDTYPE,   // every id issued is below the limit it holds (#81)
-        LASTTRADE_RECORDTYPE, // an instrument's last trade: its price, and an id drawn when it was made (#237)
+        LASTTRADE_RECORDTYPE, // an instrument's last trade: its price, an id (#237), the releases pending (#518)
         TOTAL_RECORDTYPE
     };
+    /// The last-trade record's layout: version 1 adds the releases pending (#518) to version 0's trade (#237)
+    static constexpr u32 LAST_TRADE_FORMAT_VERSION = 1;
 
 private:
     /// Whether a restored order would have traded with an order that arrived before it: one the matcher's own search
@@ -175,8 +180,10 @@ private:
     struct LastTrade
     {
         u32 version_;
+        u32 formatVersion_; ///< a record in format version 0 names no releases (#518)
         PriceT lastPx_;
         IdT tradeId_; ///< drawn when the trade was made: every order that arrived before it has a smaller id
+        std::vector<IdT> pendingReleases_;
     };
     std::map<IdT, LastTrade> lastTrades_;
     std::vector<OrderEntry *> stopsReached_;

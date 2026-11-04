@@ -342,9 +342,10 @@ int main(int argc, char *argv[])
     }
 
     // 9c. A crash after a trade's transaction committed, and before the release of a held stop it reached did, leaves the
-    // stop held, and only a trade releases one (#237). The trade's transaction persisted its instrument's last trade, and
-    // the load found the stops it reached that were held when it was made. Release them now, after the orders above,
-    // whose lost trades came before the lost releases, and before any client can send an order.
+    // stop held, and only a trade releases one (#237). The trade's transaction persisted its instrument's last trade,
+    // which names the releases pending then (#518), and the load found the stops among them still held. Release them
+    // now, after the orders above, whose lost trades came before the lost releases, and before any client can send an
+    // order.
     const std::vector<OrderEntry *> &stopsReached = dispatcher->stopsReached();
     if (!stopsReached.empty())
     {
@@ -360,7 +361,7 @@ int main(int argc, char *argv[])
             {
                 aux::ExchLogger::instance()->error(
                     "Restored stop " + std::to_string(stop->orderId_.id_) +
-                    " that its instrument's last trade reached could not be released: " + ex.what());
+                    " whose release a trade left pending could not be released: " + ex.what());
             }
             // Each release matches on a transaction worker, and the next one must see its trades
             while (0 != transactMgr->pendingTransactions())

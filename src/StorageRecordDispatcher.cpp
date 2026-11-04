@@ -20,6 +20,7 @@
 #include "ClearingCodec.h"
 #include "RawDataCodec.h"
 #include "OrderCodec.h"
+#include "CodecChecks.h"
 #include "OrderStorage.h"
 #include "OrderMatcher.h"
 #include "Logger.h"
@@ -77,9 +78,9 @@ void expectFormat(const char *record, u32 formatVersion, u32 newestReadable)
 /// id 0 is the empty execution list at (0,0), so (0,1) belongs to no other record.
 const IdT ID_LIMIT_RECORD_ID(0, 1);
 /// The last-trade record's layout (#237): the instrument's id, the price, a double, and the trade's id. An id is its u64
-/// number, then its u32 date.
-const u32 LAST_TRADE_FORMAT_VERSION = 0;
-const size_t LAST_TRADE_RECORD_SIZE = sizeof(u32) + 2 * (sizeof(u64) + sizeof(u32)) + sizeof(PriceT);
+/// number, then its u32 date. Since format version 1 (#518) a u32 count follows, then each pending release's stop id.
+const size_t RECORD_ID_SIZE = sizeof(u64) + sizeof(u32);
+const size_t LAST_TRADE_RECORD_SIZE = sizeof(u32) + 2 * RECORD_ID_SIZE + sizeof(PriceT);
 void appendId(string *buffer, const IdT &id)
 {
     buffer->append(reinterpret_cast<const char *>(&id.id_), sizeof(id.id_));
@@ -211,15 +212,37 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
     case LASTTRADE_RECORDTYPE:
     {
         expectFormat("Last trade", formatVersion, LAST_TRADE_FORMAT_VERSION);
-        if (LAST_TRADE_RECORD_SIZE != size)
+        if ((0 == formatVersion) ? (LAST_TRADE_RECORD_SIZE != size) : (LAST_TRADE_RECORD_SIZE + sizeof(u32) > size))
         {
-            throw std::runtime_error("Last trade record is not 36 bytes, record could not be restored!");
+            throw std::runtime_error((0 == formatVersion)
+                                         ? "Last trade record is not 36 bytes, record could not be restored!"
+                                         : "Last trade record is shorter than 40 bytes, record could not be restored!");
         }
         SourceIdT instrument;
-        LastTrade trade{ version, 0.0, IdT() };
+        LastTrade trade{ version, formatVersion, 0.0, IdT(), {} };
         const char *p = readId(buf + sizeof(word), &instrument);
         memcpy(&trade.lastPx_, p, sizeof(trade.lastPx_));
-        readId(p + sizeof(trade.lastPx_), &trade.tradeId_);
+        p = readId(p + sizeof(trade.lastPx_), &trade.tradeId_);
+        if (0 < formatVersion)
+        {
+            // How many releases were pending, each one's stop, and nothing after them (#518). The count is checked
+            // against what the record holds before anything is read or allocated.
+            u32 count = 0;
+            memcpy(&count, p, sizeof(count));
+            p += sizeof(count);
+            const char *const end = buf + size;
+            if (static_cast<size_t>(end - p) / RECORD_ID_SIZE < count)
+            {
+                throw std::runtime_error(
+                    "Last trade record names more pending releases than it holds, record could not be restored!");
+            }
+            trade.pendingReleases_.resize(count);
+            for (IdT &stop : trade.pendingReleases_)
+            {
+                p = readId(p, &stop);
+            }
+            Codec::expectConsumed(p, end, "last trade");
+        }
         if (lastTradeKey(instrument) != id)
         {
             throw std::runtime_error("Last trade record keyed for another instrument, record could not be restored!");
@@ -373,9 +396,9 @@ void StorageRecordDispatcher::finishLoad()
     }
     pendingOrders_.clear();
 
-    // The held stops each instrument's last trade reached (#237). A trade's release is a transaction of its own, after
-    // the trade's, so a crash between the two leaves a stop held that the trade reached. Only a stop that was held when
-    // the trade was made: one that arrived after it waits for the next trade, as it would have.
+    // The held stops whose releases a crash lost (#237). A trade's release is a transaction of its own, after the trade's,
+    // so a crash between the two leaves a stop held that the trade reached. Only a stop that was held when the trade was
+    // made: one that arrived after it waits for the next trade, as it would have.
     stopsReached_.clear();
     if (nullptr != orderBook_)
     {
@@ -385,6 +408,25 @@ void StorageRecordDispatcher::finishLoad()
             {
                 continue;
             }
+            // Since #518 the record names the releases pending when it was written, as the running server decided them:
+            // a trade reaches a stop that the stop book holds as the trade is decided. Each one restored held is
+            // released, at whatever price, since an earlier trade may have reached it. A record in the format before
+            // names none, and its price and id say what it reached. Either way each stop to release is marked pending
+            // again: the server's own matching (#207) runs before the releases, and the records its trades write must
+            // still name them.
+            if (0 < trade.formatVersion_)
+            {
+                for (const IdT &stopId : trade.pendingReleases_)
+                {
+                    OrderEntry *stop = (nullptr != orderStorage_) ? orderStorage_->locateByOrderId(stopId) : nullptr;
+                    if ((nullptr != stop) && (stop->instrument_.getId() == instrument) &&
+                        orderBook_->markReleasePending(*stop))
+                    {
+                        stopsReached_.push_back(stop);
+                    }
+                }
+                continue;
+            }
             OrderBook::OrdersT reached;
             orderBook_->triggeredStops(instrument, trade.lastPx_, &reached);
             for (const IdT &stopId : reached)
@@ -392,6 +434,7 @@ void StorageRecordDispatcher::finishLoad()
                 OrderEntry *stop = (nullptr != orderStorage_) ? orderStorage_->locateByOrderId(stopId) : nullptr;
                 if ((nullptr != stop) && (stop->orderId_.id_ < trade.tradeId_.id_))
                 {
+                    orderBook_->markReleasePending(*stop);
                     stopsReached_.push_back(stop);
                 }
             }
@@ -613,14 +656,22 @@ void StorageRecordDispatcher::abortGroup() noexcept
     }
 }
 
-u32 StorageRecordDispatcher::saveLastTrade(const SourceIdT &instrument, PriceT lastPx, const IdT &tradeId)
+u32 StorageRecordDispatcher::saveLastTrade(const SourceIdT &instrument, PriceT lastPx, const IdT &tradeId,
+                                           const std::vector<IdT> &pendingReleases)
 {
     assert(nullptr != fileStorage_);
     string buffer = recordWord(LASTTRADE_RECORDTYPE, LAST_TRADE_FORMAT_VERSION);
     appendId(&buffer, instrument);
     buffer.append(reinterpret_cast<const char *>(&lastPx), sizeof(lastPx));
     appendId(&buffer, tradeId);
-    assert(LAST_TRADE_RECORD_SIZE == buffer.size());
+    // Format version 1 (#518): how many releases are pending, then each one's stop
+    const u32 count = static_cast<u32>(pendingReleases.size());
+    buffer.append(reinterpret_cast<const char *>(&count), sizeof(count));
+    for (const IdT &stop : pendingReleases)
+    {
+        appendId(&buffer, stop);
+    }
+    assert(LAST_TRADE_RECORD_SIZE + sizeof(count) + count * RECORD_ID_SIZE == buffer.size());
     // A new version, which erases all but the newest older one (#148), as an order's does
     return fileStorage_->update(lastTradeKey(instrument), buffer.data(), buffer.size());
 }
