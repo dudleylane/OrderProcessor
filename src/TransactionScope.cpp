@@ -77,6 +77,8 @@ const char *operationName(OperationType type) noexcept
         return "PERSIST_LASTTRADE_TROPERATION";
     case REPORT_RESTATEMENT_TROPERATION:
         return "REPORT_RESTATEMENT_TROPERATION";
+    case REPORT_TRIGGER_TROPERATION:
+        return "REPORT_TRIGGER_TROPERATION";
     }
     return "an operation of an unknown type";
 }

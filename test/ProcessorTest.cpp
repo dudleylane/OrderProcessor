@@ -2657,6 +2657,149 @@ TEST_F(ProcessorTest, ACancelEnqueuedBeforeAStopsReleaseWins)
     EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
 }
 
+namespace
+{
+/// A client's replacement for the order under a ClOrdID of its own, as a replace makes one: the engine decides whether
+/// its stop was reached
+OrderEntry *replacementFor(const OrderEntry &order)
+{
+    OrderEntry *replacement = order.clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = order.clOrderId_;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    replacement->stopTriggered_ = false;
+    return replacement;
+}
+} // namespace
+
+TEST_F(ProcessorTest, AStopReplacedBeforeItsReleaseRunsIsReleasedAsItsReplacement)
+{
+    // A trade reaches the stop, and a replace of it is enqueued before the trade's transaction enqueues the release, as
+    // ACancelEnqueuedBeforeAStopsReleaseWins enqueues a cancel. The replace runs first, and finds the stop still held
+    // but reached (#517): its replacement is released as it is made, a STOP to trade as a market order, with the
+    // TRIGGERED report the original's release would have sent. The release then finds the original replaced.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *bid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+    OrderEntry *replacement = replacementFor(*stop);
+    replacement->orderQty_ = 20;
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+
+    transMgr_->keep_ = true; // the sell's booking and the replace are enqueued, in that order, before either runs
+    inQueues_->push("test", OrderEvent(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5).release()));
+    engine.processor_.process();
+    inQueues_->push("test", OrderReplaceEvent(stop->orderId_, replacement));
+    engine.processor_.process();
+    transMgr_->keep_ = false;
+    ASSERT_EQ(2u, transMgr_->kept_.size());
+    transMgr_->runKept();
+
+    EXPECT_EQ(REPLACED_ORDSTATUS, stop->status_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, REPLACE_EXECTYPE }), engine.reports_.reportTypesOf(stop->orderId_))
+        << "the release reported the original it found replaced";
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    EXPECT_TRUE(live->stopTriggered_);
+    EXPECT_EQ(FILLED_ORDSTATUS, live->status_);
+    EXPECT_EQ(std::vector<std::string>{ "20@10" }, engine.reports_.tradesOf(live->orderId_));
+    EXPECT_EQ((std::vector<ExecType>{ REPLACE_EXECTYPE, TRIGGERED_EXECTYPE, TRADE_EXECTYPE }),
+              engine.reports_.reportTypesOf(live->orderId_));
+    EXPECT_EQ(75u, bid->leavesQty_);
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty()) << "the replacement is held at the stop the trade reached";
+}
+
+TEST_F(ProcessorTest, AStopLimitReplacedBeforeItsReleaseRunsRestsAsItsReplacement)
+{
+    // As above for a STOPLIMIT: released as it is made, its replacement rests at its own limit (#517)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 9.5, 20), STOPLIMIT_ORDERTYPE, 10.0));
+    OrderEntry *replacement = replacementFor(*stop);
+    replacement->price_ = 9.6;
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+
+    transMgr_->keep_ = true;
+    inQueues_->push("test", OrderEvent(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5).release()));
+    engine.processor_.process();
+    inQueues_->push("test", OrderReplaceEvent(stop->orderId_, replacement));
+    engine.processor_.process();
+    transMgr_->keep_ = false;
+    ASSERT_EQ(2u, transMgr_->kept_.size());
+    transMgr_->runKept();
+
+    EXPECT_EQ(REPLACED_ORDSTATUS, stop->status_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, REPLACE_EXECTYPE }), engine.reports_.reportTypesOf(stop->orderId_));
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    EXPECT_TRUE(live->stopTriggered_);
+    EXPECT_EQ(NEW_ORDSTATUS, live->status_);
+    EXPECT_EQ((std::vector<ExecType>{ REPLACE_EXECTYPE, TRIGGERED_EXECTYPE }),
+              engine.reports_.reportTypesOf(live->orderId_));
+    EXPECT_EQ(live->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE)) << "the replacement doesn't rest at its limit";
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
+}
+
+TEST_F(ProcessorTest, AStopsNewStopPxIsRefusedBeforeItsReleaseRunsAndTheReleaseReleasesIt)
+{
+    // The stop was reached, so a new stopPx means nothing, even before its release runs (#238, #517). The stop stays
+    // held for its release, which releases it.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 9.5, 20), STOPLIMIT_ORDERTYPE, 10.0));
+    OrderEntry *replacement = replacementFor(*stop);
+    replacement->stopPx_ = 10.5;
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+
+    transMgr_->keep_ = true;
+    inQueues_->push("test", OrderEvent(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5).release()));
+    engine.processor_.process();
+    inQueues_->push("test", OrderReplaceEvent(stop->orderId_, replacement));
+    engine.processor_.process();
+    transMgr_->keep_ = false;
+    ASSERT_EQ(2u, transMgr_->kept_.size());
+    transMgr_->runKept();
+
+    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByClOrderId(replacementId)) << "the replacement was stored";
+    EXPECT_EQ(NEW_ORDSTATUS, stop->status_);
+    EXPECT_TRUE(stop->stopTriggered_);
+    EXPECT_DOUBLE_EQ(10.0, stop->stopPx_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRIGGERED_EXECTYPE }),
+              engine.reports_.reportTypesOf(stop->orderId_));
+    EXPECT_EQ(stop->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
+}
+
+TEST_F(ProcessorTest, AStopReplacedBeforeItsReleaseRunsWithNoMarketIsRefusedAndItsReleaseCancelsIt)
+{
+    // The trade took the last bid, so the STOP's replacement, released as it is made, would have nothing to trade
+    // with: refused, as a released stop's replacement is (#517). The stop's release then finds no bid, and the engine
+    // cancels the stop, as it cancels what a released STOP can't trade.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+    OrderEntry *replacement = replacementFor(*stop);
+    replacement->orderQty_ = 20;
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+
+    transMgr_->keep_ = true;
+    inQueues_->push("test", OrderEvent(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5).release()));
+    engine.processor_.process();
+    inQueues_->push("test", OrderReplaceEvent(stop->orderId_, replacement));
+    engine.processor_.process();
+    transMgr_->keep_ = false;
+    ASSERT_EQ(2u, transMgr_->kept_.size());
+    transMgr_->runKept();
+
+    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByClOrderId(replacementId)) << "the replacement was stored";
+    EXPECT_EQ(CANCELED_ORDSTATUS, stop->status_);
+    EXPECT_TRUE(stop->stopTriggered_);
+    EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty());
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRIGGERED_EXECTYPE, CANCEL_EXECTYPE }),
+              engine.reports_.reportTypesOf(stop->orderId_));
+    EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
+}
+
 TEST_F(ProcessorTest, AStopSuspendedBeforeItsReleaseRunsIsReleasedByATradeOnceResumed)
 {
     // The release finds the stop suspended and does nothing, and the suspend takes it out of the stop book. Resumed, it
@@ -2853,6 +2996,8 @@ TEST_F(ProcessorTest, AReleasedStopLimitsReplacementStaysReleased)
     EXPECT_TRUE(live->stopTriggered_);
     EXPECT_EQ(live->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
     EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty()) << "the replacement is held again";
+    EXPECT_EQ(std::vector<ExecType>{ REPLACE_EXECTYPE }, engine.reports_.reportTypesOf(live->orderId_))
+        << "the replacement was reported triggered again, though its original's release had reported it (#517)";
 }
 
 TEST_F(ProcessorTest, AReleasedStopLimitsStopPxCantBeReplaced)

@@ -260,6 +260,12 @@ public:
     /// a STOP to trade as a market order and a STOPLIMIT as a limit order (#223). Until then the order is held in its
     /// instrument's stop book. Persisted (OrderCodec format version 2).
     bool stopTriggered_ = false;
+    /// A trade reached the held stop's stop price and queued its release (OrderMatcher::afterTrade(), #517), which may
+    /// not have run yet. Set as the release is claimed, under the order's write lock, and cleared with stopTriggered_ if
+    /// the release rolls back. A replace decided before the release runs decides the order as a released one: the
+    /// release would find it replaced and release nothing. In the two bytes of padding before stopPx_, so the order's
+    /// size doesn't change. Not persisted: a restart releases by the instrument's last trade (#237). A copy starts clear.
+    bool stopReached_ = false;
 
     // --- Warm fields (accessed during processing) ---
     PriceT stopPx_;
