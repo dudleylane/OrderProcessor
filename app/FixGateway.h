@@ -325,6 +325,10 @@ public:
     /// have, as on WebSocket. ExpireDate (432) isn't read.
     static std::optional<std::string> expiryRefusal(const FIX::FieldMap &msg, TimeInForce tif, DateTimeT now,
                                                     DateTimeT *expireTime);
+    /// Why an order is refused for its MinQty (110), or nothing (#516): the engine enforces no minimum quantity and
+    /// filled below one, so a MinQty other than 0 is refused rather than ignored, until a matching rule enforces it
+    /// (#666). MinQtyMethod (1822) means nothing without it, and isn't read.
+    static std::optional<std::string> minQtyRefusal(const FIX::FieldMap &msg);
     /// An expiry the engine keeps as an ExpireTime (126) carries it, to the millisecond (#240)
     static FIX::UtcTimeStamp toUtcTimeStamp(DateTimeT when);
 

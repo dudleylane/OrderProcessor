@@ -453,6 +453,8 @@ COP (Concurrent Order Processor)
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+The matcher has no minimum quantity. An order's `minQty_` is stored, persisted and reported, but nothing reads it, so the WebSocket parser refuses a `minQty` other than 0 rather than ignore it (#516), and the FIX gateway refuses MinQty (110) other than 0 too, with OrdRejReason 11 on a new order or a swap and an OrderCancelReject on a replace. An order stored before #516 keeps its own, still unenforced. Making it a matching rule is #666.
+
 **Associated Test Cases:**
 
 | Test File | Test Case | Description |
@@ -466,6 +468,7 @@ COP (Concurrent Order Processor)
 | `ProcessorTest.cpp` | `ASwapTradesNothingWhenItsContrasFillDoesntApply` | A swap whose contra's near fill doesn't apply trades nothing, with no far leg reported for either side, and its sweep ends there, the swap resting with what it has left (#481) |
 | `ProcessorTest.cpp` | `AnIocSwapWhoseContrasFillDoesntApplyIsCanceled`, `AFokSwapWhoseContrasFillDoesntApplyIsCanceled` | A swap that never rests is canceled with what it has left when its sweep ends at a fill that didn't apply (#485) |
 | `ProcessorTest.cpp` | `ASwapTradeItsAggressorHasTooLittleLeftForFillsNeitherSide`, `ASwapTradeWhoseAggressorIsSuspendedFillsNeitherSide`, `ASwapTradeWhoseAggressorIsClosedFillsNeitherSideAndCancelsNothing` | A swap trade fills both sides or neither: one whose swap can't take its near leg whole fills and reports nothing, and a swap that isn't working isn't canceled (#483) |
+| `ClientMessageParserTest.cpp` | `AMinQtyOtherThanZeroIsRefused` | A `new_order`'s `minQty` other than 0 is refused, since nothing enforces it (#516) |
 | `IntegrationTest.cpp` | `IntegrationTest.*` | Order matching in full flow |
 | `ProcessorBench.cpp` | `BM_ProcessNewOrderWithMatch`, `BM_ProcessSwapWithMatch`, `BM_ProcessSweep`, `BM_ProcessSwapSweep`, `BM_TaskManagerTrades` | Matching through a `Processor`, a swap's too, a sweep that takes four resting orders, each of its next matches finding the next (#477), a swap's sweep the same way, and through the worker pool |
 | `OrderMatchingBench.cpp` | `BM_OrderBook*` | The book the matcher searches: add, remove, find, top of book |

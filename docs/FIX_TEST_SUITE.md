@@ -405,17 +405,18 @@ Runs `orderProcessorServer` with a certificate made for the run, and checks, on 
 
 ---
 
-## 19. FixQuantityTest, FixPriceTest and FixExpireTimeTest — What the Gateway Takes
+## 19. FixQuantityTest, FixPriceTest, FixExpireTimeTest and FixMinQtyTest — What the Gateway Takes
 
 **File:** `test/FixGatewayTest.cpp`
 **Requires:** `BUILD_FIX=ON`
 
-The checks the gateway makes on a quantity, a price and an ExpireTime before the engine sees them (#145, #511).
+The checks the gateway makes on a quantity, a price, an ExpireTime and a MinQty before the engine sees them (#145, #511, #516).
 
 | Test | Description |
 |------|-------------|
 | `OrderQtyIsAWholeNumberTheEngineCanHold` (FixQuantityTest) | `toQuantity()`: 1, 100 and 4294967295 → those; -5, 4294967296, 0.5, 0, -0, 4294967295.5, 1e300, both infinities and NaN → none |
 | `APriceIsFiniteAndAboveZeroUnlessTheOrderIsAMarketOrder` (FixPriceTest) | `isTradablePrice()`: a limit order's or a swap's price is finite and above 0; a market order's may be 0, but not infinite |
+| `OnlyAMinQtyOfZeroIsTaken` (FixMinQtyTest) | `minQtyRefusal()`: none, 0, 0.0 and -0 are taken; 1, 50, 0.5, -5, 4294967295 and a value that isn't a number are refused with the reason, since the engine enforces no minimum quantity (#516) |
 | `AnExpireTimePastWhatTheServerCanWaitUntilIsRefused` (FixExpireTimeTest) | `expiryRefusal()`: a GTD order's ExpireTime (126) at 22620411-23:47:16.854, the last millisecond the engine's expiry thread can wait until, is taken; one a millisecond later, or at 99991231-23:59:59, is refused with the reason (#511) |
 
 ---
@@ -438,6 +439,8 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `AMessageTypeTheGatewayDoesntTakeIsRefusedReadably` | News (35=B) gets the gateway's BusinessMessageReject, 380=3; QuickFIX's own carried 1137, which a counterparty that validates refuses |
 | `ARequestWithoutAFieldTheGatewayNeedsIsRefusedReadably` | A cancel without OrigClOrdID (41) and an order without OrderQty (38), which FIX 5.0 SP2 doesn't require, get a BusinessMessageReject, 380=5, naming the field |
 | `TheGatewaysOwnRefusalsAreTaken` | The gateway's refusal of an unknown symbol (35=8), and of a cancel and a replace of an unknown order (35=9) |
+| `AMinQtyOtherThanZeroIsRefusedOnEveryOrderMessage` | MinQty (110) 50 on a NewOrderSingle and a NewOrderMultileg gets an ExecutionReport, 150=8, 39=8, OrdRejReason 103=11 and the reason in Text (58), and on a replace an OrderCancelReject with it; nothing reaches the engine (#516) |
+| `AMinQtyOfZeroIsTaken` | 110=0 on each of the three reaches the engine, and the gateway sends nothing (#516) |
 | `TheEnginesRefusalsAreTaken` | The engine's refusals as the gateway reports them: a new order and a replacement whose ClOrdID is in use, a cancel too late, a business reject |
 | `EveryKindOfExecutionReportIsTaken` | Every ExecType the gateway sends, a stop's release (150=L, #236) among them, and a trade, a correction, a cancel's acknowledgement and a replacement's report, each with the order's OrderQty (38) as a counterparty reads it (#384) |
 | `AReplacementAmendedToWhatItsOriginalFilledIsReportedFilled` | EP284's C.3.b and C.3.c: the report of a replacement amended to what its original filled is taken, 150=5 and 39=2 with OrderQty its CumQty, LeavesQty 0, both ClOrdIDs and no WorkingIndicator (#381) |
