@@ -703,7 +703,10 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │                  nothing left → FILLED, REPLACE report only (#381)       │
 │   • A held stop's replacement is held at its own stop; a released        │
 │     one's stays released if it is still a stop order (#223), and a       │
-│     new stopPx for it is refused (#238)                                  │
+│     new stopPx for it is refused (#238). A stop a trade reached before   │
+│     its release ran is decided as a released one (stopReached_, #517),   │
+│     and its replacement, released as it is made, gets the TRIGGERED      │
+│     report its original's release would have sent                        │
 │   • A refusal → RefuseReplaceTrOperation (OrderRejectEvent)              │
 └──────────────────────────────────────────────────────────────────────────┘
          │
@@ -714,7 +717,8 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │   • OrderBook.remove(original); MatchOrder(replacement), then            │
 │     OrderBook.add(replacement) unless it is a market order               │
 │   • OutQueues: REPLACE for the original (REPLACED) and the replacement,  │
-│     both naming the original in origOrderId; or the refusal              │
+│     both naming the original in origOrderId, then TRIGGERED for a        │
+│     replacement released as it is made (#517); or the refusal            │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -746,7 +750,9 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │     buy stops at or below it, lowest first; sell stops at or above it,   │
 │     highest first; each price in arrival order. Queue a                  │
 │     ReleaseStopDeferedEvent for each, once per chain of events           │
-│     (claimStopRelease), ahead of the sweep's next match (#477)           │
+│     (claimStopRelease), ahead of the sweep's next match (#477), and      │
+│     mark the stop reached (stopReached_), for a replace that runs        │
+│     before its release (#517)                                            │
 │   • Queued once the fills are decided: a match rolled back drops the     │
 │     trade's event, and a decision that throws drops the rest of the      │
 │     chain, so neither releases anything                                  │
@@ -771,7 +777,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │     (no contra: canceled), a STOPLIMIT as a limit order, then booked     │
 │     with what is left                                                    │
 │   • Rollback: undo the booking, drop its deferred events, clear the      │
-│     flag, hold the stop again                                            │
+│     flag and the stop's reached mark (#517), hold the stop again         │
 └──────────────────────────────────────────────────────────────────────────┘
        │
        ▼
@@ -796,6 +802,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 | `OrderBookTest.cpp` | `OrderBookTest.*Stop*` | The stop book's order and bounds |
 | `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReleaseStop_*` | The release's execute, rollback and no-ops |
 | `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReportRelease_*` | The TRIGGERED report, and none for a release that released nothing |
+| `TrOperationsTest.cpp` | `MatchOrderOperationTest.ReportTrigger_*` | The TRIGGERED report for a replacement its replace released, with the replace's figures (#517) |
 | `IntegrationTest.cpp` | `IntegrationTest.Stops*` | A sweep that reaches a stop, on the real manager with four transaction workers |
 | `ProcessorBench.cpp` | `BM_ProcessStopRelease` | A trade that releases a held stop, and the release's transaction, which matches it (#480) |
 | `StorageRecordDispatcherTest.cpp` | `OnlyAWorkingOrderIsBookedOrLeftToMatch`, golden records | Restore placement, format version 2 |

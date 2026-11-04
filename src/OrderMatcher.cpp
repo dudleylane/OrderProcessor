@@ -298,6 +298,12 @@ void OrderMatcher::afterTrade(OrderEntry *order, QuantityT leavesBefore, PriceT 
                 OrderEntry *stop = ctxt.orderStorage_->locateByOrderId(stopId);
                 if ((nullptr != stop) && defered_->claimStopRelease(stopId))
                 {
+                    // Reached now, at the decision: a replace that runs before the release decides the stop as a
+                    // released one, which the release, finding it replaced, wouldn't (#517)
+                    {
+                        oneapi::tbb::spin_rw_mutex::scoped_lock lock(stop->entryMutex_, true);
+                        stop->stopReached_ = true;
+                    }
                     defered_->addDeferedEvent(new ReleaseStopDeferedEvent(stop));
                 }
             }
