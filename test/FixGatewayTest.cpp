@@ -1584,6 +1584,31 @@ TEST(FixExpireTimeTest, AnExpireTimePastWhatTheServerCanWaitUntilIsRefused)
     }
 }
 
+TEST(FixMinQtyTest, OnlyAMinQtyOfZeroIsTaken)
+{
+    // The engine enforces no minimum quantity, and filled below one, so MinQty (110) other than 0 is refused (#516)
+    const auto refusalOf = [](const char *minQty)
+    {
+        FIX::Message msg;
+        if (nullptr != minQty)
+        {
+            msg.setField(FIX::FIELD::MinQty, minQty);
+        }
+        return FixGateway::minQtyRefusal(msg);
+    };
+    for (const char *taken : { static_cast<const char *>(nullptr), "0", "0.0", "-0" })
+    {
+        EXPECT_EQ(std::nullopt, refusalOf(taken)) << (taken ? taken : "(none)");
+    }
+    for (const char *refused : { "1", "50", "0.5", "-5", "4294967295", "abc" })
+    {
+        EXPECT_EQ(std::optional<std::string>(
+                      "MinQty (110) must be 0 or left out: the server doesn't enforce a minimum quantity"),
+                  refusalOf(refused))
+            << refused;
+    }
+}
+
 // =============================================================================
 // Session Routing Tests
 // =============================================================================
@@ -3502,6 +3527,88 @@ void setState(OrderEntry *order, OrderStatus status, QuantityT orderQty, Quantit
     order->cumQty_ = cumQty;
     order->leavesQty_ = leavesQty;
     order->published_ = OrderFigures(*order);
+}
+
+TEST_F(FixtSessionTest, AMinQtyOtherThanZeroIsRefusedOnEveryOrderMessage)
+{
+    // MinQty (110), which the engine doesn't enforce, is refused rather than ignored (#516): a NewOrderSingle and a
+    // NewOrderMultileg with an ExecutionReport, 150=8 and OrdRejReason 103=11 (unsupported order characteristic), and a
+    // replace with an OrderCancelReject. Nothing reaches the engine.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, NEW_ORDSTATUS, 100, 0, 100);
+
+    FIX50SP2::NewOrderSingle single =
+        makeNewOrderSingle("ORD-MIN", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100);
+    single.set(FIX::MinQty(50));
+    receive(single);
+    FIX50SP2::NewOrderMultileg swap = makeFxSwap("SWAP-MIN");
+    swap.set(FIX::MinQty(50));
+    receive(swap);
+    FIX50SP2::OrderCancelReplaceRequest replace = makeLimitReplace("ORD-X", "RPL-MIN");
+    replace.set(FIX::MinQty(50));
+    receive(replace);
+
+    const std::string why = "MinQty (110) must be 0 or left out: the server doesn't enforce a minimum quantity";
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(2u, reports.size()) << sentText();
+    const std::vector<std::string> refused{ "ORD-MIN", "SWAP-MIN" };
+    for (size_t i = 0; i < reports.size(); ++i)
+    {
+        SCOPED_TRACE(refused[i]);
+        EXPECT_EQ(refused[i], fieldOf(reports[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ(std::string(1, FIX::ExecType_REJECTED), fieldOf(reports[i], FIX::FIELD::ExecType));
+        EXPECT_EQ(std::string(1, FIX::OrdStatus_REJECTED), fieldOf(reports[i], FIX::FIELD::OrdStatus));
+        EXPECT_EQ(std::to_string(FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC),
+                  fieldOf(reports[i], FIX::FIELD::OrdRejReason));
+        EXPECT_EQ("Order refused: " + why, fieldOf(reports[i], FIX::FIELD::Text));
+    }
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(1u, rejects.size()) << sentText();
+    EXPECT_EQ("RPL-MIN", fieldOf(rejects[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("ORD-X", fieldOf(rejects[0], FIX::FIELD::OrigClOrdID));
+    EXPECT_EQ("Replace refused: " + why, fieldOf(rejects[0], FIX::FIELD::Text));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AMinQtyOfZeroIsTaken)
+{
+    // 110=0 asks for no minimum, so the order, the swap and the replace each reach the engine, unanswered by the gateway
+    // (#516)
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::vector<std::unique_ptr<OrderEntry>> pushed; // never reach an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .Times(2)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.emplace_back(evt.order_);
+            }));
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                pushed.emplace_back(evt.replacementOrder_);
+            }));
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, NEW_ORDSTATUS, 100, 0, 100);
+
+    FIX50SP2::NewOrderSingle single =
+        makeNewOrderSingle("ORD-ZERO", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100);
+    single.set(FIX::MinQty(0));
+    receive(single);
+    FIX50SP2::NewOrderMultileg swap = makeFxSwap("SWAP-ZERO");
+    swap.set(FIX::MinQty(0));
+    receive(swap);
+    FIX50SP2::OrderCancelReplaceRequest replace = makeLimitReplace("ORD-X", "RPL-ZERO");
+    replace.set(FIX::MinQty(0));
+    receive(replace);
+
+    EXPECT_EQ(3u, pushed.size());
+    EXPECT_TRUE(sentOfType(FIX::MsgType_ExecutionReport).empty()) << sentText();
+    EXPECT_TRUE(sentOfType(FIX::MsgType_OrderCancelReject).empty()) << sentText();
 }
 
 TEST_F(FixtSessionTest, AStatusRequestIsAnsweredWithTheOrdersStateAndQuantities)

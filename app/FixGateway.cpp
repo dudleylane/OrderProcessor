@@ -968,6 +968,12 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
         refuseOrder(msg, sid, FIX::OrdRejReason_INCORRECT_QUANTITY, "Order refused: " + quantityRefusal());
         return;
     }
+    // A minimum quantity, which the engine doesn't enforce, as an unsupported order characteristic (#516)
+    if (const std::optional<std::string> refusal = minQtyRefusal(msg))
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC, "Order refused: " + *refusal);
+        return;
+    }
     const OrderType ordTypeVal = toOrdType(ordType.getValue());
     if (msg.isSet(price) && !isTradablePrice(priceVal, ordTypeVal))
     {
@@ -1239,11 +1245,16 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
                       "Order refused: the server has no clearing firm");
         return;
     }
-    // As for NewOrderSingle, before the quantity is narrowed or anything is stored (#145)
+    // As for NewOrderSingle, before the quantity is narrowed or anything is stored (#145), and its minimum (#516)
     const std::optional<QuantityT> qty = toQuantity(orderQty.getValue());
     if (!qty)
     {
         refuseOrder(msg, sid, FIX::OrdRejReason_INCORRECT_QUANTITY, "Order refused: " + quantityRefusal());
+        return;
+    }
+    if (const std::optional<std::string> refusal = minQtyRefusal(msg))
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC, "Order refused: " + *refusal);
         return;
     }
 
@@ -1508,6 +1519,13 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
             return;
         }
         replacement->orderQty_ = *qty;
+    }
+    // A minimum quantity, as for a new order (#516). One of 0 is taken, and the replacement keeps its original's, as a
+    // replace_order on WebSocket does: 0, but for an order stored before #516.
+    if (const std::optional<std::string> refusal = minQtyRefusal(msg))
+    {
+        refuse("Replace refused: " + *refusal);
+        return;
     }
 
     // A GTD replacement expires at its ExpireTime (126), the original's or a new one ahead of it, and only a GTD order
@@ -2555,6 +2573,26 @@ std::optional<std::string> FixGateway::expiryRefusal(const FIX::FieldMap &msg, T
     }
     *expireTime = when;
     return std::nullopt;
+}
+
+std::optional<std::string> FixGateway::minQtyRefusal(const FIX::FieldMap &msg)
+{
+    if (!msg.isSetField(FIX::FIELD::MinQty))
+    {
+        return std::nullopt;
+    }
+    try
+    {
+        if (0.0 == FIX::DoubleConvertor::convert(msg.getField(FIX::FIELD::MinQty)))
+        {
+            return std::nullopt;
+        }
+    }
+    catch (const FIX::FieldConvertError &)
+    {
+        // Not a number: refused too, which a session's own check of the field's type does first
+    }
+    return std::string("MinQty (110) must be 0 or left out: the server doesn't enforce a minimum quantity");
 }
 
 FIX::UtcTimeStamp FixGateway::toUtcTimeStamp(DateTimeT when)

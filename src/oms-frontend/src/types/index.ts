@@ -44,6 +44,8 @@ export interface Order {
   orderQty: number;
   cumQty: number;
   leavesQty: number;
+  /** 0 for every order the server takes since #516, which refuses a minimum it doesn't enforce; an order stored before
+   *  keeps its own, still unenforced */
   minQty: number;
   /** The business day's figures (#244): what the order had left to trade when the day began, and the day's fills */
   dayOrderQty: number;
@@ -170,7 +172,6 @@ export interface NewOrderRequest {
   price?: number;
   stopPx?: number;
   orderQty: number;
-  minQty?: number;
   tif: TimeInForce;
   /** A GTD order's expiry, in milliseconds since the epoch, required for GTD and refused for any other (#240) */
   expireTime?: number;
