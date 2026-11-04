@@ -772,11 +772,17 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
         evnt.transaction_->addOperation(op);
     };
 
-    // A released stop's replacement, if it is a stop order too, stays released: its stop was reached (#223). Read
-    // without the original's lock: the release that sets it is a transaction on the original, and they run one at a
-    // time, so nothing changes it while this one runs.
-    replacement.stopTriggered_ = original->stopTriggered_ && ((STOP_ORDERTYPE == replacement.ordType_) ||
-                                                              (STOPLIMIT_ORDERTYPE == replacement.ordType_));
+    // A released stop's replacement, if it is a stop order too, stays released: its stop was reached (#223). So is the
+    // replacement of a stop a trade reached before its release ran (#517): the release runs after this replace, finds
+    // the original replaced and releases nothing, so the replacement is released here. Both are read without the
+    // original's lock, which the market check below must come before. The release that sets stopTriggered_, and clears
+    // both if it rolls back, is a transaction on the original. The trade that sets stopReached_ sets it in the drain of
+    // a transaction on the instrument, which ends before the manager takes that transaction out. This replace is a
+    // transaction on both, so neither changes while it runs.
+    const bool reached = original->stopTriggered_ || original->stopReached_;
+    replacement.stopTriggered_ =
+        reached && ((STOP_ORDERTYPE == replacement.ordType_) || (STOPLIMIT_ORDERTYPE == replacement.ordType_));
+    const bool releasedHere = replacement.stopTriggered_ && !original->stopTriggered_;
     // A market replacement, or a released stop's, needs an order to trade with. Asked before the original's lock is
     // taken: a matcher can hold the book's lock while it waits on the original (#74).
     const Side opposite = (BUY_SIDE == replacement.side_) ? SELL_SIDE : BUY_SIDE;
@@ -817,7 +823,7 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
         return;
     }
     // A released stop's stop was reached, so a new stopPx would mean nothing (#238). Decided here, when the replace's
-    // turn comes: the release may have run since the client sent it.
+    // turn comes: the release may have run since the client sent it, or a trade may have queued it (#517).
     if (replacement.stopTriggered_ && (replacement.stopPx_ != original->stopPx_))
     {
         refuse(CancelRejectEvent::OTHER,
@@ -911,6 +917,14 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
     // Persist both as part of this transaction (#20), ahead of the operations that publish their reports (#28)
     persistOrder(evnt.transaction_, *stored);
     persistOrder(evnt.transaction_, *original);
+    // A replacement released here gets the TRIGGERED report its original's release would have sent (#236, #517): after
+    // both REPLACE reports, once it is durable, with what this decision left it (#411). Its trades come after, each in
+    // a transaction of its own.
+    if (releasedHere && stored->working())
+    {
+        std::unique_ptr<Operation> report(new ReportTriggerTrOperation(*stored));
+        evnt.transaction_->addOperation(report);
+    }
     // The replacement's own expiry: its time in force may differ from the original's, whose timer then finds it
     // replaced (#240)
     scheduleExpiry(*stored);

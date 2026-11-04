@@ -829,6 +829,24 @@ TEST_F(MatchOrderOperationTest, ReleaseStop_ReleasesAHeldStopAndRollbackHoldsItA
     EXPECT_EQ(0u, deferedContainer_.deferedEventCount());
 }
 
+TEST_F(MatchOrderOperationTest, ReleaseStop_RollbackClearsTheMarkOfTheTradeThatReachedTheStop)
+{
+    // A release rolled back holds the stop again, and nothing queues it again: the stop is no longer reached, so a
+    // replace doesn't release its replacement (#517)
+    orderBook_->add(*sellOrder_);
+    holdAsStopLimit(buyOrder_, orderBook_.get());
+    buyOrder_->stopReached_ = true; // as the trade that queued the release marks it
+    ReleaseStopTrOperation op(buyOrder_);
+    Context ctx = createContext();
+
+    op.execute(ctx);
+    EXPECT_TRUE(buyOrder_->stopTriggered_);
+    op.rollback(ctx);
+    EXPECT_FALSE(buyOrder_->stopTriggered_);
+    EXPECT_FALSE(buyOrder_->stopReached_);
+    EXPECT_TRUE(orderBook_->holdsStops(instrumentId_));
+}
+
 TEST_F(MatchOrderOperationTest, ReleaseStop_DoesNothingToAStopNoLongerHeldOrWorking)
 {
     // A transaction on the order before it decided first: a cancel, whose own operations take the stop out of the stop
@@ -882,6 +900,34 @@ TEST_F(MatchOrderOperationTest, ReportRelease_ReportsTheReleaseToTheOrdersSource
     EXPECT_EQ(TRIGGERED_EXECTYPE, exec->type_);
     EXPECT_EQ(NEW_ORDSTATUS, exec->orderStatus_);
     EXPECT_EQ(buyOrder_->orderId_, exec->orderId_);
+    EXPECT_EQ(std::string(buyOrder_->source_.get()), out.reports_[0].second);
+}
+
+TEST_F(MatchOrderOperationTest, ReportTrigger_ReportsTheReplacementAsItsReplaceLeftIt)
+{
+    // The TRIGGERED report for a replacement its replace released (#517), with the figures the replace left it (#411),
+    // whatever the order has when the report goes out
+    RecordingOutQueues out;
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, &out, matcher_.get(), IdTGenerator::instance(),
+                &deferedContainer_);
+    buyOrder_->ordType_ = STOPLIMIT_ORDERTYPE;
+    buyOrder_->stopPx_ = 99.0;
+    buyOrder_->stopTriggered_ = true;
+    ReportTriggerTrOperation report(*buyOrder_);
+    EXPECT_EQ(buyOrder_->orderId_, report.getObjectId());
+    buyOrder_->status_ = PARTFILL_ORDSTATUS; // a later decision's
+
+    report.execute(ctx);
+
+    ASSERT_EQ(1u, out.reports_.size());
+    const Queues::ExecReportEvent &sent = out.reports_[0].first;
+    ASSERT_NE(nullptr, sent.exec_);
+    EXPECT_EQ(TRIGGERED_EXECTYPE, sent.exec_->type_);
+    EXPECT_EQ(NEW_ORDSTATUS, sent.exec_->orderStatus_);
+    EXPECT_EQ(buyOrder_->orderId_, sent.exec_->orderId_);
+    ASSERT_TRUE(sent.figures_.has_value());
+    EXPECT_EQ(NEW_ORDSTATUS, sent.figures_->status_);
+    EXPECT_TRUE(sent.figures_->stopTriggered_);
     EXPECT_EQ(std::string(buyOrder_->source_.get()), out.reports_[0].second);
 }
 
