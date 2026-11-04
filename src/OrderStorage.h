@@ -101,9 +101,10 @@ public:
     bool persist(const OrderEntry &order, const OrderFigures &figures, u32 *version);
     /// Erases one persisted version, undoing a persist().
     void unpersist(const IdT &orderId, u32 version);
-    /// Writes a new persisted version of the instrument's last trade (#237), as persist() writes an order's. Returns
-    /// false when no saver is attached, in which case nothing was written.
-    bool persistLastTrade(const SourceIdT &instrument, PriceT lastPx, const IdT &execId, u32 *version);
+    /// Writes a new persisted version of the instrument's last trade (#237), with the releases pending on it (#518), as
+    /// persist() writes an order's. Returns false when no saver is attached, in which case nothing was written.
+    bool persistLastTrade(const SourceIdT &instrument, PriceT lastPx, const IdT &execId,
+                          const std::vector<IdT> &pendingReleases, u32 *version);
     /// Erases one version of it, undoing a persistLastTrade()
     void unpersistLastTrade(const SourceIdT &instrument, u32 version);
     /// The persists this thread makes between beginPersistGroup() and commitPersistGroup() become durable together, or

@@ -16,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 #include "TransactionDef.h"
 #include "DataModelDef.h"
 #include "DeferedEvents.h"
@@ -183,9 +184,10 @@ private:
     bool written_;
 };
 
-/// Writes a new persisted version of an instrument's last trade, its price and an id drawn when it was made (#237), in the
-/// trade's transaction. It joins the trade's order persists in one commit (#163), so the price is durable with the fills
-/// it comes from. Rollback erases the version it wrote.
+/// Writes a new persisted version of an instrument's last trade, its price and an id drawn when it was made (#237), and the
+/// held stops whose releases are pending on the instrument (#518), in the trade's transaction. It joins the trade's order
+/// persists in one commit (#163), so the price is durable with the fills it comes from. Rollback erases the version it
+/// wrote.
 /// Its object is an id of the instrument's last trade, (instrument number, 2), not the instrument: the transactions that
 /// write it run one after another, as #148's pruning needs of a record's writers, and a trade's fills stay unordered with
 /// the instrument's bookings, cancels and releases, as they were.
@@ -197,6 +199,13 @@ public:
     /// The object every write of the instrument's last trade relates to
     static IdT lastTradeObject(const SourceIdT &instrument);
 
+    /// The stops whose releases are pending, which the trade gives once it has claimed its own (#518). Empty, it
+    /// allocates nothing.
+    std::vector<IdT> *pendingReleases()
+    {
+        return &pendingReleases_;
+    }
+
     void execute(const Context &cnxt) override;
     void rollback(const Context &cnxt) override;
 
@@ -204,6 +213,7 @@ private:
     SourceIdT instrument_;
     PriceT lastPx_;
     IdT tradeId_;
+    std::vector<IdT> pendingReleases_;
     u32 version_ = 0;
     bool written_ = false;
 };

@@ -63,6 +63,8 @@ public:
     MOCK_METHOD(bool, holdsStops, (const SourceIdT &instrument), (const, override));
     MOCK_METHOD(void, triggeredStops, (const SourceIdT &instrument, COP::PriceT lastPx, OrdersT *result),
                 (const, override));
+    MOCK_METHOD(bool, markReleasePending, (const COP::OrderEntry &stop), (override));
+    MOCK_METHOD(void, pendingReleases, (const SourceIdT &instrument, std::vector<IdT> *result), (const, override));
 };
 
 /**
@@ -77,7 +79,9 @@ public:
     MOCK_METHOD(void, commitGroup, (), (override));
     MOCK_METHOD(void, abortGroup, (), (noexcept, override));
     MOCK_METHOD(COP::u32, saveLastTrade,
-                (const COP::SourceIdT &instrument, COP::PriceT lastPx, const COP::IdT &tradeId), (override));
+                (const COP::SourceIdT &instrument, COP::PriceT lastPx, const COP::IdT &tradeId,
+                 const std::vector<COP::IdT> &pendingReleases),
+                (override));
     MOCK_METHOD(void, eraseLastTrade, (const COP::SourceIdT &instrument, COP::u32 version), (override));
 };
 

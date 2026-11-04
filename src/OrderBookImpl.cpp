@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <algorithm>
 #include <stdexcept>
 #include "OrderBookImpl.h"
 #include "OrderStorage.h"
@@ -262,6 +263,19 @@ template <typename StopsT> bool eraseStop(StopsT *stops, PriceT price, const IdT
     }
     return false;
 }
+
+/// Whether a multimap of one side's stops holds (price, id)
+template <typename StopsT> bool holdsStop(const StopsT &stops, PriceT price, const IdT &id)
+{
+    for (auto range = stops.equal_range(price); range.first != range.second; ++range.first)
+    {
+        if (id == range.first->second)
+        {
+            return true;
+        }
+    }
+    return false;
+}
 } // namespace
 
 void OrderBookImpl::addStop(const OrderEntry &order)
@@ -309,6 +323,44 @@ void OrderBookImpl::removeStop(const OrderEntry &order)
         throw std::runtime_error("Unable to remove stop order - order not held!");
     }
     group.stopCount_.fetch_sub(1, std::memory_order_relaxed);
+    // A release pending is pending no longer: it took the stop out, or a cancel or a replace did first (#518)
+    const auto pending = std::find(group.pendingReleases_.begin(), group.pendingReleases_.end(), order.orderId_);
+    if (group.pendingReleases_.end() != pending)
+    {
+        group.pendingReleases_.erase(pending);
+    }
+}
+
+bool OrderBookImpl::markReleasePending(const OrderEntry &stop)
+{
+    OrderGroupsByInstrumentT::iterator it = orderGroups_.find(stop.instrument_.getId());
+    if ((orderGroups_.end() == it) || ((BUY_SIDE != stop.side_) && (SELL_SIDE != stop.side_)))
+    {
+        return false; // never held: addStop() refuses it
+    }
+    OrdersGroup &group = *it->second;
+    tbb::mutex::scoped_lock lock(group.stopLock_);
+    const bool held = (BUY_SIDE == stop.side_) ? holdsStop(group.buyStops_, stop.stopPx_, stop.orderId_)
+                                               : holdsStop(group.sellStops_, stop.stopPx_, stop.orderId_);
+    if (held && (group.pendingReleases_.end() ==
+                 std::find(group.pendingReleases_.begin(), group.pendingReleases_.end(), stop.orderId_)))
+    {
+        group.pendingReleases_.push_back(stop.orderId_);
+    }
+    return held;
+}
+
+void OrderBookImpl::pendingReleases(const SourceIdT &instrument, std::vector<IdT> *result) const
+{
+    assert(nullptr != result);
+    OrderGroupsByInstrumentT::const_iterator it = orderGroups_.find(instrument);
+    if (orderGroups_.end() == it)
+    {
+        return;
+    }
+    const OrdersGroup &group = *it->second;
+    tbb::mutex::scoped_lock lock(group.stopLock_);
+    result->insert(result->end(), group.pendingReleases_.begin(), group.pendingReleases_.end());
 }
 
 bool OrderBookImpl::holdsStops(const SourceIdT &instrument) const
