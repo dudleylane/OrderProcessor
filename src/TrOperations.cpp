@@ -773,6 +773,8 @@ void ReleaseStopTrOperation::rollback(const Context &cnxt)
     }
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(order_->entryMutex_, true);
     order_->stopTriggered_ = false;
+    // Held again, and nothing queues this release again: the stop is no longer reached (#517)
+    order_->stopReached_ = false;
     cnxt.orderBook_->addStop(*order_);
 }
 
@@ -806,6 +808,25 @@ void ReportReleaseTrOperation::execute(const Context &cnxt)
 }
 
 void ReportReleaseTrOperation::rollback(const Context &) {}
+
+ReportTriggerTrOperation::ReportTriggerTrOperation(const OrderEntry &order)
+    : Operation(REPORT_TRIGGER_TROPERATION, order.orderId_), figures_(order)
+{
+}
+
+void ReportTriggerTrOperation::execute(const Context &cnxt)
+{
+    ExecutionEntry execReport;
+    execReport.orderId_ = getObjectId();
+    execReport.type_ = TRIGGERED_EXECTYPE;
+    execReport.transactTime_ = aux::currentDateTime();
+    execReport.execId_ = IdT(); /// will be assigned when saved into the storage
+    execReport.orderStatus_ = figures_.status_;
+    execReport.market_ = INTERNAL_EXECUTION;
+    processEvent_GenerateExecution(cnxt, getObjectId(), execReport, std::string(), &figures_);
+}
+
+void ReportTriggerTrOperation::rollback(const Context &) {}
 
 ReportRestatementTrOperation::ReportRestatementTrOperation(const OrderEntry &order)
     : Operation(REPORT_RESTATEMENT_TROPERATION, order.orderId_), figures_(order)

@@ -292,6 +292,23 @@ private:
     const ReleaseStopTrOperation &release_;
 };
 
+/// Reports a replacement that its replace released with the TRIGGERED execution report its original's release would
+/// have sent (#517): a trade reached the original's stop before the release ran, and the release, which runs after the
+/// replace, finds the original replaced and reports nothing. It takes the replacement's figures as the replace left
+/// them, as the replacement's persist does (#411), and follows the persists and the two REPLACE reports. The
+/// replacement's trades are reported after it, by their own transactions.
+class ReportTriggerTrOperation final : public Operation
+{
+public:
+    explicit ReportTriggerTrOperation(const OrderEntry &order);
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    OrderFigures figures_;
+};
+
 /// Reports an order restated for a new business day with a RESTATED execution report, FIX's ExecType D (#244): its day
 /// figures as they begin the day, and its status, as the restatement left them (#441). It takes them under the order's
 /// write lock, which its caller holds: its transaction names the order alone, so a booking on the instrument can fill
