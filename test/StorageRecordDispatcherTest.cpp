@@ -211,6 +211,11 @@ public:
         return !stops_.empty();
     }
     void triggeredStops(const SourceIdT & /*instrument*/, PriceT /*lastPx*/, OrdersT * /*result*/) const override {}
+    bool markReleasePending(const OrderEntry & /*stop*/) override
+    {
+        return false;
+    }
+    void pendingReleases(const SourceIdT & /*instrument*/, std::vector<IdT> * /*result*/) const override {}
 
     std::deque<const OrderEntry *> orders_;
     std::deque<const OrderEntry *> stops_;
@@ -1862,7 +1867,13 @@ const char *const GOLDEN_ID_LIMIT_RECORD = "09000000cb04fb711f010000";
 /// The golden instrument's last trade (#237): 101.25, made when id 4242 was drawn, keyed (101, 2)
 const IdT GOLDEN_TRADE_ID(4242, 1792000000);
 const IdT GOLDEN_LAST_TRADE_KEY(101, 2);
-const char *const GOLDEN_LAST_TRADE_RECORD = "0a0000006500000000000000952835010000000000505940921000000000000000c0cf6a";
+const char *const GOLDEN_LAST_TRADE_RECORD_V0 =
+    "0a0000006500000000000000952835010000000000505940921000000000000000c0cf6a";
+/// Format version 1 (#518): version 0's fields, then how many releases were pending, 2, and each one's stop, 4241 then
+/// 4239, in the order trades reached them
+const std::vector<IdT> GOLDEN_PENDING_RELEASES = { IdT(4241, 20261014), IdT(4239, 20261014) };
+const char *const GOLDEN_LAST_TRADE_RECORD_V1 = "0a00010065000000000000009528350100000000005059409210000000000000"
+                                                "00c0cf6a020000009110000000000000962835018f1000000000000096283501";
 
 } // namespace
 
@@ -1880,7 +1891,7 @@ TEST_F(StorageRecordDispatcherTest, WritesTheGoldenRecords)
     const std::unique_ptr<OrderEntry> order = goldenOrder();
     dispatcher_->save(*order);
     dispatcher_->saveIdLimit(GOLDEN_ID_LIMIT);
-    dispatcher_->saveLastTrade(GOLDEN_INSTRUMENT_ID, 101.25, GOLDEN_TRADE_ID);
+    dispatcher_->saveLastTrade(GOLDEN_INSTRUMENT_ID, 101.25, GOLDEN_TRADE_ID, GOLDEN_PENDING_RELEASES);
 
     const auto written = [this](const IdT &id) -> std::string
     {
@@ -1894,7 +1905,7 @@ TEST_F(StorageRecordDispatcherTest, WritesTheGoldenRecords)
     expectGolden("GOLDEN_RAWDATA_RECORD", written(GOLDEN_RAWDATA_ID), GOLDEN_RAWDATA_RECORD);
     expectGolden("GOLDEN_ORDER_RECORD_V4", written(GOLDEN_ORDER_ID), GOLDEN_ORDER_RECORD_V4);
     expectGolden("GOLDEN_ID_LIMIT_RECORD", written(IdT(0, 1)), GOLDEN_ID_LIMIT_RECORD);
-    expectGolden("GOLDEN_LAST_TRADE_RECORD", written(GOLDEN_LAST_TRADE_KEY), GOLDEN_LAST_TRADE_RECORD);
+    expectGolden("GOLDEN_LAST_TRADE_RECORD_V1", written(GOLDEN_LAST_TRADE_KEY), GOLDEN_LAST_TRADE_RECORD_V1);
 }
 
 namespace
@@ -2153,10 +2164,10 @@ std::unique_ptr<char[]> exactCopy(const std::string &bytes)
 const std::vector<std::pair<IdT, const char *>> &goldenLoadedRecords()
 {
     static const std::vector<std::pair<IdT, const char *>> records = {
-        { GOLDEN_INSTRUMENT_ID, GOLDEN_INSTRUMENT_RECORD }, { GOLDEN_STRING_ID, GOLDEN_STRING_RECORD },
-        { GOLDEN_ACCOUNT_ID, GOLDEN_ACCOUNT_RECORD },       { GOLDEN_CLEARING_ID, GOLDEN_CLEARING_RECORD },
-        { GOLDEN_RAWDATA_ID, GOLDEN_RAWDATA_RECORD },       { IdT(0, 1), GOLDEN_ID_LIMIT_RECORD },
-        { GOLDEN_LAST_TRADE_KEY, GOLDEN_LAST_TRADE_RECORD }
+        { GOLDEN_INSTRUMENT_ID, GOLDEN_INSTRUMENT_RECORD },     { GOLDEN_STRING_ID, GOLDEN_STRING_RECORD },
+        { GOLDEN_ACCOUNT_ID, GOLDEN_ACCOUNT_RECORD },           { GOLDEN_CLEARING_ID, GOLDEN_CLEARING_RECORD },
+        { GOLDEN_RAWDATA_ID, GOLDEN_RAWDATA_RECORD },           { IdT(0, 1), GOLDEN_ID_LIMIT_RECORD },
+        { GOLDEN_LAST_TRADE_KEY, GOLDEN_LAST_TRADE_RECORD_V0 }, { GOLDEN_LAST_TRADE_KEY, GOLDEN_LAST_TRADE_RECORD_V1 }
     };
     return records;
 }
@@ -2165,17 +2176,38 @@ const std::vector<std::pair<IdT, const char *>> &goldenLoadedRecords()
 TEST_F(StorageRecordDispatcherTest, ALastTradeRecordLongerThanItsFieldsOrKeyedForAnotherInstrumentIsRefused)
 {
     // The record names its instrument, and its key must be that instrument's (#237): a record under another key would be
-    // pruned with the wrong record's versions (#148)
+    // pruned with the wrong record's versions (#148). Version 0 is 36 bytes, and version 1 as long as its count of
+    // pending releases says (#518).
     restoreGoldenInstrument();
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
-    const std::string golden = fromHex(GOLDEN_LAST_TRADE_RECORD);
-    EXPECT_NO_THROW(dispatcher_->onRecordLoaded(GOLDEN_LAST_TRADE_KEY, 0, golden.data(), golden.size()));
-    const std::string longer = golden + std::string(1, '\0');
-    EXPECT_THROW(dispatcher_->onRecordLoaded(GOLDEN_LAST_TRADE_KEY, 1, longer.data(), longer.size()),
-                 std::runtime_error);
-    EXPECT_THROW(dispatcher_->onRecordLoaded(IdT(102, 2), 1, golden.data(), golden.size()), std::runtime_error);
-    EXPECT_THROW(dispatcher_->onRecordLoaded(GOLDEN_INSTRUMENT_ID, 1, golden.data(), golden.size()), std::runtime_error)
-        << "under the instrument's own key";
+    for (const char *hex : { GOLDEN_LAST_TRADE_RECORD_V0, GOLDEN_LAST_TRADE_RECORD_V1 })
+    {
+        const std::string golden = fromHex(hex);
+        SCOPED_TRACE(toHex(golden.substr(0, 4)));
+        EXPECT_NO_THROW(dispatcher_->onRecordLoaded(GOLDEN_LAST_TRADE_KEY, 0, golden.data(), golden.size()));
+        const std::string longer = golden + std::string(1, '\0');
+        EXPECT_THROW(dispatcher_->onRecordLoaded(GOLDEN_LAST_TRADE_KEY, 1, longer.data(), longer.size()),
+                     std::runtime_error);
+        EXPECT_THROW(dispatcher_->onRecordLoaded(IdT(102, 2), 1, golden.data(), golden.size()), std::runtime_error);
+        EXPECT_THROW(dispatcher_->onRecordLoaded(GOLDEN_INSTRUMENT_ID, 1, golden.data(), golden.size()),
+                     std::runtime_error)
+            << "under the instrument's own key";
+    }
+
+    // Version 1's count, after the trade's 36 bytes, bounds what is read: a count past the record's end is refused
+    // before any id is read, and so is one that leaves bytes after its last id
+    std::string record = fromHex(GOLDEN_LAST_TRADE_RECORD_V1);
+    u32 count = 0;
+    std::memcpy(&count, record.data() + 36, sizeof(count));
+    ASSERT_EQ(GOLDEN_PENDING_RELEASES.size(), count);
+    for (const u32 wrong : { count + 1, count - 1, 0u, 0xFFFFFFFFu })
+    {
+        std::memcpy(record.data() + 36, &wrong, sizeof(wrong));
+        const std::unique_ptr<char[]> copy = exactCopy(record);
+        EXPECT_THROW(dispatcher_->onRecordLoaded(GOLDEN_LAST_TRADE_KEY, 1, copy.get(), record.size()),
+                     std::runtime_error)
+            << "a count of " << wrong << " in a record that holds " << count << " ids";
+    }
 }
 
 TEST_F(StorageRecordDispatcherTest, EveryRecordCutShortIsRejected)
@@ -2245,15 +2277,19 @@ TEST_F(StorageRecordDispatcherTest, ARecordInANewerFormatIsRejected)
     for (const auto &golden : goldenLoadedRecords())
     {
         std::string record = fromHex(golden.second);
-        record[2] = 1; // format version 1
+        // One past the newest its codec reads: 1, but for the last trade's, at 1 since #518
+        const u32 newer =
+            (GOLDEN_LAST_TRADE_KEY == golden.first) ? StorageRecordDispatcher::LAST_TRADE_FORMAT_VERSION + 1 : 1;
+        const std::string format = "format version " + std::to_string(newer);
+        record[2] = static_cast<char>(newer);
         try
         {
             dispatcher_->onRecordLoaded(golden.first, 0, record.data(), record.size());
-            ADD_FAILURE() << toHex(record.substr(0, 4)) << " record in format version 1 was loaded";
+            ADD_FAILURE() << toHex(record.substr(0, 4)) << " record in " << format << " was loaded";
         }
         catch (const std::runtime_error &ex)
         {
-            EXPECT_NE(std::string::npos, std::string(ex.what()).find("format version 1"))
+            EXPECT_NE(std::string::npos, std::string(ex.what()).find(format))
                 << toHex(record.substr(0, 4)) << ": " << ex.what();
         }
     }
@@ -2348,6 +2384,65 @@ TEST_F(StorageRecordDispatcherTest, RestoredOrdersThatCrossAnEarlierOneAreLeftTo
     ASSERT_EQ(2u, dispatcher_->ordersToMatch().size());
     EXPECT_EQ(y->orderId_, dispatcher_->ordersToMatch()[0]->orderId_);
     EXPECT_EQ(w->orderId_, dispatcher_->ordersToMatch()[1]->orderId_);
+}
+
+TEST_F(StorageRecordDispatcherTest, ARestoreReleasesTheStopsTheLastTradeNamesOrInVersion0ThoseItsPriceReached)
+{
+    // Four held sell stops on the golden instrument. The last trade, at 101.25 when id 4242 was drawn, reaches those at
+    // 102. From version 0 of its record (#237), the restore releases those it reaches that arrived before it, 4240 and
+    // 4241. Version 1 (#518) names the releases pending, and the restore releases those, in its order and whatever its
+    // price: 4241, then 4239, at 101, which an earlier trade reached. It doesn't release 4240, which the stop book didn't
+    // hold when the trade was decided. Every stop to release is marked pending again, for the records the server's own
+    // matching writes before the releases run.
+    restoreGoldenInstrument();
+    const struct
+    {
+        u64 number_;
+        PriceT stopPx_;
+    } stops[] = { { 4239, 101.0 }, { 4240, 102.0 }, { 4241, 102.0 }, { 4243, 102.0 } };
+    const struct
+    {
+        const char *record_;
+        std::vector<u64> released_;
+    } formats[] = { { GOLDEN_LAST_TRADE_RECORD_V0, { 4240, 4241 } }, { GOLDEN_LAST_TRADE_RECORD_V1, { 4241, 4239 } } };
+    for (const auto &format : formats)
+    {
+        const std::string record = fromHex(format.record_);
+        SCOPED_TRACE(toHex(record.substr(0, 4)));
+        OrderBookImpl book;
+        OrderBookImpl::InstrumentsT instruments;
+        instruments.insert(GOLDEN_INSTRUMENT_ID);
+        book.init(instruments);
+        OrderDataStorage storage;
+        TestFileSaver saver;
+        StorageRecordDispatcher dispatcher;
+        dispatcher.init(restore_.get(), &book, &saver, &storage);
+        dispatcher.startLoad();
+        for (const auto &s : stops)
+        {
+            std::unique_ptr<OrderEntry> stop = bookedOrder(GOLDEN_INSTRUMENT_ID, s.number_, SELL_SIDE, 0.0, 10);
+            stop->ordType_ = STOP_ORDERTYPE;
+            stop->stopPx_ = s.stopPx_;
+            loadOrderRecord(dispatcher, *stop);
+        }
+        dispatcher.onRecordLoaded(GOLDEN_LAST_TRADE_KEY, 0, record.data(), record.size());
+        dispatcher.finishLoad();
+
+        std::vector<u64> released;
+        for (const OrderEntry *stop : dispatcher.stopsReached())
+        {
+            released.push_back(stop->orderId_.id_);
+        }
+        EXPECT_EQ(format.released_, released);
+        std::vector<IdT> pending;
+        book.pendingReleases(GOLDEN_INSTRUMENT_ID, &pending);
+        std::vector<u64> marked;
+        for (const IdT &stop : pending)
+        {
+            marked.push_back(stop.id_);
+        }
+        EXPECT_EQ(format.released_, marked) << "a stop to release isn't marked pending";
+    }
 }
 
 // =============================================================================

@@ -15,6 +15,7 @@
 #include <atomic>
 #include <optional>
 #include <set>
+#include <vector>
 #include <oneapi/tbb/spin_rw_mutex.h>
 #include "TypesDef.h"
 #include "WideDataLazyRef.h"
@@ -433,6 +434,15 @@ public:
     /// stop price is at or below lastPx, from the lowest, then sell stops at or above it, from the highest, each price's
     /// in arrival order. They stay held: the release takes them out.
     virtual void triggeredStops(const SourceIdT &instrument, PriceT lastPx, OrdersT *result) const = 0;
+    /// The held stops whose releases are pending (#518): a trade reached each and queued its release, which hasn't run.
+    /// The instrument's last trade names them, so that a restart releases what the running server would have, and
+    /// only that. Marking a stop again changes nothing: a chain claims a release once, so another order's trade can
+    /// reach a stop whose release is pending. A stop the book doesn't hold isn't marked, and false is returned.
+    /// removeStop() ends the mark, whether a release, a cancel or a replace takes the stop out, and addStop() never
+    /// sets one, so a release rolled back puts its stop back unmarked.
+    virtual bool markReleasePending(const OrderEntry &stop) = 0;
+    /// The instrument's stops whose releases are pending, in the order they were marked, appended to result
+    virtual void pendingReleases(const SourceIdT &instrument, std::vector<IdT> *result) const = 0;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -554,11 +564,13 @@ public:
     virtual void beginGroup() {}
     virtual void commitGroup() {}
     virtual void abortGroup() noexcept {}
-    /// Persists an instrument's last trade, its price and its execution id, as a new version of the instrument's
-    /// last-trade record, and returns that version (#237). A held stop that a trade reached is released in a transaction
-    /// of its own, after the trade's: a crash between the two leaves the stop held, and the restart releases it from
-    /// this record. A saver that keeps none writes nothing.
-    virtual u32 saveLastTrade(const SourceIdT & /*instrument*/, PriceT /*lastPx*/, const IdT & /*execId*/)
+    /// Persists an instrument's last trade, its price and its execution id, with the held stops whose releases are
+    /// pending on the instrument (#518), as a new version of the instrument's last-trade record, and returns that
+    /// version (#237). A held stop that a trade reached is released in a transaction of its own, after the trade's: a
+    /// crash between the two leaves the stop held, and the restart releases it from this record. A saver that keeps
+    /// none writes nothing.
+    virtual u32 saveLastTrade(const SourceIdT & /*instrument*/, PriceT /*lastPx*/, const IdT & /*execId*/,
+                              const std::vector<IdT> & /*pendingReleases*/)
     {
         return 0;
     }
