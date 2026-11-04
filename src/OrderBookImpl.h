@@ -65,6 +65,8 @@ public:
     virtual void removeStop(const OrderEntry &order);
     virtual bool holdsStops(const SourceIdT &instrument) const;
     virtual void triggeredStops(const SourceIdT &instrument, PriceT lastPx, OrdersT *result) const;
+    virtual bool markReleasePending(const OrderEntry &stop);
+    virtual void pendingReleases(const SourceIdT &instrument, std::vector<IdT> *result) const;
 
     BookSnapshot getSnapshot(const SourceIdT &instrument, const Store::OrderDataStorage *storage) const;
 
@@ -87,6 +89,9 @@ private:
         /// How many stops are held, read without the lock: transactions on the instrument run one at a time, and the
         /// lock comes in only when there is a stop to find
         std::atomic<u32> stopCount_{ 0 };
+        /// The held stops whose releases are pending, in the order they were marked (#518). Each is held: removeStop()
+        /// drops it.
+        std::vector<IdT> pendingReleases_;
     };
 
     typedef std::map<IdT, OrdersGroup *> OrderGroupsByInstrumentT;

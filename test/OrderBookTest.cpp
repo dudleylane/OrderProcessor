@@ -456,6 +456,49 @@ TEST_F(OrderBookTest, RemovingAStopTakesOnlyThatOne)
     EXPECT_FALSE(orderBook_->holdsStops(instrumentId1_));
 }
 
+TEST_F(OrderBookTest, AStopsReleaseIsPendingFromItsMarkUntilTheStopLeavesTheStopBook)
+{
+    // The instrument's last trade names the releases pending (#518). A trade's claim marks one, a stop is marked once
+    // however many trades reach it, the marks keep their order, and each instrument has its own. The mark ends when the
+    // stop leaves the stop book, and a stop held again isn't pending.
+    auto first = createOrderWithId(instrumentId1_, IdT(1, 1), SELL_SIDE, 1.0);
+    first->ordType_ = STOP_ORDERTYPE;
+    first->stopPx_ = 5.0;
+    auto second = createOrderWithId(instrumentId1_, IdT(2, 1), BUY_SIDE, 1.0);
+    second->ordType_ = STOP_ORDERTYPE;
+    second->stopPx_ = 7.0;
+    auto other = createOrderWithId(instrumentId2_, IdT(3, 1), BUY_SIDE, 1.0);
+    other->ordType_ = STOP_ORDERTYPE;
+    other->stopPx_ = 7.0;
+    const auto pending = [this](const SourceIdT &instrument)
+    {
+        std::vector<IdT> ids;
+        orderBook_->pendingReleases(instrument, &ids);
+        return ids;
+    };
+    EXPECT_FALSE(orderBook_->markReleasePending(*first)) << "a stop the book doesn't hold";
+    orderBook_->addStop(*first);
+    orderBook_->addStop(*second);
+    orderBook_->addStop(*other);
+    EXPECT_TRUE(pending(instrumentId1_).empty());
+
+    EXPECT_TRUE(orderBook_->markReleasePending(*second));
+    EXPECT_TRUE(orderBook_->markReleasePending(*first));
+    EXPECT_TRUE(orderBook_->markReleasePending(*second)) << "another order's trade reached it";
+    EXPECT_TRUE(orderBook_->markReleasePending(*other));
+    EXPECT_EQ((std::vector<IdT>{ IdT(2, 1), IdT(1, 1) }), pending(instrumentId1_));
+    EXPECT_EQ(std::vector<IdT>{ IdT(3, 1) }, pending(instrumentId2_));
+
+    orderBook_->removeStop(*second);
+    orderBook_->addStop(*second);
+    EXPECT_EQ(std::vector<IdT>{ IdT(1, 1) }, pending(instrumentId1_)) << "a stop held again is pending";
+    orderBook_->removeStop(*first);
+    EXPECT_TRUE(pending(instrumentId1_).empty());
+    EXPECT_FALSE(orderBook_->markReleasePending(*first)) << "a stop no longer held";
+    EXPECT_TRUE(pending(instrumentId1_).empty());
+    EXPECT_EQ(std::vector<IdT>{ IdT(3, 1) }, pending(instrumentId2_));
+}
+
 TEST_F(OrderBookTest, AStopOfAnInstrumentTheBookDoesNotTradeIsRefused)
 {
     const SourceIdT other = test::addInstrument("ccc");

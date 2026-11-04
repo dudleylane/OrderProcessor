@@ -377,6 +377,9 @@ void OrderMatcher::afterTrade(OrderEntry *order, QuantityT leavesBefore, PriceT 
                         oneapi::tbb::spin_rw_mutex::scoped_lock lock(stop->entryMutex_, true);
                         stop->stopReached_ = true;
                     }
+                    // And pending until the release runs: the instrument's last trade names it, so that a restart
+                    // releases it if a crash loses the release (#518)
+                    ctxt.orderBook_->markReleasePending(*stop);
                     defered_->addDeferedEvent(new ReleaseStopDeferedEvent(stop));
                 }
             }

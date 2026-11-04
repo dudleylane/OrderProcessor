@@ -847,6 +847,31 @@ TEST_F(MatchOrderOperationTest, ReleaseStop_RollbackClearsTheMarkOfTheTradeThatR
     EXPECT_TRUE(orderBook_->holdsStops(instrumentId_));
 }
 
+TEST_F(MatchOrderOperationTest, ReleaseStop_EndsTheStopsPendingMarkAndItsRollbackDoesNotSetItAgain)
+{
+    // The trade that queued the release marked it pending, and the instrument's last trade names it until it runs
+    // (#518). Rolled back, the release holds the stop again, and nothing queues it again: it isn't pending.
+    orderBook_->add(*sellOrder_);
+    holdAsStopLimit(buyOrder_, orderBook_.get());
+    ASSERT_TRUE(orderBook_->markReleasePending(*buyOrder_));
+    ReleaseStopTrOperation op(buyOrder_);
+    Context ctx = createContext();
+    const auto pending = [this]()
+    {
+        std::vector<IdT> ids;
+        orderBook_->pendingReleases(instrumentId_, &ids);
+        return ids;
+    };
+    ASSERT_EQ(std::vector<IdT>{ buyOrder_->orderId_ }, pending());
+
+    op.execute(ctx);
+    ASSERT_TRUE(buyOrder_->stopTriggered_);
+    EXPECT_TRUE(pending().empty()) << "a release that ran is pending";
+    op.rollback(ctx);
+    ASSERT_TRUE(orderBook_->holdsStops(instrumentId_));
+    EXPECT_TRUE(pending().empty()) << "a release rolled back is pending again";
+}
+
 TEST_F(MatchOrderOperationTest, ReleaseStop_DoesNothingToAStopNoLongerHeldOrWorking)
 {
     // A transaction on the order before it decided first: a cancel, whose own operations take the stop out of the stop
@@ -1098,7 +1123,8 @@ TEST_F(MatchOrderOperationTest, ATradesLastTradeIsCommittedWithItsOrders)
     {
         ::testing::InSequence order;
         EXPECT_CALL(saver, beginGroup());
-        EXPECT_CALL(saver, saveLastTrade(instrumentId_, 100.0, tradeId)).WillOnce(::testing::Return(0u));
+        EXPECT_CALL(saver, saveLastTrade(instrumentId_, 100.0, tradeId, ::testing::IsEmpty()))
+            .WillOnce(::testing::Return(0u));
         EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_), ::testing::_)).WillOnce(::testing::Return(3u));
         EXPECT_CALL(saver, save(::testing::Ref(*sellOrder_), ::testing::_)).WillOnce(::testing::Return(5u));
         EXPECT_CALL(saver, commitGroup());
@@ -1114,7 +1140,8 @@ TEST_F(MatchOrderOperationTest, ATradesLastTradeIsCommittedWithItsOrders)
 TEST_F(MatchOrderOperationTest, PersistLastTrade_RelatesToTheInstrumentsLastTradeAndRollbackErasesItsVersion)
 {
     // Its object is the instrument's last trade, so the transactions that write it run one after another, as #148's
-    // pruning needs, and not the instrument, whose bookings, cancels and releases a trade's fills don't wait for
+    // pruning needs, and not the instrument, whose bookings, cancels and releases a trade's fills don't wait for. It
+    // writes the releases pending that the trade gave it (#518).
     MockOrderSaver saver;
     OrderStorage::instance()->attach(&saver);
     Context ctx = createContext();
@@ -1123,8 +1150,10 @@ TEST_F(MatchOrderOperationTest, PersistLastTrade_RelatesToTheInstrumentsLastTrad
     EXPECT_EQ(IdT(instrumentId_.id_, 2), op.getObjectId());
     EXPECT_NE(instrumentId_, op.getObjectId());
     EXPECT_FALSE(op.getRelatedId().isValid());
+    const std::vector<IdT> pending = { IdT(4241, 20261014), IdT(4239, 20261014) };
+    *op.pendingReleases() = pending;
 
-    EXPECT_CALL(saver, saveLastTrade(instrumentId_, 101.25, tradeId)).WillOnce(::testing::Return(7u));
+    EXPECT_CALL(saver, saveLastTrade(instrumentId_, 101.25, tradeId, pending)).WillOnce(::testing::Return(7u));
     op.execute(ctx);
     EXPECT_CALL(saver, eraseLastTrade(instrumentId_, 7u)).Times(1);
     op.rollback(ctx);

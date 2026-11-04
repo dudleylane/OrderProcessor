@@ -66,6 +66,11 @@ public:
         return false;
     }
     void triggeredStops(const SourceIdT &, PriceT, OrdersT *) const override {}
+    bool markReleasePending(const OrderEntry &) override
+    {
+        return false;
+    }
+    void pendingReleases(const SourceIdT &, std::vector<IdT> *) const override {}
 };
 
 std::unique_ptr<OrderEntry> createCorrectOrder()

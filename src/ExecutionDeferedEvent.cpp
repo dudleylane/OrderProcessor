@@ -133,19 +133,22 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
             lastPrint = it->lastPx_;
         }
     }
+    PersistLastTradeTrOperation *lastTrade = nullptr;
     if (0 < baseOrderParam.lastQty_)
     {
         baseOrderParam.lastPx_ /= baseOrderParam.lastQty_;
 
         execute(func, cnxt, scope, baseOrderParam, dayStart);
 
-        // The instrument's last trade, durable with the fills (#237). The id is drawn now, from the generator every order
-        // id comes from, so a held stop that arrived before this trade has a smaller one: a restart releases the stops
-        // that this price reaches and that were held when it traded, if their releases were lost.
+        // The instrument's last trade, durable with the fills (#237), with the releases pending once this trade has
+        // claimed its own, below (#518). The id is drawn now, from the generator every order id comes from, so a held
+        // stop that arrived before this trade has a smaller one: from a record in the format before #518's, which names
+        // no releases, a restart releases the stops its price reaches whose ids are smaller.
         assert(nullptr != cnxt.idGenerator_);
-        std::unique_ptr<Operation> lastTrade(
-            new PersistLastTradeTrOperation(baseOrder_->instrument_.getId(), lastPrint, cnxt.idGenerator_->getId()));
-        scope->addOperationFirst(lastTrade);
+        lastTrade =
+            new PersistLastTradeTrOperation(baseOrder_->instrument_.getId(), lastPrint, cnxt.idGenerator_->getId());
+        std::unique_ptr<Operation> op(lastTrade);
+        scope->addOperationFirst(op);
     }
 
     // Then what follows the trade, if the base order's fill applied, which it runs only once a contra's has: the
@@ -157,4 +160,14 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
     // trade's, the releases', the next match's.
     assert(nullptr != cnxt.orderMatch_);
     cnxt.orderMatch_->afterTrade(baseOrder_, baseBefore, lastPrint, cnxt);
+
+    // The last trade names every release pending on the instrument, not only this trade's (#518): a sweep decides all its
+    // trades before any release they queue runs, and another order's booking, enqueued before those releases, runs
+    // before them and can trade first. A release is pending only for a held stop, so an instrument that holds none takes
+    // no lock.
+    const SourceIdT instrument = baseOrder_->instrument_.getId();
+    if ((nullptr != lastTrade) && cnxt.orderBook_->holdsStops(instrument)) [[unlikely]]
+    {
+        cnxt.orderBook_->pendingReleases(instrument, lastTrade->pendingReleases());
+    }
 }
