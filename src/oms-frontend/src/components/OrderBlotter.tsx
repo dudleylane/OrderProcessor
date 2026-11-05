@@ -15,8 +15,8 @@ import {
 
 interface OrderBlotterProps {
   orders: Map<string, Order>;
-  cancelOrder: (orderId: number, clOrderId?: string) => void;
-  replaceOrder: (req: ReplaceOrderRequest) => void;
+  cancelOrder: (orderId: number, clOrderId?: string) => boolean;
+  replaceOrder: (req: ReplaceOrderRequest) => boolean;
 }
 
 export function OrderBlotter({ orders, cancelOrder, replaceOrder }: OrderBlotterProps) {

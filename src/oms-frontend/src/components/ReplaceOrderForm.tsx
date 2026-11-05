@@ -5,7 +5,8 @@ import { LATEST_EXPIRE_INPUT, LATEST_EXPIRE_TIME } from '../utils/constants';
 
 interface ReplaceOrderFormProps {
   order: Order;
-  replaceOrder: (req: ReplaceOrderRequest) => void;
+  // Whether the socket took the replace
+  replaceOrder: (req: ReplaceOrderRequest) => boolean;
   onClose: () => void;
 }
 
@@ -37,6 +38,8 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
   // edited: the input holds minutes, and the order's time may not fall on one.
   const initialExpireAt = order.tif === TimeInForce.GTD ? toLocalInput(order.expireTime) : '';
   const [expireAt, setExpireAt] = useState(initialExpireAt);
+  // A replace the socket didn't take keeps the form open (#521)
+  const [notSent, setNotSent] = useState(false);
 
   const newPrice = parseFloat(price);
   const newStopPx = parseFloat(stopPx);
@@ -92,8 +95,11 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
     if (expireTimeChanged) {
       req.expireTime = newExpireTime;
     }
-    replaceOrder(req);
-    onClose();
+    if (replaceOrder(req)) {
+      onClose();
+    } else {
+      setNotSent(true);
+    }
   };
 
   return (
@@ -167,6 +173,7 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
         Close
       </button>
       {problem && <span className="text-xs text-gray-500">{problem}</span>}
+      {!problem && notSent && <span className="text-xs text-red-400">Not sent: not connected</span>}
     </form>
   );
 }

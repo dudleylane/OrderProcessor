@@ -6,7 +6,8 @@ import { LATEST_EXPIRE_INPUT, LATEST_EXPIRE_TIME } from '../utils/constants';
 interface OrderEntryPanelProps {
   instruments: Instrument[];
   accounts: Account[];
-  sendOrder: (req: NewOrderRequest) => void;
+  // Whether the socket took the order
+  sendOrder: (req: NewOrderRequest) => boolean;
   connected: boolean;
 }
 
@@ -31,7 +32,8 @@ export function OrderEntryPanel({
   const [account, setAccount] = useState('');
   const [currency, setCurrency] = useState<Currency>(Currency.USD);
   const [capacity, setCapacity] = useState<Capacity>(Capacity.AGENCY);
-  const [lastResult, setLastResult] = useState<string | null>(null);
+  // A refused check, or whether the order was sent: its outcome comes later, in the blotters, or as a notice (#521)
+  const [lastResult, setLastResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   const needsPrice = ordType === OrderType.LIMIT || ordType === OrderType.STOPLIMIT;
   const needsStopPx = ordType === OrderType.STOP || ordType === OrderType.STOPLIMIT;
@@ -60,7 +62,7 @@ export function OrderEntryPanel({
   const handleSubmit = () => {
     const error = validate();
     if (error) {
-      setLastResult(error);
+      setLastResult({ ok: false, text: error });
       return;
     }
 
@@ -79,8 +81,8 @@ export function OrderEntryPanel({
     if (tif === TimeInForce.GTD) req.expireTime = Date.parse(expireAt);
     if (account) req.account = account;
 
-    sendOrder(req);
-    setLastResult('Order submitted');
+    const sent = sendOrder(req);
+    setLastResult(sent ? { ok: true, text: 'Sent' } : { ok: false, text: 'Not sent: not connected' });
   };
 
   return (
@@ -273,11 +275,11 @@ export function OrderEntryPanel({
 
         {lastResult && (
           <div className={`text-xs p-2 rounded-sm ${
-            lastResult === 'Order submitted'
+            lastResult.ok
               ? 'bg-green-900/30 text-green-400'
               : 'bg-red-900/30 text-red-400'
           }`}>
-            {lastResult}
+            {lastResult.text}
           </div>
         )}
       </div>
