@@ -22,7 +22,9 @@
 
 #include "DataModelDef.h"
 #include "IdTGenerator.h"
+#include "InFlightGauge.h"
 #include "IncomingQueues.h"
+#include "MockTransaction.h"
 #include "OrderBookImpl.h"
 #include "OrderStorage.h"
 #include "ServerDefaults.h"
@@ -43,6 +45,47 @@ namespace
 {
 
 const std::chrono::milliseconds REPLY_TIMEOUT(5000);
+
+/// A cancel of order number n, which no order has: the session hands it to the engine's queue as it is
+std::string cancelOf(u64 n)
+{
+    return R"({"type":"cancel_order","data":{"orderId":)" + std::to_string(n) + "}}";
+}
+
+/// The work in flight as a test holds it, past the bound or under it (#519)
+class HeldGauge : public App::InFlightGauge
+{
+public:
+    bool overBound() override
+    {
+        ++asked;
+        return over.load();
+    }
+    std::atomic<bool> over{ false };
+    /// How often the sessions asked
+    std::atomic<std::size_t> asked{ 0 };
+};
+
+/// The order numbers of the cancels taken from the engine's queue, in the order the sessions queued them
+class CancelRecorder : public Queues::InQueueProcessor
+{
+public:
+    bool process() override
+    {
+        return false;
+    }
+    void onEvent(const std::string &, const Queues::OrderEvent &) override {}
+    void onEvent(const std::string &, const Queues::OrderCancelEvent &evnt) override
+    {
+        numbers.push_back(evnt.id_.id_);
+    }
+    void onEvent(const std::string &, const Queues::OrderReplaceEvent &) override {}
+    void onEvent(const std::string &, const Queues::OrderChangeStateEvent &) override {}
+    void onEvent(const std::string &, const Queues::ProcessEvent &) override {}
+    void onEvent(const std::string &, const Queues::TimerEvent &) override {}
+
+    std::vector<u64> numbers;
+};
 
 /// A real WsServer on loopback, served by its own io_context thread as app/main.cpp serves it, with the limits a test
 /// sets (#159, #202)
@@ -77,12 +120,12 @@ protected:
         WideDataStorage::destroy();
     }
 
-    void start(const App::WsLimits &limits = App::WsLimits())
+    void start(const App::WsLimits &limits = App::WsLimits(), App::InFlightGauge *inFlight = nullptr)
     {
-        server_ =
-            std::make_shared<App::WsServer>(ioc_, tcp::endpoint(net::ip::make_address("127.0.0.1"), 0), &sessionMgr_,
-                                            WideDataStorage::instance(), OrderStorage::instance(), &inQueues_,
-                                            IdTGenerator::instance(), &orderBook_, SourceIdT(), SourceIdT(), limits);
+        server_ = std::make_shared<App::WsServer>(ioc_, tcp::endpoint(net::ip::make_address("127.0.0.1"), 0),
+                                                  &sessionMgr_, WideDataStorage::instance(), OrderStorage::instance(),
+                                                  &inQueues_, IdTGenerator::instance(), &orderBook_, SourceIdT(),
+                                                  SourceIdT(), limits, App::WsAuth(), inFlight);
         endpoint_ = server_->localEndpoint();
         server_->run();
         serverThread_ = std::thread(
@@ -208,6 +251,54 @@ protected:
         return reply.has_value() && std::string::npos != reply->value("message", "").find("Unknown message type");
     }
 
+    /// Waits until done() holds: true, unless the time ran out first
+    template <typename Done> static bool waitUntil(Done done, std::chrono::milliseconds timeout = REPLY_TIMEOUT)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (!done() && (std::chrono::steady_clock::now() < deadline))
+        {
+            std::this_thread::sleep_for(1ms);
+        }
+        return done();
+    }
+
+    /// Waits until the engine's queue has held its size for a while: the sessions have stopped queueing. Its size.
+    u32 waitForSteadyQueue(std::chrono::milliseconds timeout = REPLY_TIMEOUT)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        u32 size = inQueues_.size();
+        auto since = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            std::this_thread::sleep_for(10ms);
+            const u32 now = inQueues_.size();
+            if (now != size)
+            {
+                size = now;
+                since = std::chrono::steady_clock::now();
+            }
+            else if (std::chrono::steady_clock::now() - since >= 200ms)
+            {
+                break;
+            }
+        }
+        return size;
+    }
+
+    /// Takes the engine's queue's events as the engine would, recording the cancels' numbers, until count have come
+    bool takeCancels(CancelRecorder *recorder, std::size_t count, std::chrono::milliseconds timeout = REPLY_TIMEOUT)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while ((recorder->numbers.size() < count) && (std::chrono::steady_clock::now() < deadline))
+        {
+            if (!inQueues_.pop(recorder))
+            {
+                std::this_thread::sleep_for(1ms);
+            }
+        }
+        return recorder->numbers.size() == count;
+    }
+
     bool waitForSessions(std::size_t count, std::chrono::milliseconds timeout = REPLY_TIMEOUT)
     {
         const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -242,6 +333,11 @@ protected:
     App::SessionManager sessionMgr_;
     Queues::IncomingQueues inQueues_;
     OrderBookImpl orderBook_;
+    /// What the tests hold the work in flight with (#519). Members, as the server's thread asks them until TearDown()
+    /// stops it.
+    HeldGauge heldGauge_;
+    ::testing::NiceMock<test::MockTransactionManager> noTransactions_;
+    std::unique_ptr<App::EngineInFlightGauge> engineGauge_;
 };
 
 TEST_F(WsServerLimitsTest, AClientThatDoesNotReadIsDroppedOnceItsQueueIsFull)
@@ -444,6 +540,128 @@ TEST_F(WsServerLimitsTest, AcceptingGoesOnAfterTheProcessRunsOutOfDescriptors)
     ASSERT_FALSE(ec) << ec.message();
 
     EXPECT_TRUE(connect(later)) << "the server stopped accepting after running out of descriptors";
+}
+
+TEST_F(WsServerLimitsTest, AFloodingClientIsReadOnlyWhileTheWorkInFlightIsUnderTheBound)
+{
+    // A client could send faster than the engine decides and LMDB commits, and the server read it all into the engine's
+    // memory, without limit (#519). Here the bound is 50, and nothing takes the queue's events but the test: the session
+    // stops reading once 50 wait, give or take a millisecond's reads, and reads the rest as the test takes them.
+    engineGauge_ = std::make_unique<App::EngineInFlightGauge>(&inQueues_, &noTransactions_, 50); // none pending
+    start(App::WsLimits(), engineGauge_.get());
+    Client flooder;
+    ASSERT_TRUE(connect(flooder));
+    const std::size_t sent = 500;
+    for (std::size_t i = 1; i <= sent; ++i)
+    {
+        send(flooder, cancelOf(i));
+    }
+
+    const u32 held = waitForSteadyQueue();
+    EXPECT_LE(50u, held);
+    EXPECT_GE(300u, held) << "the session read past the bound by more than a millisecond's reads";
+
+    CancelRecorder recorder;
+    ASSERT_TRUE(takeCancels(&recorder, sent)) << recorder.numbers.size() << " of " << sent << " cancels came";
+    for (std::size_t i = 0; i < sent; ++i)
+    {
+        ASSERT_EQ(i + 1, recorder.numbers[i]);
+    }
+    EXPECT_TRUE(stillAnswers(flooder));
+}
+
+TEST_F(WsServerLimitsTest, AClientIsReadInItsTurnWhenTheWorkInFlightIsBackUnderTheBound)
+{
+    // Past the bound every session waits, from its first read on. Back under it, each reads one message a turn, so a
+    // client's cancel isn't read after everything a flooding client sent first (#519).
+    heldGauge_.over = true;
+    start(App::WsLimits(), &heldGauge_);
+    Client flooder;
+    Client other;
+    ASSERT_TRUE(connect(flooder));
+    ASSERT_TRUE(connect(other));
+    ASSERT_TRUE(waitForSessions(2));
+    const std::size_t flood = 2000;
+    for (std::size_t i = 1; i <= flood; ++i)
+    {
+        send(flooder, cancelOf(i));
+    }
+    const u64 its = 999999;
+    send(other, cancelOf(its));
+    std::this_thread::sleep_for(100ms);
+    EXPECT_EQ(0u, inQueues_.size()) << "a session read past the bound";
+
+    heldGauge_.over = false;
+    CancelRecorder recorder;
+    ASSERT_TRUE(takeCancels(&recorder, flood + 1)) << recorder.numbers.size() << " of " << flood + 1 << " cancels came";
+    const auto at = std::find(recorder.numbers.begin(), recorder.numbers.end(), its) - recorder.numbers.begin();
+    EXPECT_GT(static_cast<std::ptrdiff_t>(flood), at) << "the other client's cancel came after the whole flood";
+}
+
+TEST_F(WsServerLimitsTest, TheIdleTimeoutStopsOnlyWhileASessionWaitsForTheWorkInFlight)
+{
+    // Each read starts Beast's idle timeout, which pings the client at half the time and ends the session at the end
+    // unless something has come, the ping's answer included. A waiting session reads nothing, so the timeout would end
+    // it, losing what its client had sent: the timeout doesn't run while the session waits (#519), and runs again once
+    // it reads. Here it is 1 s, and the session waits 2 s after a read.
+    App::WsLimits limits;
+    limits.idleTimeout = std::chrono::seconds(1);
+    start(limits, &heldGauge_);
+    Client client;
+    ASSERT_TRUE(connect(client));
+    send(client, cancelOf(6));
+    // Read, and the session reads on: it asked as it connected, and again after the read
+    ASSERT_TRUE(waitUntil(
+        [this]
+        {
+            return (1u == inQueues_.size()) && (2u <= heldGauge_.asked.load());
+        }));
+
+    heldGauge_.over = true;
+    send(client, cancelOf(7));
+    // Read, and the session waits
+    ASSERT_TRUE(waitUntil(
+        [this]
+        {
+            return (2u == inQueues_.size()) && (3u <= heldGauge_.asked.load());
+        }));
+    send(client, cancelOf(8));
+    std::this_thread::sleep_for(2s);
+    EXPECT_EQ(2u, inQueues_.size()) << "the session read past the bound";
+
+    heldGauge_.over = false;
+    CancelRecorder recorder;
+    ASSERT_TRUE(takeCancels(&recorder, 3)) << "the session ended while it waited";
+    EXPECT_EQ((std::vector<u64>{ 6, 7, 8 }), recorder.numbers);
+    EXPECT_TRUE(stillAnswers(client));
+
+    // The client reads nothing more, so it answers no ping
+    EXPECT_TRUE(waitForSessions(0)) << "the idle timeout didn't run again once the session read";
+}
+
+TEST_F(WsServerLimitsTest, ASessionWaitingForTheWorkInFlightEndsWhenAWriteToItsClientFails)
+{
+    // A waiting session has no read to fail when its client goes: it ends at the first write that fails, and frees its
+    // connection then, not once the work in flight is back under the bound (#519). Here one client may connect at once.
+    App::WsLimits limits;
+    limits.maxConnections = 1;
+    heldGauge_.over = true;
+    start(limits, &heldGauge_);
+    {
+        Client gone;
+        ASSERT_TRUE(connect(gone));
+        ASSERT_TRUE(waitForSessions(1));
+        beast::get_lowest_layer(gone.ws).socket().close();
+    }
+    const auto deadline = std::chrono::steady_clock::now() + REPLY_TIMEOUT;
+    while ((0 != sessionMgr_.sessionCount()) && (std::chrono::steady_clock::now() < deadline))
+    {
+        sessionMgr_.broadcast(R"({"type":"metrics_update","data":{}})");
+        std::this_thread::sleep_for(10ms);
+    }
+    ASSERT_TRUE(waitForSessions(0));
+
+    EXPECT_NE(nullptr, connectEventually()) << "the session that waited still holds its connection";
 }
 
 } // namespace

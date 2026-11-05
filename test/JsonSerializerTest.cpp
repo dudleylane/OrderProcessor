@@ -407,4 +407,17 @@ TEST(JsonSerializerLegTest, ASwapLegIsNamedOnTheWire)
     EXPECT_FALSE(nlohmann::json::parse(App::serializeExecReport(&trade))["data"].contains("execLegType"));
 }
 
+// The metrics count the transactions not yet run, which with the queue's events are the work in flight --max-in-flight
+// bounds (#519)
+TEST(JsonSerializerMetricsTest, MetricsUpdateCarriesThePendingTransactions)
+{
+    App::SystemMetrics metrics{};
+    metrics.pendingTransactions = 5000000000ULL; // past 32 bits
+    metrics.queueDepth = 7;
+
+    nlohmann::json msg = nlohmann::json::parse(App::serializeMetricsUpdate(metrics));
+    EXPECT_EQ(5000000000ULL, msg["data"].value("pendingTransactions", size_t(0)));
+    EXPECT_EQ(7u, msg["data"].value("queueDepth", u32(0)));
+}
+
 } // namespace

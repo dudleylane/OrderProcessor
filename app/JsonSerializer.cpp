@@ -315,6 +315,7 @@ std::string App::serializeMetricsUpdate(const SystemMetrics &m)
     data["availableTransactProcessors"] = m.availableTransactProcessors;
     data["totalTransactProcessors"] = m.totalTransactProcessors;
     data["queueDepth"] = m.queueDepth;
+    data["pendingTransactions"] = m.pendingTransactions;
     data["poolSize"] = m.poolSize;
     data["poolCacheMisses"] = m.poolCacheMisses;
     data["poolAllocations"] = m.poolAllocations;

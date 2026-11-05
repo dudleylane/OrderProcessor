@@ -55,6 +55,7 @@ struct SystemMetrics
     int32_t availableTransactProcessors;
     int32_t totalTransactProcessors;
     u32 queueDepth;
+    size_t pendingTransactions; ///< transactions not yet run: with queueDepth, what --max-in-flight bounds (#519)
     size_t poolSize;
     size_t poolCacheMisses; ///< acquires that found every slot in use
     size_t poolAllocations; ///< scopes the pool allocated: one per transaction, and one per miss (#515)

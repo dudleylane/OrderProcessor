@@ -256,6 +256,8 @@ export interface SystemMetrics {
   availableTransactProcessors: number;
   totalTransactProcessors: number;
   queueDepth: number;
+  /** transactions not yet run: with queueDepth, the work in flight --max-in-flight bounds (#519) */
+  pendingTransactions: number;
   poolSize: number;
   /** acquires that found every slot in use */
   poolCacheMisses: number;

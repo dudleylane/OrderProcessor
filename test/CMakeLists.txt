@@ -77,6 +77,9 @@ target_sources(orderProcessorTest
         WsSessionTest.cpp
         WsServerLimitsTest.cpp
         JsonSerializerTest.cpp
+        # The engine's work in flight, which holds the sessions' reads past its bound (#519)
+        InFlightGaugeTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/InFlightGauge.cpp
 
         # seedData's argument parsing (header-only, in app/)
         SeedDataArgsTest.cpp
