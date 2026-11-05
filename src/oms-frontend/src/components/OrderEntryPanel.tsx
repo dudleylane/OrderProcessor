@@ -6,8 +6,9 @@ import { LATEST_EXPIRE_INPUT, LATEST_EXPIRE_TIME } from '../utils/constants';
 interface OrderEntryPanelProps {
   instruments: Instrument[];
   accounts: Account[];
-  sendOrder: (req: NewOrderRequest) => void;
-  sendSwapOrder: (req: NewSwapOrderRequest) => void;
+  // Whether the socket took the order, or the swap
+  sendOrder: (req: NewOrderRequest) => boolean;
+  sendSwapOrder: (req: NewSwapOrderRequest) => boolean;
   connected: boolean;
 }
 
@@ -33,7 +34,8 @@ export function OrderEntryPanel({
   const [account, setAccount] = useState('');
   const [currency, setCurrency] = useState<Currency>(Currency.USD);
   const [capacity, setCapacity] = useState<Capacity>(Capacity.AGENCY);
-  const [lastResult, setLastResult] = useState<string | null>(null);
+  // A refused check, or whether the order was sent: its outcome comes later, in the blotters, or as a notice (#521)
+  const [lastResult, setLastResult] = useState<{ ok: boolean; text: string } | null>(null);
   // An FX swap's far leg, and both legs' settlement dates (YYYY-MM-DD)
   const [farPrice, setFarPrice] = useState('');
   const [settlDate, setSettlDate] = useState('');
@@ -75,7 +77,7 @@ export function OrderEntryPanel({
   const handleSubmit = () => {
     const error = validate();
     if (error) {
-      setLastResult(error);
+      setLastResult({ ok: false, text: error });
       return;
     }
 
@@ -94,8 +96,8 @@ export function OrderEntryPanel({
       };
       if (tif === TimeInForce.GTD) swap.expireTime = Date.parse(expireAt);
       if (account) swap.account = account;
-      sendSwapOrder(swap);
-      setLastResult('Swap submitted');
+      const sent = sendSwapOrder(swap);
+      setLastResult(sent ? { ok: true, text: 'Sent' } : { ok: false, text: 'Not sent: not connected' });
       return;
     }
 
@@ -114,8 +116,8 @@ export function OrderEntryPanel({
     if (tif === TimeInForce.GTD) req.expireTime = Date.parse(expireAt);
     if (account) req.account = account;
 
-    sendOrder(req);
-    setLastResult('Order submitted');
+    const sent = sendOrder(req);
+    setLastResult(sent ? { ok: true, text: 'Sent' } : { ok: false, text: 'Not sent: not connected' });
   };
 
   return (
@@ -344,11 +346,11 @@ export function OrderEntryPanel({
 
         {lastResult && (
           <div className={`text-xs p-2 rounded-sm ${
-            lastResult === 'Order submitted'
+            lastResult.ok
               ? 'bg-green-900/30 text-green-400'
               : 'bg-red-900/30 text-red-400'
           }`}>
-            {lastResult}
+            {lastResult.text}
           </div>
         )}
       </div>
