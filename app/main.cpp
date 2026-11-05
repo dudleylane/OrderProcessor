@@ -479,11 +479,12 @@ int main(int argc, char *argv[])
             " (#146)");
     }
 
-    // 10b. Start FIX acceptor (if configured)
+    // 10b. Start FIX acceptor (if configured). Its sessions' new orders, swaps, cancels and replaces wait, up to a
+    // second each, while the engine's work in flight is over --max-in-flight (#519).
 #ifdef BUILD_FIX
     if (fixServer)
     {
-        fixServer->start(cfg.fixCfg, cfg.fixCredentials, App::FixTlsFiles{ cfg.fixTlsCert, cfg.fixTlsKey });
+        fixServer->start(cfg.fixCfg, cfg.fixCredentials, App::FixTlsFiles{ cfg.fixTlsCert, cfg.fixTlsKey }, &inFlight);
     }
 #endif
 

@@ -26,8 +26,9 @@ inline constexpr std::size_t DEFAULT_MAX_SESSION_QUEUE_MB = 16;
 inline constexpr std::size_t MAX_CLIENT_MESSAGE_BYTES = 64 * 1024;
 
 /// The default for orderProcessorServer's --max-in-flight: the engine's work in flight, the events not yet decided and
-/// the transactions not yet run, at which the WebSocket sessions stop reading their clients' messages (#519). A backlog
-/// of that size drains in about 20 s at LMDB's ~2 ms a commit, and holds tens of MB.
+/// the transactions not yet run, at which the WebSocket sessions stop reading their clients' messages, and the FIX
+/// gateway holds each new order, swap, cancel and replace up to a second (#519). A backlog of that size drains in
+/// about 20 s at LMDB's ~2 ms a commit, and holds tens of MB.
 inline constexpr std::size_t DEFAULT_MAX_IN_FLIGHT = 10'000;
 
 /// What WebSocket clients may hold of the server (#159). The defaults bound what slow clients can make the server keep:

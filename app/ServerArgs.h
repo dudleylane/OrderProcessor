@@ -92,7 +92,12 @@ inline std::string serverUsage()
            std::to_string(DEFAULT_MAX_SESSION_QUEUE_MB) +
            ")\n"
            "  --max-in-flight N         the engine's events and transactions waiting, at which WebSocket\n"
+#ifdef BUILD_FIX
+           "                            clients' messages wait to be read, and FIX orders, cancels and\n"
+           "                            replaces up to a second each (default " +
+#else
            "                            clients' messages wait to be read (default " +
+#endif
            std::to_string(DEFAULT_MAX_IN_FLIGHT) +
            ")\n"
            "  --ws-token-file FILE      the access token every WebSocket client must offer, from FILE; or set\n"

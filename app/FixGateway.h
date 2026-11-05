@@ -45,6 +45,7 @@ namespace App
 {
 
 class FixCarryingStoreFactory;
+class InFlightGauge;
 
 class FixGateway : public FIX::Application
 {
@@ -57,6 +58,11 @@ public:
     /// comes within about a round trip of the refusal, so a session would have to have this many more refused meanwhile
     /// for it to be forgotten, and answered as an unknown order.
     static constexpr size_t REFUSALS_KEPT = 1024;
+    /// How long a new order, a swap, a cancel or a replace waits, at most, for the engine's work in flight to be back
+    /// under the server's bound before the gateway takes it on regardless (#519), and how often it looks meanwhile. The
+    /// session's thread waits, as for an answer (#380), and reads none of its counterparty's messages meanwhile.
+    static constexpr std::chrono::milliseconds DEFAULT_IN_FLIGHT_WAIT{ 1000 };
+    static constexpr std::chrono::milliseconds IN_FLIGHT_RECHECK{ 5 };
 
     FixGateway(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
                Store::OrderDataStorage *orderStorage, SourceIdT defaultClearingId = SourceIdT(),
@@ -71,6 +77,12 @@ public:
     /// store tells a message its client was sent from one it wasn't (#513); none to hand them to no store. The factory
     /// sets it as it is made and clears it as it goes.
     void setStores(FixCarryingStoreFactory *stores);
+
+    /// The engine's work in flight (#519): from now on, while it is over the server's bound, a new order, a swap, a
+    /// cancel or a replace waits on its session's thread, up to longestWait, before the gateway takes it on, as a
+    /// WebSocket session waits to read its client's next message. A status request adds no work, and doesn't wait. Set
+    /// it before the acceptor starts; without it, as in tests, nothing waits.
+    void setInFlightGauge(InFlightGauge *inFlight, std::chrono::milliseconds longestWait = DEFAULT_IN_FLIGHT_WAIT);
 
     // Application interface
     void onCreate(const FIX::SessionID &) override;
@@ -138,6 +150,9 @@ public:
 private:
     /// builds the typed message for its MsgType and calls the matching handler
     void dispatch(const FIX::Message &msg, const FIX::SessionID &sid);
+    /// Waits while the engine's work in flight is over the bound, up to inFlightWait_ (#519): the first thing each
+    /// handler of a message that adds work does, holding none of the gateway's locks
+    void waitForInFlight() const;
     /// logs an exception a handler threw and answers the one message with a BusinessMessageReject
     void rejectContained(const FIX::Message &msg, const FIX::SessionID &sid, const char *what);
     /// answers the one message with a BusinessMessageReject to its sender, quoting its MsgSeqNum, MsgType and ClOrdID
@@ -282,6 +297,8 @@ private:
     std::condition_variable answers_;            // notified on each answer
     std::atomic<size_t> unansweredCount_{ 0 };   // unanswered_.size(), which the engine's reports read without the lock
     const std::chrono::milliseconds answerWait_; // how long a request waits for its order's answer
+    InFlightGauge *inFlight_ = nullptr;          // the engine's work in flight, if set (#519)
+    std::chrono::milliseconds inFlightWait_ = DEFAULT_IN_FLIGHT_WAIT; // how long a message waits for it, at most
 
     /// The key of the order that replaced each replaced FIX order, by the key of the one it replaced (#383): learned
     /// from each replacement's report, and at startup from the orders stored. Kept for good, as the orders are.

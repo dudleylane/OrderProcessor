@@ -28,6 +28,7 @@
 #include "FixOutQueues.h"
 #include "FixServer.h"
 #include "FixStores.h"
+#include "InFlightGauge.h"
 #include "MultiOutQueues.h"
 
 #include <gtest/gtest.h>
@@ -39,12 +40,14 @@
 #include "MockStorage.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -4704,6 +4707,221 @@ TEST_F(FixtSessionTest, TheGatewayHandsEachStoreItsSession)
     session_->send(stored);
     EXPECT_EQ(1u, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText();
     EXPECT_EQ(unsent, store->unsentFrom());
+}
+
+/// The work in flight as a test holds it, past the bound or under it, and how often the gateway asked (#519)
+class HeldGauge final : public InFlightGauge
+{
+public:
+    bool overBound() override
+    {
+        ++asked;
+        return over.load();
+    }
+    std::atomic<bool> over{ false };
+    std::atomic<size_t> asked{ 0 };
+};
+
+/// CLIENT_A's session, whose gateway checks the work in flight as the test holds it (#519): a message that adds work
+/// waits while it is over the bound, up to LONGEST_WAIT, unless a test sets another
+class FixtSessionInFlightTest : public FixtSessionTest
+{
+protected:
+    static constexpr std::chrono::milliseconds LONGEST_WAIT{ 200 };
+
+    void SetUp() override
+    {
+        FixtSessionTest::SetUp();
+        gateway_->setInFlightGauge(&gauge_, LONGEST_WAIT);
+    }
+
+    /// How long the session took over msg from CLIENT_A
+    std::chrono::steady_clock::duration timedReceive(const FIX::Message &msg)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        receive(msg);
+        return std::chrono::steady_clock::now() - start;
+    }
+
+    /// Waits, up to 10 s, until the gateway has asked at least n times: false if it hasn't by then
+    bool askedAtLeast(size_t n) const
+    {
+        for (const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+             std::chrono::steady_clock::now() < deadline;)
+        {
+            if (n <= gauge_.asked.load())
+            {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return false;
+    }
+
+    HeldGauge gauge_; // a member, so that it outlives the gateway, which TearDown destroys
+};
+
+TEST_F(FixtSessionInFlightTest, EachOrderAndRequestWaitsWhileTheWorkIsOverTheBoundUpToItsLongestWait)
+{
+    // While the engine's work in flight is over the bound, a new order, a swap, a cancel and a replace each wait on the
+    // session's thread until the longest wait is up, and are then taken on: a counterparty is slowed down, never
+    // refused (#519)
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1");
+    setState(order, NEW_ORDSTATUS, 100, 0, 100);
+    std::vector<std::unique_ptr<OrderEntry>> pushed; // the mock queue owns nothing
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .Times(2)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.emplace_back(evt.order_);
+            }));
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderCancelEvent &>())).Times(1);
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                pushed.emplace_back(evt.replacementOrder_);
+            }));
+
+    gauge_.over = true;
+    const std::vector<std::chrono::steady_clock::duration> waits = {
+        timedReceive(makeNewOrderSingle("ORD-2", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100)),
+        timedReceive(makeFxSwap("SWAP-1")),
+        timedReceive(makeCancelRequest("ORD-1", "CXL-1")),
+        timedReceive(makeLimitReplace("ORD-1", "RPL-1")),
+    };
+    for (size_t i = 0; i < waits.size(); ++i)
+    {
+        EXPECT_LE(LONGEST_WAIT, waits[i]) << "message " << i;
+        EXPECT_GT(LONGEST_WAIT + std::chrono::seconds(5), waits[i]) << "message " << i;
+    }
+    EXPECT_EQ(3u, pushed.size());
+    EXPECT_TRUE(sentOfType(FIX::MsgType_ExecutionReport).empty()) << sentText();
+    EXPECT_TRUE(sentOfType(FIX::MsgType_OrderCancelReject).empty()) << sentText();
+}
+
+TEST_F(FixtSessionInFlightTest, AWaitEndsOnceTheWorkInFlightIsBackUnderTheBound)
+{
+    // A message waits only while the work is over the bound: it is taken on once the work is back under, however long
+    // its longest wait (#519)
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    gateway_->setInFlightGauge(&gauge_, std::chrono::seconds(60));
+    std::unique_ptr<OrderEntry> pushed;
+    std::atomic<bool> taken{ false };
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.reset(evt.order_);
+                taken = true;
+            }));
+
+    gauge_.over = true;
+    const auto start = std::chrono::steady_clock::now();
+    std::thread client(
+        [&]
+        {
+            receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+        });
+    const bool waiting = askedAtLeast(2); // it asked, and asked again
+    const bool takenWhileOver = taken.load();
+    gauge_.over = false;
+    client.join();
+
+    EXPECT_TRUE(waiting);
+    EXPECT_FALSE(takenWhileOver);
+    EXPECT_TRUE(taken.load());
+    EXPECT_GT(std::chrono::seconds(30), std::chrono::steady_clock::now() - start); // not at its longest wait
+}
+
+TEST_F(FixtSessionInFlightTest, UnderTheBoundAMessageIsTakenOnOnceTheGatewayHasAsked)
+{
+    // Under the bound the gateway asks once, and takes the message on (#519)
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::unique_ptr<OrderEntry> pushed;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.reset(evt.order_);
+            }));
+    receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    EXPECT_NE(nullptr, pushed);
+    EXPECT_EQ(1u, gauge_.asked.load());
+}
+
+TEST_F(FixtSessionInFlightTest, AStatusRequestIsAnsweredAtOnceOverTheBound)
+{
+    // A status request adds no work: it is answered without asking how much work is in flight (#519)
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1");
+    setState(order, NEW_ORDSTATUS, 100, 0, 100);
+    gauge_.over = true;
+    receive(makeStatusRequest("ORD-1"));
+    EXPECT_EQ(0u, gauge_.asked.load());
+    EXPECT_EQ(1u, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText();
+}
+
+TEST_F(FixtSessionInFlightTest, TheEnginesReportsGoOutWhileTheSessionWaitsForTheWorkInFlight)
+{
+    // The session's thread waits holding neither the session's lock nor any of the gateway's, so the engine's reports
+    // to the session go out meanwhile: here the engine's refusal of an order sent before the one that waits (#519)
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::unique_ptr<OrderEntry> first;
+    std::unique_ptr<OrderEntry> second;
+    std::atomic<bool> secondTaken{ false };
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                first.reset(evt.order_);
+            }))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                second.reset(evt.order_);
+                secondTaken = true;
+            }));
+    receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    ASSERT_NE(nullptr, first);
+    sent_.clear();
+    gauge_.asked = 0;
+
+    // The next order comes on the session's thread, which waits; the engine's refusal of the first on one of its own
+    gateway_->setInFlightGauge(&gauge_, std::chrono::seconds(10));
+    gauge_.over = true;
+    std::thread client(
+        [&]
+        {
+            receive(makeNewOrderSingle("ORD-2", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+        });
+    const bool waiting = askedAtLeast(2);
+    const std::string source = FixGateway::makeSourceString(sid_);
+    Queues::OrderRejectEvent refusal; // as the engine refuses an order it couldn't store, by its stored ClOrdID
+    refusal.clOrderId_ = FixGateway::sessionClOrdId(source, "ORD-1");
+    refusal.symbol_ = "aaa";
+    refusal.side_ = BUY_SIDE;
+    refusal.orderQty_ = 100;
+    refusal.reason_ = "Order refused: it could not be stored";
+    const auto start = std::chrono::steady_clock::now();
+    gateway_->sendOrderReject(refusal, source);
+    const auto reported = std::chrono::steady_clock::now() - start;
+    const bool reportedWhileWaiting = !secondTaken.load();
+    gauge_.over = false;
+    client.join();
+
+    EXPECT_TRUE(waiting);
+    EXPECT_GT(std::chrono::seconds(5), reported); // not once the session's wait is up, at 10 s
+    EXPECT_TRUE(reportedWhileWaiting);
+    EXPECT_TRUE(secondTaken.load());
+    ASSERT_EQ(1u, sent_.size()) << sentText();
+    const FIX::Message rejection = parsed(sent_[0]);
+    EXPECT_EQ(FIX::MsgType_ExecutionReport, fieldOf(rejection.getHeader(), FIX::FIELD::MsgType));
+    EXPECT_EQ("ORD-1", fieldOf(rejection, FIX::FIELD::ClOrdID));
+    EXPECT_EQ(std::string(1, FIX::ExecType_REJECTED), fieldOf(rejection, FIX::FIELD::ExecType));
 }
 
 } // anonymous namespace

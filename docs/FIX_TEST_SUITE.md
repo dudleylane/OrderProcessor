@@ -421,7 +421,7 @@ The checks the gateway makes on a quantity, a price, an ExpireTime and a MinQty 
 
 ---
 
-## 20. FixtSessionTest — FIXT.1.1 Sessions, with FIX 5.0 SP2
+## 20. FixtSessionTest and FixtSessionInFlightTest — FIXT.1.1 Sessions, with FIX 5.0 SP2
 
 **File:** `test/FixGatewayTest.cpp`
 **Requires:** `BUILD_FIX=ON`
@@ -476,6 +476,11 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `ARefusedReplacementsClOrdIdNamesWhatItWasLastSentFor` | A refused replacement's ClOrdID sent again for a new order that is refused, by the gateway or by the engine, names no order: a replace or cancel naming it is answered as unknown (102=1); sent again for another replace that is refused, it names that replace's order (#398) |
 | `AHeldStopSaysItIsNotWorkingUntilItsRelease` | A held stop's acknowledgement, a status answer for it and the refusal of a new order that repeats its ClOrdID say WorkingIndicator (636) N; its release and a status answer after it, Y; a limit order's acknowledgement and status, Y, and a status answer once it has traded, none; a validating counterparty takes each (EP284's E.1.f, #387) |
 | `TheGatewayHandsEachStoreItsSession` | The gateway hands the server's store its session as QuickFIX makes it (`onCreate()`): a report sent while CLIENT_A is logged on isn't marked unsent, and the first one stored after its connection goes is (#513) |
+| `EachOrderAndRequestWaitsWhileTheWorkIsOverTheBoundUpToItsLongestWait` (FixtSessionInFlightTest) | While the engine's work in flight is over `--max-in-flight`, as a gauge the test holds says, a NewOrderSingle, a NewOrderMultileg, a cancel and a replace each wait on the session's thread until their longest wait, 200 ms here, is up, and then reach the engine; nothing is refused (#519) |
+| `AWaitEndsOnceTheWorkInFlightIsBackUnderTheBound` (FixtSessionInFlightTest) | A NewOrderSingle waiting on a thread of its own, as on a session's, with a minute's longest wait, reaches the engine once the work is back under, and not before |
+| `UnderTheBoundAMessageIsTakenOnOnceTheGatewayHasAsked` (FixtSessionInFlightTest) | Under the bound the gateway asks the gauge once, and the order reaches the engine |
+| `AStatusRequestIsAnsweredAtOnceOverTheBound` (FixtSessionInFlightTest) | An OrderStatusRequest adds no work: it is answered over the bound, and the gauge isn't asked |
+| `TheEnginesReportsGoOutWhileTheSessionWaitsForTheWorkInFlight` (FixtSessionInFlightTest) | While a NewOrderSingle waits on its session's thread, the engine's refusal of the order before it goes out at once from another thread: the wait holds neither the session's lock nor any of the gateway's |
 
 ---
 

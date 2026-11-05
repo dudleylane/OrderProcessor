@@ -22,6 +22,8 @@ class OrderDataStorage;
 namespace App
 {
 
+class InFlightGauge;
+
 /// The certificate and private key the FIX acceptor serves TLS with (#228), as PEM files: the certificate, followed by
 /// any intermediate ones, and its key, not encrypted. Both empty: plain TCP.
 struct FixTlsFiles
@@ -62,8 +64,10 @@ public:
     /// With tls's files the acceptor is ThreadedSSLSocketAcceptor, and serves TLS only, with the protocols FixTls.h
     /// says (#228); without them it is ThreadedSocketAcceptor, plain TCP, and it warns. Throws if a file can't be used,
     /// a session isn't FIXT.1.1's with FIX 5.0 SP2 and both of their dictionaries (#377), or the credentials name
-    /// an account the data directory doesn't have.
-    void start(const std::string &configFile, const std::string &credentialsFile, const FixTlsFiles &tls = {});
+    /// an account the data directory doesn't have. With inFlight, a session's new orders, swaps, cancels and replaces
+    /// wait while the engine's work in flight is over the server's bound, up to a second each (#519).
+    void start(const std::string &configFile, const std::string &credentialsFile, const FixTlsFiles &tls = {},
+               InFlightGauge *inFlight = nullptr);
 
     /// Stop the FIX acceptor gracefully.
     void stop();
