@@ -127,7 +127,7 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `NewOrderSingle_LimitPriceNoOrderTradesAt_IsNotQueued` | A limit order's Price (44) of 0, of -1.25, or of 310 digits either way, which QuickFIX reads as infinity → refused, nothing pushed (#145) |
 | `NewOrderSingle_MarketOrderWithPriceZero_IsQueued` | A market order's Price of 0 → queued: it trades at no price of its own (#145) |
 | `NewOrderSingle_MarketOrderWithAPriceBeyondDoubleRange_IsNotQueued` | A market order's 310-digit Price → refused, nothing pushed (#145) |
-| `NewOrderSingle_FxSwapFarPriceNoOrderTradesAt_IsNotQueued` | A swap's far price (6500) no order trades at → refused, nothing pushed (#145) |
+| `NewOrderSingle_FxSwap_IsNotQueued` | A NewOrderSingle with OrdType G, with no far leg, with FIX's deprecated OrderQty2, SettlDate2 and Price2, or with 6500 and 6501 → refused, nothing pushed: a swap is a NewOrderMultileg (#527) |
 | `NewOrderSingle_UnknownSymbol_NoPush` | Unknown symbol → no event pushed; refused to the sender, 103=1 (#189) |
 | `NewOrderSingle_WithoutAccount_GetsTheServerDefaults` | No Account (1) → the server's default account and clearing firm (#34) |
 | `NewOrderSingle_NamingAnAccount_KeepsIt` | An Account (1) the server knows → kept |
@@ -157,8 +157,7 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `CancelRequest_ForItsOwnOrderStoredUnderTheClOrdIdAlone_IsQueued` | The session's own order stored before #71, under its ClOrdID alone → still cancelled |
 | `CancelRequest_ForAnotherSourcesOrderStoredUnderTheClOrdIdAlone_IsNotQueued` | A WebSocket order's ClOrdID, or another session's from before #71 → not found (#71) |
 | `NewOrderMultileg_FxSwap_PushesToQueue` | 2-leg multileg → FXSWAP OrderEntry with near/far prices, and LegSettlDates as midnight UTC of their days (#198) |
-| `ASwapsSettlementDatesAreReadAsDates` | A NewOrderSingle swap's SettlDate (64) and 6501, LocalMktDates, become midnight UTC of their days (#198) |
-| `ASwapWithADateThatIsntOneIsNotQueued` | `-5`, a non-number, 21 digits or a day that doesn't exist, in 64, 6501 or a leg's 588 → refused before anything is stored, nothing pushed (#190) |
+| `ASwapWithADateThatIsntOneIsNotQueued` | `-5`, a non-number, 21 digits or a day that doesn't exist, in a near or far leg's 588 → refused before anything is stored, nothing pushed (#190) |
 | `NewOrderSingle_StopOrdersCarryTheirStopPx` | A STOP's and a STOP_LIMIT's StopPx (99) → the order's stop price; a STOP_LIMIT's Price (44) is its limit (#223) |
 | `NewOrderSingle_StopOrderWithoutAStopPxNoOrderTradesAt_IsNotQueued` | A stop order without StopPx, or with one no order trades at → refused before anything is stored, nothing pushed (#223) |
 | `NewOrderSingle_AGtdOrderCarriesItsExpireTime` | TimeInForce GTD (59=6) with ExpireTime (126) → the order's expiry (#240) |
@@ -441,6 +440,8 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `TheGatewaysOwnRefusalsAreTaken` | The gateway's refusal of an unknown symbol (35=8), and of a cancel and a replace of an unknown order (35=9) |
 | `AMinQtyOtherThanZeroIsRefusedOnEveryOrderMessage` | MinQty (110) 50 on a NewOrderSingle and a NewOrderMultileg gets an ExecutionReport, 150=8, 39=8, OrdRejReason 103=11 and the reason in Text (58), and on a replace an OrderCancelReject with it; nothing reaches the engine (#516) |
 | `AMinQtyOfZeroIsTaken` | 110=0 on each of the three reaches the engine, and the gateway sends nothing (#516) |
+| `ASwapAsANewOrderSingleIsRefusedReadably` | A NewOrderSingle with OrdType G and FIX's deprecated far-leg fields, which the session takes, gets the gateway's ExecutionReport, 150=8, 39=8, OrdRejReason 103=11 and the reason in Text (58); nothing reaches the engine (#527) |
+| `ASwapsFarLegInTagsNoDictionaryDefinesIsRefusedByTheSession` | The far leg in 6500 and 6501, as README.md gave it until #527, gets the session's Reject (35=3) naming 6500, SessionRejectReason 0 (invalid tag number), and the gateway never sees the order |
 | `TheEnginesRefusalsAreTaken` | The engine's refusals as the gateway reports them: a new order and a replacement whose ClOrdID is in use, a cancel too late, a business reject |
 | `EveryKindOfExecutionReportIsTaken` | Every ExecType the gateway sends, a stop's release (150=L, #236) among them, and a trade, a correction, a cancel's acknowledgement and a replacement's report, each with the order's OrderQty (38) as a counterparty reads it (#384) |
 | `AReplacementAmendedToWhatItsOriginalFilledIsReportedFilled` | EP284's C.3.b and C.3.c: the report of a replacement amended to what its original filled is taken, 150=5 and 39=2 with OrderQty its CumQty, LeavesQty 0, both ClOrdIDs and no WorkingIndicator (#381) |

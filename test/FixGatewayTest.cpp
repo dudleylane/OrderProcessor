@@ -1087,20 +1087,25 @@ TEST_F(FixGatewayInboundTest, NewOrderSingle_MarketOrderWithAPriceBeyondDoubleRa
     gateway_->onMessage(msg, TEST_SID);
 }
 
-TEST_F(FixGatewayInboundTest, NewOrderSingle_FxSwapFarPriceNoOrderTradesAt_IsNotQueued)
+TEST_F(FixGatewayInboundTest, NewOrderSingle_FxSwap_IsNotQueued)
 {
-    // The far price (6500) went through std::stod, which also takes "inf" and "nan"
+    // An FX swap is a NewOrderMultileg (#527): a NewOrderSingle with OrdType G is refused whatever far leg it gives:
+    // none, FIX's deprecated OrderQty2 (192), SettlDate2 (193) and Price2 (640), or 6500 and 6501, the tags the gateway
+    // read until then, which no dictionary defines
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
-    int n = 0;
-    for (const char *farPrice : { "inf", "nan", "0", "-1.0872" })
-    {
-        auto msg = makeNewOrderSingle("SWAP-FAR-" + std::to_string(++n), "aaa", FIX::Side_BUY, FIX::OrdType_FOREX_SWAP,
-                                      1.0850, 1000000);
-        msg.setField(6500, farPrice);
-        msg.setField(6501, "20261115");
-        msg.setField(FIX::FIELD::SettlDate, "20261015");
-        gateway_->onMessage(msg, TEST_SID);
-    }
+    auto none = makeNewOrderSingle("SWAP-NONE", "aaa", FIX::Side_BUY, FIX::OrdType_FOREX_SWAP, 1.0850, 1000000);
+    gateway_->onMessage(none, TEST_SID);
+    auto fixFields = makeNewOrderSingle("SWAP-FIX", "aaa", FIX::Side_BUY, FIX::OrdType_FOREX_SWAP, 1.0850, 1000000);
+    fixFields.set(FIX::SettlDate("20261015"));
+    fixFields.set(FIX::OrderQty2(1000000));
+    fixFields.set(FIX::SettlDate2("20261115"));
+    fixFields.set(FIX::Price2(1.0872));
+    gateway_->onMessage(fixFields, TEST_SID);
+    auto tags = makeNewOrderSingle("SWAP-TAGS", "aaa", FIX::Side_BUY, FIX::OrdType_FOREX_SWAP, 1.0850, 1000000);
+    tags.set(FIX::SettlDate("20261015"));
+    tags.setField(6500, "1.0872");
+    tags.setField(6501, "20261115");
+    gateway_->onMessage(tags, TEST_SID);
 }
 
 TEST_F(FixGatewayInboundTest, NewOrderMultileg_OrderQtyTheEngineCannotHold_IsNotQueued)
@@ -2691,9 +2696,8 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsLegsCarryTheirSideDateAndPri
 
 // --- Settlement dates, as FIX's LocalMktDate (#198, #190) ---
 
-/// 2026-10-15 and 2026-11-15 at midnight UTC, in the engine's milliseconds, as the frontend sends them
+/// 2026-10-15 at midnight UTC, in the engine's milliseconds, as the frontend sends it
 const DateTimeT OCT_15 = 1792022400000ULL;
-const DateTimeT NOV_15 = 1794700800000ULL;
 
 TEST(FixLocalMktDateTest, ADateIsMidnightUtcOfThatDay)
 {
@@ -2718,28 +2722,6 @@ TEST(FixLocalMktDateTest, AnythingElseIsNotADate)
     }
 }
 
-TEST_F(FixGatewayInboundTest, ASwapsSettlementDatesAreReadAsDates)
-{
-    // NewOrderSingle's 64 and 6501 here; NewOrderMultileg_FxSwap_PushesToQueue checks each leg's 588
-    OrderEntry *capturedOrder = nullptr;
-    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
-        .WillOnce(Invoke(
-            [&](const std::string &, const OrderEvent &evt)
-            {
-                capturedOrder = evt.order_;
-            }));
-    auto msg = makeNewOrderSingle("SWAP-DATE-1", "aaa", FIX::Side_BUY, FIX::OrdType_FOREX_SWAP, 1.0850, 1000000);
-    msg.setField(6500, "1.0872");
-    msg.setField(FIX::FIELD::SettlDate, "20261015");
-    msg.setField(6501, "20261115");
-    gateway_->onMessage(msg, TEST_SID);
-
-    ASSERT_NE(nullptr, capturedOrder);
-    EXPECT_EQ(OCT_15, capturedOrder->settlDate_);
-    EXPECT_EQ(NOV_15, capturedOrder->farSettlDate_);
-    delete capturedOrder;
-}
-
 TEST_F(FixGatewayInboundTest, ASwapWithADateThatIsntOneIsNotQueued)
 {
     // Refused to the sender before anything is stored (#190); there is no session here to send that to
@@ -2747,16 +2729,6 @@ TEST_F(FixGatewayInboundTest, ASwapWithADateThatIsntOneIsNotQueued)
     int n = 0;
     for (const char *bad : { "-5", "abc", "123456789012345678901", "20261301" })
     {
-        for (const int field : { static_cast<int>(FIX::FIELD::SettlDate), 6501 })
-        {
-            auto msg = makeNewOrderSingle("SWAP-BAD-" + std::to_string(++n), "aaa", FIX::Side_BUY,
-                                          FIX::OrdType_FOREX_SWAP, 1.0850, 1000000);
-            msg.setField(6500, "1.0872");
-            msg.setField(FIX::FIELD::SettlDate, "20261015");
-            msg.setField(6501, "20261115");
-            msg.setField(field, bad);
-            gateway_->onMessage(msg, TEST_SID);
-        }
         gateway_->onMessage(makeFxSwap("SWAP-BAD-" + std::to_string(++n), bad, "20261115"), TEST_SID);
         gateway_->onMessage(makeFxSwap("SWAP-BAD-" + std::to_string(++n), "20261015", bad), TEST_SID);
     }
@@ -3612,6 +3584,60 @@ TEST_F(FixtSessionTest, AMinQtyOfZeroIsTaken)
     EXPECT_EQ(3u, pushed.size());
     EXPECT_TRUE(sentOfType(FIX::MsgType_ExecutionReport).empty()) << sentText();
     EXPECT_TRUE(sentOfType(FIX::MsgType_OrderCancelReject).empty()) << sentText();
+}
+
+TEST_F(FixtSessionTest, ASwapAsANewOrderSingleIsRefusedReadably)
+{
+    // An FX swap is a NewOrderMultileg (#527). A NewOrderSingle with OrdType G and FIX's own far-leg fields, which FIX
+    // 5.0 deprecated for NewOrderMultileg, passes the session's checks, and the gateway refuses it with an
+    // ExecutionReport, 150=8 and OrdRejReason 103=11 (unsupported order characteristic). Nothing reaches the engine.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    FIX50SP2::NewOrderSingle swap =
+        makeNewOrderSingle("SWAP-NOS", "aaa", FIX::Side_BUY, FIX::OrdType_FOREX_SWAP, 1.0850, 1000000);
+    swap.set(FIX::SettlDate("20261015"));
+    swap.set(FIX::OrderQty2(1000000));
+    swap.set(FIX::SettlDate2("20261115"));
+    swap.set(FIX::Price2(1.0872));
+    receive(swap);
+
+    EXPECT_TRUE(sentOfType(FIX::MsgType_Reject).empty()) << sentText();
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(1u, reports.size()) << sentText();
+    EXPECT_EQ("SWAP-NOS", fieldOf(reports[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ(std::string(1, FIX::ExecType_REJECTED), fieldOf(reports[0], FIX::FIELD::ExecType));
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_REJECTED), fieldOf(reports[0], FIX::FIELD::OrdStatus));
+    EXPECT_EQ(std::to_string(FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC),
+              fieldOf(reports[0], FIX::FIELD::OrdRejReason));
+    EXPECT_EQ("Order refused: an FX swap is a NewOrderMultileg (35=AB), with its two legs",
+              fieldOf(reports[0], FIX::FIELD::Text));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ASwapsFarLegInTagsNoDictionaryDefinesIsRefusedByTheSession)
+{
+    // What README.md gave until #527: a NewOrderSingle swap with its far leg's price in 6500 and its date in 6501. No
+    // dictionary defines either, and QuickFIX checks a tag from 5000 up unless ValidateUserDefinedFields is N, which
+    // config/fix.cfg doesn't set. So the session answers with a Reject (35=3) naming 6500, SessionRejectReason 0
+    // (invalid tag number), and the gateway never sees the order.
+    ASSERT_FALSE(applicationDictionary().isField(6500));
+    ASSERT_FALSE(applicationDictionary().isField(6501));
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    FIX50SP2::NewOrderSingle swap =
+        makeNewOrderSingle("SWAP-TAGS", "aaa", FIX::Side_BUY, FIX::OrdType_FOREX_SWAP, 1.0850, 1000000);
+    swap.set(FIX::SettlDate("20261015"));
+    swap.setField(6500, "1.0872");
+    swap.setField(6501, "20261115");
+    receive(swap);
+
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_Reject);
+    ASSERT_EQ(1u, rejects.size()) << sentText();
+    EXPECT_EQ("6500", fieldOf(rejects[0], FIX::FIELD::RefTagID));
+    EXPECT_EQ(std::to_string(FIX::SessionRejectReason_INVALID_TAG_NUMBER),
+              fieldOf(rejects[0], FIX::FIELD::SessionRejectReason));
+    EXPECT_TRUE(sentOfType(FIX::MsgType_ExecutionReport).empty()) << sentText();
+    expectEverythingSentIsTaken();
 }
 
 TEST_F(FixtSessionTest, AStatusRequestIsAnsweredWithTheOrdersStateAndQuantities)
