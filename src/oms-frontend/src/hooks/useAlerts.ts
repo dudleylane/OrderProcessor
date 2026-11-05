@@ -98,43 +98,50 @@ export function useAlerts(metricsHistory: SystemMetrics[]): AlertsState {
   const [rules, setRules] = useState<AlertRule[]>(loadRules);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const cooldownMap = useRef<Map<string, number>>(new Map());
-  const lastEvaluatedLen = useRef(0);
+  // The last sample evaluated, the object itself: the history's length stops growing at its cap, and one render
+  // can bring several samples (#520)
+  const lastEvaluated = useRef<SystemMetrics | null>(null);
 
   // Persist rules
   useEffect(() => { saveRules(rules); }, [rules]);
 
-  // Evaluate rules on new metrics
+  // Evaluate rules on each sample after the last one evaluated, each against the sample before it. One that has
+  // left the history, past a render bringing more than its cap, is still the first new sample's predecessor
   useEffect(() => {
-    if (metricsHistory.length <= lastEvaluatedLen.current) return;
-    lastEvaluatedLen.current = metricsHistory.length;
+    const last = lastEvaluated.current;
+    const first = last === null ? 0 : metricsHistory.lastIndexOf(last) + 1;
+    if (first >= metricsHistory.length) return;
+    lastEvaluated.current = metricsHistory[metricsHistory.length - 1];
 
-    const current = metricsHistory[metricsHistory.length - 1];
-    const prev = metricsHistory.length > 1 ? metricsHistory[metricsHistory.length - 2] : null;
-    if (!current) return;
-
+    // The samples of one render share its time, so a rule that fires on one waits out its cooldown through the rest
     const now = Date.now();
     const newAlerts: Alert[] = [];
 
-    for (const rule of rules) {
-      if (!rule.enabled) continue;
+    for (let i = first; i < metricsHistory.length; i++) {
+      const current = metricsHistory[i];
+      const prev = i > 0 ? metricsHistory[i - 1] : last;
 
-      const lastFired = cooldownMap.current.get(rule.id) ?? 0;
-      if (now - lastFired < COOLDOWN_MS) continue;
+      for (const rule of rules) {
+        if (!rule.enabled) continue;
 
-      const { triggered, value } = evaluateRule(rule, current, prev);
-      if (triggered) {
-        cooldownMap.current.set(rule.id, now);
-        newAlerts.push({
-          id: `${rule.id}-${now}`,
-          ruleId: rule.id,
-          ruleName: rule.name,
-          severity: rule.severity,
-          message: `${rule.name}: ${value} ${rule.operator} ${rule.threshold}`,
-          value,
-          threshold: rule.threshold,
-          timestamp: now,
-          acknowledged: false,
-        });
+        const lastFired = cooldownMap.current.get(rule.id) ?? 0;
+        if (now - lastFired < COOLDOWN_MS) continue;
+
+        const { triggered, value } = evaluateRule(rule, current, prev);
+        if (triggered) {
+          cooldownMap.current.set(rule.id, now);
+          newAlerts.push({
+            id: `${rule.id}-${now}`,
+            ruleId: rule.id,
+            ruleName: rule.name,
+            severity: rule.severity,
+            message: `${rule.name}: ${value} ${rule.operator} ${rule.threshold}`,
+            value,
+            threshold: rule.threshold,
+            timestamp: now,
+            acknowledged: false,
+          });
+        }
       }
     }
 
