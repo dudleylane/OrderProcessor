@@ -14,6 +14,7 @@
 #include <boost/beast/websocket.hpp>
 #include <nlohmann/json.hpp>
 #include <chrono>
+#include <future>
 #include <memory>
 #include <optional>
 #include <set>
@@ -34,6 +35,7 @@
 #include "WsCredentials.h"
 #include "WsOutQueues.h"
 #include "WsServer.h"
+#include "WsSession.h"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -334,6 +336,34 @@ protected:
     SourceIdT clearingId_;
 };
 
+/// Holds the side of the book it names, from inside OrderBookImpl::find(), which runs it under the side's lock, until
+/// it is released: so a test knows the lock is held, and for how long (#525)
+class HoldSide : public OrderFunctor
+{
+public:
+    HoldSide(const SourceIdT &instrument, Side side, std::promise<void> *inside, std::shared_future<void> release)
+        : instrument_(instrument), inside_(inside), release_(std::move(release))
+    {
+        side_ = side;
+    }
+    SourceIdT instrument() const override
+    {
+        return instrument_;
+    }
+    bool match(const IdT &, bool *stop) const override
+    {
+        inside_->set_value();
+        release_.wait();
+        *stop = true;
+        return false;
+    }
+
+private:
+    SourceIdT instrument_;
+    std::promise<void> *inside_;
+    std::shared_future<void> release_;
+};
+
 } // namespace
 
 TEST_F(WsAuthorizationTest, ASessionGetsOnlyItsIdentitysAccountsAndTheirOrders)
@@ -540,4 +570,78 @@ TEST_F(WsAuthorizationTest, WithoutIdentitiesEverySessionSeesEverythingAsBefore)
     out_->push(reject, "WebSocket");
     EXPECT_EQ(std::vector<std::string>{ "execution_report" }, typesBeforeMarker(*one));
     EXPECT_EQ(std::vector<std::string>{ "execution_report" }, typesBeforeMarker(*two));
+}
+
+// A report builds its instrument's depth only when a session subscribes to the book (#525): every report walked the
+// book, under each side's lock, and the broadcast then dropped what it built. With nobody subscribed, the push doesn't
+// wait for a side's lock.
+TEST_F(WsAuthorizationTest, AReportWithNoBookSubscriberDoesNotWalkTheBook)
+{
+    orderBook_.add(*storeOrder(1, tradingId_, "A-1"));
+    const OrderEntry *reported = storeOrder(2, tradingId_, "A-2");
+
+    std::promise<void> inside;
+    std::promise<void> release;
+    HoldSide hold(instrumentId_, BUY_SIDE, &inside, release.get_future().share());
+    std::thread holder(
+        [this, &hold]
+        {
+            orderBook_.find(hold);
+        });
+    inside.get_future().wait();
+    std::future<void> pushed = std::async(std::launch::async,
+                                          [this, reported]
+                                          {
+                                              report(*reported, "desk-a");
+                                          });
+    const bool returned = std::future_status::ready == pushed.wait_for(std::chrono::seconds(2));
+    release.set_value();
+    holder.join();
+    pushed.get();
+    EXPECT_TRUE(returned) << "with nobody subscribed, the push waited for the book's lock: it walked the book";
+}
+
+// What the push asks (#525): whether a session subscribes to the symbol's book. A symbol's entry goes with its last
+// subscriber, whether it unsubscribes or its session ends.
+TEST_F(WsAuthorizationTest, TheSessionManagerSaysWhetherABookHasASubscriber)
+{
+    net::io_context ioc;
+    auto session = std::make_shared<WsSession>(tcp::socket(ioc), &sessionMgr_, nullptr, nullptr, nullptr, nullptr,
+                                               nullptr, SourceIdT(), SourceIdT());
+    sessionMgr_.addSession(session);
+    EXPECT_FALSE(sessionMgr_.hasBookSubscribers("AAPL"));
+    sessionMgr_.subscribe(session, "AAPL");
+    EXPECT_TRUE(sessionMgr_.hasBookSubscribers("AAPL"));
+    EXPECT_FALSE(sessionMgr_.hasBookSubscribers("MSFT")) << "another symbol's book";
+    sessionMgr_.unsubscribe(session, "AAPL");
+    EXPECT_FALSE(sessionMgr_.hasBookSubscribers("AAPL")) << "after its last subscriber unsubscribed";
+    sessionMgr_.subscribe(session, "AAPL");
+    sessionMgr_.removeSession(session);
+    EXPECT_FALSE(sessionMgr_.hasBookSubscribers("AAPL")) << "after its last subscriber's session ended";
+}
+
+// A report's book update goes to every session that subscribes to the book, whatever its identity, since the book shows
+// no account (#225), with each resting order's leaves as its last report gave them (#525)
+TEST_F(WsAuthorizationTest, AReportsBookUpdateGoesToEverySubscriberWithTheReportedLeaves)
+{
+    OrderEntry *resting = storeOrder(1, tradingId_, "A-1");
+    orderBook_.add(*resting);
+    start();
+    std::unique_ptr<Client> a = connect(TOKEN_A);
+    std::unique_ptr<Client> b = connect(TOKEN_B);
+    b->ws.write(net::buffer(std::string(R"({"type":"subscribe_book","symbol":"AAPL"})")));
+    ASSERT_TRUE(readUntil(*b, "book_update").has_value()) << "no first snapshot: desk-b doesn't subscribe";
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(resting->entryMutex_, true);
+        resting->leavesQty_ = 40; // a fill of 60 decided, and its report not out
+    }
+
+    report(*resting, "desk-a");
+    EXPECT_EQ((std::vector<std::string>{ "execution_report", "order_update" }), typesBeforeMarker(*a))
+        << "desk-a, which doesn't subscribe, got the book";
+    std::optional<nlohmann::json> update = readUntil(*b, "book_update");
+    ASSERT_TRUE(update.has_value()) << "the report's book update didn't reach the session that subscribes";
+    ASSERT_EQ(1u, (*update)["data"]["bids"].size());
+    EXPECT_EQ(100u, (*update)["data"]["bids"][0]["qty"].get<u64>()) << "the depth shows a fill before its report";
+    EXPECT_EQ(1u, (*update)["data"]["bids"][0]["orderCount"].get<u32>());
 }

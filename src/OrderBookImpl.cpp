@@ -525,6 +525,63 @@ IdT OrderBookImpl::getTop(const SourceIdT &instrument, const Side &side) const
     return IdT();
 }
 
+namespace
+{
+/// A side's resting orders, by price, as getSnapshot() copies them under the side's lock (#525)
+typedef std::vector<std::pair<PriceT, IdT>> RestingOrdersT;
+
+/// Copies a side's resting orders in one walk: assign() walks the side twice, to count it and to copy it (#525)
+template <typename OrdersT> void copyResting(const OrdersT &side, RestingOrdersT *resting)
+{
+    resting->clear();
+    resting->reserve(side.size());
+    for (const auto &[price, orderId] : side)
+    {
+        resting->emplace_back(price, orderId);
+    }
+}
+
+/// A side's levels, from its resting orders, each with the leaves its last report gave (#404), read under its read lock
+/// with no book lock held (#525)
+template <typename Compare>
+void aggregateLevels(const RestingOrdersT &resting, const OrderDataStorage *storage, std::vector<BookLevel> *levels)
+{
+    std::map<PriceT, BookLevel, Compare> byPrice;
+    for (const auto &[price, orderId] : resting)
+    {
+        OrderEntry *order = storage->locateByOrderId(orderId);
+        if (nullptr == order)
+        {
+            continue;
+        }
+        QuantityT leaves = 0;
+        {
+            oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
+            if (order->published_)
+            {
+                leaves = order->published_->leavesQty_;
+            }
+        }
+        // Its first report isn't out, and the update that report sends follows, or its last report left it nothing to
+        // trade: a cancel, an expiry or a replace zeroes the leaves at the decision, and takes the order out of the
+        // book in a later operation
+        if (0 == leaves)
+        {
+            continue;
+        }
+        BookLevel &level = byPrice[price];
+        level.price = price;
+        level.totalQty += leaves;
+        level.orderCount++;
+    }
+    levels->reserve(byPrice.size());
+    for (const auto &[price, level] : byPrice)
+    {
+        levels->push_back(level);
+    }
+}
+} // namespace
+
 BookSnapshot OrderBookImpl::getSnapshot(const SourceIdT &instrument, const Store::OrderDataStorage *storage) const
 {
     BookSnapshot snap;
@@ -534,51 +591,24 @@ BookSnapshot OrderBookImpl::getSnapshot(const SourceIdT &instrument, const Store
         return snap;
     }
 
-    // Aggregate bids (descending price)
+    // Each side's orders are copied under its lock and read once it is released: never a book lock and an order's at
+    // once (#525). A fill's decision holds the order's write lock while it takes a filled order out of the book
+    // (processFill calls remove()), and the report whose push builds this runs in a transaction that doesn't name the
+    // instrument, so beside its fills. The matcher takes the side's lock and then an order's, but only within the
+    // instrument's chain, as its fills are decided. So the depth is the book's as of the copy: an order that leaves it
+    // before its read shows its last reported leaves, and one booked meanwhile is missed, until the next update.
+    // The thread keeps its copy from one snapshot to the next: a side of 128 orders is 3 KB, past glibc's tcache, and
+    // a copy made for each report cost it ~30,000 instructions in the allocator (#525)
+    static thread_local RestingOrdersT resting;
     {
         tbb::mutex::scoped_lock lock(it->second->buyLock_);
-        std::map<PriceT, BookLevel, PriceTDescend> levels;
-        for (const auto &[price, orderId] : it->second->buyOrder_)
-        {
-            OrderEntry *order = storage->locateByOrderId(orderId);
-            if (!order)
-            {
-                continue;
-            }
-            auto &lvl = levels[price];
-            lvl.price = price;
-            lvl.totalQty += order->leavesQty_;
-            lvl.orderCount++;
-        }
-        snap.bids.reserve(levels.size());
-        for (auto &[p, lvl] : levels)
-        {
-            snap.bids.push_back(lvl);
-        }
+        copyResting(it->second->buyOrder_, &resting);
     }
-
-    // Aggregate asks (ascending price)
+    aggregateLevels<PriceTDescend>(resting, storage, &snap.bids);
     {
         tbb::mutex::scoped_lock lock(it->second->sellLock_);
-        std::map<PriceT, BookLevel, PriceTAscend> levels;
-        for (const auto &[price, orderId] : it->second->sellOrder_)
-        {
-            OrderEntry *order = storage->locateByOrderId(orderId);
-            if (!order)
-            {
-                continue;
-            }
-            auto &lvl = levels[price];
-            lvl.price = price;
-            lvl.totalQty += order->leavesQty_;
-            lvl.orderCount++;
-        }
-        snap.asks.reserve(levels.size());
-        for (auto &[p, lvl] : levels)
-        {
-            snap.asks.push_back(lvl);
-        }
+        copyResting(it->second->sellOrder_, &resting);
     }
-
+    aggregateLevels<PriceTAscend>(resting, storage, &snap.asks);
     return snap;
 }

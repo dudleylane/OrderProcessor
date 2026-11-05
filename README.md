@@ -473,7 +473,7 @@ A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through
 | `order_snapshot` | `Order[]` | On connect: every order, as its last report left it, so it gives no fill not yet reported (#404). An order whose first report isn't out yet is left out; that report's `order_update` comes after the snapshot |
 | `order_update` | `Order` | After each `execution_report`: the order as that report's decision left it, so a fill's counts no later fill (#411) |
 | `execution_report` | `ExecutionReport` | On trade, reject, cancel, replace, correct |
-| `book_update` | `OrderBookSnapshot` | On book change (subscribed symbols only) |
+| `book_update` | `OrderBookSnapshot` | To a session that subscribes to the symbol, as it subscribes and with each execution report on the symbol, whoever the report goes to: each level's leaves as the resting orders' last reports give them, so it gives no fill not yet reported (#525). An order whose first report isn't out yet is left out |
 | `cancel_reject` | `{orderId, reason}` | When a cancel is refused; `reason` says why: unknown order, too late (with the order's status), or a replace pending |
 | `business_reject` | `{refId, reason}` | Not sent: nothing in the server raises one |
 | `metrics_update` | `SystemMetrics` | Every 1 second (broadcast to all) |
