@@ -1486,6 +1486,16 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
         replacement->instrument_ = instrument;
     }
 
+    // OrdType (40), which FIX requires, must be the order's: a replace keeps an order's type, as the engine's does.
+    // Until #528 it went unread, and a change of type was acknowledged, the replacement keeping the original's. It is
+    // checked before the price and StopPx, so that a limit order's replace to a stop is refused for its type.
+    FIX::OrdType ordType;
+    if (msg.getFieldIfSet(ordType) && (toOrdType(ordType.getValue()) != replacement->ordType_))
+    {
+        refuse("Replace refused: a replace cannot change the order type (40)");
+        return;
+    }
+
     // The price and quantity are checked before they are narrowed, and before the request's ClOrdID is stored (#145)
     FIX::Price price;
     if (msg.isSet(price))
