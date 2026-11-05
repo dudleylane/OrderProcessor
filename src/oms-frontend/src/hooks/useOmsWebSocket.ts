@@ -262,7 +262,18 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
         clearTimeout(reconnectRef.current);
         reconnectRef.current = null;
       }
-      wsRef.current?.close();
+      // A browser fires the close event later, and the socket's onclose would reconnect with this effect's token, as
+      // a socket of its own beside the next effect's: so the socket let go of here says nothing more (#523)
+      const ws = wsRef.current;
+      wsRef.current = null;
+      if (ws) {
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        ws.close();
+      }
+      dispatch({ type: 'DISCONNECTED' });
     };
   }, [connect]);
 
