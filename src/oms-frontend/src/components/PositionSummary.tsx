@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import type { Order } from '../types';
-import { Side } from '../types/enums';
+import { OrderType, Side } from '../types/enums';
 import { formatQuantity, formatPrice } from '../utils/format';
 
 interface PositionSummaryProps {
@@ -30,6 +30,7 @@ export function PositionSummary({ orders }: PositionSummaryProps) {
     const posMap = new Map<string, Position>();
     for (const order of orders.values()) {
       if (order.cumQty <= 0 || replaced.has(order.orderId)) continue;
+      if (order.ordType === OrderType.FXSWAP) continue;
 
       const key = `${order.account}\u0000${order.symbol}`;
       const existing = posMap.get(key) ?? {
@@ -58,10 +59,23 @@ export function PositionSummary({ orders }: PositionSummaryProps) {
     );
   }, [orders]);
 
+  // A swap's legs offset, so it changes no net position, and its figures are its near leg's alone (#691). So swaps are
+  // left out, and the panel says so.
+  const swapsLeftOut = useMemo(
+    () => Array.from(orders.values()).some(o => o.ordType === OrderType.FXSWAP && o.cumQty > 0),
+    [orders],
+  );
+  const swapNote = swapsLeftOut ? (
+    <p className="p-3 text-xs text-gray-500">
+      Swaps are left out: a swap's two legs offset, so it changes no net position.
+    </p>
+  ) : null;
+
   if (positions.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64 text-gray-600 text-sm">
+      <div className="flex flex-col items-center justify-center h-64 text-gray-600 text-sm">
         No positions
+        {swapNote}
       </div>
     );
   }
@@ -127,6 +141,7 @@ export function PositionSummary({ orders }: PositionSummaryProps) {
           })}
         </tbody>
       </table>
+      {swapNote}
     </div>
   );
 }
