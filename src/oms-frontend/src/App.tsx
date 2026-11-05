@@ -10,6 +10,7 @@ import { DashboardTab } from './components/DashboardTab';
 import { MemoryAdminTab } from './components/MemoryAdminTab';
 import { AlertsPanel } from './components/AlertsPanel';
 import { AccessTokenPrompt } from './components/AccessTokenPrompt';
+import { NoticeStrip } from './components/NoticeStrip';
 import { ACTIVE_STATUSES } from './utils/constants';
 import { loadAccessToken, saveAccessToken } from './utils/accessToken';
 
@@ -96,6 +97,8 @@ function OmsApp({ token, onChangeToken }: OmsAppProps) {
           </button>
         </div>
       </header>
+
+      <NoticeStrip notices={oms.notices} onDismiss={oms.dismissNotice} onDismissAll={oms.dismissNotices} />
 
       {/* Tab bar */}
       <div className="flex border-b border-gray-800 px-2">

@@ -11,6 +11,7 @@ import type {
   ReplaceOrderRequest,
   SystemMetrics,
 } from '../types';
+import { isRejection } from '../types';
 import type { ServerMessage, ClientMessage } from '../types/websocket';
 import { wsSubprotocols } from '../utils/accessToken';
 
@@ -22,6 +23,18 @@ const WS_URL =
 const RECONNECT_DELAY = 3000;
 const MAX_EXECUTIONS = 1000;
 const MAX_METRICS_HISTORY = 300; // 5 minutes at 1/sec
+const MAX_NOTICES = 50;
+
+/**
+ * A refusal the server sent, or a request the socket didn't take (#521): an error, a cancel or business reject, a
+ * REJECT report for an order never stored, or a request not sent. Each stays until the user dismisses it.
+ */
+export interface Notice {
+  id: number;
+  time: number;
+  kind: 'error' | 'cancel_reject' | 'business_reject' | 'reject' | 'not_sent';
+  text: string;
+}
 
 // --- State & Reducer ---
 
@@ -36,6 +49,8 @@ export interface OmsState {
   executions: Execution[];
   bookData: Map<string, OrderBookSnapshot>;
   metricsHistory: SystemMetrics[];
+  // Newest first
+  notices: Notice[];
 }
 
 type OmsAction =
@@ -47,7 +62,10 @@ type OmsAction =
   | { type: 'ORDER_UPDATE'; data: Order }
   | { type: 'EXECUTION_REPORT'; data: ExecutionReport }
   | { type: 'BOOK_UPDATE'; data: OrderBookSnapshot }
-  | { type: 'METRICS_UPDATE'; data: SystemMetrics };
+  | { type: 'METRICS_UPDATE'; data: SystemMetrics }
+  | { type: 'NOTICE'; notice: Notice }
+  | { type: 'DISMISS_NOTICE'; id: number }
+  | { type: 'DISMISS_NOTICES' };
 
 function omsReducer(state: OmsState, action: OmsAction): OmsState {
   switch (action.type) {
@@ -86,6 +104,12 @@ function omsReducer(state: OmsState, action: OmsAction): OmsState {
         .slice(-MAX_METRICS_HISTORY);
       return { ...state, metricsHistory };
     }
+    case 'NOTICE':
+      return { ...state, notices: [action.notice, ...state.notices].slice(0, MAX_NOTICES) };
+    case 'DISMISS_NOTICE':
+      return { ...state, notices: state.notices.filter(n => n.id !== action.id) };
+    case 'DISMISS_NOTICES':
+      return { ...state, notices: [] };
     default:
       return state;
   }
@@ -100,28 +124,41 @@ const INITIAL_STATE: OmsState = {
   executions: [],
   bookData: new Map(),
   metricsHistory: [],
+  notices: [],
 };
 
 // --- Hook ---
 
 export interface OmsActions {
-  sendOrder: (req: NewOrderRequest) => void;
-  cancelOrder: (orderId: number, clOrderId?: string) => void;
-  replaceOrder: (req: ReplaceOrderRequest) => void;
+  // Each says whether the socket took the request; one it didn't take also gets a notice (#521)
+  sendOrder: (req: NewOrderRequest) => boolean;
+  cancelOrder: (orderId: number, clOrderId?: string) => boolean;
+  replaceOrder: (req: ReplaceOrderRequest) => boolean;
   subscribeBook: (symbol: string) => void;
   unsubscribeBook: (symbol: string) => void;
+  dismissNotice: (id: number) => void;
+  dismissNotices: () => void;
 }
 
 // token: the server's access token, offered on every connection, or '' for a server that asks for none (#146)
 export function useOmsWebSocket(token: string): OmsState & OmsActions {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeSeq = useRef(0);
   const [state, dispatch] = useReducer(omsReducer, INITIAL_STATE);
 
-  const send = useCallback((msg: ClientMessage) => {
+  const notify = useCallback((kind: Notice['kind'], text: string) => {
+    noticeSeq.current += 1;
+    dispatch({ type: 'NOTICE', notice: { id: noticeSeq.current, time: Date.now(), kind, text } });
+  }, []);
+
+  // Whether the socket took the message: one sent while it is closed, or still opening, is lost
+  const send = useCallback((msg: ClientMessage): boolean => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(msg));
+      return true;
     }
+    return false;
   }, []);
 
   const connect = useCallback(() => {
@@ -173,9 +210,17 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
           case 'order_update':
             dispatch({ type: 'ORDER_UPDATE', data: msg.data });
             break;
-          case 'execution_report':
+          case 'execution_report': {
             dispatch({ type: 'EXECUTION_REPORT', data: msg.data });
+            // An order or a replacement refused before it was stored: the report comes to its sender alone, and the
+            // order never reaches the order blotter. Its reason says which ("Order refused: ...", "Replace refused:
+            // ..."). A stored order's REJECT shows in its row there.
+            const exec = msg.data as Execution;
+            if (exec.orderId === 0 && isRejection(exec)) {
+              notify('reject', exec.rejectReason || 'Order refused');
+            }
             break;
+          }
           case 'book_update':
             dispatch({ type: 'BOOK_UPDATE', data: msg.data });
             break;
@@ -183,13 +228,14 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
             dispatch({ type: 'METRICS_UPDATE', data: msg.data });
             break;
           case 'cancel_reject':
-            console.warn('Cancel rejected:', msg.data.reason);
+            // To every session that may see the order's account, so the notice names the order
+            notify('cancel_reject', msg.data.orderId ? `Order ${msg.data.orderId}: ${msg.data.reason}` : msg.data.reason);
             break;
           case 'business_reject':
-            console.warn('Business reject:', msg.data.reason);
+            notify('business_reject', `${msg.data.reason} (reference ${msg.data.refId})`);
             break;
           case 'error':
-            console.error('Server error:', msg.message);
+            notify('error', msg.message);
             break;
         }
       } catch (e) {
@@ -198,7 +244,7 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
     };
 
     wsRef.current = ws;
-  }, [token]);
+  }, [token, notify]);
 
   useEffect(() => {
     connect();
@@ -215,20 +261,32 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
 
   // --- Exposed send methods ---
 
+  // A request the socket didn't take gets a notice naming it: the blotter's cancel button has no line of its own
   const sendOrder = useCallback(
-    (req: NewOrderRequest) => send({ type: 'new_order', data: req }),
-    [send],
+    (req: NewOrderRequest) => {
+      const sent = send({ type: 'new_order', data: req });
+      if (!sent) notify('not_sent', `New order (${req.side} ${req.orderQty} ${req.symbol}) not sent: not connected`);
+      return sent;
+    },
+    [send, notify],
   );
 
   const cancelOrder = useCallback(
-    (orderId: number, clOrderId?: string) =>
-      send({ type: 'cancel_order', data: { orderId, clOrderId } }),
-    [send],
+    (orderId: number, clOrderId?: string) => {
+      const sent = send({ type: 'cancel_order', data: { orderId, clOrderId } });
+      if (!sent) notify('not_sent', `Cancel of order ${orderId} not sent: not connected`);
+      return sent;
+    },
+    [send, notify],
   );
 
   const replaceOrder = useCallback(
-    (req: ReplaceOrderRequest) => send({ type: 'replace_order', data: req }),
-    [send],
+    (req: ReplaceOrderRequest) => {
+      const sent = send({ type: 'replace_order', data: req });
+      if (!sent) notify('not_sent', `Replace of order ${req.orderId} not sent: not connected`);
+      return sent;
+    },
+    [send, notify],
   );
 
   const subscribeBook = useCallback(
@@ -241,6 +299,9 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
     [send],
   );
 
+  const dismissNotice = useCallback((id: number) => dispatch({ type: 'DISMISS_NOTICE', id }), []);
+  const dismissNotices = useCallback(() => dispatch({ type: 'DISMISS_NOTICES' }), []);
+
   return {
     ...state,
     sendOrder,
@@ -248,5 +309,7 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
     replaceOrder,
     subscribeBook,
     unsubscribeBook,
+    dismissNotice,
+    dismissNotices,
   };
 }
