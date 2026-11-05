@@ -920,6 +920,16 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
     {
         return;
     }
+    // An FX swap is a NewOrderMultileg (#527): FIX 5.0 deprecated a NewOrderSingle's far-leg fields for it, OrderQty2
+    // (192), SettlDate2 (193) and Price2 (640). The gateway read the far leg from 6500 and 6501 until then, tags no
+    // dictionary defines, so the session refused such an order before the gateway saw it.
+    const OrderType ordTypeVal = toOrdType(ordType.getValue());
+    if (FXSWAP_ORDERTYPE == ordTypeVal)
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC,
+                    "Order refused: an FX swap is a NewOrderMultileg (35=AB), with its two legs");
+        return;
+    }
 
     FIX::Price price;
     double priceVal = 0.0;
@@ -1002,7 +1012,6 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
         refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC, "Order refused: " + *refusal);
         return;
     }
-    const OrderType ordTypeVal = toOrdType(ordType.getValue());
     if (msg.isSet(price) && !isTradablePrice(priceVal, ordTypeVal))
     {
         refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION, "Order refused: " + priceRefusal("Price (44)", ordTypeVal));
@@ -1029,29 +1038,8 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
             return;
         }
     }
-    double farPrice = 0.0;
-    if ((FXSWAP_ORDERTYPE == ordTypeVal) && msg.isSetField(6500))
-    {
-        farPrice = std::stod(msg.getField(6500));
-        if (!isTradablePrice(farPrice, ordTypeVal))
-        {
-            refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION,
-                        "Order refused: " + priceRefusal("the far leg's price (6500)", ordTypeVal));
-            return;
-        }
-    }
 
-    // A swap's settlement dates, read before anything is stored (#190)
-    DateTimeT settlDate = 0;
-    DateTimeT farSettlDate = 0;
-    if ((FXSWAP_ORDERTYPE == ordTypeVal) &&
-        (!readSettlDate(msg, msg, sid, FIX::FIELD::SettlDate, "SettlDate (64)", &settlDate) ||
-         !readSettlDate(msg, msg, sid, 6501, "the far leg's SettlDate (6501)", &farSettlDate)))
-    {
-        return;
-    }
-
-    // A GTD order's ExpireTime (126) (#240), read before anything is stored, as the prices and dates are
+    // A GTD order's ExpireTime (126) (#240), read before anything is stored, as the prices are
     DateTimeT expireTimeVal = 0;
     if (const std::optional<std::string> refusal =
             expiryRefusal(msg, toTif(tifVal), aux::currentDateTime(), &expireTimeVal))
@@ -1094,17 +1082,6 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
             .count());
     order->lastUpdateTime_ = order->creationTime_;
-
-    // FX Swap: extract far-leg fields from user-defined tags (6500=farPrice, 6501=farSettlDate)
-    if (FXSWAP_ORDERTYPE == order->ordType_)
-    {
-        if (msg.isSetField(6500))
-        {
-            order->farPrice_ = farPrice; // read and checked above (#145)
-        }
-        order->farSettlDate_ = farSettlDate; // 6501, read and checked above (#190)
-        order->settlDate_ = settlDate;       // SettlDate (64), the near leg's
-    }
 
     // A cancel sent at once waits for it (#380), and a status request reports it Pending New (#383)
     Queues::OrderEvent evt(order);

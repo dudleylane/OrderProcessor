@@ -325,9 +325,9 @@ public:
     /// a QTY field over as a double with no range check, and converting a double outside QuantityT's range is undefined
     /// behaviour (#145, as #16 was in the JSON parser).
     static std::optional<QuantityT> toQuantity(double orderQty);
-    /// Whether an order of ordType can trade at price, a Price (44), LegPrice (566) or a swap's far price (6500): finite,
-    /// and above zero unless the order is a market order, which trades at no price of its own. QuickFIX accepts any
-    /// number of digits in a PRICE field, and 310 of them convert to infinity (#145).
+    /// Whether an order of ordType can trade at price, a Price (44) or a LegPrice (566): finite, and above zero unless
+    /// the order is a market order, which trades at no price of its own. QuickFIX accepts any number of digits in a
+    /// PRICE field, and 310 of them convert to infinity (#145).
     static bool isTradablePrice(double price, OrderType ordType);
     /// A LocalMktDate (YYYYMMDD), as the engine keeps a settlement date: milliseconds since the epoch at midnight UTC of
     /// that day, as the frontend sends one (#198). Nothing for anything else: not 8 digits, no such day, or before 1970.
