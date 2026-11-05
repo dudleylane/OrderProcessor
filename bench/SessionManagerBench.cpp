@@ -6,6 +6,7 @@
  Distributed under the GNU Affero General Public License (AGPL).
 */
 
+#include <algorithm>
 #include <benchmark/benchmark.h>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -42,11 +43,13 @@ std::shared_ptr<const App::WsIdentity> identityWith(const SourceIdT &account)
 
 /// K clients, each with a session in a SessionManager, as the server's WsServer makes them. Their io_context never
 /// runs: a benchmark times what the broadcasting thread does, and the handlers it posts wait until reset() drops them.
-/// With identities, every other client's may see ACCOUNT, and the rest's may not.
+/// With identities, every other client's may see ACCOUNT, and the rest's may not. Given a symbol, each subscribes to
+/// its book.
 class Clients
 {
 public:
-    explicit Clients(int count, bool withIdentities = false) : count_(count), withIdentities_(withIdentities)
+    explicit Clients(int count, bool withIdentities = false, std::string watched = std::string())
+        : count_(count), withIdentities_(withIdentities), watched_(std::move(watched))
     {
         attach();
     }
@@ -68,6 +71,25 @@ public:
         attach();
     }
 
+    /// Whether a book update for the symbol reaches every client: the handler a broadcast posts for a session holds
+    /// the session, until reset() drops it
+    bool watching(const std::string &symbol)
+    {
+        std::vector<long> held;
+        for (const auto &session : sessions_)
+        {
+            held.push_back(session.use_count());
+        }
+        manager_.broadcastBookUpdate(symbol, "{}");
+        bool every = true;
+        for (std::size_t i = 0; i < sessions_.size(); ++i)
+        {
+            every = every && (held[i] + 1 == sessions_[i].use_count());
+        }
+        reset();
+        return every;
+    }
+
 private:
     void attach()
     {
@@ -81,6 +103,10 @@ private:
                 session->setIdentityForBenchmark((0 == (i % 2)) ? maySee_ : mayNotSee_);
             }
             manager_.addSession(session);
+            if (!watched_.empty())
+            {
+                manager_.subscribe(session, watched_);
+            }
             sessions_.push_back(std::move(session));
         }
     }
@@ -95,6 +121,7 @@ private:
 
     const int count_;
     const bool withIdentities_;
+    const std::string watched_;
     const std::shared_ptr<const App::WsIdentity> maySee_ = identityWith(ACCOUNT);
     const std::shared_ptr<const App::WsIdentity> mayNotSee_ = identityWith(SourceIdT(2, 1));
     std::unique_ptr<boost::asio::io_context> ioc_ = std::make_unique<boost::asio::io_context>();
@@ -161,6 +188,9 @@ public:
         instruments.insert(instrumentId);
         book_ = std::make_unique<OrderBookImpl>();
         book_->init(instruments);
+        instrumentId_ = instrumentId;
+        accountId_ = accountId;
+        clearingId_ = clearingId;
     }
     ~ReportedOrder()
     {
@@ -175,6 +205,41 @@ public:
     {
         return *order_;
     }
+    const SourceIdT &instrument() const
+    {
+        return instrumentId_;
+    }
+
+    /// Books depth resting orders of 10 each, stored with their own ClOrdIDs and published as their last reports left
+    /// them (#404), half of them buys at LEVELS prices below the order's and half sells at LEVELS prices above it
+    void rest(int depth)
+    {
+        for (int i = 0; i < depth; ++i)
+        {
+            const std::string clOrdId = "BENCH-REST-" + std::to_string(i);
+            const SourceIdT clOrderId = Store::WideDataStorage::instance()->add(
+                new RawDataEntry(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size())));
+            auto *resting = new OrderEntry(SourceIdT(), SourceIdT(), clOrderId, SourceIdT(), instrumentId_, accountId_,
+                                           clearingId_, SourceIdT());
+            resting->orderId_ = IdT(static_cast<u64>(100 + i), 20261027);
+            const bool buy = (0 == (i % 2));
+            const int level = (i / 2) % LEVELS;
+            resting->side_ = buy ? BUY_SIDE : SELL_SIDE;
+            resting->ordType_ = LIMIT_ORDERTYPE;
+            resting->tif_ = DAY_TIF;
+            resting->capacity_ = PRINCIPAL_CAPACITY;
+            resting->currency_ = USD_CURRENCY;
+            resting->price_ = buy ? (140.0 - level) : (160.0 + level);
+            resting->orderQty_ = 10;
+            resting->leavesQty_ = 10;
+            resting->status_ = NEW_ORDSTATUS;
+            Store::OrderStorage::instance()->restore(resting); // which publishes it as its record would
+            book_->add(*resting);
+        }
+    }
+
+    /// The price levels each side's resting orders take
+    static constexpr int LEVELS = 8;
     OrderBookImpl *book()
     {
         return book_.get();
@@ -183,6 +248,9 @@ public:
 private:
     OrderEntry *order_; // the storage's
     std::unique_ptr<OrderBookImpl> book_;
+    SourceIdT instrumentId_;
+    SourceIdT accountId_;
+    SourceIdT clearingId_;
 };
 
 } // namespace
@@ -289,3 +357,65 @@ static void BM_WsOutQueuesPushTradeReport(benchmark::State &state)
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_WsOutQueuesPushTradeReport)->Arg(1)->Arg(8);
+
+// BM_WsOutQueuesPushTradeReport with one client subscribed to the instrument's book, which holds D resting orders over
+// eight price levels on each side: the push builds the book's depth and offers it to the client (#525)
+static void BM_WsOutQueuesPushTradeReportWatched(benchmark::State &state)
+{
+    const int depth = static_cast<int>(state.range(0));
+    Clients clients(1, false, "AAPL");
+    ReportedOrder reported;
+    reported.rest(depth);
+    App::WsOutQueues out(&clients.manager(), Store::WideDataStorage::instance(), Store::OrderStorage::instance(),
+                         reported.book());
+
+    TradeExecEntry trade;
+    trade.type_ = TRADE_EXECTYPE;
+    trade.execId_ = IdT(2, 20261027);
+    trade.orderId_ = reported.order().orderId_;
+    trade.orderStatus_ = PARTFILL_ORDSTATUS;
+    trade.transactTime_ = 1;
+    trade.market_ = INTERNAL_EXECUTION;
+    trade.lastQty_ = 30;
+    trade.lastPx_ = 150.0;
+    trade.currency_ = USD_CURRENCY;
+    trade.tradeDate_ = 20261027;
+    Queues::ExecReportEvent report(&trade);
+    report.figures_.emplace(reported.order());
+    if (!clients.watching("AAPL"))
+    {
+        state.SkipWithError("the client doesn't subscribe to the instrument's book");
+        return;
+    }
+    // The depth the push builds: each side's levels, with every resting order in them
+    const size_t levels = static_cast<size_t>(std::min(ReportedOrder::LEVELS, (depth + 1) / 2));
+    const BookSnapshot book = reported.book()->getSnapshot(reported.instrument(), Store::OrderStorage::instance());
+    u32 counted = 0;
+    for (const auto *side : { &book.bids, &book.asks })
+    {
+        for (const BookLevel &level : *side)
+        {
+            counted += level.orderCount;
+        }
+    }
+    if ((levels != book.bids.size()) || (static_cast<u32>(depth) != counted))
+    {
+        state.SkipWithError("the book doesn't hold the resting orders as booked");
+        return;
+    }
+
+    std::int64_t sinceReset = 0;
+    for (auto _ : state)
+    {
+        out.push(report, "bench");
+        if (++sinceReset == RESET_EVERY)
+        {
+            state.PauseTiming();
+            clients.reset();
+            sinceReset = 0;
+            state.ResumeTiming();
+        }
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_WsOutQueuesPushTradeReportWatched)->Arg(8)->Arg(256);
