@@ -37,10 +37,11 @@ void WsServer::ThrottledWarning::warn(const std::string &text)
 WsServer::WsServer(net::io_context &ioc, tcp::endpoint endpoint, SessionManager *sessionMgr,
                    Store::WideParamsDataStorage *wideData, Store::OrderDataStorage *orderStorage,
                    Queues::InQueues *inQueues, IdTValueGenerator *idGen, OrderBookImpl *orderBook,
-                   SourceIdT defaultClearingId, SourceIdT defaultAccountId, const WsLimits &limits, const WsAuth &auth)
+                   SourceIdT defaultClearingId, SourceIdT defaultAccountId, const WsLimits &limits, const WsAuth &auth,
+                   InFlightGauge *inFlight)
     : acceptor_(ioc), ioc_(ioc), sessionMgr_(sessionMgr), wideData_(wideData), orderStorage_(orderStorage),
       inQueues_(inQueues), idGen_(idGen), orderBook_(orderBook), defaultClearingId_(defaultClearingId),
-      defaultAccountId_(defaultAccountId), limits_(limits), auth_(auth), acceptRetry_(ioc)
+      defaultAccountId_(defaultAccountId), limits_(limits), auth_(auth), inFlight_(inFlight), acceptRetry_(ioc)
 {
     beast::error_code ec;
 
@@ -107,9 +108,9 @@ void WsServer::onAccept(beast::error_code ec, tcp::socket socket)
     }
 
     connections_->fetch_add(1, std::memory_order_relaxed);
-    auto session =
-        std::make_shared<WsSession>(std::move(socket), sessionMgr_, wideData_, orderStorage_, inQueues_, idGen_,
-                                    orderBook_, defaultClearingId_, defaultAccountId_, limits_, connections_, auth_);
+    auto session = std::make_shared<WsSession>(std::move(socket), sessionMgr_, wideData_, orderStorage_, inQueues_,
+                                               idGen_, orderBook_, defaultClearingId_, defaultAccountId_, limits_,
+                                               connections_, auth_, inFlight_);
     session->run();
 
     doAccept();

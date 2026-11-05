@@ -7,6 +7,7 @@
 #include "OrderStorage.h"
 #include "TransactionScopePool.h"
 #include "TransactionScope.h"
+#include "TransactionDef.h"
 
 #include <chrono>
 
@@ -14,10 +15,12 @@ using namespace COP::App;
 
 MetricsPublisher::MetricsPublisher(boost::asio::io_context &ioc, SessionManager *sessionMgr,
                                    Tasks::TaskManager *taskMgr, Queues::InQueuesContainer *inQueues,
-                                   Store::OrderDataStorage *orderStorage, const ACID::TransactionScopePool *scopePool,
-                                   const Store::LMDBStorage *storage, std::chrono::milliseconds interval)
+                                   const ACID::TransactionManager *transactMgr, Store::OrderDataStorage *orderStorage,
+                                   const ACID::TransactionScopePool *scopePool, const Store::LMDBStorage *storage,
+                                   std::chrono::milliseconds interval)
     : timer_(ioc), interval_(interval), running_(false), sessionMgr_(sessionMgr), taskMgr_(taskMgr),
-      inQueues_(inQueues), orderStorage_(orderStorage), scopePool_(scopePool), storage_(storage)
+      inQueues_(inQueues), transactMgr_(transactMgr), orderStorage_(orderStorage), scopePool_(scopePool),
+      storage_(storage)
 {
 }
 
@@ -70,8 +73,9 @@ void MetricsPublisher::collectAndBroadcast()
     m.availableTransactProcessors = taskMgr_->availableTransactProcessors();
     m.totalTransactProcessors = taskMgr_->totalTransactProcessors();
 
-    // Queue depth
+    // Queue depth, and the transactions not yet run: together the work in flight --max-in-flight bounds (#519)
     m.queueDepth = inQueues_->size();
+    m.pendingTransactions = transactMgr_->pendingTransactions();
 
     // Pool stats
     m.poolSize = scopePool_->poolSize();
