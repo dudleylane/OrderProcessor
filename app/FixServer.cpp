@@ -101,6 +101,7 @@ struct FixServer::Impl
     std::unique_ptr<FIX::MessageStoreFactory> storeFactory; // FileStore's (makeFixStores())
     std::unique_ptr<FixRotatingLogFactory> logFactory;      // FileLog's files, bounded (#160)
     std::unique_ptr<FIX::Acceptor> acceptor;                // ThreadedSSLSocketAcceptor with TLS (#228)
+    std::string tlsCertificate;                             // what TLS is served with; empty for plain TCP
 };
 
 FixServer::FixServer(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
@@ -117,8 +118,8 @@ FixServer::~FixServer()
     stop();
 }
 
-void FixServer::start(const std::string &configFile, const std::string &credentialsFile, const FixTlsFiles &tls,
-                      InFlightGauge *inFlight)
+void FixServer::createSessions(const std::string &configFile, const std::string &credentialsFile,
+                               const FixTlsFiles &tls)
 {
     impl_->settings = std::make_unique<FIX::SessionSettings>(configFile);
     if (tls.enabled())
@@ -130,7 +131,6 @@ void FixServer::start(const std::string &configFile, const std::string &credenti
     addCounterpartySessions(*impl_->settings, *impl_->credentials, credentialsFile);
     checkSessionsSpeakFix50Sp2(*impl_->settings);
     impl_->gateway->setCredentials(impl_->credentials.get());
-    impl_->gateway->setInFlightGauge(inFlight);
     std::string compIds;
     for (const FixCounterparty &counterparty : impl_->credentials->counterparties())
     {
@@ -147,19 +147,34 @@ void FixServer::start(const std::string &configFile, const std::string &credenti
     aux::ExchLogger::instance()->note("FIX counterparties, from " + credentialsFile + ": " + compIds);
     impl_->storeFactory = makeFixStores(*impl_->settings, *impl_->gateway);
     impl_->logFactory = std::make_unique<FixRotatingLogFactory>(*impl_->settings);
+    // QuickFIX's acceptor makes every session as it is constructed: each opens its store, and the gateway learns it in
+    // onCreate(). Only its start() listens (#526).
     if (tls.enabled())
     {
         impl_->acceptor = std::make_unique<FIX::ThreadedSSLSocketAcceptor>(*impl_->gateway, *impl_->storeFactory,
                                                                            *impl_->settings, *impl_->logFactory);
-        impl_->acceptor->start();
-        aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSSLSocketAcceptor): TLS only, " +
-                                          impl_->settings->get().getString(FIX::SSL_PROTOCOL) + ", with " +
-                                          tls.certificate + " (#228)");
+        impl_->tlsCertificate = tls.certificate;
         return;
     }
     impl_->acceptor = std::make_unique<FIX::ThreadedSocketAcceptor>(*impl_->gateway, *impl_->storeFactory,
                                                                     *impl_->settings, *impl_->logFactory);
+}
+
+void FixServer::start(InFlightGauge *inFlight)
+{
+    if (!impl_->acceptor)
+    {
+        throw std::logic_error("FixServer::start() without createSessions(): there is no session to listen for (#526)");
+    }
+    impl_->gateway->setInFlightGauge(inFlight);
     impl_->acceptor->start();
+    if (!impl_->tlsCertificate.empty())
+    {
+        aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSSLSocketAcceptor): TLS only, " +
+                                          impl_->settings->get().getString(FIX::SSL_PROTOCOL) + ", with " +
+                                          impl_->tlsCertificate + " (#228)");
+        return;
+    }
     aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSocketAcceptor)");
     aux::ExchLogger::instance()->warn("FIX runs over plain TCP: a counterparty's Logon password, and every order and "
                                       "report, cross the network in the clear. --fix-tls-cert and --fix-tls-key "

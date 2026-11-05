@@ -62,6 +62,14 @@ FIX 5.0 SP2 over FIXT.1.1 only (#377):
   the store for a new day only when `TimeRange::isInSameRange()` puts now in another day than the store's creation,
   any other reset coming from a Logon within the day. A QuickFIX release that changes any of them needs
   `FixStoresTest` read again, not only run.
+- **Sessions before listening (#526):** the server makes its sessions before the restore's work and listens only
+  after it, so that what that work reports to a counterparty is stored for the client to ask for. It relies on two
+  things QuickFIX does, the same in 22.1 and 22.3: `Acceptor`'s constructor makes every session (`initialize()`),
+  each `Session`'s constructor opening its store and calling `Application::onCreate()`, and only `Acceptor::start()`
+  binds the port; and a session whose client isn't logged on stores an application message, unless
+  `shouldSendReset()`, which a `ResetOnLogon`, `ResetOnLogout` or `ResetOnDisconnect` of Y can make true and
+  `config/fix.cfg` doesn't. A QuickFIX release that changes either needs `FixResendTest.py`'s second scenario read
+  again, not only run.
 - **TLS (#228):** the SSL acceptor exists only in a build with `HAVE_SSL`. The pinned release's install defines it in
   `QuickFIXBuildConfig.h`, which `ThreadedSSLSocketAcceptor.h` includes, so the gateway needs no define of its own;
   `scripts/build-quickfix.sh` builds with `-DHAVE_SSL=ON`. The server puts `ServerCertificateFile`,
