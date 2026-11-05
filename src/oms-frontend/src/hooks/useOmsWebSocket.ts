@@ -146,6 +146,9 @@ export interface OmsActions {
 export function useOmsWebSocket(token: string): OmsState & OmsActions {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The symbols whose books the app follows. The server keeps a session's subscriptions, and a reconnect's session
+  // starts with none, so each connection is given them as it opens (#522).
+  const bookSymbolsRef = useRef(new Set<string>());
   const noticeSeq = useRef(0);
   const [state, dispatch] = useReducer(omsReducer, INITIAL_STATE);
 
@@ -181,6 +184,10 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
 
     ws.onopen = () => {
       dispatch({ type: 'CONNECTED' });
+      for (const symbol of bookSymbolsRef.current) {
+        const msg: ClientMessage = { type: 'subscribe_book', symbol };
+        ws.send(JSON.stringify(msg));
+      }
     };
 
     ws.onclose = () => {
@@ -300,13 +307,20 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
     [send, notify],
   );
 
+  // A symbol subscribed while the socket is closed is sent when it opens
   const subscribeBook = useCallback(
-    (symbol: string) => send({ type: 'subscribe_book', symbol }),
+    (symbol: string) => {
+      bookSymbolsRef.current.add(symbol);
+      send({ type: 'subscribe_book', symbol });
+    },
     [send],
   );
 
   const unsubscribeBook = useCallback(
-    (symbol: string) => send({ type: 'unsubscribe_book', symbol }),
+    (symbol: string) => {
+      bookSymbolsRef.current.delete(symbol);
+      send({ type: 'unsubscribe_book', symbol });
+    },
     [send],
   );
 
