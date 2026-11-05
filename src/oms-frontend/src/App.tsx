@@ -197,10 +197,7 @@ function OmsApp({ token, onChangeToken }: OmsAppProps) {
                 />
               )}
               {activeTab === 'positions' && (
-                <PositionSummary
-                  executions={oms.executions}
-                  orders={oms.orders}
-                />
+                <PositionSummary orders={oms.orders} />
               )}
             </div>
           </div>
