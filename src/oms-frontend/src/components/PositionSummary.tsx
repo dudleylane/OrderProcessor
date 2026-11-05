@@ -1,85 +1,62 @@
 import React, { useMemo } from 'react';
-import type { Execution, Order } from '../types';
-import { isCorrection, isTrade, isTradeCancel } from '../types';
+import type { Order } from '../types';
 import { Side } from '../types/enums';
-import { formatQuantity, formatPrice, formatTime } from '../utils/format';
+import { formatQuantity, formatPrice } from '../utils/format';
 
 interface PositionSummaryProps {
-  executions: Execution[];
   orders: Map<string, Order>;
 }
 
 interface Position {
+  account: string;
   symbol: string;
-  netQty: number;
-  avgPx: number;
-  tradeCount: number;
-  lastTradeTime: number;
-  totalCost: number;
-  totalQty: number;
+  boughtQty: number;
+  boughtCost: number;
+  soldQty: number;
+  soldCost: number;
 }
 
-export function PositionSummary({ executions, orders }: PositionSummaryProps) {
+// Each account's positions from its orders' own figures, each order's filled quantity at its average price (#524). The
+// order snapshot carries them for every order the session may see, where the trade reports are only this session's.
+// Corrections and trade cancels change those figures, so they need nothing here.
+export function PositionSummary({ orders }: PositionSummaryProps) {
   const positions = useMemo(() => {
-    const posMap = new Map<string, Position>();
-
-    for (const exec of executions) {
-      const order = orders.get(String(exec.orderId));
-      if (!order) continue;
-      const symbol = order.symbol;
-
-      const existing = posMap.get(symbol) ?? {
-        symbol,
-        netQty: 0,
-        avgPx: 0,
-        tradeCount: 0,
-        lastTradeTime: 0,
-        totalCost: 0,
-        totalQty: 0,
-      };
-
-      if (isTrade(exec)) {
-        const trade = exec;
-        // Fix: use order side instead of hardcoded "BANK_DEMO"
-        const direction =
-          order.side === Side.BUY || order.side === Side.BUY_MINUS ? 1 : -1;
-        const signedQty = trade.lastQty * direction;
-
-        existing.netQty += signedQty;
-        existing.tradeCount += 1;
-        existing.totalCost += trade.lastPx * trade.lastQty;
-        existing.totalQty += trade.lastQty;
-        existing.lastTradeTime = Math.max(existing.lastTradeTime, trade.transactTime);
-      } else if (isCorrection(exec)) {
-        // Correct adjusts position
-        const corr = exec;
-        const direction =
-          order.side === Side.BUY || order.side === Side.BUY_MINUS ? 1 : -1;
-        const signedQty = corr.lastQty * direction;
-
-        existing.netQty += signedQty;
-        existing.totalCost += corr.lastPx * corr.lastQty;
-        existing.totalQty += corr.lastQty;
-      } else if (isTradeCancel(exec)) {
-        // Trade cancel reverses the original trade. An order cancel is type CANCEL too, and moves no position (#179).
-        const cancel = exec;
-        // We don't have the original trade qty on the cancel exec itself,
-        // so this is a placeholder -- real impl would look up the ref exec
-        void cancel;
-      }
-
-      // VWAP avg price
-      if (existing.totalQty > 0) {
-        existing.avgPx = existing.totalCost / existing.totalQty;
-      }
-
-      posMap.set(symbol, existing);
+    // A replacement takes over its original's fills, so an original counts only until its replacement arrives
+    const replaced = new Set<number>();
+    for (const order of orders.values()) {
+      if (order.origOrderId) replaced.add(order.origOrderId);
     }
 
-    return Array.from(posMap.values()).sort((a, b) =>
-      a.symbol.localeCompare(b.symbol),
+    const posMap = new Map<string, Position>();
+    for (const order of orders.values()) {
+      if (order.cumQty <= 0 || replaced.has(order.orderId)) continue;
+
+      const key = `${order.account}\u0000${order.symbol}`;
+      const existing = posMap.get(key) ?? {
+        account: order.account,
+        symbol: order.symbol,
+        boughtQty: 0,
+        boughtCost: 0,
+        soldQty: 0,
+        soldCost: 0,
+      };
+
+      // Since #510 only BUY and SELL trade; the other sides are on orders stored before it
+      if (order.side === Side.BUY || order.side === Side.BUY_MINUS) {
+        existing.boughtQty += order.cumQty;
+        existing.boughtCost += order.cumQty * order.avgPx;
+      } else {
+        existing.soldQty += order.cumQty;
+        existing.soldCost += order.cumQty * order.avgPx;
+      }
+
+      posMap.set(key, existing);
+    }
+
+    return Array.from(posMap.values()).sort(
+      (a, b) => a.account.localeCompare(b.account) || a.symbol.localeCompare(b.symbol),
     );
-  }, [executions, orders]);
+  }, [orders]);
 
   if (positions.length === 0) {
     return (
@@ -94,24 +71,30 @@ export function PositionSummary({ executions, orders }: PositionSummaryProps) {
       <table className="w-full text-xs">
         <thead>
           <tr className="text-gray-500 border-b border-gray-800">
+            <th className="text-left p-3">Account</th>
             <th className="text-left p-3">Symbol</th>
             <th className="text-right p-3">Net Qty</th>
             <th className="text-left p-3">Direction</th>
-            <th className="text-right p-3">Avg Px</th>
-            <th className="text-right p-3">Trades</th>
-            <th className="text-right p-3">Last Trade</th>
+            <th className="text-right p-3">Bought</th>
+            <th className="text-right p-3">Avg Buy</th>
+            <th className="text-right p-3">Sold</th>
+            <th className="text-right p-3">Avg Sell</th>
           </tr>
         </thead>
         <tbody>
           {positions.map(pos => {
-            const isLong = pos.netQty > 0;
-            const isFlat = pos.netQty === 0;
+            const netQty = pos.boughtQty - pos.soldQty;
+            const isLong = netQty > 0;
+            const isFlat = netQty === 0;
 
             return (
               <tr
-                key={pos.symbol}
+                key={`${pos.account}\u0000${pos.symbol}`}
                 className="border-b border-gray-800/50 hover:bg-gray-900/50"
               >
+                <td className="p-3 text-gray-400">
+                  {pos.account}
+                </td>
                 <td className="p-3 font-mono font-medium">
                   {pos.symbol}
                 </td>
@@ -119,7 +102,7 @@ export function PositionSummary({ executions, orders }: PositionSummaryProps) {
                   isFlat ? 'text-gray-500' :
                   isLong ? 'text-blue-400' : 'text-orange-400'
                 }`}>
-                  {formatQuantity(pos.netQty)}
+                  {formatQuantity(netQty)}
                 </td>
                 <td className={`p-3 font-medium ${
                   isFlat ? 'text-gray-500' :
@@ -128,35 +111,21 @@ export function PositionSummary({ executions, orders }: PositionSummaryProps) {
                   {isFlat ? 'FLAT' : isLong ? 'LONG' : 'SHORT'}
                 </td>
                 <td className="p-3 text-right font-mono">
-                  {pos.avgPx > 0 ? formatPrice(pos.avgPx) : '--'}
+                  {formatQuantity(pos.boughtQty)}
                 </td>
-                <td className="p-3 text-right text-gray-400">
-                  {pos.tradeCount}
+                <td className="p-3 text-right font-mono">
+                  {pos.boughtQty > 0 ? formatPrice(pos.boughtCost / pos.boughtQty) : '--'}
                 </td>
-                <td className="p-3 text-right text-gray-500 font-mono">
-                  {pos.lastTradeTime > 0 ? formatTime(pos.lastTradeTime) : '--'}
+                <td className="p-3 text-right font-mono">
+                  {formatQuantity(pos.soldQty)}
+                </td>
+                <td className="p-3 text-right font-mono">
+                  {pos.soldQty > 0 ? formatPrice(pos.soldCost / pos.soldQty) : '--'}
                 </td>
               </tr>
             );
           })}
         </tbody>
-
-        {/* Totals row */}
-        <tfoot>
-          <tr className="border-t border-gray-700 text-gray-400">
-            <td className="p-3 font-medium">Total</td>
-            <td className="p-3 text-right font-mono font-medium">
-              {formatQuantity(positions.reduce((s, p) => s + Math.abs(p.netQty), 0))}
-              <span className="text-gray-600 ml-1">gross</span>
-            </td>
-            <td className="p-3" />
-            <td className="p-3" />
-            <td className="p-3 text-right font-mono">
-              {positions.reduce((s, p) => s + p.tradeCount, 0)}
-            </td>
-            <td className="p-3" />
-          </tr>
-        </tfoot>
       </table>
     </div>
   );
