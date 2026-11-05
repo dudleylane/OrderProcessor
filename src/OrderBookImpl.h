@@ -30,7 +30,8 @@ class OrderDataStorage;
 struct BookLevel
 {
     PriceT price;
-    QuantityT totalQty;
+    /// A sum of the orders' leaves, each a QuantityT: in one, a level past 4,294,967,295 wrapped (#525)
+    u64 totalQty;
     u32 orderCount;
 };
 
@@ -68,6 +69,9 @@ public:
     virtual bool markReleasePending(const OrderEntry &stop);
     virtual void pendingReleases(const SourceIdT &instrument, std::vector<IdT> *result) const;
 
+    /// The instrument's depth as its orders' last reports give it (#404): each resting order's reported leaves, read
+    /// under the order's read lock once the side's lock is released (#525). An order whose first report isn't out, or
+    /// whose last report left it nothing to trade, is left out.
     BookSnapshot getSnapshot(const SourceIdT &instrument, const Store::OrderDataStorage *storage) const;
 
 private:

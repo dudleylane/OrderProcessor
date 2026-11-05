@@ -39,10 +39,15 @@ void WsOutQueues::push(const Queues::ExecReportEvent &evnt, const std::string &t
     sessionMgr_->broadcastToAccount(account, serializeExecReport(evnt.exec_));
     sessionMgr_->broadcastToAccount(account, serializeOrderUpdate(*order, *figures));
 
-    // 3. The book, to its subscribers, whatever their accounts: it shows no account (#225)
+    // 3. The book, to its subscribers, whatever their accounts: it shows no account (#225). Built only when a session
+    // subscribes to it: every report walked the instrument's book, and the broadcast then dropped it unless one did
+    // (#525). A session that subscribes meanwhile gets the book as it subscribes.
     const std::string &symbol = order->instrument_.get().symbol_;
-    SourceIdT instrId = order->instrument_.getId();
-    BookSnapshot snap = orderBook_->getSnapshot(instrId, orderStorage_);
+    if (!sessionMgr_->hasBookSubscribers(symbol))
+    {
+        return;
+    }
+    BookSnapshot snap = orderBook_->getSnapshot(order->instrument_.getId(), orderStorage_);
     std::string bookJson = serializeBookUpdate(symbol, snap);
     sessionMgr_->broadcastBookUpdate(symbol, bookJson);
 }
