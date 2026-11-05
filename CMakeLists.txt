@@ -264,7 +264,8 @@ if(BUILD_APP)
         add_test(NAME ServerThatCannotStartExits
                  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/ServerStartupTest.sh $<TARGET_FILE:orderProcessorServer>)
         if(BUILD_FIX)
-            # A FIX client that reconnects gets back the reports it missed: the server, its settings, two sessions (#160)
+            # A FIX client that reconnects gets back the reports it missed: the server, its settings, two sessions
+            # (#160), and those the server made as it started again, before FIX listened (#526)
             find_package(Python3 REQUIRED COMPONENTS Interpreter)
             add_test(NAME FixClientRecoversMissedReports
                      COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test/FixResendTest.py

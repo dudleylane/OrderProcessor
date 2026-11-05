@@ -58,16 +58,22 @@ public:
               SourceIdT defaultClearingId, SourceIdT defaultAccountId);
     ~FixServer();
 
-    /// Start the FIX acceptor, with QuickFIX's settings from configFile and the counterparties from credentialsFile
-    /// (#147). Each counterparty gets a session, with BeginString and SenderCompID from the settings' [DEFAULT], unless
-    /// the settings already have one; a session the credentials don't name is refused, since nobody could log on to it.
-    /// With tls's files the acceptor is ThreadedSSLSocketAcceptor, and serves TLS only, with the protocols FixTls.h
-    /// says (#228); without them it is ThreadedSocketAcceptor, plain TCP, and it warns. Throws if a file can't be used,
-    /// a session isn't FIXT.1.1's with FIX 5.0 SP2 and both of their dictionaries (#377), or the credentials name
-    /// an account the data directory doesn't have. With inFlight, a session's new orders, swaps, cancels and replaces
-    /// wait while the engine's work in flight is over the server's bound, up to a second each (#519).
-    void start(const std::string &configFile, const std::string &credentialsFile, const FixTlsFiles &tls = {},
-               InFlightGauge *inFlight = nullptr);
+    /// Make the FIX sessions, without listening (#526), with QuickFIX's settings from configFile and the counterparties
+    /// from credentialsFile (#147). Each counterparty gets a session, with BeginString and SenderCompID from the
+    /// settings' [DEFAULT], unless the settings already have one; a session the credentials don't name is refused, since
+    /// nobody could log on to it. From here a session stores what the engine reports to it, for its client to ask for
+    /// once it logs on, so the server makes them before the restore's work reports anything. With tls's files the
+    /// acceptor is ThreadedSSLSocketAcceptor, and serves TLS only, with the protocols FixTls.h says (#228); without
+    /// them it is ThreadedSocketAcceptor, plain TCP. Throws if a file can't be used, a session isn't FIXT.1.1's with
+    /// FIX 5.0 SP2 and both of their dictionaries (#377), or the credentials name an account the data directory doesn't
+    /// have.
+    void createSessions(const std::string &configFile, const std::string &credentialsFile, const FixTlsFiles &tls = {});
+
+    /// Start listening for the counterparties whose sessions createSessions() made (#526), and warn if it is over plain
+    /// TCP. With inFlight, a session's new orders, swaps, cancels and replaces wait while the engine's work in flight is
+    /// over the server's bound, up to a second each (#519). Throws if createSessions() hasn't made the sessions, or if
+    /// the acceptor can't listen.
+    void start(InFlightGauge *inFlight = nullptr);
 
     /// Stop the FIX acceptor gracefully.
     void stop();

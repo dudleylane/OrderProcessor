@@ -4,7 +4,8 @@
     and keeps every message it reads; over TLS when given an ssl.SSLContext (#228).
   - Server: the server on a new, seeded data directory, with this branch's config/fix.cfg (only its paths and port
     changed, its dictionaries read from config/spec, and any settings given added) and a credentials file for the
-    counterparties given, as the server needs since #147; serving TLS when given a certificate and key (#228).
+    counterparties given, as the server needs since #147; serving TLS when given a certificate and key (#228). It can
+    be killed, as a crash would stop it, and started again on the same directory (#526).
   - hash_password(): a password as the credentials file stores it, made with Python's own PBKDF2, so the server's is
     checked against an independent implementation.
   - expect() and problems: each check's line, and the ones that failed.
@@ -192,6 +193,10 @@ class Server:
 
     def __enter__(self):
         self.seed_data()
+        return self.start()
+
+    def start(self):
+        """Runs the server on the data directory, and returns once FIX listens"""
         self.proc = subprocess.Popen(self.args(), env=self.env)
         deadline = time.time() + 60
         while time.time() < deadline and self.proc.poll() is None:
@@ -202,6 +207,12 @@ class Server:
                 time.sleep(0.2)
         self.__exit__(None, None, None)
         sys.exit(f'the server did not listen on {self.fix_port} (exit {self.proc.poll()})')
+
+    def kill(self):
+        """Kills the server, as a crash would stop it: it writes nothing more, and logs no client out. The data
+        directory and the sessions' stores stay, for start() to run it again on them (#526)."""
+        self.proc.kill()
+        self.proc.wait()
 
     def log(self):
         path = os.path.join(self.work, 'exchange.log')

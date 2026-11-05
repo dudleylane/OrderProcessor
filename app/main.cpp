@@ -288,7 +288,10 @@ int main(int argc, char *argv[])
     auto wsOutQueues = std::make_unique<App::WsOutQueues>(sessionMgr.get(), Store::WideDataStorage::instance(),
                                                           Store::OrderStorage::instance(), orderBook.get());
 
-    // 6b. Create FIX gateway (if configured)
+    // 6b. Create FIX gateway (if configured), with its sessions. From here each session stores what the engine reports
+    // to it, for its client to ask for once it logs on, so they're made before the restore's work below reports
+    // anything: a report that found no session was dropped for good (#526). FIX listens only at 10b, once that work is
+    // done.
 #ifdef BUILD_FIX
     std::unique_ptr<App::FixServer> fixServer;
     std::unique_ptr<App::MultiOutQueues> multiOutQueues;
@@ -298,6 +301,7 @@ int main(int argc, char *argv[])
         fixServer =
             std::make_unique<App::FixServer>(inQueues.get(), Store::WideDataStorage::instance(),
                                              Store::OrderStorage::instance(), defaultClearingId, defaultAccountId);
+        fixServer->createSessions(cfg.fixCfg, cfg.fixCredentials, App::FixTlsFiles{ cfg.fixTlsCert, cfg.fixTlsKey });
 
         multiOutQueues = std::make_unique<App::MultiOutQueues>();
         multiOutQueues->addDelegate(wsOutQueues.get());
@@ -479,12 +483,13 @@ int main(int argc, char *argv[])
             " (#146)");
     }
 
-    // 10b. Start FIX acceptor (if configured). Its sessions' new orders, swaps, cancels and replaces wait, up to a
-    // second each, while the engine's work in flight is over --max-in-flight (#519).
+    // 10b. Start FIX acceptor (if configured): it listens from here, once the restore's work is done (#526). Its
+    // sessions' new orders, swaps, cancels and replaces wait, up to a second each, while the engine's work in flight is
+    // over --max-in-flight (#519).
 #ifdef BUILD_FIX
     if (fixServer)
     {
-        fixServer->start(cfg.fixCfg, cfg.fixCredentials, App::FixTlsFiles{ cfg.fixTlsCert, cfg.fixTlsKey }, &inFlight);
+        fixServer->start(&inFlight);
     }
 #endif
 
