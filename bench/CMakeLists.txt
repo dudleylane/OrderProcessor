@@ -9,10 +9,12 @@ target_sources(orderProcessorBench
         OrderParamsLayoutBench.cpp
         SessionManagerBench.cpp
         ClientMessageParserBench.cpp
+        WsSessionBench.cpp
 
-        # The WebSocket broadcast path a transaction worker takes through WsOutQueues (built from app/, #159), and the
-        # parser the IO thread runs on each client message (#516)
+        # The WebSocket broadcast path a transaction worker takes through WsOutQueues (built from app/, #159), the
+        # parser the IO thread runs on each client message (#516), and a served session's read of each (#519)
         ${CMAKE_SOURCE_DIR}/app/SessionManager.cpp
+        ${CMAKE_SOURCE_DIR}/app/WsServer.cpp
         ${CMAKE_SOURCE_DIR}/app/WsSession.cpp
         ${CMAKE_SOURCE_DIR}/app/WsCredentials.cpp
         ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
