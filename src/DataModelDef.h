@@ -382,11 +382,11 @@ public:
     bool compare(const OrderEntry &val) const;
 
     /// What the order's last report said it has (#404), which readers outside a transaction give: a WebSocket session's
-    /// order snapshot. A decision changes the order when it is made, and the transaction that persists and reports it
-    /// runs after it, so the order itself can have what no report has said, nor made durable. Set under the order's
-    /// write lock: by processEvent_GenerateExecution as each report goes out, after its transaction's persists have
-    /// committed (#28, #163), and by OrderDataStorage::restore from the record. Read under the read lock. Empty until
-    /// the order's first report, and in a copy.
+    /// order snapshot, and the book's depth (#525). A decision changes the order when it is made, and the transaction
+    /// that persists and reports it runs after it, so the order itself can have what no report has said, nor made
+    /// durable. Set under the order's write lock: by processEvent_GenerateExecution as each report goes out, after its
+    /// transaction's persists have committed (#28, #163), and by OrderDataStorage::restore from the record. Read under
+    /// the read lock. Empty until the order's first report, and in a copy.
     std::optional<OrderFigures> published_;
 
 private:

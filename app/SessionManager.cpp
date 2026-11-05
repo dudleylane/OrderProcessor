@@ -109,6 +109,13 @@ void SessionManager::sendToSource(const std::string &source, const std::string &
     }
 }
 
+bool SessionManager::hasBookSubscribers(const std::string &symbol) const
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    // A symbol's entry goes with its last subscriber (unsubscribe(), removeSession())
+    return subscribers_.end() != subscribers_.find(symbol);
+}
+
 size_t SessionManager::sessionCount() const
 {
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);

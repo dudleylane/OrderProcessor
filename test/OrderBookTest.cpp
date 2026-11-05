@@ -12,6 +12,8 @@
 */
 
 #include <gtest/gtest.h>
+#include <atomic>
+#include <thread>
 #include "TestFixtures.h"
 #include "TestAux.h"
 #include "MockOrderBook.h"
@@ -49,6 +51,20 @@ protected:
         order->side_ = side;
         order->price_ = price;
         return order;
+    }
+
+    // A stored order with leaves to trade, as its last report left it: restore() gives an order its own figures as its
+    // last report's, as for one restored from its record (#404). The book's depth reads them (#525).
+    OrderEntry *storedOrder(SourceIdT instr, IdT orderId, Side side, PriceT price, QuantityT leaves)
+    {
+        auto order = createOrderWithId(instr, orderId, side, price);
+        assignClOrderId(order.get());
+        order->status_ = NEW_ORDSTATUS;
+        order->orderQty_ = leaves;
+        order->leavesQty_ = leaves;
+        OrderEntry *stored = order.release();
+        OrderStorage::instance()->restore(stored);
+        return stored;
     }
 };
 
@@ -511,6 +527,102 @@ TEST_F(OrderBookTest, AStopOfAnInstrumentTheBookDoesNotTradeIsRefused)
     OrderBookImpl::OrdersT reached;
     orderBook_->triggeredStops(other, 5.0, &reached);
     EXPECT_TRUE(reached.empty());
+}
+
+// =============================================================================
+// Depth (#525)
+// =============================================================================
+
+// The depth is what the resting orders' last reports gave, not what a decision has left them since: a fill is decided
+// under the order's lock, and its report goes out when its transaction runs (#525)
+TEST_F(OrderBookTest, SnapshotGivesTheLeavesOfEachOrdersLastReport)
+{
+    OrderEntry *order = storedOrder(instrumentId1_, IdT(1, 1), BUY_SIDE, 5.0, 100);
+    orderBook_->add(*order);
+    order->leavesQty_ = 60; // a fill of 40 decided, and its report not out
+
+    const BookSnapshot book = orderBook_->getSnapshot(instrumentId1_, OrderStorage::instance());
+    ASSERT_EQ(1u, book.bids.size());
+    EXPECT_EQ(100u, book.bids[0].totalQty) << "the depth shows a fill before its report";
+    EXPECT_EQ(1u, book.bids[0].orderCount);
+    EXPECT_TRUE(book.asks.empty());
+}
+
+// An order whose first report isn't out is left out, as the order snapshot leaves it out, and so is one whose last
+// report left it nothing to trade: a cancel zeroes the leaves at its decision and takes the order out of the book in a
+// later operation (#525)
+TEST_F(OrderBookTest, SnapshotLeavesOutAnUnreportedOrderAndAClosedOne)
+{
+    OrderEntry *unreported = storedOrder(instrumentId1_, IdT(1, 1), SELL_SIDE, 5.0, 50);
+    unreported->published_.reset();
+    OrderEntry *canceled = storedOrder(instrumentId1_, IdT(1, 2), SELL_SIDE, 6.0, 70);
+    canceled->leavesQty_ = 0;
+    canceled->published_.emplace(*canceled);
+    OrderEntry *resting = storedOrder(instrumentId1_, IdT(1, 3), SELL_SIDE, 6.0, 30);
+    orderBook_->add(*unreported);
+    orderBook_->add(*canceled);
+    orderBook_->add(*resting);
+
+    const BookSnapshot book = orderBook_->getSnapshot(instrumentId1_, OrderStorage::instance());
+    ASSERT_EQ(1u, book.asks.size()) << "the order with no report has a level";
+    EXPECT_EQ(6.0, book.asks[0].price);
+    EXPECT_EQ(30u, book.asks[0].totalQty);
+    EXPECT_EQ(1u, book.asks[0].orderCount) << "the canceled order is counted";
+}
+
+// A level's total is a sum of the orders' leaves, each a QuantityT, and it wrapped past 4,294,967,295 (#525)
+TEST_F(OrderBookTest, SnapshotLevelTotalsPastThirtyTwoBits)
+{
+    orderBook_->add(*storedOrder(instrumentId1_, IdT(1, 1), BUY_SIDE, 5.0, 3000000000u));
+    orderBook_->add(*storedOrder(instrumentId1_, IdT(1, 2), BUY_SIDE, 5.0, 3000000000u));
+
+    const BookSnapshot book = orderBook_->getSnapshot(instrumentId1_, OrderStorage::instance());
+    ASSERT_EQ(1u, book.bids.size());
+    EXPECT_EQ(6000000000u, book.bids[0].totalQty);
+    EXPECT_EQ(2u, book.bids[0].orderCount);
+}
+
+// A report sets its order's figures under the order's write lock on its transaction's worker, while a report on another
+// order of the instrument builds the depth on another worker. The depth reads each order's figures under its read
+// lock: without it, the two are a data race, which the TSan build reports (#525).
+TEST_F(OrderBookTest, SnapshotReadsEachOrdersReportedLeavesUnderItsLock)
+{
+    OrderEntry *order = storedOrder(instrumentId1_, IdT(1, 1), BUY_SIDE, 5.0, 100);
+    orderBook_->add(*order);
+
+    std::atomic<bool> started{ false };
+    std::atomic<bool> stop{ false };
+    std::thread reporter(
+        [order, &started, &stop]
+        {
+            for (QuantityT leaves = 1; !stop.load(); leaves = (leaves % 100) + 1)
+            {
+                {
+                    oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, true);
+                    order->leavesQty_ = leaves;
+                    order->published_.emplace(*order);
+                }
+                started = true;
+                std::this_thread::yield();
+            }
+        });
+    while (!started.load())
+    {
+        std::this_thread::yield();
+    }
+    const int SNAPSHOTS = 1000;
+    int reported = 0;
+    for (int i = 0; i < SNAPSHOTS; ++i)
+    {
+        const BookSnapshot book = orderBook_->getSnapshot(instrumentId1_, OrderStorage::instance());
+        if ((1u == book.bids.size()) && (1u <= book.bids[0].totalQty) && (book.bids[0].totalQty <= 100u))
+        {
+            ++reported;
+        }
+    }
+    stop = true;
+    reporter.join();
+    EXPECT_EQ(SNAPSHOTS, reported) << "a snapshot gave the order leaves that no report gave it";
 }
 
 } // namespace
