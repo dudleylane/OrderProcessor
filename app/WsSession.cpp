@@ -1,4 +1,5 @@
 #include "WsSession.h"
+#include "InFlightGauge.h"
 #include "SessionManager.h"
 #include "JsonSerializer.h"
 #include "WideDataStorage.h"
@@ -69,10 +70,12 @@ void logContained(const char *where, const std::string &request, const char *wha
 WsSession::WsSession(tcp::socket &&socket, SessionManager *sessionMgr, Store::WideParamsDataStorage *wideData,
                      Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues, IdTValueGenerator *idGen,
                      OrderBookImpl *orderBook, SourceIdT defaultClearingId, SourceIdT defaultAccountId,
-                     const WsLimits &limits, std::shared_ptr<std::atomic<std::size_t>> connections, const WsAuth &auth)
+                     const WsLimits &limits, std::shared_ptr<std::atomic<std::size_t>> connections, const WsAuth &auth,
+                     InFlightGauge *inFlight)
     : ws_(std::move(socket)), auth_(auth), sessionMgr_(sessionMgr), wideData_(wideData), orderStorage_(orderStorage),
       inQueues_(inQueues), idGen_(idGen), orderBook_(orderBook), defaultClearingId_(defaultClearingId),
-      defaultAccountId_(defaultAccountId), limits_(limits), connections_(std::move(connections))
+      defaultAccountId_(defaultAccountId), limits_(limits), connections_(std::move(connections)), inFlight_(inFlight),
+      readTimer_(ws_.get_executor())
 {
 }
 
@@ -125,7 +128,7 @@ void WsSession::onRequest(beast::error_code ec, std::size_t /*bytesTransferred*/
     }
 
     beast::get_lowest_layer(ws_).expires_never();
-    ws_.set_option(websocket::stream_base::timeout::suggested(beast::role_type::server));
+    ws_.set_option(readingTimeouts());
     // A larger message fails the read, and the session ends: Beast's default let a client send 16 MiB (#159)
     ws_.read_message_max(limits_.maxMessageBytes);
     const bool answerSubprotocol = offersSubprotocol(subprotocols);
@@ -193,12 +196,54 @@ void WsSession::onAccept(beast::error_code ec)
         sendInitial(serializeError("Internal error: initial state is incomplete"));
     }
 
-    doRead();
+    readWhenUnderBound();
 }
 
 void WsSession::doRead()
 {
     ws_.async_read(buffer_, beast::bind_front_handler(&WsSession::onRead, shared_from_this()));
+}
+
+void WsSession::readWhenUnderBound()
+{
+    if ((nullptr == inFlight_) || !inFlight_->overBound())
+    {
+        if (paused_)
+        {
+            paused_ = false;
+            ws_.set_option(readingTimeouts());
+        }
+        doRead();
+        return;
+    }
+    if (!paused_)
+    {
+        // Nothing is read while the session waits, its client's answers to Beast's pings included, so Beast's idle
+        // timeout would end the session: it is off until the session reads again
+        paused_ = true;
+        websocket::stream_base::timeout waiting = readingTimeouts();
+        waiting.idle_timeout = websocket::stream_base::none();
+        waiting.keep_alive_pings = false;
+        ws_.set_option(waiting);
+    }
+    readTimer_.expires_after(READ_RECHECK);
+    readTimer_.async_wait(beast::bind_front_handler(&WsSession::onReadTimer, shared_from_this()));
+}
+
+void WsSession::onReadTimer(beast::error_code ec)
+{
+    if (ec || dropped_)
+    {
+        return;
+    }
+    readWhenUnderBound();
+}
+
+websocket::stream_base::timeout WsSession::readingTimeouts() const
+{
+    websocket::stream_base::timeout timeouts = websocket::stream_base::timeout::suggested(beast::role_type::server);
+    timeouts.idle_timeout = limits_.idleTimeout;
+    return timeouts;
 }
 
 void WsSession::onRead(beast::error_code ec, std::size_t /*bytesTransferred*/)
@@ -228,7 +273,7 @@ void WsSession::onRead(beast::error_code ec, std::size_t /*bytesTransferred*/)
         logContained("request", msg, "unknown exception");
         send(serializeError("Internal error: request not processed"));
     }
-    doRead();
+    readWhenUnderBound();
 }
 
 void WsSession::handleMessage(const std::string &msgStr)
@@ -560,7 +605,8 @@ void WsSession::drop(std::size_t refused)
         initialMessages_ = writeQueue_.size();
     }
     queuedBytes_ = (writeQueue_.empty() || (0 < initialMessages_)) ? 0 : writeQueue_.front()->size();
-    // Ends the read and the write in progress, which then fail and let the session go
+    // Ends the read and the write in progress, which then fail and let the session go. A wait for the work in flight
+    // to drain, in place of a read, ends when it next looks (#519).
     beast::get_lowest_layer(ws_).close();
 }
 
@@ -624,6 +670,9 @@ void WsSession::onWrite(beast::error_code ec, std::size_t /*bytesTransferred*/)
     if (ec)
     {
         sessionMgr_->removeSession(shared_from_this());
+        // A session waiting for the work in flight to drain has no read to fail and let it go: its wait ends when it
+        // next looks (#519)
+        dropped_ = true;
         return;
     }
 

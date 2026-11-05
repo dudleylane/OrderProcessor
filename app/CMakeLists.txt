@@ -3,6 +3,7 @@ target_sources(orderProcessorServer PRIVATE
     ServerData.cpp
     WsServer.cpp
     WsSession.cpp
+    InFlightGauge.cpp
     WsCredentials.cpp
     JsonSerializer.cpp
     ClientMessageParser.cpp

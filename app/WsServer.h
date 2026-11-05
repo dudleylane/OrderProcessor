@@ -34,14 +34,17 @@ namespace App
 {
 
 class SessionManager;
+class InFlightGauge;
 
 class WsServer : public std::enable_shared_from_this<WsServer>
 {
 public:
+    /// inFlight, when set, holds every session's reads while the engine's work in flight is past its bound (#519)
     WsServer(boost::asio::io_context &ioc, boost::asio::ip::tcp::endpoint endpoint, SessionManager *sessionMgr,
              Store::WideParamsDataStorage *wideData, Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues,
              IdTValueGenerator *idGen, OrderBookImpl *orderBook, SourceIdT defaultClearingId,
-             SourceIdT defaultAccountId, const WsLimits &limits = WsLimits(), const WsAuth &auth = WsAuth());
+             SourceIdT defaultAccountId, const WsLimits &limits = WsLimits(), const WsAuth &auth = WsAuth(),
+             InFlightGauge *inFlight = nullptr);
 
     void run();
     /// Where the server listens: the port the system chose, when the endpoint asked for port 0
@@ -75,7 +78,8 @@ private:
     SourceIdT defaultClearingId_; // passed to every session; see WsSession (#34)
     SourceIdT defaultAccountId_;
     WsLimits limits_;
-    WsAuth auth_; // who may open a session, which each session checks (#146)
+    WsAuth auth_;             // who may open a session, which each session checks (#146)
+    InFlightGauge *inFlight_; // the engine's work in flight, which each session checks before it reads (#519)
     /// Sessions alive, against limits_.maxConnections: each one's destructor counts itself out (#159)
     std::shared_ptr<std::atomic<std::size_t>> connections_ = std::make_shared<std::atomic<std::size_t>>(0);
     boost::asio::steady_timer acceptRetry_; // the pause before accepting again after an accept failed (#202)

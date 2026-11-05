@@ -226,6 +226,12 @@ TEST_F(DocConsistencyTest, WebSocketLimits)
     expectDocEq("ws_max_client_message_kib", COP::App::MAX_CLIENT_MESSAGE_BYTES / 1024);
 }
 
+// The engine's work in flight at which the WebSocket sessions stop reading their clients' messages (#519)
+TEST_F(DocConsistencyTest, WorkInFlightBound)
+{
+    expectDocEq("max_in_flight", COP::App::DEFAULT_MAX_IN_FLIGHT);
+}
+
 TEST_F(DocConsistencyTest, WebSocketAccessToken)
 {
     expectDocEq("ws_min_token_length", COP::App::WS_MIN_TOKEN_LENGTH);
