@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -8,6 +9,7 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/websocket.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
 
 #include "TypesDef.h"
@@ -35,18 +37,23 @@ namespace App
 {
 
 class SessionManager;
+class InFlightGauge;
 
 class WsSession : public std::enable_shared_from_this<WsSession>
 {
 public:
     /// defaultClearingId goes on every new order, and defaultAccountId on one that names no account. Either may be
     /// unset when the server could not resolve it at startup; the session then refuses the orders that need it (#34).
+    /// inFlight, when set, holds the session's reads while the engine's work in flight is past its bound (#519).
     WsSession(boost::asio::ip::tcp::socket &&socket, SessionManager *sessionMgr, Store::WideParamsDataStorage *wideData,
               Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues, IdTValueGenerator *idGen,
               OrderBookImpl *orderBook, SourceIdT defaultClearingId, SourceIdT defaultAccountId,
               const WsLimits &limits = WsLimits(), std::shared_ptr<std::atomic<std::size_t>> connections = nullptr,
-              const WsAuth &auth = WsAuth());
+              const WsAuth &auth = WsAuth(), InFlightGauge *inFlight = nullptr);
     ~WsSession();
+
+    /// How often a session that waits for the engine's work in flight to drain looks again (#519)
+    static constexpr std::chrono::milliseconds READ_RECHECK{ 5 };
 
     void run();
     void send(const std::string &msg);
@@ -80,6 +87,12 @@ private:
     void refuse(boost::beast::http::status status, const std::string &reason);
     void onAccept(boost::beast::error_code ec);
     void doRead();
+    /// Reads the next message, or, while the engine's work in flight is past its bound, waits and looks again (#519).
+    /// The client's sends then wait in its TCP window, and nothing it sent is refused.
+    void readWhenUnderBound();
+    void onReadTimer(boost::beast::error_code ec);
+    /// Beast's timeouts while the session reads, with limits_.idleTimeout
+    boost::beast::websocket::stream_base::timeout readingTimeouts() const;
     void onRead(boost::beast::error_code ec, std::size_t bytesTransferred);
     void handleMessage(const std::string &msg);
     /// The order a client names: by its ClOrdID when it gives one, or else by its number (#58). Null when no order has
@@ -121,12 +134,19 @@ private:
     WsLimits limits_;
     /// Counts the server's sessions, for its connection limit; null for a session no WsServer made (#159)
     std::shared_ptr<std::atomic<std::size_t>> connections_;
+    /// The engine's work in flight, against its bound; null for no bound (#519)
+    InFlightGauge *inFlight_;
+    /// The wait before looking at the work in flight again, and whether the session is waiting (#519)
+    boost::asio::steady_timer readTimer_;
+    bool paused_ = false;
 
     std::deque<std::shared_ptr<const std::string>> writeQueue_;
     /// What writeQueue_ holds after the initial state, against limits_.maxQueuedBytes (#159, #512)
     std::size_t queuedBytes_ = 0;
     /// How many of writeQueue_'s first messages are the initial state, which queuedBytes_ doesn't count (#512)
     std::size_t initialMessages_ = 0;
+    /// Set as the session ends with its read not failed: dropped for not reading (#159), or after a write failed. It
+    /// sends nothing more, and a wait for the work in flight to drain, in place of a read, ends when it next looks (#519).
     bool dropped_ = false;
 };
 

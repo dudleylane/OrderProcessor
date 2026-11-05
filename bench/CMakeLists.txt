@@ -16,6 +16,7 @@ target_sources(orderProcessorBench
         ${CMAKE_SOURCE_DIR}/app/SessionManager.cpp
         ${CMAKE_SOURCE_DIR}/app/WsServer.cpp
         ${CMAKE_SOURCE_DIR}/app/WsSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/InFlightGauge.cpp
         ${CMAKE_SOURCE_DIR}/app/WsCredentials.cpp
         ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
         ${CMAKE_SOURCE_DIR}/app/ClientMessageParser.cpp

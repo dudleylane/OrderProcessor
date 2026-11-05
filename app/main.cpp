@@ -36,6 +36,7 @@
 #include "WsServer.h"
 #include "WsOutQueues.h"
 #include "MetricsPublisher.h"
+#include "InFlightGauge.h"
 #include "CpuAffinity.h"
 #include "HugePages.h"
 #include "ServerDefaults.h"
@@ -442,13 +443,15 @@ int main(int argc, char *argv[])
     aux::ExchLogger::instance()->note("Expiry and restatement timers set for restored orders: " +
                                       std::to_string(timers));
 
-    // 10. Create Beast io_context and WsServer
+    // 10. Create Beast io_context and WsServer. The sessions read their clients' messages only while the engine's work
+    // in flight is under --max-in-flight (#519).
+    App::EngineInFlightGauge inFlight(inQueues.get(), transactMgr.get(), cfg.maxInFlight);
     boost::asio::io_context ioc{ 1 };
 
     auto server = std::make_shared<App::WsServer>(
         ioc, boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address(cfg.bindAddress), cfg.port), sessionMgr.get(),
         Store::WideDataStorage::instance(), Store::OrderStorage::instance(), inQueues.get(), IdTGenerator::instance(),
-        orderBook.get(), defaultClearingId, defaultAccountId, cfg.wsLimits, wsAuth);
+        orderBook.get(), defaultClearingId, defaultAccountId, cfg.wsLimits, wsAuth, &inFlight);
     server->run();
     if (wsAuth.credentials)
     {
@@ -486,7 +489,7 @@ int main(int argc, char *argv[])
 
     // 10c. Create MetricsPublisher for system monitoring
     auto metricsPublisher = std::make_shared<App::MetricsPublisher>(
-        ioc, sessionMgr.get(), taskMgr.get(), inQueues.get(), Store::OrderStorage::instance(),
+        ioc, sessionMgr.get(), taskMgr.get(), inQueues.get(), transactMgr.get(), Store::OrderStorage::instance(),
         static_cast<Proc::Processor *>(evntProcessors[0])->scopePool(), lmdbStorage.get());
     metricsPublisher->start();
 

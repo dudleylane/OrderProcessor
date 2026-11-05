@@ -41,6 +41,8 @@ struct ServerArgs
     // LMDB's starting map, in MiB: a write that finds the map full doubles it (#148)
     u64 lmdbMapMb = Store::LMDBStorage::DEFAULT_MAP_SIZE >> 20;
     WsLimits wsLimits; // what WebSocket clients may hold of the server (#159)
+    // The engine's work in flight at which the WebSocket sessions stop reading their clients' messages (#519)
+    std::size_t maxInFlight = DEFAULT_MAX_IN_FLIGHT;
     // Who may open a WebSocket session (#146): the file the access token is in, and the Origins a browser may come from.
     // The token may come from OMS_WS_TOKEN instead, and the Origins from OMS_ALLOWED_ORIGINS, which main() reads.
     std::string wsTokenFile;
@@ -88,6 +90,10 @@ inline std::string serverUsage()
            "  --max-session-queue-mb N  MiB that may wait for one client after the state it gets as it\n"
            "                            connects (default " +
            std::to_string(DEFAULT_MAX_SESSION_QUEUE_MB) +
+           ")\n"
+           "  --max-in-flight N         the engine's events and transactions waiting, at which WebSocket\n"
+           "                            clients' messages wait to be read (default " +
+           std::to_string(DEFAULT_MAX_IN_FLIGHT) +
            ")\n"
            "  --ws-token-file FILE      the access token every WebSocket client must offer, from FILE; or set\n"
            "                            OMS_WS_TOKEN. Without one, any client that reaches the port may trade\n"
@@ -165,7 +171,8 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
             "--lmdb-map-mb",  "--max-connections", "--max-session-queue-mb",
             "--bind",         "--ws-token-file",   "--allowed-origin",
             "--fix-cfg",      "--fix-credentials", "--pg-connection",
-            "--fix-tls-cert", "--fix-tls-key",     "--ws-credentials"
+            "--fix-tls-cert", "--fix-tls-key",     "--ws-credentials",
+            "--max-in-flight"
         };
         bool takesValue = false;
         for (const std::string &option : withValues)
@@ -219,6 +226,11 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
             size_t mb = 0;
             read = detail::readNumber<size_t>(value, 1, std::numeric_limits<size_t>::max() >> 20, &mb);
             parsed.wsLimits.maxQueuedBytes = mb << 20;
+        }
+        else if ("--max-in-flight" == arg)
+        {
+            range = "from 1";
+            read = detail::readNumber<size_t>(value, 1, std::numeric_limits<size_t>::max(), &parsed.maxInFlight);
         }
         else if (value.empty())
         {

@@ -20,6 +20,7 @@ const SEVERITY_BG: Record<AlertSeverity, string> = {
 
 const METRIC_OPTIONS = [
   { value: 'queueDepth', label: 'Queue Depth' },
+  { value: 'pendingTransactions', label: 'Pending Transactions' },
   { value: 'poolCacheMisses', label: 'Pool Cache Misses' },
   { value: 'poolAllocations', label: 'Pool Scope Allocations' },
   { value: 'activeOrders', label: 'Active Orders' },

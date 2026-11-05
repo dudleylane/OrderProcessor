@@ -17,11 +17,13 @@
 #include <string>
 
 #include "IdTGenerator.h"
+#include "InFlightGauge.h"
 #include "IncomingQueues.h"
 #include "Logger.h"
 #include "OrderBookImpl.h"
 #include "OrderStorage.h"
 #include "SessionManager.h"
+#include "TransactionMgr.h"
 #include "WideDataStorage.h"
 #include "WsServer.h"
 
@@ -72,18 +74,20 @@ struct Singletons
 
 /// A real WsServer on loopback, as app/main.cpp serves it, with one client connected, both on the benchmark's thread.
 /// The server's io_context runs only when the benchmark serves: the client writes with blocking calls before that, and
-/// a burst fits in the sockets' buffers.
+/// a burst fits in the sockets' buffers. The sessions check the engine's work in flight, the queue's events and a
+/// transaction manager's transactions, none, against the server's default bound (#519).
 class ServedClient
 {
 public:
     ServedClient()
     {
         book_.init(OrderBookImpl::InstrumentsT());
+        transactMgr_.init(ACID::TransactionMgrParams(IdTGenerator::instance()));
 
-        server_ = std::make_shared<App::WsServer>(serverIoc_, tcp::endpoint(net::ip::make_address("127.0.0.1"), 0),
-                                                  &sessions_, Store::WideDataStorage::instance(),
-                                                  Store::OrderStorage::instance(), &inQueues_, IdTGenerator::instance(),
-                                                  &book_, SourceIdT(), SourceIdT());
+        server_ = std::make_shared<App::WsServer>(
+            serverIoc_, tcp::endpoint(net::ip::make_address("127.0.0.1"), 0), &sessions_,
+            Store::WideDataStorage::instance(), Store::OrderStorage::instance(), &inQueues_, IdTGenerator::instance(),
+            &book_, SourceIdT(), SourceIdT(), App::WsLimits(), App::WsAuth(), &inFlight_);
         server_->run();
         connected_ = connect();
     }
@@ -93,6 +97,7 @@ public:
         beast::get_lowest_layer(client_).socket().close(ec);
         serverIoc_.stop();
         server_.reset();
+        transactMgr_.stop();
     }
 
     bool connected() const
@@ -175,6 +180,8 @@ private:
     net::io_context clientIoc_;
     App::SessionManager sessions_;
     Queues::IncomingQueues inQueues_;
+    ACID::TransactionMgr transactMgr_;
+    App::EngineInFlightGauge inFlight_{ &inQueues_, &transactMgr_, App::DEFAULT_MAX_IN_FLIGHT };
     OrderBookImpl book_;
     std::shared_ptr<App::WsServer> server_;
     websocket::stream<beast::tcp_stream> client_{ clientIoc_ };

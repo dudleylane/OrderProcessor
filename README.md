@@ -34,7 +34,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 
 ### Monitoring Dashboard
 - **Real-Time Metrics:** MetricsPublisher broadcasts 17 system metrics at 1/sec over WebSocket
-- **Dashboard Tab:** Event/transaction throughput charts, queue depth, processor utilization bars
+- **Dashboard Tab:** Event/transaction throughput charts, the work in flight (queue depth and pending transactions), processor utilization bars
 - **Memory Admin Tab:** TransactionScopePool health indicator, cache miss rate trending, arena details
 - **Alert System:** Client-side rule engine with configurable thresholds, severity levels, localStorage persistence
 
@@ -188,6 +188,7 @@ Server options:
 | `--lmdb-map-mb` | 256 | LMDB's starting map, in MiB. A write that finds the map full doubles it, and logs a warning |
 | `--max-connections` | <!-- DOC_CHECK:ws_max_connections -->256<!-- /DOC_CHECK --> | WebSocket clients connected at once. One more is closed as soon as it's accepted |
 | `--max-session-queue-mb` | <!-- DOC_CHECK:ws_max_session_queue_mb -->16<!-- /DOC_CHECK --> | What may wait to be sent to one client, in MiB, after the state it gets as it connects, which isn't counted: its order snapshot alone can be larger (#512). A client that doesn't read is dropped once more waits, and gets the current state again when it reconnects |
+| `--max-in-flight` | <!-- DOC_CHECK:max_in_flight -->10000<!-- /DOC_CHECK --> | The engine's work in flight, the events not yet decided and the transactions not yet run, at which the WebSocket sessions stop reading their clients' messages until it is back under (#519). What a client sends meanwhile waits in its TCP window, and nothing it sent is refused |
 
 Without `--ws-token-file` or `OMS_WS_TOKEN`, any client that reaches the server may connect, and the server warns once at startup (#146). A token has at least <!-- DOC_CHECK:ws_min_token_length -->16<!-- /DOC_CHECK --> letters, digits, `.`, `_` or `-` (`openssl rand -hex 32` makes one); see [Connecting](#connecting) for how a client offers it. A token file with nothing on its first line, or `OMS_WS_TOKEN` set but empty, is refused rather than taken as no token.
 
@@ -531,7 +532,7 @@ A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through
 | `subscribe_book` | `{symbol}` | Subscribe to order book updates for a symbol the server trades. Another symbol gets an `error` |
 | `unsubscribe_book` | `{symbol}` | Unsubscribe from order book updates |
 
-A client's message may be at most <!-- DOC_CHECK:ws_max_client_message_kib -->64<!-- /DOC_CHECK --> KiB; a larger one ends its session. What the server holds for clients is bounded too: `--max-connections` clients, and up to `--max-session-queue-mb` waiting for each after the state it got as it connected, which it holds until it has read it (#512).
+A client's message may be at most <!-- DOC_CHECK:ws_max_client_message_kib -->64<!-- /DOC_CHECK --> KiB; a larger one ends its session. What the server holds for clients is bounded too: `--max-connections` clients, and up to `--max-session-queue-mb` waiting for each after the state it got as it connected, which it holds until it has read it (#512). So is what they can make the engine hold (#519): once its work in flight reaches `--max-in-flight`, the events waiting to be decided (`queueDepth` in `metrics_update`) and the transactions not yet run (`pendingTransactions`), no session reads its client's next message until the work is back under, and each session then reads one message in its turn. A client that sends faster than the engine decides and LMDB commits, each commit synced to disk, waits in its own TCP window, where its messages had waited in the server's memory without limit. The server logs a warning each time the work reaches the bound and a note each time it is back under. A session that waits doesn't time out (Beast's idle timeout, which needs the client's answers to its pings, is off until it reads again), and one whose client has gone ends at the first write to it that fails.
 
 A `STOP` or `STOPLIMIT` order is held until a trade in its instrument reaches its `stopPx`: a trade at or above it for a buy, at or below it for a sell (#223).
 - **While held,** the order is `NEW`, and it is in neither side of the book, so `book_update` doesn't show it. A cancel, replace or suspend works on it as on any order.
@@ -558,7 +559,7 @@ Every order clears through the server's clearing firm (`--clearing-firm`), and a
 
 **ExecutionReport** — Base fields: `execId`, `orderId`, `type`, `orderStatus`, `market`, `transactTime`. Type-specific fields: `lastQty`/`lastPx`, `currency` and `tradeDate` (trade, and correct), `rejectReason` (reject, and a rejected replace), `origOrderId` (replace/correct), `execRefId` (trade cancel/correct), and `execLegType` (`NEAR` or `FAR`) on an FX swap's fill, which is reported once per leg. An order cancel carries only the base fields. A report with `orderId` 0 is for an order the server refused without storing it, such as one whose ClOrdID is already in use; `rejectReason` says why. `tradeDate` is the business day the trade counts in, as a number YYYYMMDD, FIX's TradeDate (#258): the date the day ends on, 17:00 New York, so a trade after 17:00 has the next day's date. Both legs of a swap's fill have it, though they settle on different dates (#445).
 
-**SystemMetrics** — 21 fields: event/transaction counters (created/processed/finished), `transactionsFailed` (transactions that failed and were rolled back since the server started, each also logged at error level, #514; the UI raises a CRITICAL alert when it rises), processor availability, `queueDepth`, `poolSize`, `poolCacheMisses` (acquires that found every slot in use) and `poolAllocations` (the scopes the pool allocated: one per transaction, and one per miss, #515), all three the first event processor's pool's (#542), `poolArenaSize`, `activeSessions`, `activeOrders`, `storageMapSize` and `storageMapUsed` (LMDB's map and how much of it is in use, in bytes), `timestamp`.
+**SystemMetrics** — 22 fields: event/transaction counters (created/processed/finished), `transactionsFailed` (transactions that failed and were rolled back since the server started, each also logged at error level, #514; the UI raises a CRITICAL alert when it rises), processor availability, `queueDepth` and `pendingTransactions` (the events waiting to be decided and the transactions not yet run: the work in flight `--max-in-flight` bounds, #519), `poolSize`, `poolCacheMisses` (acquires that found every slot in use) and `poolAllocations` (the scopes the pool allocated: one per transaction, and one per miss, #515), all three the first event processor's pool's (#542), `poolArenaSize`, `activeSessions`, `activeOrders`, `storageMapSize` and `storageMapUsed` (LMDB's map and how much of it is in use, in bytes), `timestamp`.
 
 **Enums** — `Side` (BUY, SELL, BUY_MINUS, SELL_PLUS, SELL_SHORT, CROSS; the engine trades only BUY and SELL, and rejects an order on any of the other four, #510), `OrderType` (MARKET, LIMIT, STOP, STOPLIMIT, FXSWAP), `TimeInForce` (DAY, GTD, GTC, FOK, IOC, OPG, ATCLOSE), `OrderStatus` (<!-- DOC_CHECK:order_status_count -->12<!-- /DOC_CHECK --> statuses), `ExecType` (<!-- DOC_CHECK:exec_type_count -->14<!-- /DOC_CHECK --> types), `Currency` (USD, EUR, GBP, JPY, CHF, AUD, CAD, NZD), `Capacity` (<!-- DOC_CHECK:capacity_count -->6<!-- /DOC_CHECK --> types).
 
@@ -569,9 +570,9 @@ Every order clears through the server's clearing firm (`--clearing-firm`), and a
 The MetricsPublisher runs on the server's ASIO io_context thread and broadcasts system metrics every second to all connected WebSocket clients. The React frontend provides three monitoring views:
 
 ### Dashboard
-- **Summary cards:** Active sessions, active orders, queue depth, pool cache misses, events/sec, transactions/sec
+- **Summary cards:** Active sessions, active orders, queue depth, pending transactions, pool cache misses, events/sec, transactions/sec
 - **Throughput charts:** Event and transaction processing rates as time-series line charts
-- **Queue depth chart:** Event queue depth over time as area chart
+- **Work in flight chart:** The events waiting (queue depth) and the transactions pending over time, stacked, so the top is what `--max-in-flight` bounds (#519)
 - **Processor utilization:** Progress bars showing busy/total for event and transaction processors
 
 ### Memory Admin

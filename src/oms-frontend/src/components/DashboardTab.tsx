@@ -32,6 +32,7 @@ export function DashboardTab({ metricsHistory }: Props) {
         eventsPerSec: Math.max(0, m.eventsProcessed - prev.eventsProcessed),
         transactionsPerSec: Math.max(0, m.transactionsProcessed - prev.transactionsProcessed),
         queueDepth: m.queueDepth,
+        pendingTransactions: m.pendingTransactions,
       };
     });
   }, [metricsHistory]);
@@ -52,10 +53,11 @@ export function DashboardTab({ metricsHistory }: Props) {
   return (
     <div className="p-4 space-y-6">
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
         <MetricCard label="Active Sessions" value={String(latest.activeSessions)} />
         <MetricCard label="Active Orders" value={String(latest.activeOrders)} />
         <MetricCard label="Queue Depth" value={String(latest.queueDepth)} />
+        <MetricCard label="Pending Transactions" value={String(latest.pendingTransactions)} />
         <MetricCard
           label="Pool Cache Misses"
           value={String(latest.poolCacheMisses)}
@@ -149,10 +151,10 @@ export function DashboardTab({ metricsHistory }: Props) {
           </ResponsiveContainer>
         </div>
 
-        {/* Queue depth */}
+        {/* Work in flight: the events waiting and the transactions pending, stacked, which --max-in-flight bounds */}
         <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 lg:col-span-2">
           <div className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
-            Event Queue Depth
+            Work in Flight (events waiting + transactions pending)
           </div>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={chartData}>
@@ -163,7 +165,8 @@ export function DashboardTab({ metricsHistory }: Props) {
                 contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: 8 }}
                 labelStyle={{ color: '#9ca3af' }}
               />
-              <Area type="monotone" dataKey="queueDepth" stroke="#f59e0b" fill="#78350f" fillOpacity={0.4} strokeWidth={2} />
+              <Area type="monotone" dataKey="queueDepth" name="Events waiting" stackId="inFlight" stroke="#f59e0b" fill="#78350f" fillOpacity={0.4} strokeWidth={2} />
+              <Area type="monotone" dataKey="pendingTransactions" name="Transactions pending" stackId="inFlight" stroke="#a78bfa" fill="#4c1d95" fillOpacity={0.4} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
