@@ -29,6 +29,8 @@ public:
     /// that names no order a session may see, routed by the source the request came in under (#225)
     void sendToSource(const std::string &source, const std::string &json);
     void broadcastBookUpdate(const std::string &symbol, const std::string &json);
+    /// Whether any session subscribes to the symbol's book: a report builds the book's depth only then (#525)
+    bool hasBookSubscribers(const std::string &symbol) const;
     /// A session's book subscriptions are kept here, under the lock the broadcasts take: the session's own thread
     /// changes them, and broadcastBookUpdate reads them on any thread, a transaction worker's through WsOutQueues. Each
     /// session used to keep its own, read without a lock: a data race (#159).
