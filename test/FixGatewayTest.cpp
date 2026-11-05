@@ -1401,6 +1401,45 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_AnExpireTimeTheRulesRefuse_IsNotQue
     gateway_->onMessage(day, TEST_SID);
 }
 
+TEST_F(FixGatewayInboundTest, ReplaceRequest_AChangeOfOrderType_IsNotQueued)
+{
+    // A replace keeps an order's type, so one whose OrdType (40) isn't the order's is refused by the gateway (102=99),
+    // whatever it asks for (#528): a limit order made a market, stop, stop limit, swap or pegged order, a type the
+    // gateway doesn't map, and a stop limit order made a limit order. Until #528 each was queued, keeping its
+    // original's type. Each refusal is remembered (#398), so a replace that names one replaces the order it was to
+    // replace.
+    OrderEntry *limit = saveOrderOf(TEST_SID, "ORD-LMT");
+    ASSERT_NE(nullptr, limit);
+    OrderEntry *stopLimit = saveOrderOf(TEST_SID, "ORD-STP");
+    ASSERT_NE(nullptr, stopLimit);
+    stopLimit->ordType_ = STOPLIMIT_ORDERTYPE;
+    stopLimit->stopPx_ = 10.0;
+    std::vector<IdT> replaced;
+    std::vector<std::unique_ptr<OrderEntry>> replacements; // never reach an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                replaced.push_back(evt.id_);
+                replacements.emplace_back(evt.replacementOrder_);
+            }));
+
+    int n = 0;
+    for (const char ordType : { FIX::OrdType_MARKET, FIX::OrdType_STOP, FIX::OrdType_STOP_LIMIT,
+                                FIX::OrdType_FOREX_SWAP, FIX::OrdType_PEGGED })
+    {
+        auto msg = makeLimitReplace("ORD-LMT", "RPL-" + std::to_string(++n));
+        msg.set(FIX::OrdType(ordType));
+        gateway_->onMessage(msg, TEST_SID);
+    }
+    gateway_->onMessage(makeLimitReplace("ORD-STP", "RPL-TO-LIMIT"), TEST_SID);
+
+    gateway_->onMessage(makeLimitReplace("RPL-1", "RPL-AFTER"), TEST_SID);
+    ASSERT_EQ(1u, replaced.size());
+    EXPECT_EQ(limit->orderId_, replaced[0]);
+    EXPECT_EQ(LIMIT_ORDERTYPE, replacements[0]->ordType_);
+}
+
 TEST_F(FixGatewayInboundTest, ReplaceRequest_ASessionsNewestRefusedReplacementsAreRemembered)
 {
     // A replace that names a refused replacement is decided against the order it was to replace (#398), for each
@@ -3637,6 +3676,70 @@ TEST_F(FixtSessionTest, ASwapsFarLegInTagsNoDictionaryDefinesIsRefusedByTheSessi
     EXPECT_EQ(std::to_string(FIX::SessionRejectReason_INVALID_TAG_NUMBER),
               fieldOf(rejects[0], FIX::FIELD::SessionRejectReason));
     EXPECT_TRUE(sentOfType(FIX::MsgType_ExecutionReport).empty()) << sentText();
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AReplaceThatChangesTheOrderTypeIsRefusedReadably)
+{
+    // A replace keeps an order's type, as the engine's does, so one whose OrdType (40) isn't the order's gets an
+    // OrderCancelReject (102=99) that says so (#528). The issue's limit order made a market order, and its stop limit
+    // order made a limit order, were both queued until then, keeping their originals' types. A limit order made a stop,
+    // with a StopPx, is refused for its type, not for the StopPx. A replace with the order's own 40 is queued, and one
+    // without 40 gets the session's Reject, since FIX requires it.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::vector<std::unique_ptr<OrderEntry>> pushed; // never reach an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderReplaceEvent &evt)
+            {
+                pushed.emplace_back(evt.replacementOrder_);
+            }));
+    OrderEntry *limit = saveOrderOf(sid_, "ORD-X");
+    setState(limit, NEW_ORDSTATUS, 100, 0, 100);
+    OrderEntry *stopLimit = saveOrderOf(sid_, "ORD-S");
+    stopLimit->ordType_ = STOPLIMIT_ORDERTYPE;
+    stopLimit->stopPx_ = 16.0;
+    setState(stopLimit, NEW_ORDSTATUS, 100, 0, 100);
+
+    FIX50SP2::OrderCancelReplaceRequest toMarket = makeLimitReplace("ORD-X", "RPL-MKT");
+    toMarket.set(FIX::OrdType(FIX::OrdType_MARKET));
+    toMarket.removeField(FIX::FIELD::Price);
+    receive(toMarket);
+    receive(makeLimitReplace("ORD-S", "RPL-LMT"));
+    FIX50SP2::OrderCancelReplaceRequest toStop = makeLimitReplace("ORD-X", "RPL-STP");
+    toStop.set(FIX::OrdType(FIX::OrdType_STOP));
+    toStop.removeField(FIX::FIELD::Price);
+    toStop.set(FIX::StopPx(16.0));
+    receive(toStop);
+    receive(makeLimitReplace("ORD-X", "RPL-KEEP"));
+    FIX50SP2::OrderCancelReplaceRequest noType = makeLimitReplace("ORD-X", "RPL-NONE");
+    noType.removeField(FIX::FIELD::OrdType);
+    receive(noType);
+
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(3u, rejects.size()) << sentText();
+    const std::vector<std::pair<std::string, std::string>> refused{ { "RPL-MKT", "ORD-X" },
+                                                                    { "RPL-LMT", "ORD-S" },
+                                                                    { "RPL-STP", "ORD-X" } };
+    for (size_t i = 0; i < rejects.size(); ++i)
+    {
+        SCOPED_TRACE(refused[i].first);
+        EXPECT_EQ(refused[i].first, fieldOf(rejects[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ(refused[i].second, fieldOf(rejects[i], FIX::FIELD::OrigClOrdID));
+        EXPECT_EQ(std::string(1, FIX::CxlRejResponseTo_ORDER_CANCEL_REPLACE_REQUEST),
+                  fieldOf(rejects[i], FIX::FIELD::CxlRejResponseTo));
+        EXPECT_EQ(std::to_string(FIX::CxlRejReason_OTHER), fieldOf(rejects[i], FIX::FIELD::CxlRejReason));
+        EXPECT_EQ(std::string(1, FIX::OrdStatus_NEW), fieldOf(rejects[i], FIX::FIELD::OrdStatus));
+        EXPECT_EQ("Replace refused: a replace cannot change the order type (40)",
+                  fieldOf(rejects[i], FIX::FIELD::Text));
+    }
+    ASSERT_EQ(1u, pushed.size());
+    EXPECT_EQ(LIMIT_ORDERTYPE, pushed[0]->ordType_);
+    const std::vector<FIX::Message> sessionRejects = sentOfType(FIX::MsgType_Reject);
+    ASSERT_EQ(1u, sessionRejects.size()) << sentText();
+    EXPECT_EQ(std::to_string(FIX::FIELD::OrdType), fieldOf(sessionRejects[0], FIX::FIELD::RefTagID));
+    EXPECT_EQ(std::to_string(FIX::SessionRejectReason_REQUIRED_TAG_MISSING),
+              fieldOf(sessionRejects[0], FIX::FIELD::SessionRejectReason));
     expectEverythingSentIsTaken();
 }
 
