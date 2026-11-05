@@ -30,7 +30,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **Order Blotter:** Live table with inline Cancel and Replace actions
 - **Execution Blotter:** Trades, rejects, corrections, cancels with CSV export
 - **Order Book Panel:** 8-level bid/ask depth with staleness indicator and per-instrument subscription
-- **Position Summary:** Net positions per account and instrument, from each order's filled quantity and average price, with each side's average price
+- **Position Summary:** Net positions per account and instrument, from each order's filled quantity and average price, with each side's average price; swaps, whose two legs offset, are left out
 
 ### Monitoring Dashboard
 - **Real-Time Metrics:** MetricsPublisher broadcasts 17 system metrics at 1/sec over WebSocket
