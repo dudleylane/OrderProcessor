@@ -117,7 +117,8 @@ FixServer::~FixServer()
     stop();
 }
 
-void FixServer::start(const std::string &configFile, const std::string &credentialsFile, const FixTlsFiles &tls)
+void FixServer::start(const std::string &configFile, const std::string &credentialsFile, const FixTlsFiles &tls,
+                      InFlightGauge *inFlight)
 {
     impl_->settings = std::make_unique<FIX::SessionSettings>(configFile);
     if (tls.enabled())
@@ -129,6 +130,7 @@ void FixServer::start(const std::string &configFile, const std::string &credenti
     addCounterpartySessions(*impl_->settings, *impl_->credentials, credentialsFile);
     checkSessionsSpeakFix50Sp2(*impl_->settings);
     impl_->gateway->setCredentials(impl_->credentials.get());
+    impl_->gateway->setInFlightGauge(inFlight);
     std::string compIds;
     for (const FixCounterparty &counterparty : impl_->credentials->counterparties())
     {

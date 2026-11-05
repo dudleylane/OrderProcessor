@@ -9,6 +9,7 @@
 #include "Logger.h"
 #include "EnumStrings.h"
 #include "ExpiryScheduler.h"
+#include "InFlightGauge.h"
 
 #include <algorithm>
 #include <atomic>
@@ -21,6 +22,7 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 #include <quickfix/Exceptions.h>
 #include <quickfix/FixValues.h>
@@ -625,6 +627,30 @@ void FixGateway::setStores(FixCarryingStoreFactory *stores)
     stores_.store(stores);
 }
 
+void FixGateway::setInFlightGauge(InFlightGauge *inFlight, std::chrono::milliseconds longestWait)
+{
+    inFlight_ = inFlight;
+    inFlightWait_ = longestWait;
+}
+
+void FixGateway::waitForInFlight() const
+{
+    if ((nullptr == inFlight_) || !inFlight_->overBound()) [[likely]]
+    {
+        return;
+    }
+    // QuickFIX reads a session's messages on the session's own thread, so while it waits here the counterparty's next
+    // messages wait in its TCP window, as a WebSocket client's do while its session doesn't read (#519). Unlike that
+    // read, the wait ends at inFlightWait_: the engine writes a session's reports on its own threads, blocking, so a
+    // counterparty that sends and reads on one thread, blocked writing to a session that doesn't read, reads none of
+    // them, and the engine's thread writing one, blocked in turn, could keep the work in flight over the bound for good.
+    const auto deadline = std::chrono::steady_clock::now() + inFlightWait_;
+    do
+    {
+        std::this_thread::sleep_for(IN_FLIGHT_RECHECK);
+    } while (inFlight_->overBound() && (std::chrono::steady_clock::now() < deadline));
+}
+
 void FixGateway::setCredentials(const FixCredentials *credentials)
 {
     if (nullptr != credentials)
@@ -871,6 +897,8 @@ void FixGateway::dispatch(const FIX::Message &msg, const FIX::SessionID &sid)
 
 void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::SessionID &sid)
 {
+    waitForInFlight(); // while the engine's work in flight is over the bound (#519)
+
     FIX::ClOrdID clOrdId;
     msg.get(clOrdId);
     FIX::Symbol symbol;
@@ -1096,6 +1124,8 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
 // =============================================================================
 void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::SessionID &sid)
 {
+    waitForInFlight(); // while the engine's work in flight is over the bound (#519)
+
     FIX::ClOrdID clOrdId;
     msg.get(clOrdId);
     FIX::Side side;
@@ -1326,6 +1356,8 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
 
 void FixGateway::onMessage(const FIX50SP2::OrderCancelRequest &msg, const FIX::SessionID &sid)
 {
+    waitForInFlight(); // while the engine's work in flight is over the bound (#519)
+
     FIX::OrigClOrdID origClOrdId;
     msg.get(origClOrdId);
     FIX::ClOrdID clOrdId;
@@ -1373,6 +1405,8 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelRequest &msg, const FIX::S
 
 void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const FIX::SessionID &sid)
 {
+    waitForInFlight(); // while the engine's work in flight is over the bound (#519)
+
     FIX::OrigClOrdID origClOrdId;
     msg.get(origClOrdId);
     FIX::ClOrdID clOrdId;

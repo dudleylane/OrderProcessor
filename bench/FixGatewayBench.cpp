@@ -63,6 +63,8 @@
 #include "Logger.h"
 #include "SubscrManager.h"
 #include "TestAux.h"
+#include "InFlightGauge.h"
+#include "ServerDefaults.h"
 
 using namespace COP;
 using namespace COP::Store;
@@ -177,6 +179,35 @@ public:
 
     SourceIdT instrId_;
     SourceIdT clearingId_;
+};
+
+/// The engine's work in flight, as main.cpp has the gateway check it before each new order, swap, cancel and replace
+/// (#519): the real gauge, on a queue and a transaction manager of its own, both empty, so that a benchmark times the
+/// check under the bound, where a session nearly always makes it. The gateway's own queue in these benchmarks keeps
+/// what it is handed, and would pass the bound.
+class BenchInFlight final
+{
+public:
+    BenchInFlight()
+    {
+        transactMgr_.init(TransactionMgrParams(IdTGenerator::instance()));
+    }
+    ~BenchInFlight()
+    {
+        transactMgr_.stop();
+    }
+    BenchInFlight(const BenchInFlight &) = delete;
+    BenchInFlight &operator=(const BenchInFlight &) = delete;
+
+    InFlightGauge *gauge()
+    {
+        return &gauge_;
+    }
+
+private:
+    IncomingQueues inQueues_;
+    TransactionMgr transactMgr_;
+    EngineInFlightGauge gauge_{ &inQueues_, &transactMgr_, DEFAULT_MAX_IN_FLIGHT };
 };
 
 FIX50SP2::NewOrderSingle makeBenchNOS(const std::string &clOrdId, char side, char ordType, double price, double qty)
@@ -314,7 +345,9 @@ static void BM_FixNewOrderSingleTranslation(benchmark::State &state)
 {
     FixBenchSetup setup;
     IncomingQueues inQueues;
+    BenchInFlight inFlight;
     FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    gateway.setInFlightGauge(inFlight.gauge());
     const std::string source = FixGateway::makeSourceString(BENCH_SID);
 
     int ordNum = 0;
@@ -342,7 +375,9 @@ static void BM_FixNewOrderMultilegTranslation(benchmark::State &state)
 {
     FixBenchSetup setup;
     IncomingQueues inQueues;
+    BenchInFlight inFlight;
     FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    gateway.setInFlightGauge(inFlight.gauge());
     const std::string source = FixGateway::makeSourceString(BENCH_SID);
 
     int ordNum = 0;
@@ -738,7 +773,9 @@ static void BM_FixOrderAndAcknowledgement(benchmark::State &state)
 {
     FixBenchSetup setup;
     KeepingInQueues inQueues;
+    BenchInFlight inFlight;
     FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    gateway.setInFlightGauge(inFlight.gauge());
     FixOutQueues outQueues(&gateway, OrderStorage::instance());
     BenchSession session(gateway);
     if (!session.problem().empty())
@@ -951,7 +988,9 @@ static void BM_FixCancelRequest(benchmark::State &state)
 {
     FixBenchSetup setup;
     RequestInQueues inQueues;
+    BenchInFlight inFlight;
     FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    gateway.setInFlightGauge(inFlight.gauge());
     BenchSession session(gateway);
     if (!session.problem().empty())
     {
@@ -986,7 +1025,9 @@ static void BM_FixReplaceRequest(benchmark::State &state)
 {
     FixBenchSetup setup;
     RequestInQueues inQueues;
+    BenchInFlight inFlight;
     FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    gateway.setInFlightGauge(inFlight.gauge());
     FixOutQueues outQueues(&gateway, OrderStorage::instance());
     BenchSession session(gateway);
     if (!session.problem().empty())
@@ -1087,7 +1128,9 @@ static void BM_FixCancelOfUnknownOrder(benchmark::State &state)
 {
     FixBenchSetup setup;
     RequestInQueues inQueues;
+    BenchInFlight inFlight;
     FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    gateway.setInFlightGauge(inFlight.gauge());
     BenchSession session(gateway);
     if (!session.problem().empty())
     {
@@ -1318,7 +1361,9 @@ static void BM_FixRepeatedClOrdId(benchmark::State &state)
 {
     FixBenchSetup setup;
     RequestInQueues inQueues;
+    BenchInFlight inFlight;
     FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    gateway.setInFlightGauge(inFlight.gauge());
     BenchSession session(gateway);
     if (!session.problem().empty())
     {
@@ -1628,6 +1673,9 @@ static void BM_FixEndToEndFillCycle(benchmark::State &state)
     TransactionMgrParams transParams(IdTGenerator::instance());
     auto transMgr = std::make_unique<TransactionMgr>();
     transMgr->init(transParams);
+    // The gateway checks the engine's work in flight before each order, as main.cpp has it check (#519)
+    EngineInFlightGauge inFlight(inQueues.get(), transMgr.get(), DEFAULT_MAX_IN_FLIGHT);
+    gateway->setInFlightGauge(&inFlight);
 
     ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook.get(), inQueues.get(),
                            reports.get(), inQueues.get(), transMgr.get());
