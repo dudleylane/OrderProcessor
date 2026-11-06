@@ -180,7 +180,7 @@ Server options:
 | `--hash-ws-token` | | Reads a token from standard input, prints the hash `--ws-credentials` needs for it, and exits |
 | `--pg-connection` | none | The Postgres to mirror to, a libpq connection string (#151). `OMS_PG_CONNECTION` gives it too, but not both: prefer it, since every user on the host can see a flag in the process list. Needs `BUILD_PG=ON` |
 | `--data-dir` | `./data` | LMDB persistence directory |
-| `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs |
+| `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs. For now N runs N-1 at once (#711) |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
 | `--huge-pages` | off | Reports whether huge pages are available; nothing allocates from them yet |
 | `--fix-cfg` | *(none)* | Path to QuickFIX settings file (enables FIX gateway); needs `--fix-credentials` |
@@ -340,6 +340,14 @@ so nothing reaches LMDB.
 
 `BM_TaskManagerTrades` runs the same pool while every order trades: sells and buys in pairs at one price,
 dealt over 1 or 8 instruments, into a queue that counts the trade reports and keeps nothing (#290).
+
+**What limits the pool (#583).** The processor count goes to oneTBB as `max_allowed_parallelism`, which counts a
+thread that joins the work, and the thread pushing these orders never does. So pinned to four CPUs, 2 runs one
+worker at a time, and 4 and 8 both run three (#711). From one worker to three, an order takes the same instructions
+in about twice the cycles. The workers wait mostly on `TransactionMgr::lock_`, which each transaction takes four
+times, and under which the transaction tree's sorted vectors move the pending entries at each removal (#712), and
+then on `OrderDataStorage::save()`, which clones the order under the store's write lock (#713). That's the pool's
+own limit: no `OrderSaver` is attached and logging is off, and with those a server's limit is elsewhere.
 
 Each benchmark's own time below comes from one session on 2026-11-01, at this branch's 0f25bc0 with the change #503
 makes to the per-order benchmarks (below): three runs of 5 repetitions each, pinned to CPUs 2-5, each time the median
