@@ -209,6 +209,11 @@ FIX50SP2::ExecutionReport storedOrderStatusReport(const OrderEntry &order, const
         report.set(FIX::OrigClOrdID(origClOrdId));
     }
     report.set(FIX::Symbol(order.instrument_.get().symbol_));
+    // A swap's status is the multileg security's, as its other reports that aren't a leg's are (#529)
+    if (FXSWAP_ORDERTYPE == order.ordType_)
+    {
+        report.set(FIX::MultiLegReportingType(FIX::MultiLegReportingType_MULTI_LEG_SECURITY));
+    }
     // A GT order's figures for the business day, once it has traded on an earlier one (#244), and a GTD order's expiry
     // (#240)
     if ((DAY_TIF != seen.tif) && (IOC_TIF != seen.tif) && (FOK_TIF != seen.tif) && (seen.dayCumQty < seen.cumQty))
@@ -1085,7 +1090,7 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
 
     // A cancel sent at once waits for it (#380), and a status request reports it Pending New (#383)
     Queues::OrderEvent evt(order);
-    pushUnanswered(sourceStr, clOrdStr, Unanswered{ order->orderQty_, std::string() }, evt);
+    pushUnanswered(sourceStr, clOrdStr, Unanswered{ order->orderQty_, std::string(), false }, evt);
 }
 
 // =============================================================================
@@ -1328,7 +1333,8 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
     order->lastUpdateTime_ = order->creationTime_;
 
     Queues::OrderEvent evt(order);
-    pushUnanswered(sourceStr, clOrdStr, Unanswered{ order->orderQty_, std::string() }, evt); // as for NewOrderSingle
+    // As for NewOrderSingle, with the record saying it's a swap, whose Pending New is the multileg security's (#529)
+    pushUnanswered(sourceStr, clOrdStr, Unanswered{ order->orderQty_, std::string(), true }, evt);
 }
 
 void FixGateway::onMessage(const FIX50SP2::OrderCancelRequest &msg, const FIX::SessionID &sid)
@@ -1611,7 +1617,7 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
     // The queue owns the replacement once pushed (#74). A replace sent at once that names the replacement waits for it,
     // and is then decided against it, as in EP284's D.2.a (#380); a status request for it reports its original,
     // Pending Replace (#383).
-    Unanswered record{ replacement->orderQty_, rawText(existing->clOrderId_.get()) };
+    Unanswered record{ replacement->orderQty_, rawText(existing->clOrderId_.get()), false };
     Queues::OrderReplaceEvent evt(existing->orderId_, replacement.release());
     pushUnanswered(sourceStr, clOrdStr, std::move(record), evt);
 }
@@ -1793,8 +1799,15 @@ std::optional<FIX50SP2::ExecutionReport> FixGateway::answerReceivedOrder(const O
                                            clOrdId, clientClOrdId(pending->origKey, source));
         }
     }
-    // Received, and not yet stored: Pending New, with the quantity it was sent with (G.1.c), and no OrderID yet
-    return orderStatusReport("NONE", FIX::OrdStatus_PENDING_NEW, side, pending->orderQty, 0, pending->orderQty, 0);
+    // Received, and not yet stored: Pending New, with the quantity it was sent with (G.1.c), and no OrderID yet. A
+    // swap's is the multileg security's, as a stored swap's status is (#529).
+    FIX50SP2::ExecutionReport report =
+        orderStatusReport("NONE", FIX::OrdStatus_PENDING_NEW, side, pending->orderQty, 0, pending->orderQty, 0);
+    if (pending->multileg)
+    {
+        report.set(FIX::MultiLegReportingType(FIX::MultiLegReportingType_MULTI_LEG_SECURITY));
+    }
+    return report;
 }
 
 bool FixGateway::answerRepeatedOrder(const FIX::Message &msg, const FIX::SessionID &sid, const std::string &source,
@@ -2103,6 +2116,17 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
         // (2026-10-26). Until #378 it was TradeLinkID (820), which neither FIX 4.4's ExecutionReport nor 5.0 SP2's
         // has, so a client checking a swap's report against its dictionary refused it.
         report.set(FIX::TrdMatchID(std::to_string(exec->tradeLink_)));
+        // MultiLegReportingType (442) 2: the report is a leg's, whose own side, price and date are in its leg group.
+        // Its root stays the swap's, as FIX's report by leg has it: OrderQty, LeavesQty, CumQty and AvgPx "always apply
+        // to the strategy". Until #529 no report set 442, so a client took a far leg's report for a single security's
+        // fill, on the swap's side.
+        report.set(FIX::MultiLegReportingType(FIX::MultiLegReportingType_INDIVIDUAL_LEG_OF_A_MULTI_LEG_SECURITY));
+    }
+    else if (FXSWAP_ORDERTYPE == order.ordType_)
+    {
+        // A swap's other reports, its New, Cancel, Replace and the rest, are the multileg security's: each is one event
+        // of the swap's, with no leg of its own (#529)
+        report.set(FIX::MultiLegReportingType(FIX::MultiLegReportingType_MULTI_LEG_SECURITY));
     }
 
     return report;
