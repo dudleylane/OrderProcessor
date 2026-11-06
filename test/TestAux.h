@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 
 #include "DataModelDef.h"
+#include "DummyOrderSaver.h"
 #include "TransactionDef.h"
 #include "WideDataStorage.h"
 #include "OrderStorage.h"
@@ -135,21 +136,7 @@ public:
     std::deque<COP::ACID::Operation *> op_;
 };
 
-/**
- * No-op implementation of OrderSaver for tests that don't need persistence
- */
-class DummyOrderSaver : public COP::OrderSaver
-{
-public:
-    DummyOrderSaver() = default;
-    ~DummyOrderSaver() = default;
-
-    COP::u32 save(const COP::OrderEntry &, const COP::OrderFigures &) override
-    {
-        return 0;
-    }
-    void erase(const COP::IdT &, COP::u32) override {}
-};
+// DummyOrderSaver, a no-op OrderSaver, is in DummyOrderSaver.h, which the benchmarks include without GoogleTest (#530)
 
 // =============================================================================
 // Data Factory Functions (consolidated from multiple legacy test files)

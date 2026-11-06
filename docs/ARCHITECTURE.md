@@ -1565,7 +1565,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | Utility | Location | Purpose |
 |---------|----------|---------|
 | `TestTransactionContext` | `TestAux.h/cpp` | Mock ACID::Scope for transaction testing |
-| `DummyOrderSaver` | `TestAux.h` | No-op order persistence |
+| `DummyOrderSaver` | `DummyOrderSaver.h`, which `TestAux.h` includes | No-op order persistence, for the tests and, without GoogleTest, the benchmarks (#530) |
 | `check()` | `TestAux.h/cpp` | Assertion with error messages |
 | `uniqueTestPath()` | `TestAux.h` | A per-test-case path, so tests can run in parallel (#10) |
 | `SingletonFixture`, `OrderStorageFixture`, ... | `TestFixtures.h` | Create and destroy the singletons per test |
@@ -1604,7 +1604,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | Category | Files |
 |----------|-------|
 | **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `ExpirySchedulerTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `InFlightGaugeTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NodePoolTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
-| **Utilities** | `TestAux.h/cpp`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
+| **Utilities** | `TestAux.h/cpp`, `DummyOrderSaver.h`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 | **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh`, `CpuBusyTest.sh`, `BenchmarkBaselineTest.sh`, `BenchmarkBusyStartTest.sh` |
 | **Fuzzing** | `fuzz/fuzz_client_message.cpp`, `fuzz/standalone_main.cpp`, `fuzz/corpus/` (`BUILD_FUZZ=ON`) |
@@ -1623,6 +1623,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159), and a fill's report pushed through `WsOutQueues` (#442) |
 | `ClientMessageParserBench.cpp` | The IO thread's parse of a client's `new_order`, as the order entry panel sends one (#516) |
 | `WsSessionBench.cpp` | The IO thread's work for each message a flooding client sends: a served session's read, parse and push of a burst of cancels (#519) |
+| `nogtest/gtest/gtest.h` | Not a benchmark: an `#error`, first on the benchmarks' include path, so that a benchmark that includes GoogleTest, directly or through a test header, fails to build on every host (#530) |
 
 ---
 
