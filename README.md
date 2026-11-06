@@ -132,7 +132,7 @@ Server options:
 | `--hash-ws-token` | | Reads a token from standard input, prints the hash `--ws-credentials` needs for it, and exits |
 | `--pg-connection` | none | The Postgres to mirror to, a libpq connection string (#151). `OMS_PG_CONNECTION` gives it too, but not both: prefer it, since every user on the host can see a flag in the process list. Needs `BUILD_PG=ON` |
 | `--data-dir` | `./data` | LMDB persistence directory |
-| `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs |
+| `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs. For now N runs N-1 at once (#711) |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
 | `--huge-pages` | off | Reports whether huge pages are available; nothing allocates from them yet |
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
@@ -372,6 +372,14 @@ trades. It takes the number of instruments the pairs are dealt over, 1 or 8, and
 In one instrument every booking, match and fill relates to the same instrument: ~157K, ~136K and ~137K
 orders/sec at 2, 4 and 8 processors, against ~147K, ~132K and ~131K over 8 instruments: neither more processors
 nor more instruments raised it.
+
+**What limits the pool (#583).** The processor count goes to oneTBB as `max_allowed_parallelism`, which counts a
+thread that joins the work, and the thread pushing these orders never does. So pinned to four CPUs, 2 runs one
+worker at a time, and 4 and 8 both run three (#711). From one worker to three, an order takes the same instructions
+in about twice the cycles. The workers wait mostly on `TransactionMgr::lock_`, which each transaction takes four
+times, and under which the transaction tree's sorted vectors move the pending entries at each removal (#712), and
+then on `OrderDataStorage::save()`, which clones the order under the store's write lock (#713). That's the pool's
+own limit: it doesn't limit a server yet, for the two reasons below.
 
 Two things these numbers deliberately exclude, both real in production:
 
