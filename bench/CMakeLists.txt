@@ -29,6 +29,13 @@ target_include_directories(orderProcessorBench
         ${CMAKE_SOURCE_DIR}/app
 )
 
+# First on the benchmarks' include path, a gtest/gtest.h that is an #error: the benchmarks don't build with GoogleTest,
+# and an include of it found the host's own headers, which a clean host lacks (#530)
+target_include_directories(orderProcessorBench BEFORE
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/nogtest
+)
+
 if(BUILD_FIX)
     target_sources(orderProcessorBench PRIVATE
         FixGatewayBench.cpp
