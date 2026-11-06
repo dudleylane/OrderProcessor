@@ -23,7 +23,7 @@
 #include "IdTGenerator.h"
 #include "DataModelDef.h"
 #include "Logger.h"
-#include "TestAux.h"
+#include "DummyOrderSaver.h"
 
 using namespace COP;
 using namespace COP::Store;
