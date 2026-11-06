@@ -634,7 +634,7 @@ on the transaction worker, under the order's lock, after the order's earlier tra
 │   • ExecReport TRADE to aggressor                                       │
 │   • ExecReport TRADE to passive order owner                             │
 │   • Updated order states persisted                                      │
-│   • No execution record: reports aren't persisted (#33)                 │
+│   • No execution record: reports aren't persisted (#33, #582)           │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1503,6 +1503,8 @@ and the book's own maps still lie among the orders.
 │   length, then its bytes.                                                    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**What a restart keeps (#582).** LMDB holds the reference data, each order with the figures its last decision left it (#411, below), and each instrument's last trade (#237), and a trade's orders are written in one commit (#163). It holds no execution reports, as decided on #582. A report's execution is made in memory as the report is pushed (`processEvent_GenerateExecution()`), and after the push nothing in the server reads it. So a restart restores each order's state, and the positions built from it (#524), but not its fills: which trades made up its cum, at what prices and times, and their ids, which the id limit below keeps from repeating. Once a fill is delivered, nothing holds it for a client to ask for again: a WebSocket client that reconnects gets each order as its last report left it (#404), and Postgres mirrors only what LMDB keeps (#599). Persisting the reports would take more than a codec. The group commit closes before the first operation that publishes, so each report's execution, and its id, would have to be made by an operation inside the group, with a record written for each report. With nothing to read the history, that would be work on every report's path for nothing: an execution history is a feature, with a reader, not a fix.
 
 **Ids across restarts (#58, #81).** Order ids and execution ids come from the shared `IdTGenerator`, which starts at 1 in every run. Transaction ids come from a counter of their own in `app/main.cpp`, because nothing persists them. After loading, the server continues the shared counter past two points: the largest order number restored (#58), and the limit in the `IDLIMIT_RECORDTYPE` record (#81).
 
