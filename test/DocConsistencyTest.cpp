@@ -32,7 +32,8 @@
    2. Add an EXPECT_DOC_EQ() line below pointing to the source-of-truth.
 
  It also checks that docs/ARCHITECTURE.md's file reference, section 10, names
- every source, test and benchmark file (#261).
+ every source, test and benchmark file (#261), and that README's install step
+ names what the server image's builder installs (#530).
 */
 
 #include <gtest/gtest.h>
@@ -353,6 +354,80 @@ TEST_F(DocConsistencyTest, FileReferenceNamesEveryFile)
         }
     }
     EXPECT_LT(100u, files) << "found only " << files << " files: the directories or the pattern are wrong";
+}
+
+// README's install step had fallen behind the build: it lacked openssl-devel, which the build has needed since #225,
+// and the repositories spdlog-devel and lmdb-devel come from, EPEL and CRB, so on a clean host it failed at once
+// (#530). The server image's builder installs the build's packages in its first RUN, and the image's build in CI fails
+// without one the default build needs, so README's sudo dnf lines must name each -devel package that RUN installs,
+// epel-release if it installs it, and each repository it enables. What only the tests or the benchmarks need isn't in
+// the image: FetchContent brings it.
+TEST_F(DocConsistencyTest, ReadmeInstallsWhatTheServerImageBuildsWith)
+{
+    const auto root = test::sourceRoot();
+    std::ifstream dockerIn(root / "docker/Dockerfile.oms-server");
+    ASSERT_TRUE(dockerIn) << "can't read docker/Dockerfile.oms-server";
+    std::string dockerfile((std::istreambuf_iterator<char>(dockerIn)), std::istreambuf_iterator<char>());
+    dockerfile.erase(std::remove(dockerfile.begin(), dockerfile.end(), '\r'), dockerfile.end());
+    std::ifstream readmeIn(root / "README.md");
+    ASSERT_TRUE(readmeIn) << "can't read README.md";
+    std::string readme((std::istreambuf_iterator<char>(readmeIn)), std::istreambuf_iterator<char>());
+    readme.erase(std::remove(readme.begin(), readme.end(), '\r'), readme.end());
+
+    // The builder's first RUN, its continuation lines joined
+    const size_t builder = dockerfile.find(" AS builder\n");
+    ASSERT_NE(std::string::npos, builder) << "docker/Dockerfile.oms-server has no builder stage";
+    const size_t run = dockerfile.find("\nRUN ", builder);
+    ASSERT_NE(std::string::npos, run) << "docker/Dockerfile.oms-server's builder has no RUN";
+    std::string instruction;
+    std::istringstream lines(dockerfile.substr(run + 1));
+    for (std::string line; std::getline(lines, line);)
+    {
+        const bool continued = !line.empty() && ('\\' == line.back());
+        instruction += (continued ? line.substr(0, line.size() - 1) : line) + " ";
+        if (!continued)
+        {
+            break;
+        }
+    }
+
+    std::set<std::string> wanted;
+    size_t packages = 0;
+    std::istringstream words(instruction);
+    for (std::string word, previous; words >> word; previous = word)
+    {
+        if (word.ends_with("-devel"))
+        {
+            wanted.insert(word);
+            ++packages;
+        }
+        else if (("epel-release" == word) || ("--set-enabled" == previous))
+        {
+            wanted.insert(word);
+        }
+    }
+    ASSERT_LT(0u, packages) << "found no -devel package in docker/Dockerfile.oms-server's builder's first RUN: "
+                            << instruction;
+
+    std::set<std::string> named;
+    std::istringstream readmeLines(readme);
+    for (std::string line; std::getline(readmeLines, line);)
+    {
+        if (line.starts_with("sudo dnf "))
+        {
+            std::istringstream lineWords(line);
+            for (std::string word; lineWords >> word;)
+            {
+                named.insert(word);
+            }
+        }
+    }
+    ASSERT_FALSE(named.empty()) << "README.md has no line that starts with sudo dnf";
+    for (const std::string &word : wanted)
+    {
+        EXPECT_TRUE(named.count(word)) << "docker/Dockerfile.oms-server's builder installs or enables " << word
+                                       << ", and README.md's sudo dnf lines don't name it";
+    }
 }
 
 } // namespace
