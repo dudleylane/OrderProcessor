@@ -179,6 +179,7 @@ private:
     {
         QuantityT orderQty = 0; // its OrderQty (38), which a status request's Pending New reports (#383)
         std::string origKey;    // a replacement's: the key of the order it replaces; empty for a new order
+        bool multileg = false;  // a NewOrderMultileg's, whose Pending New is the multileg security's (442=3, #529)
     };
     /// The order a request from source names by ClOrdID, as locateSessionOrder() finds it, and, in *pending, what the
     /// gateway keeps of it while the engine hasn't answered it, without waiting (#383). Looked for, its record read, and

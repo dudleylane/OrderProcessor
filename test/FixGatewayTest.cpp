@@ -2685,11 +2685,15 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsLegsCarryTheirSideDateAndPri
 {
     // A swap's near leg trades on the order's side and settles on its near date; its far leg trades the other way and
     // settles on its far date. Each report carries its leg in a NoLegs group (#153), and TrdMatchID (880), which pairs
-    // it with its other leg's (#199, #378).
+    // it with its other leg's (#199, #378). Each is MultiLegReportingType (442) 2, a leg's report, whose root is the
+    // swap's, its side and its figures, as FIX's report by leg has it (#529).
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     order->side_ = BUY_SIDE;
     order->ordType_ = FXSWAP_ORDERTYPE;
+    order->orderQty_ = 1000; // 100 of it filled
+    order->cumQty_ = 100;
+    order->leavesQty_ = 900;
     order->settlDate_ = 1792022400000ULL;    // 2026-10-15, midnight UTC
     order->farSettlDate_ = 1794700800000ULL; // 2026-11-15
     order->farPrice_ = 1.0872;
@@ -2723,14 +2727,85 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsLegsCarryTheirSideDateAndPri
         ASSERT_TRUE(report.isSetField(FIX::FIELD::TrdMatchID)) << "leg " << leg;
         EXPECT_EQ("4242", report.getField(FIX::FIELD::TrdMatchID)) << "leg " << leg;
         EXPECT_FALSE(report.isSetField(FIX::FIELD::TradeLinkID)) << "leg " << leg;
+        // A leg's report (442=2), whose root is the swap's: its side, the near leg's, and its figures. Until #529 no
+        // report set 442, so a client took the far leg's report for a single security's fill, on the root's side.
+        ASSERT_TRUE(report.isSetField(FIX::FIELD::MultiLegReportingType)) << "leg " << leg;
+        EXPECT_EQ(std::string(1, FIX::MultiLegReportingType_INDIVIDUAL_LEG_OF_A_MULTI_LEG_SECURITY),
+                  report.getField(FIX::FIELD::MultiLegReportingType))
+            << "leg " << leg;
+        EXPECT_EQ(std::string(1, FIX::Side_BUY), report.getField(FIX::FIELD::Side)) << "leg " << leg;
+        EXPECT_EQ("1000", report.getField(FIX::FIELD::OrderQty)) << "leg " << leg;
+        EXPECT_EQ("100", report.getField(FIX::FIELD::CumQty)) << "leg " << leg;
+        EXPECT_EQ("900", report.getField(FIX::FIELD::LeavesQty)) << "leg " << leg;
     }
 
-    // A plain fill has no legs
+    // A plain fill, an outright order's, has neither legs nor 442
+    auto outright = createCorrectOrder(instrumentId1_);
+    assignClOrderId(outright.get());
     auto plain = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
-    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&plain, *order);
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&plain, *outright);
     EXPECT_EQ(0u, report.groupCount(FIX::FIELD::NoLegs));
     EXPECT_FALSE(report.isSetField(FIX::FIELD::TrdMatchID));
     EXPECT_FALSE(report.isSetField(FIX::FIELD::TradeLinkID));
+    EXPECT_FALSE(report.isSetField(FIX::FIELD::MultiLegReportingType));
+}
+
+TEST_F(FixGatewayInboundTest, ExecutionReport_ASwapsOtherReportsAreTheMultilegSecuritys)
+{
+    // A swap's reports that aren't a leg's are the multileg security's, MultiLegReportingType (442) 3 (#529): its New,
+    // Cancel, Replace, Expired, Restated and Rejected reports, its status, and the Pending New the gateway answers for
+    // a swap the engine hasn't stored yet. Until #529 none set 442, which FIX takes as 1, a single security. An
+    // outright order's carry none.
+    const auto typeOf = [](const FIX::Message &report)
+    {
+        return report.isSetField(FIX::FIELD::MultiLegReportingType) ? report.getField(FIX::FIELD::MultiLegReportingType)
+                                                                    : std::string("(not set)");
+    };
+    const std::string multileg(1, FIX::MultiLegReportingType_MULTI_LEG_SECURITY);
+    auto swap = createCorrectOrder(instrumentId1_);
+    assignClOrderId(swap.get());
+    swap->ordType_ = FXSWAP_ORDERTYPE;
+    auto outright = createCorrectOrder(instrumentId1_);
+    assignClOrderId(outright.get());
+    for (const ExecType type : { NEW_EXECTYPE, CANCEL_EXECTYPE, REPLACE_EXECTYPE, EXPIRED_EXECTYPE, RESTATED_EXECTYPE })
+    {
+        auto exec = makeReport<ExecutionEntry>(type, NEW_ORDSTATUS);
+        EXPECT_EQ(multileg, typeOf(FixGateway::buildExecutionReport(&exec, *swap))) << "type " << type;
+        EXPECT_EQ("(not set)", typeOf(FixGateway::buildExecutionReport(&exec, *outright))) << "type " << type;
+    }
+    auto reject = makeReport<RejectExecEntry>(REJECT_EXECTYPE, REJECTED_ORDSTATUS);
+    EXPECT_EQ(multileg, typeOf(FixGateway::buildExecutionReport(&reject, *swap)));
+    EXPECT_EQ("(not set)", typeOf(FixGateway::buildExecutionReport(&reject, *outright)));
+
+    // Its status once stored and reported, and its Pending New before the engine stores it
+    OrderEntry *stored = saveOrderOf(TEST_SID, "SWAP-S");
+    stored->ordType_ = FXSWAP_ORDERTYPE;
+    stored->published_ = OrderFigures(*stored);
+    OrderEntry *storedOutright = saveOrderOf(TEST_SID, "ORD-S");
+    storedOutright->published_ = OrderFigures(*storedOutright);
+    std::unique_ptr<OrderEntry> pushed; // never reaches an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.reset(evt.order_);
+            }));
+    gateway_->onMessage(makeFxSwap("SWAP-P"), TEST_SID);
+    ASSERT_NE(nullptr, pushed);
+    const auto statusOf = [&](const std::string &clOrdId)
+    {
+        FIX50SP2::OrderStatusRequest request;
+        request.set(FIX::ClOrdID(clOrdId));
+        request.set(FIX::Symbol("aaa"));
+        request.set(FIX::Side(FIX::Side_BUY));
+        return gateway_->answerOrderStatus(request, TEST_SID);
+    };
+    EXPECT_EQ(multileg, typeOf(statusOf("SWAP-S")));
+    const FIX50SP2::ExecutionReport pending = statusOf("SWAP-P");
+    ASSERT_TRUE(pending.isSetField(FIX::FIELD::OrdStatus));
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_PENDING_NEW), pending.getField(FIX::FIELD::OrdStatus));
+    EXPECT_EQ(multileg, typeOf(pending));
+    EXPECT_EQ("(not set)", typeOf(statusOf("ORD-S")));
 }
 
 // --- Settlement dates, as FIX's LocalMktDate (#198, #190) ---
@@ -3249,7 +3324,8 @@ TEST_F(FixtSessionTest, ASwapsLegReportIsTakenWithItsTrdMatchId)
     // NoLegs group, where FIX 4.4 had no such field. Its TradeDate (75) is its fill's business day's, as an outright
     // trade's is (#258): the engine gave every swap leg's trade 1 (#445). This checks the gateway's side, that a leg's
     // report sends the date and a counterparty that validates takes it; ProcessorTest's
-    // ASwapsLegsTradeOnTheDateOfTheDayItsFillCountsIn checks that the engine sets it.
+    // ASwapsLegsTradeOnTheDateOfTheDayItsFillCountsIn checks that the engine sets it. It is a leg's report,
+    // MultiLegReportingType (442) 2 (#529).
     ASSERT_NO_FATAL_FAILURE(logOn());
     OrderEntry *order = saveOrderOf(sid_, "SWAP-1");
     order->ordType_ = FXSWAP_ORDERTYPE;
@@ -3270,6 +3346,8 @@ TEST_F(FixtSessionTest, ASwapsLegReportIsTakenWithItsTrdMatchId)
     EXPECT_EQ("20261016", fieldOf(report, FIX::FIELD::TradeDate));
     EXPECT_EQ("(not set)", fieldOf(report, FIX::FIELD::TradeLinkID));
     EXPECT_EQ(1u, report.groupCount(FIX::FIELD::NoLegs));
+    EXPECT_EQ(std::string(1, FIX::MultiLegReportingType_INDIVIDUAL_LEG_OF_A_MULTI_LEG_SECURITY),
+              fieldOf(report, FIX::FIELD::MultiLegReportingType));
 }
 
 TEST_F(FixtSessionTest, AReportGivesWhatItsOwnFillLeftTheOrder)
@@ -3861,6 +3939,83 @@ TEST_F(FixtSessionTest, AStatusRequestForAnOrderNotYetAcknowledgedIsPendingNew)
     for (const FIX::Message &report : reports)
     {
         EXPECT_EQ("ORD-1", fieldOf(report, FIX::FIELD::ClOrdID));
+    }
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ASwapsReportsSayWhatEachRepresents)
+{
+    // A swap's fill is reported leg by leg, each leg's report MultiLegReportingType (442) 2, with the swap's side and
+    // figures at its root and the leg in its leg group. The swap's other reports are the multileg security's, 442=3:
+    // its Pending New before the engine stores it and after, its New and its status (#529). Until #529 none carried
+    // 442, which FIX takes as 1, a single security, so a client took a far leg's fill for one on the swap's side. An
+    // outright order's reports carry none. A counterparty that validates takes each.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::vector<std::unique_ptr<OrderEntry>> pushed; // never reach an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .Times(2)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.emplace_back(evt.order_);
+            }));
+    receive(makeFxSwap("SWAP-1"));
+    receive(makeNewOrderSingle("ORD-1", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    ASSERT_EQ(2u, pushed.size());
+    receive(makeStatusRequest("SWAP-1"));
+    OrderEntry *swap = saveOrderOf(sid_, "SWAP-1"); // as the engine stores it
+    swap->ordType_ = FXSWAP_ORDERTYPE;
+    swap->settlDate_ = 1792022400000ULL;    // 2026-10-15, midnight UTC
+    swap->farSettlDate_ = 1794700800000ULL; // 2026-11-15
+    swap->farPrice_ = 1.2680;
+    setState(swap, NEW_ORDSTATUS, 1000000, 0, 1000000);
+    receive(makeStatusRequest("SWAP-1"));
+    auto ack = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    ack.orderId_ = swap->orderId_;
+    gateway_->sendExecutionReport(&ack, *swap);
+    receive(makeStatusRequest("SWAP-1"));
+    // 400,000 of it filled: its near leg's fill, then its far leg's report
+    setState(swap, PARTFILL_ORDSTATUS, 1000000, 400000, 600000);
+    for (const ExecLegType leg : { NEAR_LEG, FAR_LEG })
+    {
+        auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+        trade.orderId_ = swap->orderId_;
+        trade.execLegType_ = leg;
+        trade.tradeLink_ = 4242;
+        trade.lastQty_ = 400000;
+        trade.lastPx_ = (NEAR_LEG == leg) ? 1.2650 : 1.2680;
+        trade.tradeDate_ = 20261016;
+        gateway_->sendExecutionReport(&trade, *swap);
+    }
+    OrderEntry *outright = saveOrderOf(sid_, "ORD-1");
+    setState(outright, NEW_ORDSTATUS, 100, 0, 100);
+    auto outrightAck = makeReport<ExecutionEntry>(NEW_EXECTYPE, NEW_ORDSTATUS);
+    outrightAck.orderId_ = outright->orderId_;
+    gateway_->sendExecutionReport(&outrightAck, *outright);
+    receive(makeStatusRequest("ORD-1"));
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(8u, reports.size()) << sentText();
+    const std::string multileg(1, FIX::MultiLegReportingType_MULTI_LEG_SECURITY);
+    const std::string aLeg(1, FIX::MultiLegReportingType_INDIVIDUAL_LEG_OF_A_MULTI_LEG_SECURITY);
+    const std::string none("(not set)");
+    const std::vector<std::string> expected{ multileg, multileg, multileg, multileg, aLeg, aLeg, none, none };
+    for (size_t i = 0; i < reports.size(); ++i)
+    {
+        EXPECT_EQ(expected[i], fieldOf(reports[i], FIX::FIELD::MultiLegReportingType)) << "report " << i;
+    }
+    const std::string swapId = std::to_string(swap->orderId_.id_);
+    expectStatus(reports[0], FIX::OrdStatus_PENDING_NEW, "NONE", 1000000, 0, 1000000);
+    expectStatus(reports[1], FIX::OrdStatus_PENDING_NEW, swapId, 1000000, 0, 1000000);
+    EXPECT_EQ(std::string(1, FIX::ExecType_NEW), fieldOf(reports[2], FIX::FIELD::ExecType));
+    expectStatus(reports[3], FIX::OrdStatus_NEW, swapId, 1000000, 0, 1000000);
+    for (const size_t i : { 4u, 5u })
+    {
+        // Each leg's root is the swap's: its side, the near leg's, and its figures
+        EXPECT_EQ(std::string(1, FIX::Side_BUY), fieldOf(reports[i], FIX::FIELD::Side)) << "report " << i;
+        EXPECT_EQ("400000", fieldOf(reports[i], FIX::FIELD::CumQty)) << "report " << i;
+        EXPECT_EQ("600000", fieldOf(reports[i], FIX::FIELD::LeavesQty)) << "report " << i;
+        EXPECT_EQ(1u, reports[i].groupCount(FIX::FIELD::NoLegs)) << "report " << i;
     }
     expectEverythingSentIsTaken();
 }
