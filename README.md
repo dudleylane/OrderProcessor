@@ -40,6 +40,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 
 ### Persistence
 - **LMDB Storage:** Memory-mapped key-value store with versioned records. An order keeps its newest version and the one before it, and the map doubles when a write finds it full (#148)
+- **What a restart keeps:** each order, with the figures its last decision left it (status, leaves, cum, average price and the day's), written with its trade in one commit, and each instrument's last trade. Not the execution reports, as decided on #582: a restart loses the fills themselves, which trades made up an order's cum and at what prices and times. No request returns them while the server runs either, so a client that needs the fills keeps its own
 - **PostgreSQL Write-Behind:** with `BUILD_PG=ON` and a connection string, the server mirrors its reference data and orders to Postgres, behind LMDB, which stays its record (#151)
 - **File Storage:** Legacy versioned file persistence (deprecated in favor of LMDB)
 
