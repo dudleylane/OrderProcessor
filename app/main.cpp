@@ -174,8 +174,9 @@ int main(int argc, char *argv[])
     aux::ExchLogger::instance()->setNoteOn(true);
     aux::ExchLogger::instance()->setWarnOn(true);
     aux::ExchLogger::instance()->setErrorOn(true);
-    // The logger starts with every level on. Debug lines cost about six per transaction, formatted inside the
-    // transaction manager's lock, so they are off unless --debug asks for them (#76).
+    // The logger starts with every level on. Notes say what the server does as a whole, or that something was refused:
+    // none is written for an order's normal path (#584). Debug lines are those, and about six per transaction, formatted
+    // inside the transaction manager's lock, so they are off unless --debug asks for them (#76).
     aux::ExchLogger::instance()->setDebugOn(cfg.debug);
 
     Store::WideDataStorage::create();

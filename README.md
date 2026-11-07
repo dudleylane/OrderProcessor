@@ -137,7 +137,7 @@ Server options:
 | `--huge-pages` | off | Reports whether huge pages are available; nothing allocates from them yet |
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
 | `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
-| `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock |
+| `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock, and each order's own (#584) |
 | `--lmdb-map-mb` | 256 | LMDB's starting map, in MiB. A write that finds the map full doubles it, and logs a warning |
 | `--max-connections` | <!-- DOC_CHECK:ws_max_connections -->256<!-- /DOC_CHECK --> | WebSocket clients connected at once. One more is closed as soon as it's accepted |
 | `--max-session-queue-mb` | <!-- DOC_CHECK:ws_max_session_queue_mb -->16<!-- /DOC_CHECK --> | What may wait to be sent to one client, in MiB, after the state it gets as it connects, which isn't counted: its order snapshot alone can be larger (#512). A client that doesn't read is dropped once more waits, and gets the current state again when it reconnects |
@@ -379,17 +379,17 @@ worker at a time, and 4 and 8 both run three (#711). From one worker to three, a
 in about twice the cycles. The workers wait mostly on `TransactionMgr::lock_`, which each transaction takes four
 times, and under which the transaction tree's sorted vectors move the pending entries at each removal (#712), and
 then on `OrderDataStorage::save()`, which clones the order under the store's write lock (#713). That's the pool's
-own limit: it doesn't limit a server yet, for the two reasons below.
+own limit: it doesn't limit a server yet, because each order change waits for LMDB (below).
 
-Two things these numbers deliberately exclude, both real in production:
+Two things these numbers deliberately exclude:
 
-- **Logging.** The benchmarks turn notes and debug logging off. `app/main.cpp` turns notes on; with
-  them on, a new order cost about 27 µs when #25 measured it, against 2.4 µs without, so roughly 24 µs
-  per order goes into spdlog. The server's debug logging is off unless `--debug` asks for it (#76).
-  With it on, every transaction formats about five more lines inside the transaction manager's lock,
-  and every removal from the book one more. Before #76 these benchmarks included them; in #76's
-  session a match then took ~10.4 µs, a cancel ~3.8 µs, and `BM_TaskManagerThroughput/4` ~5.9 ms per
-  500 orders.
+- **Logging.** The benchmarks turn notes and debug logging off. A server's notes say what it does as a
+  whole, or that something was refused, and since #584 it writes none for an order's normal path: a
+  resting order wrote 4 and a traded one 6.5, 5.5 to 6 µs of CPU and 98 bytes each, so about 25 µs a
+  new order. Those lines are debug logging now, which is off unless `--debug` asks for it (#76). With
+  it on, every transaction also formats about five more lines inside the transaction manager's lock.
+  Before #76 these benchmarks included them; in #76's session a match then took ~10.4 µs, a cancel
+  ~3.8 µs, and `BM_TaskManagerThroughput/4` ~5.9 ms per 500 orders.
 - **Persistence.** No `OrderSaver` is attached, so nothing reaches LMDB. With the dispatcher wired
   up, each order change costs an LMDB write, about 2 ms with fsync per commit (issue #20).
 

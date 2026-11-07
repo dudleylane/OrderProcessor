@@ -151,7 +151,7 @@ oms-server:
 | `--huge-pages` | off | Reports whether huge pages are available; nothing allocates from them yet |
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
 | `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
-| `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock |
+| `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock, and each order's own (#584) |
 
 ## Common Operations
 
