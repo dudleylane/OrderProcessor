@@ -225,9 +225,10 @@ void OrderMatcher::match(OrderEntry *order, const Context &ctxt)
         }
         else
         {
-            if (aux::ExchLogger::instance()->isNoteOn())
+            if (aux::ExchLogger::instance()->isDebugOn())
             {
-                aux::ExchLogger::instance()->note("Unable to find oposite order during order matching, stop matching.");
+                aux::ExchLogger::instance()->debug(
+                    "Unable to find oposite order during order matching, stop matching.");
             }
         }
         return;

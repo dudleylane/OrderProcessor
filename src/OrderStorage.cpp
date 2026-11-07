@@ -122,9 +122,9 @@ u64 OrderDataStorage::maxOrderNumber() const
 
 OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *idGenerator, PublishGuard *publishGuard)
 {
-    if (aux::ExchLogger::instance()->isNoteOn())
+    if (aux::ExchLogger::instance()->isDebugOn())
     {
-        aux::ExchLogger::instance()->note("OrderDataStorage saving order");
+        aux::ExchLogger::instance()->debug("OrderDataStorage saving order");
     }
 
     assert(nullptr != idGenerator);
@@ -201,9 +201,9 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
 
 void OrderDataStorage::restore(OrderEntry *order)
 {
-    if (aux::ExchLogger::instance()->isNoteOn())
+    if (aux::ExchLogger::instance()->isDebugOn())
     {
-        aux::ExchLogger::instance()->note("OrderDataStorage restoring order");
+        aux::ExchLogger::instance()->debug("OrderDataStorage restoring order");
     }
 
     {
@@ -328,9 +328,9 @@ ExecutionEntry *OrderDataStorage::locateByExecId(const IdT &execId) const
 
 void OrderDataStorage::save(const ExecutionEntry *exec)
 {
-    if (aux::ExchLogger::instance()->isNoteOn())
+    if (aux::ExchLogger::instance()->isDebugOn())
     {
-        aux::ExchLogger::instance()->note("OrderDataStorage saving execution");
+        aux::ExchLogger::instance()->debug("OrderDataStorage saving execution");
     }
 
     // Use accessor to check and insert atomically
@@ -345,9 +345,9 @@ void OrderDataStorage::save(const ExecutionEntry *exec)
 
 ExecutionEntry *OrderDataStorage::save(const ExecutionEntry &exec, IdTValueGenerator *idGenerator)
 {
-    if (aux::ExchLogger::instance()->isNoteOn())
+    if (aux::ExchLogger::instance()->isDebugOn())
     {
-        aux::ExchLogger::instance()->note("OrderDataStorage saving execution 2");
+        aux::ExchLogger::instance()->debug("OrderDataStorage saving execution 2");
     }
 
     assert(nullptr != idGenerator);
