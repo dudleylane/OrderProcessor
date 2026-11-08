@@ -55,10 +55,8 @@ struct WideData
 };
 
 /// Creates the singletons and the reference data one instrument's orders need. Notes are turned
-/// off: they are on by default and app/main.cpp keeps them on, but every order writes several lines
-/// to exchange.log, and with them on these benchmarks measure spdlog's file I/O rather than the
-/// engine (about 24 us per order on the dev box, against 3 us of engine work). Logging cost is real
-/// in production; it is simply not what these numbers are for.
+/// off, though app/main.cpp keeps them on: since #584 an order's normal path writes none, so what
+/// that leaves out is the lines the engine writes as it starts and stops.
 WideData createEngineState()
 {
     aux::ExchLogger::create();
