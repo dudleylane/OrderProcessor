@@ -141,10 +141,10 @@ void OrderBookImpl::add(const OrderEntry &order)
         throw std::runtime_error("Unable to add order into book - side is not supported!");
     }
 
-    if (aux::ExchLogger::instance()->isNoteOn())
+    if (aux::ExchLogger::instance()->isDebugOn())
     {
         OBLogMessage msg(ADDORDER_FINAL_MSG, order.orderId_);
-        aux::ExchLogger::instance()->note(msg);
+        aux::ExchLogger::instance()->debug(msg);
     }
 }
 
@@ -172,10 +172,10 @@ void OrderBookImpl::restore(const OrderEntry &order)
         throw std::runtime_error("Unable to restore order into book - side is not supported!");
     }
 
-    if (aux::ExchLogger::instance()->isNoteOn())
+    if (aux::ExchLogger::instance()->isDebugOn())
     {
         OBLogMessage msg(RESTOREORDER_FINAL_MSG, order.orderId_);
-        aux::ExchLogger::instance()->note(msg);
+        aux::ExchLogger::instance()->debug(msg);
     }
 }
 
@@ -241,10 +241,10 @@ void OrderBookImpl::remove(const OrderEntry &order)
         return;
     }
 
-    if (aux::ExchLogger::instance()->isNoteOn())
+    if (aux::ExchLogger::instance()->isDebugOn())
     {
         OBLogMessage msg(REMOVEORDER_FINAL_MSG, order.orderId_);
-        aux::ExchLogger::instance()->note(msg);
+        aux::ExchLogger::instance()->debug(msg);
     }
 }
 

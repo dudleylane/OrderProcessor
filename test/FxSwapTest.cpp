@@ -6,7 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <limits>
+#include <string>
+#include <vector>
 
 #include "TestFixtures.h"
 #include "TestAux.h"
@@ -229,6 +232,27 @@ TEST_F(FxSwapTest, SwapNoMatch_RestsOnBook)
 
     // No deferred events — order rests
     EXPECT_EQ(0u, deferedContainer_->events_.size());
+}
+
+TEST_F(FxSwapTest, ARestingSwapWritesNoNote)
+{
+    // What a server writes per order is debug, which --debug gives back: a note says what it does as a whole, or that
+    // something was refused (#584)
+    OrderEntry *buySwap = createAndSaveSwapOrder(BUY_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    buySwap->status_ = NEW_ORDSTATUS;
+    std::vector<std::string> lines;
+    {
+        CapturedLog log;
+        matcher_->match(buySwap, context_);
+        lines = log.lines();
+    }
+    const auto line = std::find_if(lines.begin(), lines.end(),
+                                   [](const std::string &logged)
+                                   {
+                                       return std::string::npos != logged.find("Unable to find opposite swap order");
+                                   });
+    ASSERT_NE(lines.end(), line);
+    EXPECT_NE(std::string::npos, line->find(": [Debug][")) << *line;
 }
 
 TEST_F(FxSwapTest, AnIocSwapWithNoContraIsCanceled)

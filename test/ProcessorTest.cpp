@@ -39,6 +39,7 @@
 #include "OrderStorage.h"
 #include "OrderBookImpl.h"
 #include "StateMachine.h"
+#include "Logger.h"
 #include "LMDBStorage.h"
 #include "StorageRecordDispatcher.h"
 #include "TransactionMgr.h"
@@ -5492,4 +5493,83 @@ TEST_F(ProcessorTest, AReplacementTakesOverItsOriginalsDay)
     EXPECT_EQ(30u, live->dayCumQty_);
     EXPECT_DOUBLE_EQ(10.0, live->dayAvgPx_);
     EXPECT_EQ(150u, live->dayOrderQty_);
+}
+
+TEST_F(ProcessorTest, AnOrdersLifeWritesNoNote)
+{
+    // A note says what the server does as a whole, or that something was refused. A server wrote 4 for each order that
+    // rested and 6.5 for each that traded, about 6 us of CPU and 98 bytes a line, for what its records and reports hold
+    // already: they are debug lines now, which --debug gives back (#584)
+    const std::string dir = test::uniqueTestPath("no-notes");
+    std::filesystem::remove_all(dir);
+    const std::string begins = "An order's life begins";
+    const std::string ends = "An order's life ends";
+    std::vector<std::string> lines;
+    {
+        test::CapturedLog log;
+        {
+            TradeRecorder reports;
+            EngineOverDirectory engine(dir, instrId1_, inQueues_.get(), &reports);
+            aux::ExchLogger::instance()->note(begins);
+
+            // One that rests, and one that trades with it
+            auto order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 100);
+            RawDataEntry clOrdId = order->clOrderId_.get();
+            inQueues_->push("test", OrderEvent(order.release()));
+            const OrderEntry *sell = engine.process(clOrdId);
+            order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+            clOrdId = order->clOrderId_.get();
+            inQueues_->push("test", OrderEvent(order.release()));
+            EXPECT_EQ(FILLED_ORDSTATUS, engine.process(clOrdId)->status_);
+            EXPECT_EQ(FILLED_ORDSTATUS, sell->status_);
+
+            // One that rests and is canceled
+            order = createTestOrder(instrId1_, BUY_SIDE, 9.0, 100);
+            clOrdId = order->clOrderId_.get();
+            inQueues_->push("test", OrderEvent(order.release()));
+            const OrderEntry *buy = engine.process(clOrdId);
+            EXPECT_EQ(NEW_ORDSTATUS, buy->status_);
+            inQueues_->push("test", OrderCancelEvent(buy->orderId_, "no longer wanted"));
+            engine.processor_.process();
+            EXPECT_EQ(CANCELED_ORDSTATUS, buy->status_);
+
+            // One that a restart restores and books
+            order = createTestOrder(instrId1_, BUY_SIDE, 8.0, 100);
+            order->orderId_ = IdT(1000000, 20261106);
+            const OrderEntry &restored = *order;
+            engine.storage_.restore(order.release());
+            engine.book_.restore(restored);
+
+            // The other way an execution is stored, which only the store's own callers use
+            ExecutionEntry exec;
+            exec.execId_ = IdT(1000001, 20261106);
+            engine.storage_.save(&exec);
+
+            aux::ExchLogger::instance()->note(ends);
+        }
+        lines = log.lines();
+    }
+    std::filesystem::remove_all(dir);
+
+    const auto holding = [](const std::string &text)
+    {
+        return [text](const std::string &line)
+        {
+            return std::string::npos != line.find(text);
+        };
+    };
+    const auto from = std::find_if(lines.begin(), lines.end(), holding(begins));
+    const auto to = std::find_if(lines.begin(), lines.end(), holding(ends));
+    ASSERT_NE(lines.end(), from) << "the log holds no note at all";
+    ASSERT_NE(lines.end(), to);
+    for (auto line = from + 1; line != to; ++line)
+    {
+        EXPECT_EQ(std::string::npos, line->find(": [Note][")) << *line;
+    }
+    const auto saving = std::find_if(from, to, holding("OrderDataStorage saving order"));
+    const auto added = std::find_if(from, to, holding("OrderBookImpl Added order"));
+    ASSERT_NE(to, saving);
+    ASSERT_NE(to, added);
+    EXPECT_NE(std::string::npos, saving->find(": [Debug][")) << *saving;
+    EXPECT_NE(std::string::npos, added->find(": [Debug][")) << *added;
 }

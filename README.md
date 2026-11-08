@@ -189,7 +189,7 @@ Server options:
 | `--fix-tls-cert`, `--fix-tls-key` | *(none)* | Serve FIX over TLS only, with this certificate (PEM, followed by any intermediate ones) and its key (PEM, not encrypted); both or neither, and only with `--fix-cfg` (#228). Without them FIX is plain TCP, and the server warns |
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
 | `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
-| `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock |
+| `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock, and each order's own (#584) |
 | `--lmdb-map-mb` | 256 | LMDB's starting map, in MiB. A write that finds the map full doubles it, and logs a warning |
 | `--max-connections` | <!-- DOC_CHECK:ws_max_connections -->256<!-- /DOC_CHECK --> | WebSocket clients connected at once. One more is closed as soon as it's accepted |
 | `--max-session-queue-mb` | <!-- DOC_CHECK:ws_max_session_queue_mb -->16<!-- /DOC_CHECK --> | What may wait to be sent to one client, in MiB, after the state it gets as it connects, which isn't counted: its order snapshot alone can be larger (#512). A client that doesn't read is dropped once more waits, and gets the current state again when it reconnects |
@@ -323,8 +323,9 @@ Each run's address space is capped, at half of RAM by default. Many benchmarks k
 
 ### Performance Results (Release Build)
 
-The benchmarks measure the engine with note and debug logging off (#121). Logging is a real cost in
-production; it is simply not what these numbers are for. For the queue, order book, state machine,
+The benchmarks measure the engine with note and debug logging off (#121), and since #584 a server
+writes no note for an order's normal path either: those lines are debug logging, which `--debug`
+asks for. For the queue, order book, state machine,
 arena, pool, NUMA, field-layout and FIX gateway microbenchmarks, run the binary:
 `./build/orderProcessorBench --benchmark_list_tests` shows everything available, and
 `scripts/benchmark-regression.sh` compares two builds (above).
@@ -347,7 +348,7 @@ worker at a time, and 4 and 8 both run three (#711). From one worker to three, a
 in about twice the cycles. The workers wait mostly on `TransactionMgr::lock_`, which each transaction takes four
 times, and under which the transaction tree's sorted vectors move the pending entries at each removal (#712), and
 then on `OrderDataStorage::save()`, which clones the order under the store's write lock (#713). That's the pool's
-own limit: no `OrderSaver` is attached and logging is off, and with those a server's limit is elsewhere.
+own limit: no `OrderSaver` is attached, and with one a server's limit is elsewhere.
 
 Each benchmark's own time below comes from one session on 2026-11-01, at this branch's 0f25bc0 with the change #503
 makes to the per-order benchmarks (below): three runs of 5 repetitions each, pinned to CPUs 2-5, each time the median
