@@ -206,9 +206,9 @@ if(BUILD_APP)
     target_link_libraries(orderProcessorServer PRIVATE
         orderEngine nlohmann_json::nlohmann_json OpenSSL::Crypto pthread)
 
-    add_executable(seedData app/seed_data.cpp)
+    add_executable(seedData app/seed_data.cpp app/ReferenceDataFile.cpp)
     op_warnings(seedData)
-    target_link_libraries(seedData PRIVATE orderEngine pthread)
+    target_link_libraries(seedData PRIVATE orderEngine nlohmann_json::nlohmann_json pthread)
 
     if(BUILD_TESTS)
         # Run seedData itself, so the Debug and sanitizer CI jobs see an abort in its own code (#41): on a new directory,
@@ -226,6 +226,10 @@ if(BUILD_APP)
         add_test(NAME SeedDataIfEmptySeedsOnlyADirectoryWithoutInstruments
                  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/SeedDataIfEmptyTest.sh $<TARGET_FILE:seedData>
                          $<TARGET_FILE:orderProcessorServer>)
+        # seedData --file loads a file's reference data, skips what's stored as the file gives it, and refuses a file
+        # that's wrong or would change what's stored, writing nothing (#585)
+        add_test(NAME SeedDataLoadsAFile
+                 COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/SeedDataFileTest.sh $<TARGET_FILE:seedData>)
         # Run the server so that it can't start: it must say why and exit, not abort (#203)
         add_test(NAME ServerThatCannotStartExits
                  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/ServerStartupTest.sh $<TARGET_FILE:orderProcessorServer>)
