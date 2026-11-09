@@ -752,7 +752,7 @@ TEST_F(MatchOrderOperationTest, PersistOrderWritesAVersion)
     MockOrderSaver saver;
     OrderStorage::instance()->attach(&saver);
     Context ctx = createContext();
-    PersistOrderTrOperation op(*buyOrder_);
+    PersistOrderTrOperation op(*buyOrder_, OrderFigures(*buyOrder_));
 
     EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_), ::testing::_)).WillOnce(::testing::Return(7u));
     op.execute(ctx);
@@ -764,7 +764,7 @@ TEST_F(MatchOrderOperationTest, PersistOrderRollbackErasesTheVersionItWrote)
     MockOrderSaver saver;
     OrderStorage::instance()->attach(&saver);
     Context ctx = createContext();
-    PersistOrderTrOperation op(*buyOrder_);
+    PersistOrderTrOperation op(*buyOrder_, OrderFigures(*buyOrder_));
 
     EXPECT_CALL(saver, save(::testing::_, ::testing::_)).WillOnce(::testing::Return(7u));
     op.execute(ctx);
@@ -777,7 +777,7 @@ TEST_F(MatchOrderOperationTest, PersistOrderRollbackWritesNothingWithoutASaver)
 {
     // With no saver attached (tests, and the load passes) nothing is written, so nothing is erased.
     Context ctx = createContext();
-    PersistOrderTrOperation op(*buyOrder_);
+    PersistOrderTrOperation op(*buyOrder_, OrderFigures(*buyOrder_));
 
     op.execute(ctx);
     op.rollback(ctx);
@@ -974,6 +974,80 @@ TEST_F(MatchOrderOperationTest, ReportRelease_ReportsNothingForAReleaseThatRelea
     EXPECT_TRUE(out.reports_.empty());
 }
 
+TEST_F(MatchOrderOperationTest, ReportRelease_ReportsWhatTheReleaseLeftTheOrder)
+{
+    // The figures the release took as it released the stop, as its persist writes them, whatever the order has when the
+    // report goes out (#411, #627)
+    orderBook_->add(*sellOrder_);
+    holdAsStopLimit(buyOrder_, orderBook_.get());
+    RecordingOutQueues out;
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, &out, matcher_.get(), IdTGenerator::instance(),
+                &deferedContainer_);
+    ReleaseStopTrOperation release(buyOrder_);
+    ReportReleaseTrOperation report(release, *buyOrder_);
+
+    release.execute(ctx);
+    buyOrder_->status_ = PARTFILL_ORDSTATUS; // a later decision's
+    buyOrder_->cumQty_ = 4;
+    report.execute(ctx);
+
+    ASSERT_EQ(1u, out.reports_.size());
+    const Queues::ExecReportEvent &sent = out.reports_[0].first;
+    ASSERT_NE(nullptr, sent.exec_);
+    EXPECT_EQ(TRIGGERED_EXECTYPE, sent.exec_->type_);
+    EXPECT_EQ(NEW_ORDSTATUS, sent.exec_->orderStatus_);
+    ASSERT_TRUE(sent.figures_.has_value());
+    EXPECT_EQ(NEW_ORDSTATUS, sent.figures_->status_);
+    EXPECT_EQ(0u, sent.figures_->cumQty_);
+    EXPECT_TRUE(sent.figures_->stopTriggered_);
+}
+
+TEST_F(MatchOrderOperationTest, PersistRelease_WritesWhatTheReleaseLeftTheOrder)
+{
+    // The figures the release took as it released the stop, not a later decision's applied before the persist runs
+    // (#411, #606)
+    orderBook_->add(*sellOrder_);
+    holdAsStopLimit(buyOrder_, orderBook_.get());
+    MockOrderSaver saver;
+    OrderStorage::instance()->attach(&saver);
+    Context ctx = createContext();
+    ReleaseStopTrOperation release(buyOrder_);
+    PersistOrderTrOperation persist(release, *buyOrder_);
+    EXPECT_EQ(buyOrder_->orderId_, persist.getObjectId());
+
+    release.execute(ctx);
+    buyOrder_->status_ = PARTFILL_ORDSTATUS; // a later decision's
+    buyOrder_->cumQty_ = 4;
+
+    EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_),
+                            ::testing::AllOf(::testing::Field(&OrderFigures::status_, NEW_ORDSTATUS),
+                                             ::testing::Field(&OrderFigures::cumQty_, 0u),
+                                             ::testing::Field(&OrderFigures::stopTriggered_, true))))
+        .WillOnce(::testing::Return(3u));
+    persist.execute(ctx);
+    EXPECT_CALL(saver, erase(buyOrder_->orderId_, 3u)).Times(1);
+    persist.rollback(ctx);
+}
+
+TEST_F(MatchOrderOperationTest, PersistRelease_WritesNothingForAReleaseThatReleasedNothing)
+{
+    // The release found the stop replaced first, by a replace whose own transaction may not have run yet: what the
+    // order holds is that decision, which only its transaction writes (#532)
+    orderBook_->add(*sellOrder_);
+    holdAsStopLimit(buyOrder_, orderBook_.get());
+    buyOrder_->status_ = REPLACED_ORDSTATUS;
+    ::testing::StrictMock<MockOrderSaver> saver;
+    OrderStorage::instance()->attach(&saver);
+    Context ctx = createContext();
+    ReleaseStopTrOperation release(buyOrder_);
+    PersistOrderTrOperation persist(release, *buyOrder_);
+
+    release.execute(ctx);
+    persist.execute(ctx);
+    persist.rollback(ctx);
+    release.rollback(ctx);
+}
+
 // =============================================================================
 // A transaction's persists, written as one (#163)
 // =============================================================================
@@ -1011,9 +1085,9 @@ void buildTrade(TransactionScope *scope, const OrderEntry &buy, const OrderEntry
         std::unique_ptr<Operation> op(publishing);
         scope->addOperation(op);
     }
-    std::unique_ptr<Operation> persistSell = std::make_unique<PersistOrderTrOperation>(sell);
+    std::unique_ptr<Operation> persistSell = std::make_unique<PersistOrderTrOperation>(sell, OrderFigures(sell));
     scope->addOperationFirst(persistSell);
-    std::unique_ptr<Operation> persistBuy = std::make_unique<PersistOrderTrOperation>(buy);
+    std::unique_ptr<Operation> persistBuy = std::make_unique<PersistOrderTrOperation>(buy, OrderFigures(buy));
     scope->addOperationFirst(persistBuy);
 }
 
@@ -1216,7 +1290,8 @@ TEST_F(MatchOrderOperationTest, OnePersistIsWrittenAsBefore)
     OrderStorage::instance()->attach(&saver);
     EXPECT_CALL(saver, save(::testing::Ref(*buyOrder_), ::testing::_)).WillOnce(::testing::Return(2u));
     TransactionScope scope;
-    std::unique_ptr<Operation> persist = std::make_unique<PersistOrderTrOperation>(*buyOrder_);
+    std::unique_ptr<Operation> persist =
+        std::make_unique<PersistOrderTrOperation>(*buyOrder_, OrderFigures(*buyOrder_));
     scope.addOperationFirst(persist);
 
     EXPECT_TRUE(scope.executeTransaction(createContext()));
