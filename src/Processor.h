@@ -143,6 +143,8 @@ public:
 public:
     /// reimplemented from InQueueProcessor
     /// retrives new event from inQueues, process it in transaction
+    /// A handler that finds an order and enqueues a transaction about it waits for the order's booking first, as the
+    /// cancel, replace and state change handlers do (#83); OrderDataStorage's lookups say why.
     virtual bool process();
     virtual void onEvent(const std::string &source, const Queues::OrderEvent &evnt);
     virtual void onEvent(const std::string &source, const Queues::OrderCancelEvent &evnt);
