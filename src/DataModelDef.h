@@ -242,8 +242,9 @@ public:
     QuantityT cumQty_;
     QuantityT orderQty_;
     TimeInForce tif_;
-    /// Set while the transaction that books a newly stored order or replacement is not yet enqueued, so that a cancel
-    /// or replace of the order waits for it (#83). Store::PublishGuard sets and clears it; a copy starts clear.
+    /// Set while the transaction that books a newly stored order or replacement is not yet enqueued, so that a cancel,
+    /// a replace or a state change of the order, a timer's included, or a stop's release waits for it (#83, #96, #223).
+    /// Store::PublishGuard sets and clears it; a copy starts clear.
     std::atomic<bool> bookingPending_{ false };
     /// Waits until the transaction that books the order is enqueued, if it is not yet (#83). Anything that finds the
     /// order and enqueues a transaction about it calls this first.
