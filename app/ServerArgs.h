@@ -35,6 +35,8 @@ struct ServerArgs
     bool debug = false;                               // debug logging, off unless asked for (#76)
     // LMDB's starting map, in MiB: a write that finds the map full doubles it (#148)
     u64 lmdbMapMb = Store::LMDBStorage::DEFAULT_MAP_SIZE >> 20;
+    // The business days whose closed orders a start keeps, the current one counted; 0 keeps every order (#597)
+    u32 keepClosedDays = 0;
     WsLimits wsLimits; // what WebSocket clients may hold of the server (#159)
     // The engine's work in flight at which the WebSocket sessions stop reading their clients' messages (#519)
     std::size_t maxInFlight = DEFAULT_MAX_IN_FLIGHT;
@@ -72,6 +74,8 @@ inline std::string serverUsage()
            "  --lmdb-map-mb N           LMDB's starting map, in MiB (default " +
            std::to_string(Store::LMDBStorage::DEFAULT_MAP_SIZE >> 20) +
            ")\n"
+           "  --keep-closed-days N      as it starts, drop each closed order whose business day isn't one of\n"
+           "                            the last N, the current one counted (default 0: keep every order)\n"
            "  --max-connections N       WebSocket clients at once (default " +
            std::to_string(DEFAULT_MAX_CONNECTIONS) +
            ")\n"
@@ -143,13 +147,22 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
             parsed.hashWsToken = true;
             continue;
         }
-        static const std::vector<std::string> withValues = {
-            "--port",          "--data-dir",        "--workers",
-            "--cpu-affinity",  "--clearing-firm",   "--default-account",
-            "--lmdb-map-mb",   "--max-connections", "--max-session-queue-mb",
-            "--bind",          "--ws-token-file",   "--allowed-origin",
-            "--pg-connection", "--ws-credentials",  "--max-in-flight"
-        };
+        static const std::vector<std::string> withValues = { "--port",
+                                                             "--data-dir",
+                                                             "--workers",
+                                                             "--cpu-affinity",
+                                                             "--clearing-firm",
+                                                             "--default-account",
+                                                             "--lmdb-map-mb",
+                                                             "--max-connections",
+                                                             "--max-session-queue-mb",
+                                                             "--bind",
+                                                             "--ws-token-file",
+                                                             "--allowed-origin",
+                                                             "--pg-connection",
+                                                             "--ws-credentials",
+                                                             "--max-in-flight",
+                                                             "--keep-closed-days" };
         bool takesValue = false;
         for (const std::string &option : withValues)
         {
@@ -207,6 +220,11 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
         {
             range = "from 1";
             read = detail::readNumber<size_t>(value, 1, std::numeric_limits<size_t>::max(), &parsed.maxInFlight);
+        }
+        else if ("--keep-closed-days" == arg)
+        {
+            range = "from 0";
+            read = detail::readNumber<u32>(value, 0, std::numeric_limits<u32>::max(), &parsed.keepClosedDays);
         }
         else if (value.empty())
         {

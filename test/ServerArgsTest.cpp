@@ -44,6 +44,7 @@ TEST(ServerArgsTest, NoArgumentsGiveTheDefaults)
     EXPECT_EQ(COP::App::DEFAULT_MAX_CONNECTIONS, parsed->wsLimits.maxConnections);
     EXPECT_EQ(COP::App::DEFAULT_MAX_SESSION_QUEUE_MB << 20, parsed->wsLimits.maxQueuedBytes);
     EXPECT_EQ(COP::App::DEFAULT_MAX_IN_FLIGHT, parsed->maxInFlight);
+    EXPECT_EQ(0u, parsed->keepClosedDays) << "a start keeps every order unless told otherwise (#597)";
     EXPECT_FALSE(parsed->help);
     EXPECT_TRUE(parsed->wsTokenFile.empty());
     EXPECT_TRUE(parsed->allowedOrigins.empty());
@@ -73,6 +74,8 @@ TEST(ServerArgsTest, EveryOptionIsRead)
                                                      "8",
                                                      "--max-in-flight",
                                                      "2500",
+                                                     "--keep-closed-days",
+                                                     "2",
                                                      "--bind",
                                                      "127.0.0.1",
                                                      "--ws-token-file",
@@ -96,6 +99,7 @@ TEST(ServerArgsTest, EveryOptionIsRead)
     EXPECT_EQ(64u, parsed->wsLimits.maxConnections);
     EXPECT_EQ(8u << 20, parsed->wsLimits.maxQueuedBytes);
     EXPECT_EQ(2500u, parsed->maxInFlight);
+    EXPECT_EQ(2u, parsed->keepClosedDays);
     EXPECT_EQ("127.0.0.1", parsed->bindAddress);
     EXPECT_EQ("/run/secrets/oms_ws_token", parsed->wsTokenFile);
     EXPECT_EQ((std::vector<std::string>{ "http://a.example", "https://b.example" }), parsed->allowedOrigins);
@@ -178,6 +182,8 @@ TEST(ServerArgsTest, ANumberOutOfItsRangeIsRefused)
         { "--max-session-queue-mb", "99999999999999999999" },
         { "--max-in-flight", "0" },
         { "--max-in-flight", "-1" },
+        { "--keep-closed-days", "-1" },
+        { "--keep-closed-days", "4294967296" },
     };
     for (const std::vector<std::string> &args : refused)
     {
@@ -225,6 +231,7 @@ TEST(ServerArgsTest, TheUsageNamesEveryOption)
         { "--pg-connection", "s" },
         { "--max-session-queue-mb", "1" },
         { "--max-in-flight", "1" },
+        { "--keep-closed-days", "0" },
         { "--help" },
     };
     for (const std::vector<std::string> &option : options)

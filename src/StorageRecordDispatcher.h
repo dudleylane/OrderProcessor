@@ -91,6 +91,24 @@ public:
     {
         return restoredIdLimit_;
     }
+    /// From the next load on, a closed order whose business day began before dayStart is dropped: it isn't restored,
+    /// and every version of its record is erased (#597). Closed is FILLED, CANCELED, REJECTED, EXPIRED or REPLACED; an
+    /// order in any other status is kept, whatever its day. 0, the default, drops nothing.
+    void dropClosedBefore(DateTimeT dayStart)
+    {
+        dropClosedBefore_ = dayStart;
+    }
+    /// The orders the last load dropped
+    size_t droppedOrders() const
+    {
+        return droppedOrders_;
+    }
+    /// The largest number of an order the last load dropped, or 0: no new order may take a dropped order's number
+    /// either (#58)
+    u64 droppedMaxOrderNumber() const
+    {
+        return droppedMaxOrderNumber_;
+    }
     /// The orders the last load restored without booking, in the order they arrived: each lost what its booking
     /// started, because the transaction that booked it committed and the one with its fills, or with the cancel of what
     /// it couldn't trade, didn't (#207). An open order that never rests is one: a market order, a STOP its stop
@@ -168,6 +186,7 @@ private:
         u32 version_;       ///< LMDB's version of the record, which picks the newest
         u32 formatVersion_; ///< the layout the codec wrote, which decode() reads by (#149)
         std::string record_;
+        std::vector<u32> versions_; ///< every version the load found, which dropping the order erases (#597)
     };
     typedef std::map<IdT, PendingOrder> PendingOrdersT;
     PendingOrdersT pendingOrders_;
@@ -176,6 +195,10 @@ private:
     u64 restoredIdLimit_;
     std::vector<u32> idLimitVersions_;
     std::vector<OrderEntry *> ordersToMatch_;
+    /// See dropClosedBefore(), and what the last load dropped (#597)
+    DateTimeT dropClosedBefore_ = 0;
+    size_t droppedOrders_ = 0;
+    u64 droppedMaxOrderNumber_ = 0;
     /// Each instrument's last trade the load found, the newest version of its record, by instrument (#237)
     struct LastTrade
     {

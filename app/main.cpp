@@ -217,8 +217,9 @@ int main(int argc, char *argv[])
 
     // 2-5. Load the data directory: its reference data, then its orders into a book. Continue the ids past every one issued
     // before, find the defaults that orders need, and make the dispatcher the storages' saver (app/ServerData.cpp, #165).
-    App::ServerData data = App::loadServerData(cfg.dataDir, static_cast<size_t>(cfg.lmdbMapMb) << 20,
-                                               ID_RESERVATION_BLOCK, cfg.clearingFirm, cfg.defaultAccount);
+    App::ServerData data =
+        App::loadServerData(cfg.dataDir, static_cast<size_t>(cfg.lmdbMapMb) << 20, ID_RESERVATION_BLOCK,
+                            cfg.clearingFirm, cfg.defaultAccount, cfg.keepClosedDays, aux::currentDateTime());
     std::unique_ptr<Store::LMDBStorage> lmdbStorage = std::move(data.lmdbStorage);
     std::unique_ptr<Store::StorageRecordDispatcher> dispatcher = std::move(data.dispatcher);
     std::unique_ptr<OrderBookImpl> orderBook = std::move(data.orderBook);

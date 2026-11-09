@@ -39,7 +39,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **Alert System:** Client-side rule engine with configurable thresholds, severity levels, localStorage persistence
 
 ### Persistence
-- **LMDB Storage:** Memory-mapped key-value store with versioned records. An order keeps its newest version and the one before it, and the map doubles when a write finds it full (#148)
+- **LMDB Storage:** Memory-mapped key-value store with versioned records. An order keeps its newest version and the one before it, and the map doubles when a write finds it full (#148). With `--keep-closed-days`, a start drops the closed orders of earlier business days (#597)
 - **What a restart keeps:** each order, with the figures its last decision left it (status, leaves, cum, average price and the day's), written with its trade in one commit, and each instrument's last trade. Not the execution reports, as decided on #582: a restart loses the fills themselves, which trades made up an order's cum and at what prices and times. No request returns them while the server runs either, so a client that needs the fills keeps its own
 - **PostgreSQL Write-Behind:** with `BUILD_PG=ON` and a connection string, the server mirrors its reference data and orders to Postgres, behind LMDB, which stays its record (#151)
 - **File Storage:** Legacy versioned file persistence (deprecated in favor of LMDB)
@@ -157,6 +157,7 @@ Server options:
 | `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
 | `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock, and each order's own (#584) |
 | `--lmdb-map-mb` | 256 | LMDB's starting map, in MiB. A write that finds the map full doubles it, and logs a warning |
+| `--keep-closed-days` | 0 | As the server starts, drops each closed order (filled, canceled, rejected, expired or replaced) whose business day isn't one of the last N, the current one counted: it isn't restored, and its records are deleted (#597). A business day runs from 17:00 New York to 17:00, so with 1 a restart at 17:01 drops the day that ended a minute before. 0 keeps every order. Postgres keeps a dropped order's row, so give it with `--pg-connection`: without Postgres a dropped order is gone, fills and all, since nothing else records them (#582). A running server drops nothing until its next start (#722) |
 | `--max-connections` | <!-- DOC_CHECK:ws_max_connections -->256<!-- /DOC_CHECK --> | WebSocket clients connected at once. One more is closed as soon as it's accepted |
 | `--max-session-queue-mb` | <!-- DOC_CHECK:ws_max_session_queue_mb -->16<!-- /DOC_CHECK --> | What may wait to be sent to one client, in MiB, after the state it gets as it connects, which isn't counted: its order snapshot alone can be larger (#512). A client that doesn't read is dropped once more waits, and gets the current state again when it reconnects |
 | `--max-in-flight` | <!-- DOC_CHECK:max_in_flight -->10000<!-- /DOC_CHECK --> | The engine's work in flight, the events not yet decided and the transactions not yet run, at which the WebSocket sessions stop reading their clients' messages until it is back under (#519). What a client sends meanwhile waits in its TCP window, and nothing it sent is refused |
@@ -192,6 +193,8 @@ docker compose up --build -d
 ```
 
 The first `up` seeds the new data volume with test data, so the stack takes orders at once: the server's container runs `seedData --if-empty` before the server (#161). To start with your own reference data instead, load it before the first `up`, as [docker/README.md](docker/README.md#seed-test-data) shows.
+
+Compose gives the server `--keep-closed-days 1` (#597): Postgres keeps every order there, so each start drops the closed orders of the business days before its own.
 
 This starts 3 services:
 
@@ -500,7 +503,7 @@ A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through
 | `connected` | — | On WebSocket handshake |
 | `instrument_list` | `Instrument[]` | On connect |
 | `account_list` | `Account[]` | On connect |
-| `order_snapshot` | `Order[]` | On connect: every order, as its last report left it, so it gives no fill not yet reported (#404). An order whose first report isn't out yet is left out; that report's `order_update` comes after the snapshot |
+| `order_snapshot` | `Order[]` | On connect: every order the server holds (with `--keep-closed-days`, its open orders and the kept days' closed ones, #597), as its last report left it, so it gives no fill not yet reported (#404). An order whose first report isn't out yet is left out; that report's `order_update` comes after the snapshot |
 | `order_update` | `Order` | After each `execution_report`: the order as that report's decision left it, so a fill's counts no later fill (#411) |
 | `execution_report` | `ExecutionReport` | On trade, reject, cancel, replace, correct |
 | `book_update` | `OrderBookSnapshot` | To a session that subscribes to the symbol, as it subscribes and with each execution report on the symbol, whoever the report goes to: each level's leaves as the resting orders' last reports give them, so it gives no fill not yet reported (#525). An order whose first report isn't out yet is left out |
@@ -583,7 +586,7 @@ With `BUILD_PG=ON` (libpqxx 8) and a libpq connection string, from `OMS_PG_CONNE
 - **When:** each save is queued as LMDB takes it, and the writer writes them in order, in transactions of up to 256. At startup the server first queues everything its data directory holds, which LMDB's load restores without saving. A rollback takes an order's row back to the version LMDB kept, or removes it if LMDB kept none.
 - **Failures:** a write Postgres refuses is logged and counted, and the rest of its transaction's writes land. A lost connection is retried, with the same writes in the same order. Connecting gives up after `connect_timeout`, 5 seconds unless the string sets one, and at shutdown what can't be written then is dropped, counted and logged.
 - **While Postgres is down:** a write of a row that is still queued replaces the queued one, in its place (#231). Each write sets a whole row or deletes it, so only the newest matters. The queue then holds at most one write per row changed during the outage, however many changes there were, and reference data still lands before the orders that name it.
-- **What it holds:** a write can reach Postgres before LMDB commits it, so after a crash Postgres may hold a version LMDB lost. The next start sends what LMDB holds again, but doesn't delete such a row. Executions aren't mirrored, as LMDB doesn't keep them either, and nothing uses the `users` and `audit_log` tables yet (#225).
+- **What it holds:** a write can reach Postgres before LMDB commits it, so after a crash Postgres may hold a version LMDB lost. The next start sends what LMDB holds again, but doesn't delete such a row. Executions aren't mirrored, as LMDB doesn't keep them either, and nothing uses the `users` and `audit_log` tables yet (#225). An order a start drops (`--keep-closed-days`, #597) keeps its row: Postgres hears nothing of the drop.
 - **Schema:** `docker/init-db/001_schema.sql`. `PGSchemaTest` checks that every enum string the writer sends is one of its type's values.
 - **Tests:** `scripts/pg-for-tests.sh start NAME` starts a throwaway Postgres with the schema and prints its connection string; with it in `PG_CONNECTION_STRING`, `ctest -R 'PGWriteBehind|Postgres'` runs the writer's tests. CI runs them so, in the Release and sanitizer jobs.
 - **Docker:** compose builds the server with `BUILD_PG=ON` and points it at `oms-db` (docker/README.md)
