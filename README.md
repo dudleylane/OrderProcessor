@@ -304,7 +304,7 @@ cd build && ctest --output-on-failure
 
 ### Local pre-push gate
 
-A tracked hook runs the build, `ctest -j1 --timeout 300`, and the clang-format check before every push, and refuses the push if any fails. It builds the working tree, so it also refuses a push unless the working tree is the commit pushed: `HEAD`, with nothing changed or untracked. Its build directory must be a Release one configured as CI configures it (`BUILD_TESTS`, `BUILD_BENCHMARKS` and `BUILD_APP` on, and on this branch `BUILD_FIX`). Enable it once per clone:
+A tracked hook runs the build, `ctest -j1 --timeout 300`, and the clang-format check before every push, and refuses the push if any fails. Its ctest runs under a 4G memory cap, as CI's test steps do (`scripts/memory-cap.sh`, #607): a test that runs away is killed at the cap and named, and the rest run. The cap is a systemd user scope's, so the hook needs systemd's user manager. It builds the working tree, so it also refuses a push unless the working tree is the commit pushed: `HEAD`, with nothing changed or untracked. Its build directory must be a Release one configured as CI configures it (`BUILD_TESTS`, `BUILD_BENCHMARKS` and `BUILD_APP` on, and on this branch `BUILD_FIX`). Enable it once per clone:
 
 ```bash
 git config core.hooksPath scripts/hooks
@@ -693,7 +693,8 @@ OrderProcessor/
 │   └── .env.example        # PostgreSQL credentials and the access token, a template
 ├── scripts/                # Tooling
 │   ├── benchmark-regression.sh  # Before/after benchmark comparison
-│   └── loop-instructions.sh     # Instructions per iteration in each per-order benchmark's timed span (#503)
+│   ├── loop-instructions.sh     # Instructions per iteration in each per-order benchmark's timed span (#503)
+│   └── memory-cap.sh            # Runs a command under a memory cap, as CI's test steps and the hook run ctest (#607)
 ├── docs/                   # Architecture documentation
 │   └── ARCHITECTURE.md     # Comprehensive architecture document
 ├── CMakeLists.txt          # Root build configuration

@@ -7,7 +7,9 @@
 #                               directory configured with CI's BUILD_* options
 #   2. ctest -j1 --timeout 300  (build-test.yml: Test, which runs -j$(nproc):
 #                               a test that depends on running alone, or on
-#                               another's timing, fails in one of the two)
+#                               another's timing, fails in one of the two),
+#                               under CI's 4G memory cap (scripts/memory-cap.sh,
+#                               #607), which needs systemd's user manager
 #   3. clang-format --dry-run   (format.yml)
 # It builds the working tree, so it refuses a push unless the working tree is
 # the commit pushed: HEAD, with nothing changed or untracked (#152). Left to CI:
@@ -95,7 +97,7 @@ step() {
 
 # 0. Preflight: fail closed on missing tools before spending minutes building.
 missing=()
-for tool in cmake ctest "$CLANG_FORMAT"; do
+for tool in cmake ctest "$CLANG_FORMAT" systemd-run; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         missing+=("$tool")
     fi
@@ -103,6 +105,11 @@ done
 if (( ${#missing[@]} > 0 )); then
     refuse "missing tool(s): ${missing[*]} (clang-format: sudo dnf install clang-tools-extra)"
 fi
+# The tests run under a memory cap (#607): a systemd user scope, which needs the
+# user manager. Make one now, so that a host without it is refused before the
+# build, and its refusal is never taken for a failed test.
+"$ROOT/scripts/memory-cap.sh" 4G true >/dev/null \
+    || refuse "can't run the tests under a memory cap; scripts/memory-cap.sh said why above"
 
 # 1. Configure on first use, then build. CI tests a Release build; insist on one.
 step "build ($BUILD_DIR)"
@@ -131,9 +138,12 @@ if ! ctest --test-dir "$BUILD_DIR" -N 2>/dev/null | grep -qE '^Total Tests: [1-9
 fi
 cmake --build "$BUILD_DIR" -j"$(nproc)" || refuse "build failed"
 
-# 2. Tests, serial here and parallel in CI, with CI's per-test timeout.
-step "ctest -j1 --timeout 300"
-ctest --test-dir "$BUILD_DIR" --output-on-failure --timeout 300 -j1 || refuse "tests failed"
+# 2. Tests, serial here and parallel in CI, with CI's per-test timeout and its
+# memory cap (#607): a test that runs away is killed at the cap and named, and
+# the rest run, before it can take down the host.
+step "ctest -j1 --timeout 300, under a 4G memory cap"
+"$ROOT/scripts/memory-cap.sh" 4G ctest --test-dir "$BUILD_DIR" --output-on-failure --timeout 300 -j1 \
+    || refuse "tests failed"
 
 # 3. Format check, identical to format.yml.
 step "$("$CLANG_FORMAT" --version) --dry-run"
