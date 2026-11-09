@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { OrderType, Side, TimeInForce, Currency, Capacity } from '../types/enums';
 import type { Instrument, Account, NewOrderRequest } from '../types';
-import { LATEST_EXPIRE_INPUT, LATEST_EXPIRE_TIME } from '../utils/constants';
+import { LATEST_EXPIRE_INPUT, LATEST_EXPIRE_TIME, TAKEN_TIFS } from '../utils/constants';
 
 interface OrderEntryPanelProps {
   instruments: Instrument[];
@@ -205,7 +205,7 @@ export function OrderEntryPanel({
               onChange={e => setTif(e.target.value as TimeInForce)}
               className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm"
             >
-              {Object.values(TimeInForce).map(t => (
+              {TAKEN_TIFS.map(t => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
