@@ -50,8 +50,13 @@ void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, con
 
     ord->addExecution(execReport->execId_);
 
-    // What the report says the order has (#411): what its decision left, for a report made with it, a fill's, and
-    // otherwise the order as it is now. Readers outside a transaction give the order as this from now on (#404).
+    // What the report says the order has (#411): what its decision left, for a report handed it, and otherwise the
+    // order as it is now. The two are the same only if nothing can decide about the order between its decision and
+    // this report: the decision closed the order, or this report runs in the transaction that books it, which names
+    // its instrument while a cancel, replace or state change of the order waits for its booking mark (#83). Any other
+    // report is handed its decision's figures, as a fill's, a release's, a replacement's TRIGGERED and a
+    // restatement's are (#627). The reports of #580's features, which only tests reach, aren't yet: whatever produces
+    // one must hand them theirs. Readers outside a transaction give the order as this from now on (#404).
     ExecReportEvent report(execReport);
     report.figures_ = (nullptr != decided) ? *decided : OrderFigures(*ord);
     ord->published_ = report.figures_;
@@ -442,28 +447,37 @@ void AddToOrderBookTrOperation::rollback(const Context &cnxt)
 }
 
 PersistOrderTrOperation::PersistOrderTrOperation(const OrderEntry &order, const OrderFigures &decided)
-    : Operation(PERSIST_ORDER_TROPERATION, order.orderId_), order_(order), decided_(decided), version_(0),
-      written_(false)
+    : Operation(PERSIST_ORDER_TROPERATION, order.orderId_), order_(order), release_(nullptr), decided_(decided),
+      version_(0), written_(false)
 {
 }
 
-PersistOrderTrOperation::PersistOrderTrOperation(const OrderEntry &order)
-    : Operation(PERSIST_ORDER_TROPERATION, order.orderId_), order_(order), version_(0), written_(false)
+PersistOrderTrOperation::PersistOrderTrOperation(const ReleaseStopTrOperation &release, const OrderEntry &order)
+    : Operation(PERSIST_ORDER_TROPERATION, order.orderId_), order_(order), release_(&release), version_(0),
+      written_(false)
 {
 }
 PersistOrderTrOperation::~PersistOrderTrOperation() {}
 
 void PersistOrderTrOperation::decided(const OrderFigures &figures) noexcept
 {
+    // Only Processor::persistOrder() hands a persist a later decision, and no release's transaction reaches it: a
+    // release's persist would write the release's figures, not these
+    assert(nullptr == release_);
     decided_ = figures;
 }
 
 void PersistOrderTrOperation::execute(const Context &cnxt)
 {
     assert(nullptr != cnxt.orderStorage_);
+    const OrderFigures *figures = (nullptr != release_) ? release_->decided() : &*decided_;
+    if (nullptr == figures)
+    {
+        return; // the release released nothing, so there is no decision of its own to record (#532)
+    }
     // Read lock: this runs on a transaction worker while other threads may read the same order.
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order_.entryMutex_, false);
-    written_ = cnxt.orderStorage_->persist(order_, decided_ ? *decided_ : OrderFigures(order_), &version_);
+    written_ = cnxt.orderStorage_->persist(order_, *figures, &version_);
 }
 
 void PersistOrderTrOperation::rollback(const Context &cnxt)
@@ -708,7 +722,7 @@ void ReleaseStopTrOperation::execute(const Context &cnxt)
 {
     assert(nullptr != order_);
     assert(nullptr != cnxt.orderBook_);
-    released_ = false;
+    decided_.reset();
     booked_ = false;
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(order_->entryMutex_, true);
@@ -720,7 +734,9 @@ void ReleaseStopTrOperation::execute(const Context &cnxt)
         assert(!order_->bookingPending_.load());
         cnxt.orderBook_->removeStop(*order_);
         order_->stopTriggered_ = true;
-        released_ = true;
+        // What the release decided, for its persist and its report (#411, #627). Its fills are decided after this
+        // transaction's operations, each persisted and reported by a transaction of its own.
+        decided_.emplace(*order_);
     }
     if (nullptr != cnxt.deferedEvents_)
     {
@@ -739,7 +755,7 @@ void ReleaseStopTrOperation::execute(const Context &cnxt)
 
 void ReleaseStopTrOperation::rollback(const Context &cnxt)
 {
-    if (!released_)
+    if (!decided_)
     {
         return;
     }
@@ -766,26 +782,21 @@ ReportReleaseTrOperation::ReportReleaseTrOperation(const ReleaseStopTrOperation 
 
 void ReportReleaseTrOperation::execute(const Context &cnxt)
 {
-    if (!release_.released())
+    // What the release left the order with, as its persist writes it (#627)
+    const OrderFigures *decided = release_.decided();
+    if (nullptr == decided)
     {
         return;
     }
-    assert(nullptr != cnxt.orderStorage_);
-    const OrderEntry *order = cnxt.orderStorage_->locateByOrderId(getObjectId());
-    assert(nullptr != order);
-
     ExecutionEntry execReport;
     execReport.orderId_ = getObjectId();
     execReport.type_ = TRIGGERED_EXECTYPE;
     execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
-    {
-        // NEW: a held stop has no fills, and the release's own trades are applied after this transaction's operations
-        oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, false);
-        execReport.orderStatus_ = order->status_;
-    }
+    // NEW: a held stop has no fills, and the release's own trades are applied after this transaction's operations
+    execReport.orderStatus_ = decided->status_;
     execReport.market_ = INTERNAL_EXECUTION;
-    processEvent_GenerateExecution(cnxt, getObjectId(), execReport);
+    processEvent_GenerateExecution(cnxt, getObjectId(), execReport, std::string(), decided);
 }
 
 void ReportReleaseTrOperation::rollback(const Context &) {}
