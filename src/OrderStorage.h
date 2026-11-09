@@ -38,10 +38,11 @@ namespace Store
 /// write-lock the order before it is inserted into the lookup maps, so any other thread that finds
 /// it blocks until release(). See #13.
 ///
-/// The order is also reachable before its creator enqueues the transaction that matches and books it. A cancel or
-/// replace enqueued in that gap would get the lower transaction id and be decided before the order was booked. So
-/// save() also sets the order's bookingPending_, and Processor waits for it to clear before it enqueues a cancel or
-/// replace of the order. The creator calls bookingEnqueued() once that transaction is enqueued. See #83.
+/// The order is also reachable before its creator enqueues the transaction that matches and books it. A transaction
+/// about the order enqueued in that gap would get the lower transaction id and run first: a cancel would be decided
+/// before the order was booked. So save() also sets the order's bookingPending_, and the engine waits for it to clear
+/// before it enqueues a cancel, a replace or a state change of the order, a timer's included (#96), or a stop's release
+/// (#223). The creator calls bookingEnqueued() once that transaction is enqueued. See #83.
 ///
 /// A guard serves one save().
 class PublishGuard
@@ -114,6 +115,12 @@ public:
     void abortPersistGroup() noexcept;
 
 public:
+    /// An order is found here from the moment save() stores it, a little before its creator enqueues the transaction
+    /// that books it, and a transaction about the order enqueued in that gap would run before the booking. So a handler
+    /// that finds an order from an event and enqueues a transaction about it calls the order's
+    /// waitUntilBookingEnqueued() first, as Processor's cancel, replace and state change handlers do, and gets a
+    /// ProcessorTest case that holds the order's mark open, as each of theirs has (#83, #625). An order found through
+    /// the book was booked already.
     OrderEntry *locateByClOrderId(const RawDataEntry &clOrderId) const;
     OrderEntry *locateByOrderId(const IdT &orderId) const;
     /// The order with this number, the part of its id that clients see (#58). Null when no order has it, or when more
