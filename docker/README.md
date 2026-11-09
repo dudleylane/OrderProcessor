@@ -94,7 +94,7 @@ With `--ws-credentials` (#225), each client has a token of its own, and its sess
 2. Write `docker/ws-credentials`, a line per identity: its name, its token's hash, and its accounts. The file holds only hashes, so `chmod 0644` is fine, and the server's user in the image (uid 10001) can read it.
 3. In `docker-compose.yml`, give `oms-server` the file and the flag, and take `OMS_WS_TOKEN` out of its environment: the server refuses the two together.
    ```yaml
-   command: ["--port", "8080", "--data-dir", "/data", "--ws-credentials", "/etc/orderprocessor/ws-credentials"]
+   command: ["--port", "8080", "--data-dir", "/data", "--keep-closed-days", "1", "--ws-credentials", "/etc/orderprocessor/ws-credentials"]
    volumes:
      - ./ws-credentials:/etc/orderprocessor/ws-credentials:ro,z
    ```
@@ -131,11 +131,11 @@ ENTRYPOINT ["orderProcessorServer"]
 CMD ["--port", "8080", "--data-dir", "/data"]
 ```
 
-Override in `docker-compose.yml`:
+`docker-compose.yml` gives its own command, which adds `--keep-closed-days 1` (#597): Postgres keeps every order in this stack, so each start drops the closed orders of the business days before its own. Keep it in a command of your own:
 
 ```yaml
 oms-server:
-  command: ["--port", "8080", "--data-dir", "/data", "--workers", "4"]
+  command: ["--port", "8080", "--data-dir", "/data", "--keep-closed-days", "1", "--workers", "4"]
 ```
 
 | Flag | Default | Description |
@@ -152,6 +152,7 @@ oms-server:
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
 | `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
 | `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock, and each order's own (#584) |
+| `--keep-closed-days` | 0 (1 in `docker-compose.yml`) | As the server starts, drops each closed order whose business day isn't one of the last N, the current one counted (#597). 0 keeps every order. The first start with it drops the earlier days' closed orders of a volume already in use; Postgres keeps their rows |
 
 ## Common Operations
 

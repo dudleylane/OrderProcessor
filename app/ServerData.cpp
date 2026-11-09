@@ -12,6 +12,8 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
+#include <format>
 
 #include "Logger.h"
 #include "WideDataStorage.h"
@@ -21,19 +23,48 @@
 
 using namespace COP;
 
+DateTimeT App::keptDaysStart(DateTimeT now, u32 days)
+{
+    if (0 == days)
+    {
+        return 0;
+    }
+    // Back a day's start at a time: a business day is 23 or 25 hours long when New York changes its clocks
+    DateTimeT start = Proc::ExpiryScheduler::dayStartOf(now);
+    for (u32 day = 1; (day < days) && (0 < start); ++day)
+    {
+        start = Proc::ExpiryScheduler::dayStartOf(start - 1);
+    }
+    return start;
+}
+
 App::ServerData App::loadServerData(const std::string &dataDir, size_t lmdbMapSize, u64 idBlock,
-                                    const std::string &clearingFirm, const std::string &defaultAccount)
+                                    const std::string &clearingFirm, const std::string &defaultAccount,
+                                    u32 keepClosedDays, DateTimeT now)
 {
     ServerData data;
 
-    // Phase 1: Load reference data (instruments, accounts, strings) — orderBook is null
+    // Phase 1: Load reference data (instruments, accounts, strings) — orderBook is null. Its orders are restored too, and
+    // the closed ones of earlier business days dropped (#597): their records are erased, so the second pass finds none.
+    const DateTimeT keptFrom = keptDaysStart(now, keepClosedDays);
     data.lmdbStorage = std::make_unique<Store::LMDBStorage>(lmdbMapSize);
     data.dispatcher = std::make_unique<Store::StorageRecordDispatcher>();
     data.dispatcher->init(Store::WideDataStorage::instance(), nullptr, data.lmdbStorage.get(),
                           Store::OrderStorage::instance());
+    data.dispatcher->dropClosedBefore(keptFrom);
     data.lmdbStorage->load(dataDir, data.dispatcher.get());
+    data.droppedOrders = data.dispatcher->droppedOrders();
+    const u64 droppedMaxOrderNumber = data.dispatcher->droppedMaxOrderNumber();
 
     aux::ExchLogger::instance()->note("Phase 1 LMDB load complete (reference data)");
+    if (0 < keepClosedDays)
+    {
+        // One line a start, not one an order
+        aux::ExchLogger::instance()->note(
+            "Dropped " + std::to_string(data.droppedOrders) + " closed orders of business days before " +
+            std::format("{:%FT%TZ}", std::chrono::sys_seconds(std::chrono::seconds(keptFrom / 1000))) +
+            " (--keep-closed-days " + std::to_string(keepClosedDays) + ")");
+    }
 
     // Collect instrument IDs and init OrderBook
     OrderBookImpl::InstrumentsT instrumentIds;
@@ -64,7 +95,7 @@ App::ServerData App::loadServerData(const std::string &dataDir, size_t lmdbMapSi
     // restored, so that no new order gets a number a restored order already has: clients name orders by number (#58).
     // And past the limit the previous run saved, below which it issued every id, execution ids included: execution
     // reports aren't persisted, so without it a new report could repeat an id a client already has (#81).
-    data.lastOrderNumber = Store::OrderStorage::instance()->maxOrderNumber();
+    data.lastOrderNumber = std::max(Store::OrderStorage::instance()->maxOrderNumber(), droppedMaxOrderNumber);
     const u64 idLimit = data.dispatcher->restoredIdLimit();
     data.lastIssued = std::max(data.lastOrderNumber, (0 < idLimit) ? idLimit - 1 : 0);
     IdTGenerator::instance()->advancePast(data.lastIssued);

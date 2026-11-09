@@ -1433,13 +1433,15 @@ public:
 class EngineOverDirectory
 {
 public:
+    /// dropClosedBefore: what a start given --keep-closed-days drops (#597); 0 drops nothing
     EngineOverDirectory(const std::string &dir, const SourceIdT &instrument, IncomingQueues *inQueues,
-                        OutQueues *outQueues)
+                        OutQueues *outQueues, DateTimeT dropClosedBefore = 0)
     {
         OrderBookImpl::InstrumentsT instruments;
         instruments.insert(instrument);
         book_.init(instruments);
         dispatcher_.init(WideDataStorage::instance(), &book_, &lmdb_, &storage_);
+        dispatcher_.dropClosedBefore(dropClosedBefore);
         lmdb_.load(dir, &dispatcher_);
         storage_.attach(&dispatcher_);
         ProcessorParams params(IdTGenerator::instance(), &storage_, &book_, inQueues, outQueues, inQueues,
@@ -3480,6 +3482,62 @@ TEST_F(ProcessorTest, AnOpenOrderStoredOnASideTheBookDoesntHoldIsRestoredOutOfIt
             ASSERT_NE(nullptr, restored);
             EXPECT_EQ(CANCELED_ORDSTATUS, restored->status_) << "order " << id.id_ << ": its cancel wasn't persisted";
         }
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AReplacementWhoseOriginalAStartDroppedIsRestoredAndCanBeCanceled)
+{
+    // A start given --keep-closed-days drops a replaced order of an earlier business day, and keeps its replacement, which
+    // is open (#597). Only a replacement still pending reads its original (Pend_Replace's rows), and one that is open was
+    // accepted, so its client can still cancel it.
+    const std::string dir = test::uniqueTestPath("dropped-original");
+    std::filesystem::remove_all(dir);
+    const DateTimeT today = ExpiryScheduler::dayStartOf(aux::currentDateTime());
+    ASSERT_LT(0u, today);
+    IdT original;
+    IdT replacement;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory before(dir, instrId1_, inQueues_.get(), &reports);
+        auto order = createTestOrder(instrId1_, SELL_SIDE, 200.0, 10);
+        const RawDataEntry clOrdId = order->clOrderId_.get();
+        inQueues_->push("test", OrderEvent(order.release()));
+        OrderEntry *resting = before.process(clOrdId);
+        ASSERT_EQ(NEW_ORDSTATUS, resting->status_);
+        OrderEntry *changed = resting->clone();
+        changed->orderId_ = IdT();
+        test::assignClOrderId(changed);
+        changed->origClOrderId_ = resting->clOrderId_;
+        changed->price_ = 201.0;
+        changed->status_ = RECEIVEDNEW_ORDSTATUS;
+        const RawDataEntry changedId = changed->clOrderId_.get();
+        inQueues_->push("test", OrderReplaceEvent(resting->orderId_, changed));
+        OrderEntry *stored = before.process(changedId);
+        ASSERT_EQ(REPLACED_ORDSTATUS, resting->status_);
+        ASSERT_EQ(NEW_ORDSTATUS, stored->status_);
+        original = resting->orderId_;
+        replacement = stored->orderId_;
+        // The original as the transaction that replaced it wrote it, in an earlier business day
+        resting->dayStart_ = today - 1;
+        before.dispatcher_.save(*resting);
+    }
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports, today);
+        EXPECT_EQ(1u, restarted.dispatcher_.droppedOrders());
+        EXPECT_EQ(nullptr, restarted.storage_.locateByOrderId(original)) << "the replaced order wasn't dropped";
+        OrderEntry *restored = restarted.storage_.locateByOrderId(replacement);
+        ASSERT_NE(nullptr, restored);
+        ASSERT_EQ(NEW_ORDSTATUS, restored->status_);
+        EXPECT_EQ(replacement, restarted.book_.getTop(instrId1_, SELL_SIDE));
+
+        inQueues_->push("test", OrderCancelEvent(replacement, "closing it"));
+        restarted.processor_.process();
+        EXPECT_EQ(CANCELED_ORDSTATUS, restored->status_);
+        EXPECT_EQ(0u, restored->leavesQty_);
+        const std::vector<ExecType> types = reports.reportTypesOf(replacement);
+        EXPECT_NE(types.end(), std::find(types.begin(), types.end(), CANCEL_EXECTYPE)) << "its cancel wasn't reported";
     }
     std::filesystem::remove_all(dir);
 }

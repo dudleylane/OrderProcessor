@@ -68,8 +68,9 @@ services:
     # one a server ran on before it was seeded, which has an LMDB file but no instrument. Not a one-shot service:
     # podman-compose makes a dependency a container that must be running when the server starts.
     entrypoint: ["sh", "-c", "seedData --if-empty --data-dir /data && exec orderProcessorServer \"$$@\"", "oms-server"]
-    # The image's CMD, repeated: an entrypoint set here clears it
-    command: ["--port", "8080", "--data-dir", "/data"]
+    # The image's CMD, repeated, since an entrypoint set here clears it, and --keep-closed-days 1 (#597): Postgres keeps
+    # every order here, so each start drops the closed orders of the business days before its own
+    command: ["--port", "8080", "--data-dir", "/data", "--keep-closed-days", "1"]
     restart: unless-stopped
     # A small init runs as PID 1 and starts the server (#203). As PID 1 itself, the server ignored SIGTERM until its
     # handler was set, after the data directory's restore, and an abort became a SIGSEGV.
