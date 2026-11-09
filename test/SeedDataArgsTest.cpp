@@ -79,4 +79,33 @@ TEST(SeedDataArgsTest, IfEmptyIsOffUnlessAskedFor)
     EXPECT_EQ("/data", after->dataDir);
 }
 
+TEST(SeedDataArgsTest, TakesAFile)
+{
+    // Reference data from a file, and not the test set (#585)
+    std::string error;
+    EXPECT_TRUE(parseSeedDataArgs({ "--data-dir", "/data" }, &error)->file.empty());
+    const std::optional<SeedDataArgs> parsed =
+        parseSeedDataArgs({ "--file", "reference.json", "--if-empty", "/data" }, &error);
+    ASSERT_TRUE(parsed.has_value()) << error;
+    EXPECT_EQ("reference.json", parsed->file);
+    EXPECT_TRUE(parsed->ifEmpty);
+    EXPECT_EQ("/data", parsed->dataDir);
+}
+
+TEST(SeedDataArgsTest, RejectsFileWithoutAFile)
+{
+    std::string error;
+    EXPECT_FALSE(parse({ "--data-dir", "/data", "--file" }, &error));
+    EXPECT_EQ("--file needs a file", error);
+    EXPECT_FALSE(parse({ "--file", "", "/data" }, &error));
+    EXPECT_EQ("--file needs a file", error);
+}
+
+TEST(SeedDataArgsTest, RejectsASecondFile)
+{
+    std::string error;
+    EXPECT_FALSE(parse({ "--file", "a.json", "--file", "b.json" }, &error));
+    EXPECT_EQ("--file is given more than once", error);
+}
+
 } // namespace

@@ -440,4 +440,51 @@ inline std::string_view toJsonString(AccountType t)
     return "INVALID";
 }
 
+inline AccountType accountTypeFromJson(std::string_view sv)
+{
+    if (sv == "PRINCIPAL")
+    {
+        return PRINCIPAL_ACCOUNTTYPE;
+    }
+    if (sv == "AGENCY")
+    {
+        return AGENCY_ACCOUNTTYPE;
+    }
+    return INVALID_ACCOUNTTYPE;
+}
+
+inline std::string_view toJsonString(InstrumentType t)
+{
+    if (t == EQUITY_INSTRUMENTTYPE)
+    {
+        return "EQUITY";
+    }
+    if (t == FX_SPOT_INSTRUMENTTYPE)
+    {
+        return "FX_SPOT";
+    }
+    if (t == FX_SWAP_INSTRUMENTTYPE)
+    {
+        return "FX_SWAP";
+    }
+    return "INVALID";
+}
+
+inline InstrumentType instrumentTypeFromJson(std::string_view sv)
+{
+    if (sv == "EQUITY")
+    {
+        return EQUITY_INSTRUMENTTYPE;
+    }
+    if (sv == "FX_SPOT")
+    {
+        return FX_SPOT_INSTRUMENTTYPE;
+    }
+    if (sv == "FX_SWAP")
+    {
+        return FX_SWAP_INSTRUMENTTYPE;
+    }
+    return INVALID_INSTRUMENTTYPE;
+}
+
 } // namespace COP

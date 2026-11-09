@@ -226,6 +226,17 @@ docker compose start oms-server
 
 `seedData` seeds instruments, accounts and the server's clearing firm, and skips any that already exist, so running it again is safe. On a fresh volume, you can also run the `run` line before the first `docker compose up`.
 
+To load your own reference data instead of the test set, give `seedData` your file with `--file` (#585): README's [Standalone Server](../README.md#standalone-server) gives its format. Mount it read-only, by its absolute path (`z` relabels it for SELinux), and make it readable by the server's user, `oms` (`chmod 0644 reference.json`). Load it before the first `up`, so that the volume has your instruments when the server's container first starts: its `seedData --if-empty` then leaves the volume alone, where it would add the test set to a volume with no instrument. On this branch, make `fix-credentials` and the certificate first, as the Quick Start does before its `up`: compose mounts both into the server's container, for a `run` too.
+
+```bash
+docker compose build oms-server
+docker compose run --rm --no-deps -v "$PWD/reference.json:/reference.json:ro,z" \
+    --entrypoint seedData oms-server --data-dir /data --file /reference.json
+docker compose up -d
+```
+
+On a volume in use, stop the server first and start it after, as above.
+
 ### Shell Access
 
 ```bash
