@@ -94,9 +94,13 @@ jobs:
         # per-test-case paths (test::uniqueTestPath), so no two cases share
         # a file or directory.  --timeout turns a hung test into a failure
         # instead of a job that holds the only runner until it is killed
-        # (#59); the slowest test takes about 4 s alone.
+        # (#59); the slowest test takes about 4 s alone.  Under a 4G
+        # memory cap (#607): a test that runs away is killed at the cap
+        # and named, and the rest run, before it can take down the
+        # laptop the runners share.  The larger suite, FX's with the
+        # gateway, peaks at about 0.5 GiB here.
         shell: bash
-        run: ctest --test-dir build --output-on-failure --timeout 300 -j"$(nproc)"
+        run: scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 300 -j"$(nproc)"
 
       - name: Postgres write-behind tests, against a throwaway database
         # The step above built these and skipped them, for want of a database (#151). This starts one with the schema,
@@ -106,8 +110,9 @@ jobs:
           trap 'scripts/pg-for-tests.sh stop orderprocessor-ci-pg-release' EXIT
           PG_CONNECTION_STRING="$(scripts/pg-for-tests.sh start orderprocessor-ci-pg-release)"
           export PG_CONNECTION_STRING
-          ctest --test-dir build --output-on-failure --timeout 300 --no-tests=error -R 'PGWriteBehind|Postgres' \
-            | tee "$RUNNER_TEMP/pg-tests.log"
+          # Under the Test step's memory cap (#607); the database's container stays outside it
+          scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 300 --no-tests=error \
+            -R 'PGWriteBehind|Postgres' | tee "$RUNNER_TEMP/pg-tests.log"
           # A test that found no database skipped, and ctest counts a skip as a pass
           if grep -q '(Skipped)' "$RUNNER_TEMP/pg-tests.log"; then
             echo "::error::a Postgres test skipped: PG_CONNECTION_STRING didn't reach it"
