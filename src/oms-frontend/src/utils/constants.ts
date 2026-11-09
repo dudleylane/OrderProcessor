@@ -1,4 +1,4 @@
-import { OrderStatus, ExecType, Side } from '../types/enums';
+import { OrderStatus, ExecType, Side, TimeInForce } from '../types/enums';
 
 /** Display labels for all 12 order statuses */
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
@@ -95,3 +95,13 @@ export const REPLACEABLE_STATUSES = new Set<OrderStatus>([
 export const LATEST_EXPIRE_TIME = 9223372036854;
 /** The latest an expiry input offers, in local time: a day before the above, so no time zone's is past it */
 export const LATEST_EXPIRE_INPUT = '2262-04-10T23:59';
+
+/** The times in force the server takes. It rejects OPG and ATCLOSE, which need auctions it doesn't run (#601), though
+ *  an order it took before that may still have one. */
+export const TAKEN_TIFS: TimeInForce[] = [
+  TimeInForce.DAY,
+  TimeInForce.GTD,
+  TimeInForce.GTC,
+  TimeInForce.FOK,
+  TimeInForce.IOC,
+];

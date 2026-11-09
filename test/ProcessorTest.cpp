@@ -1516,6 +1516,11 @@ public:
     }
     void push(const Queues::CancelRejectEvent &, const std::string &) override {}
     void push(const Queues::BusinessRejectEvent &, const std::string &) override {}
+    /// A new order or a replacement refused without being stored, which has no order id to report (#67): its reason
+    void push(const Queues::OrderRejectEvent &evnt, const std::string &) override
+    {
+        refusals_.push_back(evnt.reason_);
+    }
 
     /// The trades reported for the order, as "quantity@price"
     std::vector<std::string> tradesOf(const IdT &orderId) const
@@ -1622,6 +1627,7 @@ public:
     std::vector<Trade> trades_;
     std::vector<Report> reports_;
     std::vector<std::pair<IdT, std::string>> rejectReasons_;
+    std::vector<std::string> refusals_;
     /// If set, every report is noted here as "report <type>"
     std::vector<std::string> *log_ = nullptr;
 };
@@ -3847,6 +3853,110 @@ TEST_F(ProcessorTest, AnOpenOrderStoredOnASideTheBookDoesntHoldIsRestoredOutOfIt
         }
     }
     std::filesystem::remove_all(dir);
+}
+
+namespace
+{
+/// The two times in force that need an auction, which the engine refuses (#601), each with the reason it gives
+const std::pair<TimeInForce, std::string> AUCTION_TIFS[] = {
+    { OPG_TIF, "OPG orders aren't taken: no opening auction runs!" },
+    { ATCLOSE_TIF, "ATCLOSE orders aren't taken: no closing auction runs!" },
+};
+} // namespace
+
+TEST_F(ProcessorTest, AnOpgOrAtCloseOrderIsRejectedWithItsReason)
+{
+    // No auction runs (#601). An OPG or ATCLOSE order rested and traded as a GTC one, all day and every day after, and
+    // nothing told its client. Each is refused as its checks refuse an order, with a reason that names it.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *bid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 10));
+    const OrderEntry *ask = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 10));
+    for (const auto &[tif, reason] : AUCTION_TIFS)
+    {
+        auto market = withTif(createTestOrder(instrId1_, SELL_SIDE, 0.0, 5), tif);
+        market->ordType_ = MARKET_ORDERTYPE;
+        const OrderEntry *refused[] = {
+            engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 10.5, 5), tif)), // rests, between the two
+            engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 11.0, 5), tif)), // at the ask
+            engine.submit(std::move(market)),                                           // at the bid
+        };
+        for (const OrderEntry *order : refused)
+        {
+            ASSERT_NE(nullptr, order);
+            EXPECT_EQ(REJECTED_ORDSTATUS, order->status_) << "tif " << tif;
+            EXPECT_EQ(0u, order->leavesQty_) << "tif " << tif;
+            EXPECT_EQ(reason, engine.reports_.rejectReasonOf(order->orderId_)) << "tif " << tif;
+            EXPECT_TRUE(engine.reports_.tradesOf(order->orderId_).empty()) << "tif " << tif;
+        }
+    }
+    EXPECT_TRUE(engine.reports_.tradesOf(bid->orderId_).empty()) << "the bid traded";
+    EXPECT_TRUE(engine.reports_.tradesOf(ask->orderId_).empty()) << "the ask traded";
+    EXPECT_EQ(10u, bid->leavesQty_);
+    EXPECT_EQ(10u, ask->leavesQty_);
+    EXPECT_EQ(bid->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
+    EXPECT_EQ(ask->orderId_, orderBook_->getTop(instrId1_, SELL_SIDE));
+}
+
+TEST_F(ProcessorTest, AReplaceToOpgOrAtCloseIsRefusedAndTheOrderStaysAsItWas)
+{
+    // A replacement is a new order, and meets the same checks (#601)
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *resting = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 10));
+    ASSERT_NE(nullptr, resting);
+    for (const auto &[tif, reason] : AUCTION_TIFS)
+    {
+        OrderEntry *replacement = replacementFor(*resting);
+        replacement->tif_ = tif;
+        const RawDataEntry replacementId = replacement->clOrderId_.get();
+        const size_t before = engine.reports_.refusals_.size();
+        engine.request(OrderReplaceEvent(resting->orderId_, replacement));
+        EXPECT_EQ(nullptr, OrderStorage::instance()->locateByClOrderId(replacementId)) << "tif " << tif;
+        ASSERT_EQ(before + 1, engine.reports_.refusals_.size()) << "tif " << tif;
+        EXPECT_EQ("Replace refused: " + reason, engine.reports_.refusals_.back()) << "tif " << tif;
+    }
+    EXPECT_EQ(NEW_ORDSTATUS, resting->status_);
+    EXPECT_EQ(DAY_TIF, resting->tif_);
+    EXPECT_EQ(10u, resting->leavesQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE }), engine.reports_.reportTypesOf(resting->orderId_));
+    EXPECT_EQ(resting->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
+}
+
+TEST_F(ProcessorTest, AnOrderStoredWithOpgTradesAsBeforeAndAReplaceMustGiveItAnotherTimeInForce)
+{
+    // An order taken before #601 may be OPG or ATCLOSE, and still trades as a GTC one. A replace makes a new order from
+    // it, so one that keeps its time in force is refused, and one that gives another is taken.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *stored = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 10));
+    ASSERT_NE(nullptr, stored);
+    stored->tif_ = OPG_TIF; // as the order was taken before #601
+    const OrderEntry *sell = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 4));
+    ASSERT_NE(nullptr, sell);
+    EXPECT_EQ(FILLED_ORDSTATUS, sell->status_);
+    EXPECT_EQ(PARTFILL_ORDSTATUS, stored->status_);
+    EXPECT_EQ(6u, stored->leavesQty_);
+
+    OrderEntry *keeps = replacementFor(*stored);
+    keeps->price_ = 9.5;
+    const RawDataEntry keepsId = keeps->clOrderId_.get();
+    engine.request(OrderReplaceEvent(stored->orderId_, keeps));
+    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByClOrderId(keepsId))
+        << "a replacement that keeps OPG was taken";
+    ASSERT_EQ(1u, engine.reports_.refusals_.size());
+    EXPECT_EQ("Replace refused: OPG orders aren't taken: no opening auction runs!", engine.reports_.refusals_.back());
+    EXPECT_EQ(PARTFILL_ORDSTATUS, stored->status_);
+
+    OrderEntry *gtc = replacementFor(*stored);
+    gtc->price_ = 9.5;
+    gtc->tif_ = GTC_TIF;
+    const RawDataEntry gtcId = gtc->clOrderId_.get();
+    engine.request(OrderReplaceEvent(stored->orderId_, gtc));
+    EXPECT_EQ(REPLACED_ORDSTATUS, stored->status_);
+    const OrderEntry *replaced = OrderStorage::instance()->locateByClOrderId(gtcId);
+    ASSERT_NE(nullptr, replaced);
+    EXPECT_EQ(PARTFILL_ORDSTATUS, replaced->status_);
+    EXPECT_EQ(GTC_TIF, replaced->tif_);
+    EXPECT_EQ(6u, replaced->leavesQty_);
+    EXPECT_EQ(replaced->orderId_, orderBook_->getTop(instrId1_, BUY_SIDE));
 }
 
 TEST_F(ProcessorTest, AReplacementWhoseOriginalAStartDroppedIsRestoredAndCanBeCanceled)
