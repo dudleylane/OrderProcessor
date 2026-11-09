@@ -32,6 +32,8 @@ class LMDBStorage final : public FileSaver
 public:
     /// The map LMDB starts with unless asked for another (#148). A write that finds the map full doubles it.
     static constexpr size_t DEFAULT_MAP_SIZE = 256UL * 1024UL * 1024UL;
+    /// The versions eraseVersions() erases in one transaction (#597)
+    static constexpr size_t ERASE_BATCH = 1000;
 
     LMDBStorage();
     /// mapSize: the map to start with. A directory that holds more opens with what it holds.
@@ -48,6 +50,8 @@ public:
     u32 replace(const IdT &id, u32 version, const char *buf, size_t size) override;
     void erase(const IdT &id, u32 version) override;
     void erase(const IdT &id) override;
+    /// ERASE_BATCH versions to a transaction, where erase(id, version) takes one each (#597)
+    void eraseVersions(const std::vector<std::pair<IdT, u32>> &versions) override;
     Newest loadNewest(const IdT &id, std::vector<char> *buf) override;
     /// A thread's group (#163): between beginGroup() and commitGroup(), update() works out each record's new version and
     /// holds it, and commitGroup() writes them all in one transaction. The versions update() returns are the ones

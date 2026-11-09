@@ -465,7 +465,7 @@ void FixGateway::learnReplacement(const OrderEntry &replacement)
     replacements_.insert_or_assign(std::move(replaced), std::move(key));
 }
 
-OrderEntry *FixGateway::replacementOf(std::string_view key) const
+OrderEntry *FixGateway::linkedReplacement(std::string_view key) const
 {
     std::string replacementKey;
     {
@@ -479,6 +479,13 @@ OrderEntry *FixGateway::replacementOf(std::string_view key) const
     }
     RawDataEntry rawKey(STRING_RAWDATATYPE, replacementKey.c_str(), static_cast<u32>(replacementKey.size()));
     return orderStorage_->locateByClOrderId(rawKey);
+}
+
+OrderEntry *FixGateway::replacementOf(std::string_view key, const IdT &original) const
+{
+    // A replacement's original never changes once it is stored, so it is read without its lock
+    OrderEntry *next = linkedReplacement(key);
+    return ((nullptr != next) && (original == next->origOrderId_)) ? next : nullptr;
 }
 
 size_t FixGateway::knownReplacements() const
@@ -496,15 +503,17 @@ FixGateway::RejectedOrder FixGateway::rejectedOrder(const OrderEntry &order, Ord
         return described;
     }
     std::string key = rawText(order.clOrderId_.get());
+    IdT replaced = order.orderId_;
     for (size_t followed = 0; REPLACED_ORDSTATUS == described.status; ++followed)
     {
-        const OrderEntry *next = (followed < knownReplacements()) ? replacementOf(key) : nullptr;
+        const OrderEntry *next = (followed < knownReplacements()) ? replacementOf(key, replaced) : nullptr;
         if (nullptr == next)
         {
             described.status = PENDINGREPLACE_ORDSTATUS;
             break;
         }
         key = rawText(next->clOrderId_.get());
+        replaced = next->orderId_;
         const OrderSeen seen = seenOf(*next);
         described = RejectedOrder{ seen.number, seen.status };
     }
@@ -1683,13 +1692,31 @@ FIX50SP2::ExecutionReport FixGateway::answerOrderStatus(const FIX50SP2::OrderSta
         report.set(FIX::Text(text));
         return report;
     };
-    std::optional<FIX50SP2::ExecutionReport> answer = answerReceivedOrder(
-        order, pending, source, byClOrdId ? clOrdId.getString() : std::string(), side.getValue(), true);
+    // A ClOrdID of no order the store has, nor of one the engine has yet to answer, may be that of an order a start
+    // dropped (#597) and whose replacement it kept: the replacement's record names it, and the gateway learned the link
+    // as it was made. The request is answered with the replacement, as for a replaced order the store has (#383).
+    const OrderEntry *keptReplacement = nullptr;
+    if (byClOrdId && (nullptr == order) && !pending)
+    {
+        keptReplacement = linkedReplacement(sessionClOrdId(source, clOrdId.getString()));
+    }
+    std::optional<FIX50SP2::ExecutionReport> answer;
+    if (nullptr != keptReplacement)
+    {
+        answer = answerStoredOrder(*keptReplacement, source, clOrdId.getString(), std::nullopt, true);
+    }
+    else
+    {
+        answer = answerReceivedOrder(order, pending, source, byClOrdId ? clOrdId.getString() : std::string(),
+                                     side.getValue(), true);
+    }
     // Named by both, they must name the same order: the OrderID (37) is that of the order the ClOrdID names, or the one
     // the answer reports for it along a replace, which the client has from the replace it sent or from the
-    // acknowledgement of it. A new order the engine hasn't stored has none yet.
+    // acknowledgement of it. A new order the engine hasn't stored has none yet. A dropped order's is the one its
+    // replacement names.
     if (answer && byClOrdId && byOrderId && (orderId.getString() != answer->getField(FIX::FIELD::OrderID)) &&
-        ((nullptr == order) || (orderId.getString() != std::to_string(order->orderId_.id_))))
+        ((nullptr == order) || (orderId.getString() != std::to_string(order->orderId_.id_))) &&
+        ((nullptr == keptReplacement) || (orderId.getString() != std::to_string(keptReplacement->origOrderId_.id_))))
     {
         answer = unknown("Unknown order: OrderID (37) " + orderId.getString() + " is not the order of ClOrdID (11) " +
                          clOrdId.getString());
@@ -1751,7 +1778,8 @@ FIX50SP2::ExecutionReport FixGateway::answerStoredOrder(const OrderEntry &order,
     OrderSeen describedSeen = seen;
     for (size_t followed = 0; REPLACED_ORDSTATUS == describedSeen.status; ++followed)
     {
-        const OrderEntry *next = (followed < knownReplacements()) ? replacementOf(describedKey) : nullptr;
+        const OrderEntry *next =
+            (followed < knownReplacements()) ? replacementOf(describedKey, described->orderId_) : nullptr;
         if (nullptr == next)
         {
             // Replaced, and its replacement's report isn't out yet: the replace is still pending for the client

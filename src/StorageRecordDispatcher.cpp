@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 #include "StorageRecordDispatcher.h"
@@ -100,6 +101,22 @@ const u32 LAST_TRADE_KEY_DATE = 2;
 IdT lastTradeKey(const SourceIdT &instrument)
 {
     return IdT(instrument.id_, LAST_TRADE_KEY_DATE);
+}
+/// An order that will never trade again (#597): filled, canceled, rejected, expired, or replaced by another. In any other
+/// status it is open, held, suspended, done for the day or still pending, and may.
+bool closedForGood(OrderStatus status)
+{
+    switch (status)
+    {
+    case FILLED_ORDSTATUS:
+    case CANCELED_ORDSTATUS:
+    case REJECTED_ORDSTATUS:
+    case EXPIRED_ORDSTATUS:
+    case REPLACED_ORDSTATUS:
+        return true;
+    default:
+        return false;
+    }
 }
 } // namespace
 
@@ -267,12 +284,15 @@ void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const c
         // state, and OrderDataStorage::restore() rejects an order id it already holds. Decoding here would build
         // an OrderEntry, whose constructor loads the instrument, and LMDB visits keys in byte order, so an order
         // can come before its instrument's record (#49); finishLoad() decodes once every record is restored.
-        PendingOrdersT::iterator it = pendingOrders_.find(id);
-        if ((pendingOrders_.end() == it) || (version >= it->second.version_))
+        PendingOrder &pending = pendingOrders_[id];
+        if (pending.versions_.empty() || (version >= pending.version_))
         {
-            pendingOrders_[id] =
-                PendingOrder{ version, formatVersion, std::string(buf + sizeof(word), size - sizeof(word)) };
+            pending.version_ = version;
+            pending.formatVersion_ = formatVersion;
+            pending.record_.assign(buf + sizeof(word), size - sizeof(word));
         }
+        // Every version, which dropping the order erases (#597)
+        pending.versions_.push_back(version);
     }
     break;
     default:
@@ -309,6 +329,9 @@ bool StorageRecordDispatcher::crossesAnEarlierOrder(OrderEntry *order) const
 void StorageRecordDispatcher::finishLoad()
 {
     ordersToMatch_.clear();
+    droppedOrders_ = 0;
+    droppedMaxOrderNumber_ = 0;
+    std::vector<std::pair<IdT, u32>> droppedVersions;
     // In id order, which is the order the orders arrived in: ids increase across restarts too (#58)
     for (PendingOrdersT::iterator it = pendingOrders_.begin(); it != pendingOrders_.end(); ++it)
     {
@@ -317,6 +340,21 @@ void StorageRecordDispatcher::finishLoad()
         std::unique_ptr<OrderEntry> order(
             Codec::OrderCodec::decode(it->first, it->second.formatVersion_, record.data(), record.size(), &carried));
         assert(nullptr != orderStorage_);
+        // A closed order of a business day before the kept ones isn't restored, and every version of its record is
+        // erased once the loop ends (#597). Its day is the one its day figures are for (#244), which a fill in a later day
+        // and each day's restatement move on, so a closed order's is the day it closed. A record from before format 4
+        // has none, and its creation's time stands for it: a time compares with a day's start as the day it is in does.
+        const DateTimeT day = (0 != order->dayStart_) ? order->dayStart_ : order->creationTime_;
+        if ((0 != dropClosedBefore_) && closedForGood(order->status_) && (day < dropClosedBefore_))
+        {
+            ++droppedOrders_;
+            droppedMaxOrderNumber_ = std::max(droppedMaxOrderNumber_, it->first.id_);
+            for (const u32 version : it->second.versions_)
+            {
+                droppedVersions.emplace_back(it->first, version);
+            }
+            continue;
+        }
         // app/main.cpp loads twice, once without an order book and once with it, so an order can
         // already be in storage from the first pass. Restore it once, and book it on the pass that
         // has a book.
@@ -395,6 +433,11 @@ void StorageRecordDispatcher::finishLoad()
         }
     }
     pendingOrders_.clear();
+    if (!droppedVersions.empty())
+    {
+        assert(nullptr != fileStorage_);
+        fileStorage_->eraseVersions(droppedVersions);
+    }
 
     // The held stops whose releases a crash lost (#237). A trade's release is a transaction of its own, after the trade's,
     // so a crash between the two leaves a stop held that the trade reached. Only a stop that was held when the trade was

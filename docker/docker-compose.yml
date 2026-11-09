@@ -69,10 +69,13 @@ services:
     # podman-compose makes a dependency a container that must be running when the server starts.
     entrypoint: ["sh", "-c", "seedData --if-empty --data-dir /data && exec orderProcessorServer \"$$@\"", "oms-server"]
     # The image's CMD, repeated: an entrypoint set here clears it. On this branch that includes the FIX gateway's config
-    # and its credentials (#147), without which the server refuses --fix-cfg and exits 2.
+    # and its credentials (#147), without which the server refuses --fix-cfg and exits 2. Then --keep-closed-days 1
+    # (#597): Postgres keeps every order here, so each start drops the closed orders of the business days before
+    # its own.
     command: ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/fix.cfg",
               "--fix-credentials", "/etc/orderprocessor/fix-credentials",
-              "--fix-tls-cert", "/etc/orderprocessor/tls/tls.crt", "--fix-tls-key", "/etc/orderprocessor/tls/tls.key"]
+              "--fix-tls-cert", "/etc/orderprocessor/tls/tls.crt", "--fix-tls-key", "/etc/orderprocessor/tls/tls.key",
+              "--keep-closed-days", "1"]
     restart: unless-stopped
     # A small init runs as PID 1 and starts the server (#203). As PID 1 itself, the server ignored SIGTERM until its
     # handler was set, after the data directory's restore, and an abort became a SIGSEGV.

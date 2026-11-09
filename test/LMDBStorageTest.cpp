@@ -679,6 +679,40 @@ TEST_F(LMDBStorageTest, AGroupWritesItsUpdatesInOneTransaction)
     EXPECT_TRUE(storage.isExists(buy, 0)) << "the version before the new one is kept (#148)";
 }
 
+TEST_F(LMDBStorageTest, EraseVersionsTakesATransactionABatch)
+{
+    // A start that drops closed orders erases every version of each at once (#597): ERASE_BATCH to a transaction, where
+    // erase(id, version) commits, and syncs, each on its own
+    TestLMDBObserver observer;
+    LMDBStorage storage;
+    storage.load(testDir_, &observer);
+    const u64 records = LMDBStorage::ERASE_BATCH + 10;
+    storage.beginGroup();
+    for (u64 i = 1; i <= records; ++i)
+    {
+        ASSERT_EQ(0u, storage.update(IdT(i, 1), "v", 1));
+    }
+    storage.commitGroup();
+    std::vector<std::pair<IdT, u32>> versions;
+    for (u64 i = 1; i < records; ++i)
+    {
+        versions.emplace_back(IdT(i, 1), 0u);
+    }
+    versions.emplace_back(IdT(records + 1, 1), 0u); // not there, and skipped
+    const u64 before = storage.commits();
+
+    storage.eraseVersions(versions);
+
+    EXPECT_EQ(before + 2, storage.commits()) << versions.size() << " versions";
+    u64 left = 0;
+    for (u64 i = 1; i < records; ++i)
+    {
+        left += storage.isExists(IdT(i, 1), 0) ? 1 : 0;
+    }
+    EXPECT_EQ(0u, left) << "versions named were left";
+    EXPECT_TRUE(storage.isExists(IdT(records, 1), 0)) << "a version not named was erased";
+}
+
 TEST_F(LMDBStorageTest, AnAbortedGroupWritesNothing)
 {
     TestLMDBObserver observer;
