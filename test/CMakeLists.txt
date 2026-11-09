@@ -83,6 +83,9 @@ target_sources(orderProcessorTest
 
         # seedData's argument parsing (header-only, in app/)
         SeedDataArgsTest.cpp
+        # The reference data seedData --file loads (#585)
+        ReferenceDataFileTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/ReferenceDataFile.cpp
         ServerArgsTest.cpp
         WsAuthTest.cpp
         # Identities: each sees and trades only its own accounts (#225)

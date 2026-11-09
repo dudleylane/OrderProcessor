@@ -16,11 +16,14 @@ struct SeedDataArgs
     /// --if-empty: seed only a directory with no instrument yet, and leave one in use alone, since what seedData adds is
     /// test data (#161). A directory a server ran on before it was seeded has an LMDB file, but no instrument.
     bool ifEmpty = false;
+    /// --file FILE: load FILE's reference data, and not the test set (#585). Empty when not given.
+    std::string file;
 };
 
 /// The data directory seedData seeds: `--data-dir DIR`, as orderProcessorServer takes it, or a lone DIR; "./data" when
-/// neither is given. And --if-empty. Anything else returns nullopt with the reason in *error. Before #42 any first
-/// argument was the directory, so `seedData --data-dir /data` seeded a directory named "--data-dir".
+/// neither is given. And --if-empty, and --file FILE (#585). Anything else returns nullopt with the reason in *error.
+/// Before #42 any first argument was the directory, so `seedData --data-dir /data` seeded a directory named
+/// "--data-dir".
 inline std::optional<SeedDataArgs> parseSeedDataArgs(const std::vector<std::string> &args, std::string *error)
 {
     SeedDataArgs parsed;
@@ -32,6 +35,21 @@ inline std::optional<SeedDataArgs> parseSeedDataArgs(const std::vector<std::stri
         if ("--if-empty" == arg)
         {
             parsed.ifEmpty = true;
+            continue;
+        }
+        if ("--file" == arg)
+        {
+            if ((i + 1 >= args.size()) || args[i + 1].empty())
+            {
+                *error = "--file needs a file";
+                return std::nullopt;
+            }
+            if (!parsed.file.empty())
+            {
+                *error = "--file is given more than once";
+                return std::nullopt;
+            }
+            parsed.file = args[++i];
             continue;
         }
         if ("--data-dir" == arg)
