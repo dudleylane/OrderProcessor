@@ -1565,6 +1565,19 @@ A copy of a map takes its nodes from the same pool, so it too must be made under
 Nodes are not all a walk touches: a ClOrdID key's bytes (`RawDataEntry`'s own allocation), the objects a lookup finds,
 and the book's own maps still lie among the orders.
 
+**Closed orders (#597).** Nothing removes an order while the server runs. A start given `--keep-closed-days N` drops
+each closed order (FILLED, CANCELED, REJECTED, EXPIRED or REPLACED) whose business day began before the last N, the
+current one counted. Its day is its `dayStart_` (#244), and its creation's time for a record from before format 4.
+`StorageRecordDispatcher::finishLoad()` doesn't restore it, and erases every version of its record with
+`FileSaver::eraseVersions()`, `LMDBStorage::ERASE_BATCH` to a transaction. The load's first pass drops them, so the
+second finds none, and the next id stays past a dropped order's number (`droppedMaxOrderNumber()`). Postgres keeps
+their rows. Only a replacement still pending reads its original (`Pend_Replace`'s rows), and its original isn't closed
+yet, so an open replacement whose original was dropped restores and trades as any order does. On this branch the FIX
+gateway answers a status request that names a dropped original with its replacement, through the link it learned from
+the replacement's record (`linkedReplacement()`). It follows a link only to a replacement whose `origOrderId_` is the
+order it starts from (`replacementOf()`), since the ClOrdID a link is kept by may name a new order once its own was
+dropped. Dropping orders while the server runs is #722.
+
 ### 8.2 Codec System
 
 ```

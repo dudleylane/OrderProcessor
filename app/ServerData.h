@@ -40,7 +40,7 @@ struct ServerData
     std::unique_ptr<Store::StorageRecordDispatcher> dispatcher;
     /// Holds the restored orders that rest
     std::unique_ptr<OrderBookImpl> orderBook;
-    /// The largest order number restored
+    /// The largest order number restored, or dropped (#597)
     u64 lastOrderNumber = 0;
     /// The id counter continues after it
     u64 lastIssued = 0;
@@ -48,17 +48,24 @@ struct ServerData
     SourceIdT defaultClearingId;
     /// Invalid when the default account isn't in the directory
     SourceIdT defaultAccountId;
+    /// The closed orders the load dropped (#597)
+    size_t droppedOrders = 0;
 };
+/// The start of the earliest of the last days business days as of now, the current one counted (#597): 0 for 0 days,
+/// which keeps every day
+DateTimeT keptDaysStart(DateTimeT now, u32 days);
 
 /// Loads the data directory as the server starts, which app/main.cpp did inline until #165:
 /// - reference data first, then everything again with an order book, so that the orders are restored into it;
+/// - with keepClosedDays above 0, each closed order whose business day isn't one of the last keepClosedDays as of now
+///   dropped: not restored, and its records erased (#597);
 /// - the id counter continued past every id issued before (#58, #81), with idBlock ids reserved ahead;
 /// - the clearing firm and default account that orders need, if the directory has them (#34);
 /// - the dispatcher made the saver of the wide data and order storages.
 /// It needs the singletons app/main.cpp creates first. It throws what a load throws, such as for a directory LMDB can't
 /// open or a record this build can't read (#149, #150), and app/main.cpp then exits with the reason (#203).
 ServerData loadServerData(const std::string &dataDir, size_t lmdbMapSize, u64 idBlock, const std::string &clearingFirm,
-                          const std::string &defaultAccount);
+                          const std::string &defaultAccount, u32 keepClosedDays = 0, DateTimeT now = 0);
 
 /// Sets the timers of the restored orders that are live: a DAY or GTD order's expiry (#240), and the restatement of
 /// one that outlives its business day (#244). One whose time passed while the server was down fires as soon as the

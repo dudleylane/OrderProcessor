@@ -4423,6 +4423,80 @@ TEST_F(FixtSessionTest, AReplacementStoredBeforeTheGatewayWasMadeIsKnown)
     expectEverythingSentIsTaken();
 }
 
+TEST_F(FixtSessionTest, AnOrderAStartDroppedIsAnsweredWithTheReplacementItKept)
+{
+    // A start that drops closed orders (#597) can drop an order and keep its replacement, whose record names it by its
+    // ClOrdID and its OrderID: a status request that names the dropped order is answered with the replacement, as for
+    // a replaced order the store has (#383). Its OrderID (37) may be the dropped order's, or the replacement's, which
+    // the answer reports; another order's names neither.
+    OrderEntry *y = saveOrderOf(sid_, "ORD-Y");
+    const std::string droppedKey = FixGateway::sessionClOrdId(FixGateway::makeSourceString(sid_), "ORD-X");
+    y->origOrderId_ = IdT(900000, 1); // no order the store has
+    y->origClOrderId_ = WideDataStorage::instance()->add(
+        new RawDataEntry(STRING_RAWDATATYPE, droppedKey.c_str(), static_cast<u32>(droppedKey.size())));
+    setState(y, NEW_ORDSTATUS, 150, 0, 150);
+    OrderEntry *other = saveOrderOf(sid_, "ORD-O");
+    setState(other, NEW_ORDSTATUS, 10, 0, 10);
+    makeSession(std::chrono::seconds(60)); // a gateway made after them, as at a restart
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    const std::string yId = std::to_string(y->orderId_.id_);
+    receive(makeStatusRequest("ORD-X"));
+    receive(makeStatusRequest("ORD-X", "900000"));
+    receive(makeStatusRequest("ORD-X", yId));
+    receive(makeStatusRequest("ORD-X", std::to_string(other->orderId_.id_)));
+
+    const std::vector<FIX::Message> answers = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(4u, answers.size()) << sentText();
+    for (size_t i : { 0u, 1u, 2u })
+    {
+        SCOPED_TRACE("answer " + std::to_string(i));
+        expectStatus(answers[i], FIX::OrdStatus_NEW, yId, 150, 0, 150);
+        EXPECT_EQ("ORD-Y", fieldOf(answers[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ("ORD-X", fieldOf(answers[i], FIX::FIELD::OrigClOrdID));
+    }
+    expectStatus(answers[3], FIX::OrdStatus_REJECTED, "NONE", 0, 0, 0);
+    EXPECT_EQ("ORD-X", fieldOf(answers[3], FIX::FIELD::ClOrdID));
+    EXPECT_EQ(std::to_string(FIX::OrdRejReason_UNKNOWN_ORDER), fieldOf(answers[3], FIX::FIELD::OrdRejReason));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AClOrdIdADroppedOrderFreedNamesTheNewOrderAlone)
+{
+    // A start that drops closed orders frees their ClOrdIDs for new orders (#597), while the link the gateway learned
+    // from a kept replacement still names the dropped order's. A new order of that ClOrdID, replaced, with its
+    // replacement's acknowledgement not out yet, is Pending Replace for the client, in a status answer and in a cancel's
+    // reject alike: never the dropped order's replacement, which has nothing to do with it.
+    OrderEntry *y = saveOrderOf(sid_, "ORD-Y");
+    const std::string source = FixGateway::makeSourceString(sid_);
+    const std::string droppedKey = FixGateway::sessionClOrdId(source, "ORD-X");
+    y->origOrderId_ = IdT(900000, 1); // no order the store has
+    y->origClOrderId_ = WideDataStorage::instance()->add(
+        new RawDataEntry(STRING_RAWDATATYPE, droppedKey.c_str(), static_cast<u32>(droppedKey.size())));
+    setState(y, NEW_ORDSTATUS, 150, 0, 150);
+    makeSession(std::chrono::seconds(60)); // a gateway made after them, as at a restart
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X"); // the ClOrdID used again
+    setState(x, REPLACED_ORDSTATUS, 100, 0, 0); // as a replace leaves it
+    receive(makeStatusRequest("ORD-X"));
+    Queues::CancelRejectEvent tooLate;
+    tooLate.id_ = x->orderId_;
+    tooLate.reason_ = Queues::CancelRejectEvent::TOO_LATE;
+    tooLate.ordStatus_ = REPLACED_ORDSTATUS;
+    tooLate.requestClOrdId_ = "CXL-1";
+    gateway_->sendCancelReject(tooLate, source);
+
+    const std::string xId = std::to_string(x->orderId_.id_);
+    const std::vector<FIX::Message> answers = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(1u, answers.size()) << sentText();
+    expectStatus(answers[0], FIX::OrdStatus_PENDING_REPLACE, xId, 100, 0, 100);
+    EXPECT_EQ("ORD-X", fieldOf(answers[0], FIX::FIELD::ClOrdID));
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(1u, rejects.size()) << sentText();
+    EXPECT_EQ(xId, fieldOf(rejects[0], FIX::FIELD::OrderID));
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_PENDING_REPLACE), fieldOf(rejects[0], FIX::FIELD::OrdStatus));
+    expectEverythingSentIsTaken();
+}
+
 TEST_F(FixtSessionTest, AStatusRequestNamesTheOrderByOrderIdAloneOrByBothIds)
 {
     // FIX 5.0 SP2's OrderStatusRequest may name the order by OrderID (37) alone. Naming it by both, they must name the

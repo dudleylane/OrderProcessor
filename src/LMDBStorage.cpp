@@ -10,6 +10,7 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 #include <cassert>
@@ -601,6 +602,31 @@ void LMDBStorage::erase(const IdT &id, u32 version)
               const int rc = mdb_del(txn, dbi_, &key, nullptr);
               return (MDB_NOTFOUND == rc) ? MDB_SUCCESS : rc;
           });
+}
+
+void LMDBStorage::eraseVersions(const std::vector<std::pair<IdT, u32>> &versions)
+{
+    // A version already gone is skipped, as erase(id, version) skips it, so a batch that write() runs again after growing
+    // the map erases the same
+    for (size_t first = 0; first < versions.size(); first += ERASE_BATCH)
+    {
+        const size_t last = std::min(versions.size(), first + ERASE_BATCH);
+        write("LMDBStorage::eraseVersions",
+              [&](MDB_txn *txn)
+              {
+                  for (size_t i = first; i < last; ++i)
+                  {
+                      const CompositeKey ck(versions[i].first, versions[i].second);
+                      MDB_val key = makeKey(ck);
+                      const int rc = mdb_del(txn, dbi_, &key, nullptr);
+                      if ((MDB_SUCCESS != rc) && (MDB_NOTFOUND != rc))
+                      {
+                          return rc;
+                      }
+                  }
+                  return MDB_SUCCESS;
+              });
+    }
 }
 
 void LMDBStorage::erase(const IdT &id)

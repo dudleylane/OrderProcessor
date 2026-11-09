@@ -111,7 +111,10 @@ With `--ws-credentials` (#225), each client has a token of its own, and its sess
 2. Write `docker/ws-credentials`, a line per identity: its name, its token's hash, and its accounts. The file holds only hashes, so `chmod 0644` is fine, and the server's user in the image (uid 10001) can read it.
 3. In `docker-compose.yml`, give `oms-server` the file and the flag, and take `OMS_WS_TOKEN` out of its environment: the server refuses the two together.
    ```yaml
-   command: ["--port", "8080", "--data-dir", "/data", "--ws-credentials", "/etc/orderprocessor/ws-credentials"]
+   command: ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/fix.cfg",
+             "--fix-credentials", "/etc/orderprocessor/fix-credentials",
+             "--fix-tls-cert", "/etc/orderprocessor/tls/tls.crt", "--fix-tls-key", "/etc/orderprocessor/tls/tls.key",
+             "--keep-closed-days", "1", "--ws-credentials", "/etc/orderprocessor/ws-credentials"]
    volumes:
      - ./ws-credentials:/etc/orderprocessor/ws-credentials:ro,z
    ```
@@ -152,14 +155,14 @@ CMD ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/
      "--fix-credentials", "/etc/orderprocessor/fix-credentials"]
 ```
 
-`docker-compose.yml` repeats them as its `command:`, because its `entrypoint:`, which seeds the volume before the server starts (#161), clears the image's `CMD`. A `command:` replaces the whole list, so to add an option, add it to compose's and keep the rest:
+`docker-compose.yml` repeats them as its `command:`, because its `entrypoint:`, which seeds the volume before the server starts (#161), clears the image's `CMD`, and adds `--keep-closed-days 1` (#597): Postgres keeps every order in this stack, so each start drops the closed orders of the business days before its own. The first start with it drops the earlier days' closed orders of a volume already in use, and Postgres keeps their rows. A `command:` replaces the whole list, so to add an option, add it to compose's and keep the rest:
 
 ```yaml
 oms-server:
   command: ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/fix.cfg",
             "--fix-credentials", "/etc/orderprocessor/fix-credentials",
             "--fix-tls-cert", "/etc/orderprocessor/tls/tls.crt", "--fix-tls-key", "/etc/orderprocessor/tls/tls.key",
-            "--workers", "4"]
+            "--keep-closed-days", "1", "--workers", "4"]
 ```
 
 Without `--fix-cfg` the FIX gateway is off, with no error: the server starts with no FIX acceptor, and nothing listens behind the 5001 compose publishes (#531). `--fix-cfg` needs `--fix-credentials`, or the server exits 2 (#147). With the certificate and key, the acceptor serves TLS only (#228).

@@ -211,9 +211,13 @@ private:
     /// A replacement of a FIX order: a status request that names the order it replaced is answered with it from now on
     /// (#383). Nothing for any other order.
     void learnReplacement(const OrderEntry &replacement);
-    /// The order that replaced the one whose ClOrdID is stored under key, or nothing when none did, or its report isn't
-    /// out yet (#383)
-    OrderEntry *replacementOf(std::string_view key) const;
+    /// The order the gateway learned replaced the one whose ClOrdID is stored under key, whichever order that was, or
+    /// nothing when none did, or its report isn't out yet (#383)
+    OrderEntry *linkedReplacement(std::string_view key) const;
+    /// The order that replaced original, whose ClOrdID is stored under key, as linkedReplacement() finds it. The link is
+    /// kept by the replaced order's ClOrdID, which a start that drops closed orders frees for a new order (#597), so it
+    /// may name the replacement of an order dropped with that ClOrdID, which isn't one of original.
+    OrderEntry *replacementOf(std::string_view key, const IdT &original) const;
     /// How many replacements the gateway knows of, which no chain of them can be longer than (#383)
     size_t knownReplacements() const;
     /// The order an OrderCancelReject (35=9) describes in its OrderID (37) and OrdStatus (39) (#385)

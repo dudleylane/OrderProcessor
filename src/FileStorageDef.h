@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <utility>
 #include <vector>
 
 #include "TypesDef.h"
@@ -50,6 +51,15 @@ public:
     virtual void erase(const IdT &id, u32 version) = 0;
     /// erases all versions of record from file
     virtual void erase(const IdT &id) = 0;
+    /// Erases each version given, in as few transactions as the storage can (#597): a start that drops closed orders
+    /// erases every version of each at once, and a transaction each is an fsync each. This default erases them one by one.
+    virtual void eraseVersions(const std::vector<std::pair<IdT, u32>> &versions)
+    {
+        for (const auto &[id, version] : versions)
+        {
+            erase(id, version);
+        }
+    }
 
     /// What loadNewest() found
     enum class Newest

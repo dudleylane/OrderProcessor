@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -34,6 +35,14 @@ namespace
 {
 const size_t MAP_SIZE = 16 << 20;
 const u64 ID_BLOCK = 100;
+
+/// The UTC time, in milliseconds since the epoch
+DateTimeT utc(int year, unsigned month, unsigned day, int hour)
+{
+    using namespace std::chrono;
+    const sys_days date = year_month_day(std::chrono::year(year), std::chrono::month(month), std::chrono::day(day));
+    return static_cast<DateTimeT>(duration_cast<milliseconds>((date + hours(hour)).time_since_epoch()).count());
+}
 
 /// The server's load (app/ServerData.cpp), over a directory a test writes first (#165). Each start makes the singletons
 /// app/main.cpp makes, so a restart in the middle of a test is a new process over the same directory.
@@ -71,6 +80,10 @@ protected:
     App::ServerData load()
     {
         return App::loadServerData(dir_, MAP_SIZE, ID_BLOCK, "CLRFirm", "ACT");
+    }
+    App::ServerData load(u32 keepClosedDays, DateTimeT now)
+    {
+        return App::loadServerData(dir_, MAP_SIZE, ID_BLOCK, "CLRFirm", "ACT", keepClosedDays, now);
     }
 
     /// An order of the given number, as the transaction that last persisted it wrote it
@@ -351,5 +364,127 @@ TEST_F(ServerDataTest, ARecordOfATypeThisBuildDoesNotKnowStopsTheLoad)
     catch (const std::runtime_error &ex)
     {
         EXPECT_NE(std::string::npos, std::string(ex.what()).find("Invalid record type")) << ex.what();
+    }
+}
+
+TEST_F(ServerDataTest, AStartDropsTheClosedOrdersOfBusinessDaysBeforeTheKeptOnes)
+{
+    // --keep-closed-days N (#597): a closed order whose business day isn't one of the last N, the current one counted,
+    // isn't restored, and every version of its record is erased. Every other order is kept, whatever its day. The start is
+    // at 22:00 New York on 2026-11-08, in the business day that began there at 17:00.
+    const DateTimeT now = utc(2026, 11, 9, 3);
+    DateTimeT days[3]; // two business days before the start's, the one before it, and the start's own
+    days[2] = Proc::ExpiryScheduler::dayStartOf(now);
+    days[1] = Proc::ExpiryScheduler::dayStartOf(days[2] - 1);
+    days[0] = Proc::ExpiryScheduler::dayStartOf(days[1] - 1);
+    ASSERT_EQ(utc(2026, 11, 8, 22), days[2]);
+    ASSERT_EQ(utc(2026, 11, 7, 22), days[1]);
+    ASSERT_EQ(utc(2026, 11, 6, 22), days[0]);
+    for (int day = 0; day < 3; ++day)
+    {
+        EXPECT_EQ(days[day], App::keptDaysStart(now, static_cast<u32>(3 - day)));
+    }
+    EXPECT_EQ(0u, App::keptDaysStart(now, 0)) << "0 days keeps every day";
+
+    struct Written
+    {
+        IdT id_;
+        RawDataEntry clOrderId_;
+        bool closed_;
+        int day_; ///< in days, the business day it closed in, or was last live in
+    };
+    const OrderStatus closed[] = { FILLED_ORDSTATUS, CANCELED_ORDSTATUS, REJECTED_ORDSTATUS, EXPIRED_ORDSTATUS,
+                                   REPLACED_ORDSTATUS };
+    const OrderStatus open[] = { NEW_ORDSTATUS, SUSPENDED_ORDSTATUS, DFD_ORDSTATUS, PENDINGREPLACE_ORDSTATUS };
+    const char *const keptFrom[] = { "", "2026-11-08T22:00:00Z", "2026-11-07T22:00:00Z", "2026-11-06T22:00:00Z" };
+    for (const u32 keep : { 1u, 2u, 3u, 0u })
+    {
+        std::filesystem::remove_all(dir_);
+        std::vector<Written> written;
+        {
+            LMDBStorage lmdb(MAP_SIZE);
+            StorageRecordDispatcher writer;
+            writer.init(WideDataStorage::instance(), nullptr, &lmdb, OrderStorage::instance());
+            lmdb.load(dir_, &writer);
+            WideDataStorage::instance()->bindStorage(&writer);
+            const SourceIdT instrument = test::addInstrument("KEEP");
+            u64 number = 0;
+            const auto save = [&](OrderStatus status, DateTimeT dayStart, DateTimeT created, int day)
+            {
+                const bool isClosed = std::find(std::begin(closed), std::end(closed), status) != std::end(closed);
+                const QuantityT leaves = (isClosed || (DFD_ORDSTATUS == status)) ? 0 : 100;
+                std::unique_ptr<OrderEntry> val = order(instrument, ++number, status, leaves);
+                val->dayStart_ = dayStart;
+                val->creationTime_ = created;
+                // Two versions, as a server leaves them (#148): a drop erases both
+                writer.save(*val);
+                writer.save(*val);
+                written.push_back(Written{ val->orderId_, val->clOrderId_.get(), isClosed, day });
+            };
+            for (int day = 0; day < 3; ++day)
+            {
+                for (const OrderStatus status : closed)
+                {
+                    save(status, days[day], days[day] + 1000, day);
+                }
+                for (const OrderStatus status : open)
+                {
+                    save(status, days[day], days[day] + 1000, day);
+                }
+            }
+            // Written before format 4 (#244), with no day: its creation's time stands for it
+            save(FILLED_ORDSTATUS, 0, days[1] + 3600000, 1);
+            save(CANCELED_ORDSTATUS, 0, days[2] + 3600000, 2);
+            // The largest number, on an order a start that keeps one or two days drops: no new order may take it
+            number = 999;
+            save(FILLED_ORDSTATUS, days[0], days[0] + 1000, 0);
+        }
+        const auto dropped = [&](const Written &w, u32 kept)
+        {
+            return (0 < kept) && w.closed_ && (w.day_ < 3 - static_cast<int>(kept));
+        };
+        restart();
+        {
+            test::CapturedLog log;
+            size_t expected = 0;
+            {
+                App::ServerData data = load(keep, now);
+                for (const Written &w : written)
+                {
+                    const bool drop = dropped(w, keep);
+                    expected += drop ? 1 : 0;
+                    EXPECT_EQ(drop, nullptr == OrderStorage::instance()->locateByOrderId(w.id_))
+                        << "keeping " << keep << " days, order " << w.id_.id_;
+                    EXPECT_EQ(drop, nullptr == OrderStorage::instance()->locateByClOrderId(w.clOrderId_))
+                        << "keeping " << keep << " days, order " << w.id_.id_ << "'s ClOrdID";
+                }
+                EXPECT_EQ(expected, data.droppedOrders) << "keeping " << keep << " days";
+                EXPECT_EQ(1000u, data.lastOrderNumber) << "keeping " << keep << " days";
+                EXPECT_GT(IdTGenerator::instance()->getId().id_, 1000u) << "keeping " << keep << " days";
+            }
+            const std::vector<std::string> lines = log.lines();
+            const std::string note = (0 < keep) ? "Dropped " + std::to_string(expected) +
+                                                      " closed orders of business days before " + keptFrom[keep] +
+                                                      " (--keep-closed-days " + std::to_string(keep) + ")"
+                                                : std::string("Dropped ");
+            EXPECT_EQ((0 < keep) ? 1 : 0, std::count_if(lines.begin(), lines.end(),
+                                                        [&](const std::string &line)
+                                                        {
+                                                            return std::string::npos != line.find(note);
+                                                        }))
+                << "keeping " << keep << " days: " << note;
+        }
+        // Erased: a start that keeps every order finds none of them
+        restart();
+        {
+            App::ServerData data = load(0, now);
+            EXPECT_EQ(0u, data.droppedOrders);
+            for (const Written &w : written)
+            {
+                EXPECT_EQ(dropped(w, keep), nullptr == OrderStorage::instance()->locateByOrderId(w.id_))
+                    << "after keeping " << keep << " days, order " << w.id_.id_;
+            }
+        }
+        restart();
     }
 }
