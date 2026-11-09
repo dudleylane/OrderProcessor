@@ -171,6 +171,14 @@ if(BUILD_TESTS)
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/ci-tested-tree.sh)
     set_tests_properties(CiTestedTreeDecides PROPERTIES SKIP_RETURN_CODE 77)
 
+    # The memory cap CI's test steps and the pre-push hook run ctest under (#607): a runaway is killed at the cap and
+    # named, the run goes on, and with no cap to be had the script refuses before running anything. It needs python3
+    # and a systemd user scope, as the script does: without them the test is skipped.
+    add_test(NAME MemoryCapStopsARunaway
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/MemoryCapTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/memory-cap.sh)
+    set_tests_properties(MemoryCapStopsARunaway PROPERTIES SKIP_RETURN_CODE 77)
+
     # The CPUs a pinned benchmark comparison watches, and the busiest of them (#406), against a made-up topology and
     # canned /proc/stat snapshots
     add_test(NAME CpuBusyDecides
