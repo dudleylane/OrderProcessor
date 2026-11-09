@@ -384,4 +384,17 @@ inline std::string_view toJsonString(AccountType t)
     return "INVALID";
 }
 
+inline AccountType accountTypeFromJson(std::string_view sv)
+{
+    if (sv == "PRINCIPAL")
+    {
+        return PRINCIPAL_ACCOUNTTYPE;
+    }
+    if (sv == "AGENCY")
+    {
+        return AGENCY_ACCOUNTTYPE;
+    }
+    return INVALID_ACCOUNTTYPE;
+}
+
 } // namespace COP

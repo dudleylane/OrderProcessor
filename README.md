@@ -105,7 +105,7 @@ cmake --build . -j$(nproc)
 - **Tests:** `build/orderProcessorTest`
 - **Benchmarks:** `build/orderProcessorBench`
 - **Server:** `build/orderProcessorServer` (WebSocket server)
-- **Seed Data:** `build/seedData` (test data generator)
+- **Seed Data:** `build/seedData` (test data, or your own reference data from a file)
 
 ---
 
@@ -118,7 +118,25 @@ cmake --build . -j$(nproc)
 ./build/orderProcessorServer --port 8080 --data-dir ./data
 ```
 
-Seed a new data directory first. Until then it has no instruments, accounts or clearing firm, and the server answers every order with an `error` (#161). `seedData` seeds test data, so don't run it on a directory in real use.
+Seed a new data directory first. Until then it has no instruments, accounts or clearing firm, and the server answers every order with an `error` (#161). `seedData` on its own seeds test data, so don't run it that way on a directory in real use: give it your own reference data with `--file`.
+
+**Your own reference data (#585).** `./build/seedData --data-dir ./data --file reference.json` loads a file's instruments, accounts and clearing firms, and none of the test set. The file is JSON, with each field named as `instrument_list` and `account_list` name it, and any section may be left out:
+
+```json
+{
+  "instruments": [
+    { "symbol": "AAPL", "securityId": "US0378331005", "securityIdSource": "ISIN" }
+  ],
+  "accounts": [
+    { "account": "TRADING-1", "firm": "Apex Capital", "type": "PRINCIPAL" }
+  ],
+  "clearingFirms": [
+    { "firm": "HOUSE-CLEARING" }
+  ]
+}
+```
+
+An account's `type` is `PRINCIPAL` or `AGENCY`. `seedData` checks the whole file before it writes anything: every field there, as a string, and not empty; each symbol, account and firm given once; and no key it doesn't know, since a misspelt one would drop its field without a word. It adds what isn't stored yet and skips what's stored with the fields the file gives it, so running it again is safe. It changes nothing that's stored: an entry stored with other fields refuses the file. A refused file writes nothing, and `seedData` exits 1, naming the entry and why. The server reads reference data only as it starts, so load the file with the server stopped. Its clearing firm and default account must be among what's loaded (`HOUSE-CLEARING` and `TRADING-1`, unless `--clearing-firm` and `--default-account` name others), and so must every account a `--ws-credentials` file names.
 
 Server options:
 
@@ -173,7 +191,7 @@ mkdir -p certs && openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN
 docker compose up --build -d
 ```
 
-The first `up` seeds the new data volume with test data, so the stack takes orders at once: the server's container runs `seedData --if-empty` before the server (#161).
+The first `up` seeds the new data volume with test data, so the stack takes orders at once: the server's container runs `seedData --if-empty` before the server (#161). To start with your own reference data instead, load it before the first `up`, as [docker/README.md](docker/README.md#seed-test-data) shows.
 
 This starts 3 services:
 
@@ -519,7 +537,7 @@ An order's time in force (#240):
 - A stop order's time in force applies when its stop releases it: a held `IOC` stop waits like any held stop.
 - **Business days (#244):** an order that rests past its business day, of any time in force but `DAY`, is restated at each day's start, 17:00 New York. Its day figures begin again, `dayOrderQty` at what it has left to trade and `dayCumQty` and `dayAvgPx` at 0, and its client gets an `execution_report` of type `RESTATED`, FIX's ExecType D, with the order as the restatement left it, even if a fill reaches the order before the report goes out (#441). A fill after the day's end counts in the new day, even before the order's restatement runs, and both sides of a trade count it in the same day. A restart restates, as it starts, an order whose day ended while the server was down.
 
-Every order clears through the server's clearing firm (`--clearing-firm`), and an order with no `account` goes to the server's default account (`--default-account`), or, under an identity (#225), to the identity's first account. `seedData` seeds both. If either is missing from the data directory, the server logs a warning at startup and answers each order that needs it with an `error` message.
+Every order clears through the server's clearing firm (`--clearing-firm`), and an order with no `account` goes to the server's default account (`--default-account`), or, under an identity (#225), to the identity's first account. `seedData`'s test set has both, and a file it loads with `--file` must have them, or the server must be started with options that name the file's (#585). If either is missing from the data directory, the server logs a warning at startup and answers each order that needs it with an `error` message.
 
 ### Key Data Types
 
