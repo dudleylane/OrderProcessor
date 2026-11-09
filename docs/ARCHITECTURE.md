@@ -619,8 +619,9 @@ The matcher has no minimum quantity. An order's `minQty_` is stored, persisted a
 │   • Add to NLinkedTree dependency graph                                  │
 │   • Mark objects as "in transaction"                                     │
 │   • Schedule execution                                                   │
-│   • The processor then clears the order's mark: a cancel or replace of   │
-│     the order can now be enqueued after this transaction (#83)           │
+│   • The processor then clears the order's mark: a cancel, a replace or   │
+│     a state change of the order, or a stop's release, can now be         │
+│     enqueued after this transaction (#83, #96, #223)                     │
 └──────────────────────────────────────────────────────────────────────────┘
        │
        ▼
