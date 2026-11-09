@@ -341,6 +341,66 @@ TEST_F(ServerDataTest, AnOrderWhoseDayEndedWhileTheServerWasDownIsRestatedAtOnce
     EXPECT_EQ(1u, expiry.pending()) << "today's order isn't restated until its day ends";
 }
 
+TEST_F(ServerDataTest, ARestoredOpgOrAtCloseOrderIsNamedInTheLogAndRestsAsBefore)
+{
+    // An order taken before #601 refused OPG and ATCLOSE keeps its time in force, and trades as a GTC order, as it did.
+    // The start names each live one, and sets the timers it set before: a restatement each, as for a GTC order.
+    const DateTimeT now = 1792022400000ULL + 9ULL * 60 * 60 * 1000; // 2026-10-15 09:00 UTC, 05:00 in New York
+    const DateTimeT hour = 60ULL * 60 * 1000;
+    SourceIdT instrument;
+    {
+        LMDBStorage lmdb(MAP_SIZE);
+        StorageRecordDispatcher writer;
+        writer.init(WideDataStorage::instance(), nullptr, &lmdb, OrderStorage::instance());
+        lmdb.load(dir_, &writer);
+        WideDataStorage::instance()->bindStorage(&writer);
+        instrument = test::addInstrument("AUCTIONS");
+        const auto save = [&](u64 number, TimeInForce tif, OrderStatus status, Side side, PriceT price)
+        {
+            std::unique_ptr<OrderEntry> val = order(instrument, number, status, (FILLED_ORDSTATUS == status) ? 0 : 100);
+            val->tif_ = tif;
+            val->side_ = side;
+            val->price_ = price;
+            val->creationTime_ = now - hour;
+            val->dayStart_ = Proc::ExpiryScheduler::dayStartOf(now - hour); // as the processor sets it (#244)
+            writer.save(*val);
+        };
+        save(1, OPG_TIF, NEW_ORDSTATUS, BUY_SIDE, 10.0);
+        save(2, ATCLOSE_TIF, NEW_ORDSTATUS, SELL_SIDE, 11.0);
+        save(3, OPG_TIF, FILLED_ORDSTATUS, BUY_SIDE, 10.0); // done: not named
+        save(4, GTC_TIF, NEW_ORDSTATUS, BUY_SIDE, 9.0);
+    }
+    restart();
+    test::CapturedLog log;
+    {
+        App::ServerData data = load();
+        EXPECT_EQ(IdT(1, 20261014), data.orderBook->getTop(instrument, BUY_SIDE));
+        EXPECT_EQ(IdT(2, 20261014), data.orderBook->getTop(instrument, SELL_SIDE));
+
+        ::testing::NiceMock<test::MockInQueues> queues;
+        Proc::ExpiryScheduler expiry(&queues,
+                                     [now]
+                                     {
+                                         return now;
+                                     });
+        EXPECT_EQ(3u, App::scheduleRestoredExpiries(*OrderStorage::instance(), &expiry)) << "a restatement each";
+        EXPECT_EQ(0u, expiry.fireDue());
+    }
+    const std::vector<std::string> lines = log.lines();
+    const auto count = [&](const std::string &text)
+    {
+        return std::count_if(lines.begin(), lines.end(),
+                             [&](const std::string &line)
+                             {
+                                 return std::string::npos != line.find(text);
+                             });
+    };
+    EXPECT_EQ(1, count("Order 1 is OPG, which the server no longer takes: it trades as a GTC order until it is filled "
+                       "or canceled, and a replace must give it another time in force (#601)"));
+    EXPECT_EQ(1, count("Order 2 is ATCLOSE, which the server no longer takes"));
+    EXPECT_EQ(2, count("(#601)")) << "only the two live orders are named";
+}
+
 TEST_F(ServerDataTest, ARecordOfATypeThisBuildDoesNotKnowStopsTheLoad)
 {
     // An unknown record type throws out of the load, and app/main.cpp exits with the reason (#203), rather than start
