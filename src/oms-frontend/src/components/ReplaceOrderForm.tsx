@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { OrderType, TimeInForce } from '../types/enums';
 import type { Order, ReplaceOrderRequest } from '../types';
-import { LATEST_EXPIRE_INPUT, LATEST_EXPIRE_TIME } from '../utils/constants';
+import { LATEST_EXPIRE_INPUT, LATEST_EXPIRE_TIME, TAKEN_TIFS } from '../utils/constants';
 
 interface ReplaceOrderFormProps {
   order: Order;
@@ -34,6 +34,9 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
   const [stopPx, setStopPx] = useState(String(order.stopPx));
   const [orderQty, setOrderQty] = useState(String(order.orderQty));
   const [tif, setTif] = useState<TimeInForce>(order.tif);
+  // The times in force the server takes, and the order's own if it was taken with one the server now refuses (#601),
+  // so that the form shows what the order has
+  const tifs = TAKEN_TIFS.includes(order.tif) ? TAKEN_TIFS : [order.tif, ...TAKEN_TIFS];
   // A GTD order's expiry, as a local date and time; the order's own if it is GTD (#240). It counts as changed only if
   // edited: the input holds minutes, and the order's time may not fall on one.
   const initialExpireAt = order.tif === TimeInForce.GTD ? toLocalInput(order.expireTime) : '';
@@ -62,6 +65,8 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
     problem = 'Quantity must be above 0';
   } else if (newQty <= order.cumQty) {
     problem = `Quantity must be above the ${order.cumQty} already filled`;
+  } else if (!TAKEN_TIFS.includes(tif)) {
+    problem = `The server no longer takes ${tif} orders: choose another time in force`;
   } else if (tif === TimeInForce.GTD && Number.isNaN(newExpireTime)) {
     problem = 'A GTD order needs an expiry';
   } else if (expireTimeChanged && newExpireTime <= Date.now()) {
@@ -145,7 +150,7 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
           onChange={e => setTif(e.target.value as TimeInForce)}
           className="bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm"
         >
-          {Object.values(TimeInForce).map(t => (
+          {tifs.map(t => (
             <option key={t} value={t}>{t}</option>
           ))}
         </select>

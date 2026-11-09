@@ -136,6 +136,15 @@ size_t App::scheduleRestoredExpiries(const Store::OrderDataStorage &storage, Pro
             Queues::TimerEvent::TimerType type = Queues::TimerEvent::INVALID_TIMER;
             const bool live = (NEW_ORDSTATUS == order.status_) || (PARTFILL_ORDSTATUS == order.status_) ||
                               (SUSPENDED_ORDSTATUS == order.status_);
+            // Taken before #601 refused it: no auction runs, so it trades as a GTC order, as it did. It has no timer.
+            if (live && ((OPG_TIF == order.tif_) || (ATCLOSE_TIF == order.tif_)))
+            {
+                aux::ExchLogger::instance()->warn(
+                    "Order " + std::to_string(order.orderId_.id_) + " is " +
+                    ((OPG_TIF == order.tif_) ? "OPG" : "ATCLOSE") +
+                    ", which the server no longer takes: it trades as a GTC order until it is filled or canceled, and "
+                    "a replace must give it another time in force (#601)");
+            }
             if (live && Proc::ExpiryScheduler::expiryOf(order, &when, &type))
             {
                 // Taken before #511 refused one: the timers wait for it with no deadline, so it never comes due

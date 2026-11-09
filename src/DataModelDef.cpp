@@ -388,6 +388,14 @@ bool OrderEntry::isValid(std::string *invalid) const
             *invalid = "Invalid value of the timeInForce!";
             return false;
         }
+        // No auction runs (#601): an OPG or ATCLOSE order rested and traded as a GTC one, all day and every day after,
+        // and nothing told its client. One stored before this still trades so, and the server names it as it starts.
+        if ((OPG_TIF == tif_) || (ATCLOSE_TIF == tif_))
+        {
+            *invalid = (OPG_TIF == tif_) ? "OPG orders aren't taken: no opening auction runs!"
+                                         : "ATCLOSE orders aren't taken: no closing auction runs!";
+            return false;
+        }
         // A GTD order expires at its expireTime_ (#240)
         if ((GTD_TIF == tif_) && (0 == expireTime_))
         {

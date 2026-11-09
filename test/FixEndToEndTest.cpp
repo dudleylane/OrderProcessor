@@ -12,6 +12,7 @@
 #ifdef BUILD_FIX
 
 // QuickFIX headers MUST come before any <flat_map> include (see FixGateway.h)
+#include <quickfix/fix50sp2/NewOrderMultileg.h>
 #include <quickfix/fix50sp2/NewOrderSingle.h>
 #include <quickfix/fix50sp2/OrderCancelRequest.h>
 #include <quickfix/FixValues.h>
@@ -425,6 +426,34 @@ protected:
         msg.set(FIX::Symbol("EURUSD"));
         msg.set(FIX::Price(price));
         msg.set(FIX::OrderQty(qty));
+        return msg;
+    }
+
+    /// An FX swap of EURUSD, a NewOrderMultileg (#527), built as FixGatewayTest's makeFxSwap builds one
+    FIX50SP2::NewOrderMultileg makeSwap(const std::string &clOrdId, char tif)
+    {
+        FIX50SP2::NewOrderMultileg msg;
+        msg.set(FIX::ClOrdID(clOrdId));
+        msg.set(FIX::Side(FIX::Side_BUY));
+        msg.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+        msg.set(FIX::OrdType(FIX::OrdType_FOREX_SWAP));
+        msg.set(FIX::Symbol("EURUSD"));
+        msg.set(FIX::OrderQty(1000000));
+        msg.set(FIX::TimeInForce(tif));
+        msg.set(FIX::Account("TESTACCT"));
+        msg.set(FIX::Currency("USD"));
+        FIX50SP2::NewOrderMultileg::NoLegs nearLeg;
+        nearLeg.set(FIX::LegSymbol("EURUSD"));
+        nearLeg.set(FIX::LegSide(FIX::Side_BUY));
+        nearLeg.set(FIX::LegPrice(1.0850));
+        nearLeg.set(FIX::LegSettlDate("20261015"));
+        msg.addGroup(nearLeg);
+        FIX50SP2::NewOrderMultileg::NoLegs farLeg;
+        farLeg.set(FIX::LegSymbol("EURUSD"));
+        farLeg.set(FIX::LegSide(FIX::Side_SELL));
+        farLeg.set(FIX::LegPrice(1.0880));
+        farLeg.set(FIX::LegSettlDate("20261115"));
+        msg.addGroup(farLeg);
         return msg;
     }
 
@@ -1355,6 +1384,74 @@ TEST_F(FixEndToEndTest, AnOrderOnASideTheBookDoesntHold_IsRejectedWithItsReason)
         EXPECT_EQ("Only BUY and SELL orders are traded!", textSentWith(*rejected, REJECT_EXECTYPE)) << "54=" << side;
         EXPECT_EQ("0", leavesSentWith(*rejected, REJECT_EXECTYPE)) << "54=" << side;
     }
+}
+
+TEST_F(FixEndToEndTest, AnOrderAtTheOpeningOrTheClose_IsRejectedWithItsReason)
+{
+    // No auction runs (#601). An order with TimeInForce (59) 2, which the gateway takes as OPG, or 7, ATCLOSE, rested
+    // and traded as a GTC one, all day and every day after. The engine now rejects it at its receive, a single or a
+    // swap, and the reject (150=8, 39=8) says why.
+    const std::pair<char, std::string> tifs[] = {
+        { FIX::TimeInForce_AT_THE_OPENING, "OPG orders aren't taken: no opening auction runs!" },
+        { FIX::TimeInForce_AT_THE_CLOSE, "ATCLOSE orders aren't taken: no closing auction runs!" },
+    };
+    for (const auto &[tif, reason] : tifs)
+    {
+        const std::string clOrdId = std::string("RJ-TIF-") + tif;
+        gateway_->onMessage(makeNOS(clOrdId, FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100, tif), fixSid_);
+        waitForProcessing();
+        OrderEntry *rejected = orderOf(clOrdId);
+        ASSERT_NE(nullptr, rejected) << "59=" << tif;
+        EXPECT_EQ(REJECTED_ORDSTATUS, rejected->status_) << "59=" << tif;
+        EXPECT_EQ((std::vector<ExecType>{ REJECT_EXECTYPE }), reportsOf(*rejected)) << "59=" << tif;
+        EXPECT_EQ(reason, textSentWith(*rejected, REJECT_EXECTYPE)) << "59=" << tif;
+        EXPECT_EQ("0", leavesSentWith(*rejected, REJECT_EXECTYPE)) << "59=" << tif;
+    }
+
+    // A swap's reject is the multileg security's, MultiLegReportingType (442) 3 (#529)
+    gateway_->onMessage(makeSwap("RJ-TIF-SWAP", FIX::TimeInForce_AT_THE_OPENING), fixSid_);
+    waitForProcessing();
+    OrderEntry *swap = orderOf("RJ-TIF-SWAP");
+    ASSERT_NE(nullptr, swap);
+    EXPECT_EQ(FXSWAP_ORDERTYPE, swap->ordType_);
+    EXPECT_EQ(REJECTED_ORDSTATUS, swap->status_);
+    EXPECT_EQ((std::vector<ExecType>{ REJECT_EXECTYPE }), reportsOf(*swap));
+    EXPECT_EQ("OPG orders aren't taken: no opening auction runs!", textSentWith(*swap, REJECT_EXECTYPE));
+    EXPECT_EQ("0", leavesSentWith(*swap, REJECT_EXECTYPE));
+    EXPECT_FALSE(orderBook_->getTop(instrId_, BUY_SIDE).isValid()) << "a refused order rests";
+}
+
+TEST_F(FixEndToEndTest, AReplaceAtTheClose_IsRefusedWithItsReason)
+{
+    // A replacement meets a new order's checks (#601): one that would be ATCLOSE is refused, to the session that sent
+    // the replace, with an OrderCancelReject (35=9) that says why, and the order is left as it was
+    gateway_->onMessage(
+        makeNOS("FIX-TIF-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100, FIX::TimeInForce_GOOD_TILL_CANCEL),
+        fixSid_);
+    waitForProcessing();
+    OrderEntry *original = orderOf("FIX-TIF-X");
+    ASSERT_NE(nullptr, original);
+    ASSERT_EQ(NEW_ORDSTATUS, original->status_);
+
+    FIX50SP2::OrderCancelReplaceRequest replace = makeReplace("FIX-TIF-X", "FIX-TIF-Y", FIX::Side_BUY, 1.0840, 100);
+    replace.set(FIX::TimeInForce(FIX::TimeInForce_AT_THE_CLOSE));
+    gateway_->onMessage(replace, fixSid_);
+    waitForProcessing();
+
+    const auto rejects = outQueues_->orderRejects();
+    ASSERT_EQ(1u, rejects.size());
+    EXPECT_TRUE(rejects[0].first.replacement_);
+    EXPECT_EQ(CancelRejectEvent::OTHER, rejects[0].first.refusal_);
+    EXPECT_EQ("Replace refused: ATCLOSE orders aren't taken: no closing auction runs!", rejects[0].first.reason_);
+    const FIX50SP2::OrderCancelReject sent =
+        FixGateway::buildReplaceReject(FixGateway::clientView(rejects[0].first, rejects[0].second),
+                                       std::to_string(original->orderId_.id_), FIX::OrdStatus_NEW);
+    EXPECT_EQ(std::to_string(FIX::CxlRejReason_OTHER), fieldOf(sent, FIX::FIELD::CxlRejReason));
+    EXPECT_EQ(rejects[0].first.reason_, fieldOf(sent, FIX::FIELD::Text));
+    EXPECT_EQ("FIX-TIF-Y", fieldOf(sent, FIX::FIELD::ClOrdID));
+    EXPECT_EQ(NEW_ORDSTATUS, original->status_);
+    EXPECT_EQ(GTC_TIF, original->tif_);
+    EXPECT_EQ(nullptr, orderOf("FIX-TIF-Y"));
 }
 
 } // anonymous namespace
