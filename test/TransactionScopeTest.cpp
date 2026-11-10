@@ -735,6 +735,54 @@ TEST_F(TransactionScopeTest, FindOperationGivesTheOperationOfItsTypeAndObject)
     EXPECT_EQ(nullptr, scope.findOperation(PERSIST_ORDER_TROPERATION, IdT(7, 1)));
 }
 
+// A transaction writes a record once (#148): a second version from it would erase the version its rollback falls back
+// to, and a rollback would leave the order nothing to restore. So the scope refuses a second persist of an order,
+// whoever builds it, before it takes the operation (#632).
+TEST_F(TransactionScopeTest, AScopeRefusesASecondPersistOfAnOrder)
+{
+    TransactionScope scope;
+    std::unique_ptr<Operation> persist(new NamedOperation(PERSIST_ORDER_TROPERATION, IdT(7, 1)));
+    scope.addOperationFirst(persist);
+    // Another operation of the order, and another order's persist, are taken
+    std::unique_ptr<Operation> report(new NamedOperation(CREATE_EXECREPORT_TROPERATION, IdT(7, 1)));
+    scope.addOperation(report);
+    std::unique_ptr<Operation> other(new NamedOperation(PERSIST_ORDER_TROPERATION, IdT(8, 1)));
+    scope.addOperationFirst(other);
+    ASSERT_EQ(3u, scope.operationCount());
+
+    std::unique_ptr<Operation> second(new NamedOperation(PERSIST_ORDER_TROPERATION, IdT(7, 1)));
+    try
+    {
+        scope.addOperationFirst(second);
+        ADD_FAILURE() << "a second persist of the order was taken first";
+    }
+    catch (const std::logic_error &ex)
+    {
+        EXPECT_STREQ("TransactionScope: a second PERSIST_ORDER_TROPERATION for 7 in one transaction (#148, #632)",
+                     ex.what());
+    }
+    EXPECT_THROW(scope.addOperation(second), std::logic_error) << "a second persist of the order was taken last";
+    EXPECT_NE(nullptr, second.get()) << "the refused persist isn't its caller's";
+    EXPECT_EQ(3u, scope.operationCount());
+}
+
+// An instrument's last trade is a record its writes prune as an order's are (#237, #148), so the scope refuses a second
+// persist of it too (#632)
+TEST_F(TransactionScopeTest, AScopeRefusesASecondPersistOfAnInstrumentsLastTrade)
+{
+    TransactionScope scope;
+    std::unique_ptr<Operation> lastTrade(new NamedOperation(PERSIST_LASTTRADE_TROPERATION, IdT(5, 2)));
+    scope.addOperationFirst(lastTrade);
+    std::unique_ptr<Operation> other(new NamedOperation(PERSIST_LASTTRADE_TROPERATION, IdT(6, 2)));
+    scope.addOperationFirst(other);
+
+    std::unique_ptr<Operation> second(new NamedOperation(PERSIST_LASTTRADE_TROPERATION, IdT(5, 2)));
+    EXPECT_THROW(scope.addOperationFirst(second), std::logic_error) << "a second persist of the last trade was taken";
+    EXPECT_THROW(scope.addOperation(second), std::logic_error) << "a second persist of the last trade was taken";
+    EXPECT_NE(nullptr, second.get()) << "the refused persist isn't its caller's";
+    EXPECT_EQ(2u, scope.operationCount());
+}
+
 } // namespace
 
 // =============================================================================

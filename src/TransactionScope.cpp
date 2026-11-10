@@ -93,6 +93,13 @@ std::string operationOf(const Operation &op, size_t pos, size_t count)
     return "its operation " + std::to_string(pos + 1) + " of " + std::to_string(count) + ", " +
            operationName(op.type()) + " for " + std::to_string(op.getObjectId().id_);
 }
+
+/// What a second persist of a record in one transaction is refused with (#632)
+[[noreturn]] void throwSecondPersist(const Operation &op)
+{
+    throw std::logic_error("TransactionScope: a second " + std::string(operationName(op.type())) + " for " +
+                           std::to_string(op.getObjectId().id_) + " in one transaction (#148, #632)");
+}
 } // namespace
 
 // Thread-local active scope for arena allocation
@@ -219,13 +226,29 @@ const TransactionId &TransactionScope::transactionId() const
     return id_;
 }
 
+void TransactionScope::refuseSecondPersist(const Operation &op) const
+{
+    // A transaction writes a record once (#148): LMDBStorage::update() keeps only the newest version it finds besides
+    // the one it writes, so a second version from the same transaction would erase the one its rollback falls back to,
+    // and a rollback would leave nothing to restore. So the scope refuses a second persist of an order, or of an
+    // instrument's last trade, whoever builds it (#632). Before it takes the operation: its caller still owns it.
+    const OperationType type = op.type();
+    if (((PERSIST_ORDER_TROPERATION == type) || (PERSIST_LASTTRADE_TROPERATION == type)) &&
+        (nullptr != findOperation(type, op.getObjectId()))) [[unlikely]]
+    {
+        throwSecondPersist(op);
+    }
+}
+
 void TransactionScope::addOperation(std::unique_ptr<Operation> &op)
 {
+    refuseSecondPersist(*op);
     operations_.push_back(op.release());
 }
 
 void TransactionScope::addOperationFirst(std::unique_ptr<Operation> &op)
 {
+    refuseSecondPersist(*op);
     operations_.insert(operations_.begin(), op.get());
     op.release();
     // Stage boundaries are indices into operations_, so every one of them moves along by one.

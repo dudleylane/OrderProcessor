@@ -103,6 +103,8 @@ public:
 private:
     /// Destroy an operation: calls destructor, frees memory only if heap-allocated.
     void destroyOperation(Operation *op) noexcept;
+    /// Throws std::logic_error if op persists a record this scope persists already (#632)
+    void refuseSecondPersist(const Operation &op) const;
     /// What executeTransaction() does once something threw: counts and logs the failure, then rolls back from the
     /// operation at pos to the first, each rollback on its own (#514). groupCall: the persists' group threw, as it
     /// began (pos 0) or committed (pos persists), not the operation at pos.
