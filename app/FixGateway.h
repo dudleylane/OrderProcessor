@@ -172,7 +172,11 @@ private:
     bool applySessionAccounts(const FIX::Message &msg, const FIX::SessionID &sid, std::string *account);
     /// The order a request from the session source names by ClOrdID (#71): the one stored under the session's key, or,
     /// failing that, the one stored under the ClOrdID alone if this session placed it, as an order stored before #71
-    /// was. Another session's order is not found.
+    /// was. Another session's order is not found. An order is found as soon as the engine stores it, before its first
+    /// report goes out, and as the engine's decisions leave it. An answer gives it as its last report left it, through
+    /// seenOf() or reportedStatus(), Pending New before the first, and never the figures a decision changes, which can
+    /// hold what no report has said nor made durable (#404). That is a convention, as OrderDataStorage's lookups state
+    /// (#628), so an answer that reads an order gets a FixtSessionTest case that holds a report back.
     OrderEntry *locateSessionOrder(const std::string &source, const std::string &clOrdId) const;
     /// What the gateway keeps of a new order or replacement it sent the engine, until the engine answers it (#380)
     struct Unanswered

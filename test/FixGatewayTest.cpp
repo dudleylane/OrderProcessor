@@ -4113,6 +4113,35 @@ TEST_F(FixtSessionTest, ARefusedReplaceGivesItsOriginalsStatusAsItsLastReportGav
     expectEverythingSentIsTaken();
 }
 
+TEST_F(FixtSessionTest, ARefusedReplaceOfAnOrderWhoseFirstReportIsntOutGivesItPendingNew)
+{
+    // The gateway finds an order as soon as the engine stores it, so a replace sent just after its order can find it
+    // before its first report is out (#404). A replace the gateway refuses itself, here for a ClOrdID in use, and one
+    // the engine refuses without the original's status give the original as Pending New, as a status answer does, and
+    // not New, as the engine booked it, which no report has said (#628).
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    x->orderQty_ = 100;
+    x->status_ = NEW_ORDSTATUS; // booked, its report not out
+    x->leavesQty_ = 100;
+    OrderEntry *other = saveOrderOf(sid_, "ORD-S");
+    setState(other, NEW_ORDSTATUS, 50, 0, 50);
+    receive(makeLimitReplace("ORD-X", "ORD-S")); // refused by the gateway: ORD-S is in use
+    engineRefuses(sid_, "ORD-R", "ORD-X");       // refused by the engine
+
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(2u, rejects.size()) << sentText();
+    for (const FIX::Message &reject : rejects)
+    {
+        EXPECT_EQ("ORD-X", fieldOf(reject, FIX::FIELD::OrigClOrdID));
+        EXPECT_EQ(std::to_string(x->orderId_.id_), fieldOf(reject, FIX::FIELD::OrderID));
+        EXPECT_EQ(std::string(1, FIX::OrdStatus_PENDING_NEW), fieldOf(reject, FIX::FIELD::OrdStatus))
+            << "the reject gives a status no report has said";
+    }
+    expectEverythingSentIsTaken();
+}
+
 TEST_F(FixtSessionTest, AReplaceTheEngineRefusesGivesItsOriginalAsTheEngineSawIt)
 {
     // The engine's refusal of a replace carries the original's status as the engine saw it when it refused (#74), which
