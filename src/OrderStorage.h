@@ -121,6 +121,14 @@ public:
     /// waitUntilBookingEnqueued() first, as Processor's cancel, replace and state change handlers do, and gets a
     /// ProcessorTest case that holds the order's mark open, as each of theirs has (#83, #625). An order found through
     /// the book was booked already.
+    ///
+    /// A lookup finds the order itself, as the engine's decisions leave it. A reader outside the transactions that
+    /// decide about it, such as a WebSocket session's order snapshot or the book's depth, gives it as its last report
+    /// left it: the fields set when it was stored, and published_ under the order's read lock. It never gives the
+    /// figures a decision changes, which can hold what no report has said nor made durable (#404). That is a
+    /// convention, as ruled on #628, so each such reader gets a test that holds a decision's report back and fails if
+    /// the reader gives the order as it is, as the snapshot's and the depth's do. A replace copies the whole order to
+    /// make its replacement, whose figures the engine decides anew.
     OrderEntry *locateByClOrderId(const RawDataEntry &clOrderId) const;
     OrderEntry *locateByOrderId(const IdT &orderId) const;
     /// The order with this number, the part of its id that clients see (#58). Null when no order has it, or when more
@@ -133,6 +141,10 @@ public:
     OrderEntry *save(const OrderEntry &order, IdTValueGenerator *idGenerator, PublishGuard *publishGuard = nullptr);
     void restore(OrderEntry *order);
 
+    /// Calls fn with each stored order, under the store's read lock. A reader outside a transaction gives each order
+    /// as the lookups above say, and its fn takes no order's lock: a replace holds its original's write lock while it
+    /// stores the replacement, which takes the store's, so an order's lock taken under the store's could deadlock with
+    /// it. The order snapshot gathers the orders here and reads each one under its own lock once this returns (#404).
     template <typename Fn> void forEachOrder(Fn &&fn) const
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
