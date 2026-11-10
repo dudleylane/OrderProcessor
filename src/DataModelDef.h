@@ -414,7 +414,8 @@ public:
     /// that persists and reports it runs after it, so the order itself can have what no report has said, nor made
     /// durable. Set under the order's write lock: by processEvent_GenerateExecution as each report goes out, after its
     /// transaction's persists have committed (#28, #163), and by OrderDataStorage::restore from the record. Read under
-    /// the read lock. Empty until the order's first report, and in a copy.
+    /// the read lock. Empty until the order's first report, and in a copy. Nothing makes a reader give this rather than
+    /// the order's own figures: that is a convention, stated at OrderDataStorage's lookups (#628).
     std::optional<OrderFigures> published_;
 
 private:
