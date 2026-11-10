@@ -2948,6 +2948,59 @@ TEST_F(ProcessorTest, AStopsReleaseIsDurableBeforeItsTriggeredReport)
     EXPECT_LT(released, triggered) << "the release was reported before it was durable";
 }
 
+namespace
+{
+/// Notes the status of each version of a stop order it saves
+class StopStatusLog final : public COP::OrderSaver
+{
+public:
+    explicit StopStatusLog(std::vector<OrderStatus> *log) : log_(log) {}
+
+    COP::u32 save(const COP::OrderEntry &order, const COP::OrderFigures &figures) override
+    {
+        if ((STOP_ORDERTYPE == order.ordType_) || (STOPLIMIT_ORDERTYPE == order.ordType_))
+        {
+            log_->push_back(figures.status_);
+        }
+        return version_++;
+    }
+    void erase(const COP::IdT &, COP::u32) override {}
+
+private:
+    std::vector<OrderStatus> *log_;
+    COP::u32 version_ = 0;
+};
+} // namespace
+
+TEST_F(ProcessorTest, ASecondReleaseOfAStopTheFirstFilledWritesNothing)
+{
+    // Two trades reach a STOP before its release runs. The first release fills it against the ask: the fill is decided
+    // as that release's transaction drains, and its own transaction, which persists it, runs after the second release.
+    // That one releases nothing, so it writes nothing. It wrote the order as it found it, FILLED by a transaction that
+    // hadn't run, which a crash could then lose (#532).
+    std::vector<OrderStatus> log;
+    StopStatusLog saver(&log);
+    OrderStorage::instance()->attach(&saver);
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const OrderEntry *ask = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
+    const OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+    log.clear();
+
+    transMgr_->keep_ = true;
+    for (int i = 0; i < 2; ++i)
+    {
+        inQueues_->push("test", OrderEvent(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5).release()));
+        engine.processor_.process();
+    }
+    transMgr_->keep_ = false;
+    transMgr_->runKept();
+
+    ASSERT_EQ(FILLED_ORDSTATUS, stop->status_);
+    EXPECT_EQ(80u, ask->leavesQty_);
+    EXPECT_EQ((std::vector<OrderStatus>{ NEW_ORDSTATUS, FILLED_ORDSTATUS }), log)
+        << "the stop's versions: its release's, NEW, then its fill's, FILLED, once, by the fill's own transaction";
+}
+
 TEST_F(ProcessorTest, AReplacedStopIsHeldAtItsNewStopPrice)
 {
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());

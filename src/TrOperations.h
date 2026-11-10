@@ -154,18 +154,21 @@ private:
     const OrderEntry &order_;
 };
 
+class ReleaseStopTrOperation;
+
 /// Writes the order to storage as part of the transaction that persists a decision about it (#20), with the figures the
-/// decision left it with (#411): a later decision, applied to the order before this runs, isn't in the record.
-/// Processor puts it first, ahead of the operations that publish the decision (#28). Rollback erases the version it
-/// wrote, which is why OrderSaver::save() returns one.
+/// decision left it with (#411): a later decision, applied to the order before this runs, isn't in the record. So
+/// every persist is handed a decision's figures, or the release whose figures it writes (#627). Processor puts it
+/// first, ahead of the operations that publish the decision (#28). Rollback erases the version it wrote, which is why
+/// OrderSaver::save() returns one.
 class PersistOrderTrOperation final : public Operation
 {
 public:
     /// Writes the figures given, those the decision left, taken when it was made
     PersistOrderTrOperation(const OrderEntry &order, const OrderFigures &decided);
-    /// Writes the order's figures as they are when this executes. For a transaction whose own operation decides as it
-    /// executes, ahead of this one: a stop's release (ReleaseStopDeferedEvent).
-    explicit PersistOrderTrOperation(const OrderEntry &order);
+    /// Writes the figures a stop's release took as it released the order, or nothing if it released nothing: the
+    /// release decides as it executes, ahead of this in the same transaction (ReleaseStopDeferedEvent; #532, #606)
+    PersistOrderTrOperation(const ReleaseStopTrOperation &release, const OrderEntry &order);
     ~PersistOrderTrOperation();
 
     /// A later decision in the same transaction: the record has what that one left (Processor::persistOrder())
@@ -179,6 +182,8 @@ private:
     PersistOrderTrOperation &operator=(const PersistOrderTrOperation &);
 
     const OrderEntry &order_;
+    /// The release whose figures this writes, or nullptr for those in decided_
+    const ReleaseStopTrOperation *release_;
     std::optional<OrderFigures> decided_;
     u32 version_;
     bool written_;
@@ -264,7 +269,8 @@ private:
 /// its instrument, so a cancel or replace of the order that came first has already taken it: if the order is no longer
 /// held and working, this does nothing. Otherwise the order leaves the stop book, is marked released, and is matched, a
 /// STOP as a market order and a STOPLIMIT as a limit order, which is then booked with what is left. Two trades can
-/// both reach a stop before its release runs; the second release finds it released and does nothing.
+/// both reach a stop before its release runs; the second release finds it released and does nothing. A release that
+/// releases the order takes the order's figures as it does, which its persist and its report carry (#411, #627).
 class ReleaseStopTrOperation final : public Operation
 {
 public:
@@ -273,23 +279,25 @@ public:
     void execute(const Context &cnxt) override;
     void rollback(const Context &cnxt) override;
 
-    /// Whether this release released the order when it executed
-    bool released() const
+    /// What this release left the order with, taken under the order's write lock as it released it, or nullptr if it
+    /// released nothing
+    const OrderFigures *decided() const
     {
-        return released_;
+        return decided_ ? &*decided_ : nullptr;
     }
 
 private:
     OrderEntry *order_;
     size_t eventCountBefore_ = 0;
-    bool released_ = false;
+    std::optional<OrderFigures> decided_;
     bool booked_ = false;
 };
 
 /// Reports a stop's release with a TRIGGERED execution report, FIX's ExecType L (#236). It follows the release and the
-/// persist that records it, so the order is durable before its client hears (#28). It reports only if the release
-/// released the order: a release that found the stop canceled, replaced, finished or already released reports nothing.
-/// The release's trades are reported after it, by their own transactions.
+/// persist that records it, so the order is durable before its client hears (#28), and carries the figures the release
+/// took, as the persist writes them (#627). It reports only if the release released the order: a release that found
+/// the stop canceled, replaced, finished or already released reports nothing. The release's trades are reported after
+/// it, by their own transactions.
 class ReportReleaseTrOperation final : public Operation
 {
 public:
