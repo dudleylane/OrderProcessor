@@ -55,7 +55,7 @@ public:
     Newest loadNewest(const IdT &id, std::vector<char> *buf) override;
     /// A thread's group (#163): between beginGroup() and commitGroup(), update() works out each record's new version and
     /// holds it, and commitGroup() writes them all in one transaction. The versions update() returns are the ones
-    /// written. A record may be updated once in a group: a transaction persists an order once.
+    /// written. A record may be updated once in a group: a transaction's scope persists a record once (#632).
     void beginGroup() override;
     void commitGroup() override;
     void abortGroup() noexcept override;
