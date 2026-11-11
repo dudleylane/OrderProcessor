@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # runner/job-started.sh: refuse a job that a fork's pull request started (#143), or that Dependabot started (#168).
 #
-# This repository's CI runs on a self-hosted runner, the maintainer's laptop, and its jobs
+# This repository's CI runs on self-hosted runners on the maintainer's laptop, and its jobs
 # run as the maintainer's user. The repository is public, so anyone can open a pull request
 # from a fork, and GitHub runs it once a maintainer approves the run (the approval policy is
 # all_external_contributors since 2026-10-12). Every workflow's jobs skip a fork's pull
@@ -23,8 +23,10 @@
 # re-run is refused too, since it replays the same payload. Since #340 Dependabot is off, as on QuickFIX's fork: no
 # .github/dependabot.yml and no alerts. The refusal stays, so that its branches don't run here if it's turned on again.
 #
-# Install it in the runner's directory, outside _work, and restart the runner when it is
-# idle, since the runner reads .env when it starts:
+# Install it in each runner's directory, outside _work: it reads the payload under its own
+# directory, so every runner needs a copy of its own (#736). Then restart that runner when it
+# is idle, since the runner reads .env when it starts. For the first runner, and likewise for
+# ~/actions-runner-orderprocessor-N and orderprocessor-runner-N.service:
 #   install -m 755 scripts/runner/job-started.sh ~/actions-runner-orderprocessor/job-started.sh
 #   echo "ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOME/actions-runner-orderprocessor/job-started.sh" \
 #     >> ~/actions-runner-orderprocessor/.env

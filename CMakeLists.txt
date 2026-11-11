@@ -163,6 +163,12 @@ if(BUILD_TESTS)
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/memory-cap.sh)
     set_tests_properties(MemoryCapStopsARunaway PROPERTIES SKIP_RETURN_CODE 77)
 
+    # The names CI's jobs give what they make in podman's store, against a made-up store (#736): one runner's cleanup
+    # removes its own leftovers and no other runner's, and a runner's name it can't vouch for is refused.
+    add_test(NAME CiNamesKeepRunnersApart
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/CiNamesTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/ci-names.sh)
+
     # The CPUs a pinned benchmark comparison watches, and the busiest of them (#406), against a made-up topology and
     # canned /proc/stat snapshots
     add_test(NAME CpuBusyDecides

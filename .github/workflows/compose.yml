@@ -1,6 +1,6 @@
 name: Compose Stack
 
-# A run takes about three minutes of the only runner, most of it building both images, which docker.yml's jobs build
+# A run takes about three minutes of a runner, most of it building both images, which docker.yml's jobs build
 # for every pull request anyway. So this runs when what only it covers changes, and weekly, for new base images (#140).
 on:
   # Pushes to the two long-lived branches, and pull requests into them: a pull request's branch runs once, for the
@@ -35,7 +35,7 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A few API calls: a hung one would hold the only runner until it is killed (#169)
+    # A few API calls: a hung one would hold its runner until it is killed (#169)
     timeout-minutes: 5
     # Read access to what it compares, and nothing else
     permissions:
@@ -62,8 +62,8 @@ jobs:
     # nginx frontend, and checks that they work together (#140).  The image
     # checks in docker.yml run each image alone.
     # scripts/check-compose-stack.sh says what it checks; run it locally the
-    # same way.  Like the image checks, it names what it makes after the run
-    # and removes it.
+    # same way.  Like the image checks, it names what it makes after this
+    # runner and the run (#736) and removes it.
     # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
     # A pull request can delete this line, so the runner's job-started hook,
     # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
@@ -77,28 +77,24 @@ jobs:
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A hung build or start would hold the only runner until it is killed (#59).
+    # A hung build or start would hold its runner until it is killed (#59).
     timeout-minutes: 30
-    env:
-      CHECK_NAME: orderprocessor-ci-${{ github.run_id }}-${{ github.run_attempt }}-stack
     steps:
       - uses: actions/checkout@v4
 
-      - name: Remove what an interrupted run left behind
-        # As in docker.yml: the host has powered off mid-job (#32), and jobs
-        # run one at a time here, so anything named orderprocessor-ci-*
-        # belongs to an earlier run.  podman-compose also makes a pod, named
-        # pod_<project>.
+      - name: Remove what an earlier job of this runner left behind
+        # As in docker.yml: the host has powered off mid-job (#32), and a
+        # runner runs one job at a time, so whatever bears this runner's
+        # prefix belongs to an earlier job of its own (#736).  podman-compose
+        # also makes a pod, named pod_<project>, which scripts/ci-names.sh
+        # removes too.
         shell: bash
-        run: |
-          stale() { grep -E '^(pod_)?orderprocessor-ci-' || true; }
-          podman pod ls --format '{{.Name}}' | stale | xargs -r podman pod rm -f
-          podman ps -a --format '{{.Names}}' | stale | xargs -r podman rm -f -t 0
-          podman volume ls --format '{{.Name}}' | stale | xargs -r podman volume rm -f
-          podman network ls --format '{{.Name}}' | stale | xargs -r podman network rm -f
-          podman images --format '{{.Repository}}' | sed 's|^localhost/||' | stale | sort -u \
-            | sed 's|^|localhost/|' | xargs -r podman rmi -f
+        run: scripts/ci-names.sh remove
 
       - name: Bring up the compose stack and check it
         shell: bash
-        run: scripts/check-compose-stack.sh
+        # Named for this runner and this run (#736)
+        run: |
+          CHECK_NAME="$(scripts/ci-names.sh prefix)$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-stack"
+          export CHECK_NAME
+          scripts/check-compose-stack.sh

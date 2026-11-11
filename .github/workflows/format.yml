@@ -19,7 +19,7 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A few API calls: a hung one would hold the only runner until it is killed (#169)
+    # A few API calls: a hung one would hold its runner until it is killed (#169)
     timeout-minutes: 5
     # Read access to what it compares, and nothing else
     permissions:
@@ -61,7 +61,7 @@ jobs:
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A hung step would hold the only runner for GitHub's six-hour default (#169). The job's last 25 successful runs, on
+    # A hung step would hold its runner for GitHub's six-hour default (#169). The job's last 25 successful runs, on
     # either branch to 2026-10-14, took 2.3 minutes at most.
     timeout-minutes: 10
     steps:
@@ -94,7 +94,7 @@ jobs:
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A hung pull would hold the only runner until it is killed (#59).  A run
+    # A hung pull would hold its runner until it is killed (#59).  A run
     # takes seconds once the images are in the store.
     timeout-minutes: 10
     steps:
