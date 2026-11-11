@@ -19,7 +19,7 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A few API calls: a hung one would hold the only runner until it is killed (#169)
+    # A few API calls: a hung one would hold its runner until it is killed (#169)
     timeout-minutes: 5
     # Read access to what it compares, and nothing else
     permissions:
@@ -44,11 +44,10 @@ jobs:
     name: ${{ matrix.sanitizer }}${{ matrix.allow_failure && ' (advisory)' || '' }}
     # Self-hosted runner on the dev box.  The toolchain CI used to
     # install via `dnf install -y gcc-toolset-15* tbb-devel ...` is
-    # already on this host (verified before the migration).  Matrix
-    # jobs serialise on a single self-hosted runner — they'll run
-    # sequentially rather than in parallel, so total wall-clock is the
-    # sum (asan_ubsan + tsan) rather than the max.  Acceptable trade
-    # for the budget.
+    # already on this host (verified before the migration).  The
+    # repository's runners run the matrix's jobs at once, beside the other
+    # workflows' jobs (#736): they share the host's CPU, so each builds
+    # slower than alone, and a run takes about as long as its longest job.
     # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
     # A pull request can delete this line, so the runner's job-started hook,
     # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
@@ -62,7 +61,7 @@ jobs:
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A hung step would hold the only runner for GitHub's six-hour default (#169). The jobs' last 25 successful runs, on
+    # A hung step would hold its runner for GitHub's six-hour default (#169). The jobs' last 25 successful runs, on
     # either branch to 2026-10-14, took 11.3 minutes at most; the rest is room for a loaded laptop and for building the
     # instrumented oneTBB on a cold cache.
     timeout-minutes: 60
@@ -136,6 +135,11 @@ jobs:
             exit 1
           fi
           PREFIX="$HOME/.cache/orderprocessor/onetbb-$TBB_VERSION-tsan-gcc$(g++ -dumpfullversion)"
+          # Another runner's TSan job may find the cache cold at the same time (#736): under the lock, the second waits
+          # for the first, and finds it built
+          mkdir -p "$(dirname "$PREFIX")"
+          exec 9> "$PREFIX.lock"
+          flock 9
           if [ ! -f "$PREFIX/lib64/cmake/TBB/TBBConfig.cmake" ]; then
             SRC=$(mktemp -d)
             git clone -q --depth 1 --branch "$TBB_VERSION" https://github.com/uxlfoundation/oneTBB.git "$SRC"
@@ -207,15 +211,16 @@ jobs:
 
       - name: Postgres write-behind tests, against a throwaway database
         # As build-test.yml runs them (#151), here under the sanitizer: the writer is the code that runs a thread of its
-        # own, and libpqxx's calls, uninstrumented, stay on it
+        # own, and libpqxx's calls, uninstrumented, stay on it. The database is named for this runner, as there (#736).
         shell: bash
         env:
           ASAN_OPTIONS: "abort_on_error=1:halt_on_error=1:detect_leaks=1"
           UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
           TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1"
         run: |
-          trap 'scripts/pg-for-tests.sh stop orderprocessor-ci-pg-${{ matrix.sanitizer }}' EXIT
-          PG_CONNECTION_STRING="$(scripts/pg-for-tests.sh start orderprocessor-ci-pg-${{ matrix.sanitizer }})"
+          pg="$(scripts/ci-names.sh prefix)pg-${{ matrix.sanitizer }}"
+          trap 'scripts/pg-for-tests.sh stop "$pg"' EXIT
+          PG_CONNECTION_STRING="$(scripts/pg-for-tests.sh start "$pg")"
           export PG_CONNECTION_STRING
           # Under the Test step's memory cap (#607); the database's container stays outside it
           scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 600 -j1 --no-tests=error \
