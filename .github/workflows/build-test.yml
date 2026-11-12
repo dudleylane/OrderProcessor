@@ -19,7 +19,7 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A few API calls: a hung one would hold the only runner until it is killed (#169)
+    # A few API calls: a hung one would hold its runner until it is killed (#169)
     timeout-minutes: 5
     # Read access to what it compares, and nothing else
     permissions:
@@ -60,7 +60,7 @@ jobs:
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A hung step would hold the only runner for GitHub's six-hour default (#169). The job's last 25 successful runs, on
+    # A hung step would hold its runner for GitHub's six-hour default (#169). The job's last 25 successful runs, on
     # either branch to 2026-10-14, took 7.5 minutes at most; the rest is room for a loaded laptop and for a FetchContent
     # clone on a cold cache.
     timeout-minutes: 45
@@ -93,6 +93,11 @@ jobs:
           REF="$(sed -n 's/^ARG QUICKFIX_REF=//p' docker/Dockerfile.oms-server | tr -d '\r')"
           [ -n "$REF" ] || { echo "::error::docker/Dockerfile.oms-server pins no QUICKFIX_REF (#178)"; exit 1; }
           PREFIX="$HOME/.cache/orderprocessor/quickfix-$REF-gcc$(g++ -dumpfullversion)"
+          # Another runner's FIX ON job may find the cache cold at the same time (#736): under the lock, the second
+          # waits for the first, and finds it built
+          mkdir -p "$(dirname "$PREFIX")"
+          exec 9> "$PREFIX.lock"
+          flock 9
           if [ ! -f "$PREFIX/quickfix-ref" ]; then
             rm -rf "${PREFIX:?}"
             scripts/build-quickfix.sh "$REF" "$PREFIX"
@@ -129,7 +134,7 @@ jobs:
         # Tests run in parallel: fixtures that touch the filesystem build
         # per-test-case paths (test::uniqueTestPath), so no two cases share
         # a file or directory.  --timeout turns a hung test into a failure
-        # instead of a job that holds the only runner until it is killed
+        # instead of a job that holds its runner until it is killed
         # (#59); the slowest test takes about 4 s alone.  Under a 4G
         # memory cap (#607): a test that runs away is killed at the cap
         # and named, and the rest run, before it can take down the
@@ -140,11 +145,13 @@ jobs:
 
       - name: Postgres write-behind tests, against a throwaway database
         # The step above built these and skipped them, for want of a database (#151). This starts one with the schema,
-        # in a container on a loopback port, and leaves the host's own PostgreSQL alone.
+        # in a container on a loopback port, and leaves the host's own PostgreSQL alone. It is named for this runner:
+        # another runner's job may have a database of its own up at the same time (#736).
         shell: bash
         run: |
-          trap 'scripts/pg-for-tests.sh stop orderprocessor-ci-pg-release' EXIT
-          PG_CONNECTION_STRING="$(scripts/pg-for-tests.sh start orderprocessor-ci-pg-release)"
+          pg="$(scripts/ci-names.sh prefix)pg-release"
+          trap 'scripts/pg-for-tests.sh stop "$pg"' EXIT
+          PG_CONNECTION_STRING="$(scripts/pg-for-tests.sh start "$pg")"
           export PG_CONNECTION_STRING
           # Under the Test step's memory cap (#607); the database's container stays outside it
           scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 300 --no-tests=error \

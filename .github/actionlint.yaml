@@ -1,5 +1,5 @@
 # actionlint's configuration (#174), which scripts/lint.sh passes to it
 self-hosted-runner:
-  # The label of this repository's self-hosted runner, the maintainer's laptop
+  # The label of this repository's self-hosted runners, on the maintainer's laptop (#736)
   labels:
     - orderprocessor-dev
