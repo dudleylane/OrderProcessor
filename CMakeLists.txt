@@ -31,6 +31,11 @@ option(BUILD_FUZZ "Build fuzz targets in test/fuzz (libFuzzer with Clang, corpus
 option(WARNINGS_AS_ERRORS "Fail the build on a warning in this project's own code; CI's Release job and the pre-push hook turn it on (#167)" OFF)
 set(MARCH "native" CACHE STRING
     "The CPU a Release build targets (-march): native, this machine's, or an ISA level such as x86-64-v3 for a binary that runs on other machines; the server image uses x86-64-v3 (#170)")
+set(LTO_JOBS "auto" CACHE STRING
+    "How many LTRANS jobs a Release build's link runs at once: auto, one per thread when there is no make job server to join, as under Ninja, or a positive number; a CI job gives its share of the host's threads (#738)")
+if(NOT LTO_JOBS STREQUAL "auto" AND NOT LTO_JOBS MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "LTO_JOBS is '${LTO_JOBS}', not auto or a positive number (#738)")
+endif()
 
 # Warnings for this project's own targets, which the FetchContent dependencies don't get: -Wall -Wextra, and -Werror with
 # WARNINGS_AS_ERRORS (#167)
@@ -53,13 +58,13 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebI
         -O3                    # Aggressive optimization
         -march=${MARCH}        # The target CPU's instructions: native by default (#170)
         -mtune=${MTUNE}        # Its scheduling
-        -flto=auto             # Link-time optimization, its LTRANS jobs in parallel: plain -flto warned of serial ones (#167)
+        -flto=${LTO_JOBS}      # Link-time optimization, LTO_JOBS LTRANS jobs at once (#738): plain -flto warned of serial ones (#167)
         -ffast-math            # Fast floating-point, but its -ffinite-math-only lets the compiler delete every
         -fno-finite-math-only  # inf/NaN check (#142: a price of 1e400 parsed as inf), so turn that part back off
         -funroll-loops         # Loop unrolling
         -fomit-frame-pointer   # Free up register for hot paths
     )
-    add_link_options(-flto=auto) # Enable LTO at link time
+    add_link_options(-flto=${LTO_JOBS}) # Enable LTO at link time, with LTO_JOBS LTRANS jobs at once (#738)
 endif()
 
 add_compile_definitions(
@@ -184,6 +189,11 @@ if(BUILD_TESTS)
     add_test(NAME CiNamesKeepRunnersApart
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/CiNamesTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/ci-names.sh)
+
+    # Each CI job's share of the host's threads (#738): the share scripts/ci-jobs.sh prints or refuses, and the
+    # workflows, the server image and the Release links, which must take it, read as they stand
+    add_test(NAME CiJobsTakeTheirShare
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/CiJobsTest.sh ${CMAKE_CURRENT_SOURCE_DIR})
 
     # The CPUs a pinned benchmark comparison watches, and the busiest of them (#406), against a made-up topology and
     # canned /proc/stat snapshots

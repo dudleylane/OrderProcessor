@@ -132,6 +132,7 @@ cmake --build . -j$(nproc)
 | `BUILD_FUZZ` | OFF | Build the `parseClientMessage` fuzz target (`docs/DEBUGGING.md`, Fuzzing) |
 | `WARNINGS_AS_ERRORS` | OFF | Fail the build on a warning in the project's own code; CI's Release job and the pre-push hook turn it on (#167) |
 | `MARCH` | `native` | The CPU a Release build targets (`-march`): `native`, this machine's, or an ISA level such as `x86-64-v3`. The server image builds for `x86-64-v3` (#170) |
+| `LTO_JOBS` | `auto` | How many LTRANS jobs a Release build's link runs at once (`-flto=`): `auto`, one per thread under Ninja, or a positive number. Each CI job gives its share of the host's threads (#738) |
 
 ### Build Outputs
 

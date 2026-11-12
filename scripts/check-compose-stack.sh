@@ -50,6 +50,10 @@
 #                  (default: orderprocessor-check-<pid>)
 #   START_TIMEOUT  seconds compose up, after the build, may take to start the stack and
 #                  the services to become healthy (default: 300)
+#   CI_BUILD_JOBS  how many compilers and LTRANS jobs the server image's builds run at
+#                  once, which its Dockerfile takes as JOBS (#738). Each CI runner's .env
+#                  gives it, since the runners run their jobs at once; unset, as by hand,
+#                  the builds take every thread.
 #
 # Exit codes: 0 = the stack came up and passed every check, 1 = it didn't,
 # 2 = usage or setup error
@@ -82,6 +86,13 @@ esac
 command -v podman >/dev/null 2>&1 || usage_error "podman is not installed"
 command -v podman-compose >/dev/null 2>&1 || usage_error "podman-compose is not installed"
 command -v openssl >/dev/null 2>&1 || usage_error "openssl is not installed"
+# In CI, the server image's builds take the job's share of the host's threads (#738). The frontend's Dockerfile has no
+# use for it, and podman warns that it went unused.
+JOBS_ARG=()
+if [[ -n "${CI_BUILD_JOBS:-}" ]]; then
+    jobs=$("$ROOT/scripts/ci-jobs.sh") || usage_error "CI_BUILD_JOBS '$CI_BUILD_JOBS' isn't a positive number"
+    JOBS_ARG=("--podman-build-args=--build-arg JOBS=$jobs")
+fi
 WORK="$(mktemp -d)"
 
 step() {
@@ -97,7 +108,7 @@ fail() {
 
 # podman-compose on the committed file plus this run's override. --layers=false and --pull=newer as in the image checks:
 # no intermediate images left in the store this user shares, and current base images.
-COMPOSE=(podman-compose "--podman-build-args=--layers=false --pull=newer" -p "$NAME"
+COMPOSE=(podman-compose "--podman-build-args=--layers=false --pull=newer" "${JOBS_ARG[@]}" -p "$NAME"
     -f docker/docker-compose.yml -f "$WORK/override.yml" --env-file "$WORK/env")
 
 # Prints the name of the container compose made for service $1
