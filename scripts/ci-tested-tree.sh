@@ -3,7 +3,7 @@
 # it decides whether the workflow's other jobs run.
 #
 # Pull requests are rebase-merged, so the push of a merge carries a tree that the pull request's own run of the same
-# workflow has already tested. Running every job again on it takes this repository's one runner for a full run and
+# workflow has already tested. Running every job again on it takes this repository's runners for a full run and
 # checks nothing new. So:
 #   - Every run records the tree it checked out: a notice annotation on this job, titled "Tested tree". A pull
 #     request's run checks out GitHub's merge of the pull request into its base, so it records that merge's tree, the

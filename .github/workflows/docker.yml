@@ -19,7 +19,7 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A few API calls: a hung one would hold the only runner until it is killed (#169)
+    # A few API calls: a hung one would hold its runner until it is killed (#169)
     timeout-minutes: 5
     # Read access to what it compares, and nothing else
     permissions:
@@ -46,10 +46,11 @@ jobs:
     # build on this host's own toolchain, so nothing else checks the image:
     # until #132 it couldn't build on either branch, with every check green.
     # scripts/check-server-image.sh says what it checks; run it locally the
-    # same way.  This runner runs as the same user as everything else on the
-    # dev box, so podman's storage is shared: the script names what it makes
-    # after the run and removes it, and builds with --layers=false so that
-    # no intermediate images are left behind.
+    # same way.  The runners run as the same user as everything else on the
+    # dev box, so podman's storage is shared, by jobs that run at once too:
+    # the script names what it makes after this runner and the run (#736)
+    # and removes it, and builds with --layers=false so that no intermediate
+    # images are left behind.
     # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
     # A pull request can delete this line, so the runner's job-started hook,
     # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
@@ -63,30 +64,27 @@ jobs:
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A hung build would hold the only runner until it is killed (#59).
+    # A hung build would hold its runner until it is killed (#59).
     timeout-minutes: 30
-    env:
-      CHECK_NAME: orderprocessor-ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Remove what an interrupted run left behind
-        # The host has powered off mid-job (#32), and a run that dies never
-        # cleans up.  Jobs run one at a time on this runner, so anything named
-        # orderprocessor-ci-* belongs to an earlier run.  The frontend image's
-        # check below makes a network (#139).
+      - name: Remove what an earlier job of this runner left behind
+        # The host has powered off mid-job (#32), and a job that dies never
+        # cleans up.  A runner runs one job at a time, so whatever bears this
+        # runner's prefix belongs to an earlier job of its own, and the other
+        # runners' jobs, which may be running beside this one, keep theirs
+        # (#736).  scripts/ci-names.sh says how.
         shell: bash
-        run: |
-          stale() { grep '^orderprocessor-ci-' || true; }
-          podman ps -a --format '{{.Names}}' | stale | xargs -r podman rm -f -t 0
-          podman volume ls --format '{{.Name}}' | stale | xargs -r podman volume rm -f
-          podman network ls --format '{{.Name}}' | stale | xargs -r podman network rm -f
-          podman images --format '{{.Repository}}' | sed 's|^localhost/||' | stale | sort -u \
-            | sed 's|^|localhost/|' | xargs -r podman rmi -f
+        run: scripts/ci-names.sh remove
 
       - name: Build the server image and run it
         shell: bash
-        run: scripts/check-server-image.sh
+        # Named for this runner and this run (#736)
+        run: |
+          CHECK_NAME="$(scripts/ci-names.sh prefix)$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          export CHECK_NAME
+          scripts/check-server-image.sh
 
   frontend-image:
     name: Frontend image build + run
@@ -96,7 +94,8 @@ jobs:
     # such as a wire-protocol type that app/JsonSerializer.cpp no longer
     # matches, turned no check red.  scripts/check-frontend-image.sh says
     # what it checks; run it locally the same way.  Like the server image's
-    # check, it names what it makes after the run and removes it.
+    # check, it names what it makes after this runner and the run and
+    # removes it.
     # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
     # A pull request can delete this line, so the runner's job-started hook,
     # scripts/runner/job-started.sh, refuses such a job as well. Pushes and
@@ -110,25 +109,21 @@ jobs:
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A hung npm ci would hold the only runner until it is killed (#59).  A
+    # A hung npm ci would hold its runner until it is killed (#59).  A
     # run took 20 seconds here on 2026-10-14, with the base images cached.
     timeout-minutes: 15
-    env:
-      CHECK_NAME: orderprocessor-ci-${{ github.run_id }}-${{ github.run_attempt }}-frontend
     steps:
       - uses: actions/checkout@v4
 
-      - name: Remove what an interrupted run left behind
+      - name: Remove what an earlier job of this runner left behind
         # As in server-image above.
         shell: bash
-        run: |
-          stale() { grep '^orderprocessor-ci-' || true; }
-          podman ps -a --format '{{.Names}}' | stale | xargs -r podman rm -f -t 0
-          podman volume ls --format '{{.Name}}' | stale | xargs -r podman volume rm -f
-          podman network ls --format '{{.Name}}' | stale | xargs -r podman network rm -f
-          podman images --format '{{.Repository}}' | sed 's|^localhost/||' | stale | sort -u \
-            | sed 's|^|localhost/|' | xargs -r podman rmi -f
+        run: scripts/ci-names.sh remove
 
       - name: Build the frontend image and run it
         shell: bash
-        run: scripts/check-frontend-image.sh
+        # Named for this runner and this run (#736)
+        run: |
+          CHECK_NAME="$(scripts/ci-names.sh prefix)$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-frontend"
+          export CHECK_NAME
+          scripts/check-frontend-image.sh
