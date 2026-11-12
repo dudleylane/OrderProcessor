@@ -146,7 +146,8 @@ jobs:
             cmake -S "$SRC" -B "$SRC/build" -G Ninja -DCMAKE_BUILD_TYPE=Debug \
               -DTBB_SANITIZE=thread -DTBB_TEST=OFF -DTBB_EXAMPLES=OFF -DTBB_STRICT=OFF \
               -DCMAKE_INSTALL_PREFIX="$PREFIX"
-            cmake --build "$SRC/build" -j"$(nproc)"
+            jobs=$(scripts/ci-jobs.sh) # the job's share of the host's threads, as in its build (#738)
+            cmake --build "$SRC/build" -j"$jobs"
             cmake --install "$SRC/build"
             rm -rf "$SRC"
           fi
@@ -177,8 +178,13 @@ jobs:
             -DCMAKE_SHARED_LINKER_FLAGS="${{ matrix.ldflags }}"
 
       - name: Build
+        # With the job's share of the host's threads (#738): the runners run their jobs at once, and #739's four
+        # sanitizer builds, each with every thread, held the runners' slice over its memory limit until GitHub gave
+        # their jobs up (#740). scripts/ci-jobs.sh takes the share from CI_BUILD_JOBS, which each runner's .env gives.
         shell: bash
-        run: cmake --build build -j"$(nproc)"
+        run: |
+          jobs=$(scripts/ci-jobs.sh)
+          cmake --build build -j"$jobs"
 
       - name: Check the tests load the instrumented oneTBB
         # The instrumented library is libtbb_debug.so.12; if the binary

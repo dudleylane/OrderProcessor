@@ -18,6 +18,10 @@ RUN dnf install -y epel-release 'dnf-command(config-manager)' \
 ENV PATH=/opt/rh/gcc-toolset-15/root/usr/bin:$PATH \
     CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++
 
+# How many compilers and LTRANS jobs the builds below run at once. Empty, as by default, they take every thread; CI's
+# image and stack checks give a job's share of the host's threads (#738), since its runners run their jobs at once.
+ARG JOBS=
+
 # libpqxx, PostgreSQL's C++ client, for the Postgres write-behind (#151). Neither CentOS nor EPEL packages it, so it is
 # built from its source at a release: the one CI's host has, from PostgreSQL's own repository (PGDG).
 ARG LIBPQXX_REF=8.0.2
@@ -26,7 +30,7 @@ RUN dnf install -y libpq-devel && dnf clean all \
     && git clone --depth 1 --branch "$LIBPQXX_REF" https://github.com/jtv/libpqxx.git /tmp/libpqxx \
     && cmake -S /tmp/libpqxx -B /tmp/libpqxx/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
         -DSKIP_BUILD_TEST=ON -DBUILD_DOC=OFF -DCMAKE_INSTALL_PREFIX=/usr/local \
-    && cmake --build /tmp/libpqxx/build -j"$(nproc)" \
+    && cmake --build /tmp/libpqxx/build -j"${JOBS:-$(nproc)}" \
     && cmake --install /tmp/libpqxx/build \
     && rm -rf /tmp/libpqxx
 ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig
@@ -38,9 +42,9 @@ COPY app/ app/
 
 # x86-64-v3, not -march=native (#170): native tied the image to the build machine's CPU. v3 is what CentOS Stream 10
 # itself is built for, so the image asks no more of a host's CPU than its base image does.
-RUN cmake -B out -DCMAKE_BUILD_TYPE=Release -DMARCH=x86-64-v3 \
+RUN cmake -B out -DCMAKE_BUILD_TYPE=Release -DMARCH=x86-64-v3 -DLTO_JOBS="${JOBS:-auto}" \
         -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_APP=ON -DBUILD_PG=ON \
-    && cmake --build out -j"$(nproc)"
+    && cmake --build out -j"${JOBS:-$(nproc)}"
 
 # --- runtime stage ---
 FROM quay.io/centos/centos:stream10

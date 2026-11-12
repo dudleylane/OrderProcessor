@@ -75,19 +75,27 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure
+        # A link's LTRANS jobs take the job's share of the host's threads, as its build and its tests do (#738)
         shell: bash
         run: |
+          jobs=$(scripts/ci-jobs.sh)
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTS=ON \
             -DBUILD_BENCHMARKS=ON \
             -DBUILD_APP=ON \
             -DBUILD_PG=ON \
-            -DWARNINGS_AS_ERRORS=ON
+            -DWARNINGS_AS_ERRORS=ON \
+            -DLTO_JOBS="$jobs"
 
       - name: Build
+        # With the job's share of the host's threads (#738): the runners run their jobs at once, and builds that each
+        # took every thread held the runners' slice over its memory limit until GitHub gave their jobs up (#740).
+        # scripts/ci-jobs.sh takes the share from CI_BUILD_JOBS, which each runner's .env gives.
         shell: bash
-        run: cmake --build build -j"$(nproc)"
+        run: |
+          jobs=$(scripts/ci-jobs.sh)
+          cmake --build build -j"$jobs"
 
       - name: Test
         # Tests run in parallel: fixtures that touch the filesystem build
@@ -98,9 +106,12 @@ jobs:
         # memory cap (#607): a test that runs away is killed at the cap
         # and named, and the rest run, before it can take down the
         # laptop the runners share.  The larger suite, FX's with the
-        # gateway, peaks at about 0.5 GiB here.
+        # gateway, peaks at about 0.5 GiB here.  As many run at once as
+        # the job's share of the host's threads, as in its build (#738).
         shell: bash
-        run: scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 300 -j"$(nproc)"
+        run: |
+          jobs=$(scripts/ci-jobs.sh)
+          scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 300 -j"$jobs"
 
       - name: Postgres write-behind tests, against a throwaway database
         # The step above built these and skipped them, for want of a database (#151). This starts one with the schema,

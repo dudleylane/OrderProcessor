@@ -30,8 +30,11 @@
 #   install -m 755 scripts/runner/job-started.sh ~/actions-runner-orderprocessor/job-started.sh
 #   echo "ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOME/actions-runner-orderprocessor/job-started.sh" \
 #     >> ~/actions-runner-orderprocessor/.env
+#   echo "CI_BUILD_JOBS=2" >> ~/actions-runner-orderprocessor/.env
 #   systemctl --user restart orderprocessor-runner.service
-# Every job's log then shows this hook's verdict before the job's first step.
+# Every job's log then shows this hook's verdict before the job's first step. CI_BUILD_JOBS isn't the hook's: it is
+# each job's share of the host's threads for its builds and tests, the host's 8 divided by its four runners (#738),
+# which scripts/ci-jobs.sh reads. Reinstalling a runner drops both lines.
 #
 # Exit status: 0 runs the job, 1 refuses it.
 
