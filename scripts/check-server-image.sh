@@ -47,6 +47,10 @@
 #   CHECK_NAME     names the image (localhost/$CHECK_NAME), the container and the
 #                  volume (default: orderprocessor-check-<pid>)
 #   START_TIMEOUT  seconds the server may take to listen on every port (default: 60)
+#   CI_BUILD_JOBS  how many compilers and LTRANS jobs the image's builds run at once,
+#                  which the Dockerfile takes as JOBS (#738). Each CI runner's .env gives
+#                  it, since the runners run their jobs at once; unset, as by hand, the
+#                  builds take every thread.
 #
 # Exit codes: 0 = the image built and passed every check, 1 = it didn't,
 # 2 = usage or setup error
@@ -74,6 +78,12 @@ esac
 [[ "$NAME" =~ ^[a-z0-9][a-z0-9_.-]*$ ]] || usage_error "CHECK_NAME '$NAME' isn't a valid image name"
 [[ "$START_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || usage_error "START_TIMEOUT '$START_TIMEOUT' isn't a positive number"
 command -v podman >/dev/null 2>&1 || usage_error "podman is not installed"
+# In CI, the image's builds take the job's share of the host's threads (#738)
+BUILD_ARGS=()
+if [[ -n "${CI_BUILD_JOBS:-}" ]]; then
+    jobs=$("$ROOT/scripts/ci-jobs.sh") || usage_error "CI_BUILD_JOBS '$CI_BUILD_JOBS' isn't a positive number"
+    BUILD_ARGS=(--build-arg "JOBS=$jobs")
+fi
 WORK="$(mktemp -d)"
 
 step() {
@@ -121,7 +131,8 @@ step "build $IMAGE from docker/Dockerfile.oms-server ($(podman --version))"
 # store it shares with everything else this user runs, and every run installs current
 # packages. --pull=newer refreshes the base image, and uses the local copy when the
 # registry can't be reached. --format docker keeps the HEALTHCHECK, which OCI drops.
-podman build --layers=false --pull=newer --format docker -f docker/Dockerfile.oms-server -t "$IMAGE" . \
+podman build --layers=false --pull=newer --format docker "${BUILD_ARGS[@]}" \
+    -f docker/Dockerfile.oms-server -t "$IMAGE" . \
     || fail "the image didn't build"
 build_seconds=$SECONDS
 
