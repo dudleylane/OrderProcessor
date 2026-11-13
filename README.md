@@ -640,7 +640,7 @@ OrderProcessor/
 ├── scripts/                # Tooling
 │   ├── benchmark-regression.sh  # Before/after benchmark comparison
 │   ├── loop-instructions.sh     # Instructions per iteration in each per-order benchmark's timed span (#503)
-│   └── memory-cap.sh            # Runs a command under a memory cap, as CI's test steps and the hook run ctest (#607)
+│   └── memory-cap.sh            # Runs a command under a memory cap, as CI's builds and tests and the hook's ctest run (#607, #740)
 ├── docs/                   # Architecture documentation
 │   └── ARCHITECTURE.md     # Comprehensive architecture document
 ├── CMakeLists.txt          # Root build configuration
