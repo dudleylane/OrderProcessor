@@ -365,8 +365,8 @@ int LMDBStorage::writeVersion(MDB_txn *txn, const IdT &id, const char *buf, size
     // The newest stays: the transaction writing the new version may still roll it back, and erase(id, version) then
     // removes only that one, leaving the newest before it to restore. Every version older than that one is final,
     // because the transactions that persist an order run one after another (TransactionMgr orders transactions that
-    // share an object, and a persist operation's object is its order), and Processor::persistOrder() persists an order
-    // once per transaction.
+    // share an object, and a persist operation's object is its order), and a transaction writes a record once: its
+    // scope refuses a second persist of one (#632).
     if (found)
     {
         MDB_cursor *cursor = nullptr;

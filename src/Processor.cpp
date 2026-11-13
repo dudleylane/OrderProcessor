@@ -489,8 +489,9 @@ void Processor::persistOrder(ACID::Scope *transaction, const OrderEntry &order)
     // transaction can run after a later decision about the order was applied (#411)
     const OrderFigures decided(order);
     // Once per transaction (#148): LMDBStorage::update() keeps only the newest version it finds besides the one it
-    // writes, so two versions of the order from one transaction would leave nothing to restore if it rolled back. A
-    // later decision in the transaction goes to the operation the first made.
+    // writes, so two versions of the order from one transaction would leave nothing to restore if it rolled back, and
+    // the scope refuses a second persist (#632). A later decision in the transaction goes to the operation the first
+    // made.
     if (ACID::Operation *persist = transaction->findOperation(ACID::PERSIST_ORDER_TROPERATION, order.orderId_))
     {
         static_cast<ACID::PersistOrderTrOperation *>(persist)->decided(decided);
