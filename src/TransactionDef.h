@@ -189,11 +189,15 @@ class Scope
 public:
     ~Scope() {}
 
-    /// add operation into the transaction
+    /// add operation into the transaction. TransactionScope refuses a second persist of a record, an order or an
+    /// instrument's last trade, with std::logic_error, and op stays the caller's (#632): LMDBStorage::update() keeps
+    /// only the newest version it finds besides the one it writes (#148), so two versions from one transaction would
+    /// leave nothing to restore if it rolled back.
     virtual void addOperation(std::unique_ptr<Operation> &op) = 0;
 
     /// add operation at the front, so it executes before every operation added so far. Persisting
-    /// uses this: an execution report must not reach a client before the order is durable (#28).
+    /// uses this: an execution report must not reach a client before the order is durable (#28). A second persist of a
+    /// record is refused as addOperation() refuses it.
     virtual void addOperationFirst(std::unique_ptr<Operation> &op) = 0;
 
     /// removes last operation from transaction scope
@@ -207,8 +211,8 @@ public:
     virtual void removeStage(const size_t &id) = 0;
 
     /// The scope's operation of this type on this object, or nullptr. Processor persists an order once per scope with
-    /// it, which LMDBStorage::update()'s pruning relies on (#148), giving a later decision in the scope to the operation
-    /// the first made (#411).
+    /// it, which LMDBStorage::update()'s pruning relies on (#148) and the scope's adds hold (#632), giving a later
+    /// decision in the scope to the operation the first made (#411).
     virtual Operation *findOperation(OperationType type, const IdT &id) const = 0;
 
     /// true if the scope holds an operation of this type on this object

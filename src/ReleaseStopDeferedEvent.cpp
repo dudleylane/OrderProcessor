@@ -40,7 +40,7 @@ void ReleaseStopDeferedEvent::execute(DeferedEventFunctor * /*func*/, const Cont
     // After the release, not first as Processor::persistOrder() puts it: the release decides as it executes, so this
     // writes the figures it took as it released the order, or nothing if it released nothing. The order may then hold a
     // decision whose own transaction hasn't run, which only that transaction writes (#532, #606). The release publishes
-    // nothing itself.
+    // nothing itself. This is the transaction's one persist of the order: the scope refuses a second (#148, #632).
     std::unique_ptr<Operation> persist(new PersistOrderTrOperation(decided, *order_));
     scope->addOperation(persist);
     // Then the TRIGGERED report, once the order is durable (#28, #236)
