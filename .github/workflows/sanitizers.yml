@@ -147,7 +147,7 @@ jobs:
               -DTBB_SANITIZE=thread -DTBB_TEST=OFF -DTBB_EXAMPLES=OFF -DTBB_STRICT=OFF \
               -DCMAKE_INSTALL_PREFIX="$PREFIX"
             jobs=$(scripts/ci-jobs.sh) # the job's share of the host's threads, as in its build (#738)
-            cmake --build "$SRC/build" -j"$jobs"
+            scripts/memory-cap.sh 8G cmake --build "$SRC/build" -j"$jobs" # under the job's build's cap (#740)
             cmake --install "$SRC/build"
             rm -rf "$SRC"
           fi
@@ -181,10 +181,13 @@ jobs:
         # With the job's share of the host's threads (#738): the runners run their jobs at once, and #739's four
         # sanitizer builds, each with every thread, held the runners' slice over its memory limit until GitHub gave
         # their jobs up (#740). scripts/ci-jobs.sh takes the share from CI_BUILD_JOBS, which each runner's .env gives.
+        # Under scripts/memory-cap.sh's 8G cap, in the jobs' slice that MEMORY_CAP_SLICE in the runner's .env names,
+        # outside the runners' own slice (#740): a build that runs away is killed and named there, and doesn't stall
+        # the runners. 8G holds asan_ubsan's 5.5 GiB at a share of 2, with room; measure again for another share.
         shell: bash
         run: |
           jobs=$(scripts/ci-jobs.sh)
-          cmake --build build -j"$jobs"
+          scripts/memory-cap.sh 8G cmake --build build -j"$jobs"
 
       - name: Check the tests load the instrumented oneTBB
         # The instrumented library is libtbb_debug.so.12; if the binary
