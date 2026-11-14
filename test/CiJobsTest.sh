@@ -56,10 +56,12 @@ check "every step that takes the share asks the script for it" "" "$(awk '
     /^ *jobs=\$\(scripts\/ci-jobs\.sh\)/ { asks = 1 }
     ENDFILE { end_step() }
 ' "${workflows[@]}")"
-# QuickFIX's builds take it too: scripts/build-quickfix.sh takes every thread unless it is given JOBS
+# QuickFIX's builds take it too: scripts/build-quickfix.sh takes every thread unless it is given JOBS, which reaches it
+# through memory-cap.sh's scope where the build runs under its cap (#740)
 quickfix=$(grep -n 'build-quickfix\.sh "' "${workflows[@]}")
 check "the workflows build QuickFIX" yes "$([[ -n "$quickfix" ]] && echo yes)"
-check "and each build of it takes the share" "" "$(grep -vF 'JOBS="$jobs" scripts/build-quickfix.sh' <<< "$quickfix")"
+check "and each build of it takes the share" "" \
+    "$(grep -vE 'JOBS="\$jobs" (scripts/memory-cap\.sh [^ ]+ )?scripts/build-quickfix\.sh' <<< "$quickfix")"
 # Every Release configure gives its links' LTRANS jobs the share
 releases=$(cat "${workflows[@]}" | grep -c -- '-DCMAKE_BUILD_TYPE=Release')
 check "the workflows configure a Release build" yes "$( (( releases > 0 )) && echo yes)"

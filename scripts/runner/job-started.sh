@@ -31,10 +31,16 @@
 #   echo "ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOME/actions-runner-orderprocessor/job-started.sh" \
 #     >> ~/actions-runner-orderprocessor/.env
 #   echo "CI_BUILD_JOBS=2" >> ~/actions-runner-orderprocessor/.env
+#   echo "MEMORY_CAP_SLICE=orderprocessor-jobs.slice" >> ~/actions-runner-orderprocessor/.env
 #   systemctl --user restart orderprocessor-runner.service
 # Every job's log then shows this hook's verdict before the job's first step. CI_BUILD_JOBS isn't the hook's: it is
 # each job's share of the host's threads for its builds and tests, the host's 8 divided by its four runners (#738),
-# which scripts/ci-jobs.sh reads. Reinstalling a runner drops both lines.
+# which scripts/ci-jobs.sh reads. Nor is MEMORY_CAP_SLICE: it names the slice scripts/memory-cap.sh puts each job's
+# builds and tests in (#740), beside the runners' own slice. The host makes it once, with a limit and no swap, which
+# the script requires, before any runner's .env names it:
+#   printf '[Slice]\nMemoryMax=20G\nMemorySwapMax=0\n' > ~/.config/systemd/user/orderprocessor-jobs.slice
+#   systemctl --user daemon-reload
+# Reinstalling a runner drops the three lines.
 #
 # Exit status: 0 runs the job, 1 refuses it.
 
