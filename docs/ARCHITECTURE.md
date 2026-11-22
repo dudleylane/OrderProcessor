@@ -1131,7 +1131,12 @@ A failure stops nothing else: the caller goes on as if the event had been handle
    │     Storage's rwLock_), never a store's and then an order's: a        │
    │     replace holds its original's write lock while it stores the       │
    │     replacement, so a reader outside a transaction reads each order   │
-   │     only after it has released the store's (#404).                    │
+   │     only after it has released the store's (#404). The exception:     │
+   │     save() locks a new order's clone under orderRwLock_ before        │
+   │     publishing it, when no other thread can reach it (#13).           │
+   │   • The two stores: orderRwLock_ before rwLock_, which save() takes   │
+   │     for the ClOrdID's string. Nothing is locked under rwLock_, and    │
+   │     reference data is persisted once it is released.                  │
    │   • A book side's lock (buyLock_, sellLock_, stopLock_) and an        │
    │     order's: inside an instrument's chain both orders occur. The      │
    │     matcher reads a contra order under its side's lock, and a         │
@@ -1139,7 +1144,8 @@ A failure stops nothing else: the caller goes on as if the event had been handle
    │     takes it out of the book; the chain runs them one at a time.      │
    │     Outside the chain, never hold a book lock and an order's at       │
    │     once (#525).                                                      │
-   │   • LMDBStorage's txnLock_: alone, around one LMDB transaction.       │
+   │   • LMDBStorage's txnLock_: last, around one LMDB transaction;        │
+   │     no other lock of the engine's is taken under it.                  │
    │   • The incoming queue takes no lock to push or pop.                  │
    └───────────────────────────────────────────────────────────────────────┘
 
