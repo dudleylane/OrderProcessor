@@ -88,6 +88,9 @@ jobs:
           - sanitizer: asan_ubsan
             cxxflags: "-fsanitize=address,undefined,float-cast-overflow -fno-omit-frame-pointer -g"
             ldflags: "-fsanitize=address,undefined,float-cast-overflow"
+            # -Werror, as the Release job builds (#559): a Debug build, so it sees what NDEBUG strips from Release,
+            # such as code inside assert()
+            werror: "ON"
             allow_failure: false
             # This job also builds the benchmarks and the fuzz target (#155): it runs every benchmark once, and ctest
             # replays the fuzz corpus. Nothing else in CI runs either; BM_TaskManagerThroughput aborted in every Debug
@@ -113,6 +116,10 @@ jobs:
           - sanitizer: tsan
             cxxflags: "-fsanitize=thread -fno-omit-frame-pointer -g"
             ldflags: "-fsanitize=thread"
+            # No -Werror: GCC warns (-Wtsan) at each std::atomic_thread_fence that library headers inline, such as
+            # Boost.Asio's std_fenced_block, since TSan can't model a standalone fence (#608). The asan_ubsan job
+            # builds the same sources as a Debug build with -Werror (#559).
+            werror: "OFF"
             allow_failure: false
             extras: "OFF"
     env:
@@ -205,9 +212,12 @@ jobs:
           if [ -n "${TBB_TSAN_PREFIX:-}" ]; then
             TBB_PREFIX_ARG=(-DCMAKE_PREFIX_PATH="$TBB_TSAN_PREFIX")
           fi
+          # WARNINGS_AS_ERRORS as the matrix gives it (#559): a warning only a Debug build sees, such as one in code
+          # inside assert(), which NDEBUG strips from Release, had failed nothing
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DBUILD_FIX=${{ matrix.fix }} \
+            -DWARNINGS_AS_ERRORS=${{ matrix.werror }} \
             -DBUILD_TESTS=ON \
             -DBUILD_BENCHMARKS=${{ matrix.extras }} \
             -DBUILD_FUZZ=${{ matrix.extras }} \
