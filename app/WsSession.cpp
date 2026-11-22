@@ -91,6 +91,11 @@ WsSession::~WsSession()
 
 void WsSession::run()
 {
+    // Nagle's algorithm off (#653). Each message is a write of its own and most are small, so the second of a fill's
+    // two, the execution report's order update, waited for the client's delayed ACK of the first: 40 ms on Linux, up to
+    // 200 ms on Windows. FIX's sessions set SocketNodelay. A socket that refuses it still serves, as before.
+    beast::error_code noDelay;
+    beast::get_lowest_layer(ws_).socket().set_option(tcp::no_delay(true), noDelay);
     // A client that connects and sends nothing is dropped, as the WebSocket's own timeouts drop one later: in 5 s,
     // where it was 30, since such a connection holds a place in the server's handshakes (#541)
     beast::get_lowest_layer(ws_).expires_after(limits_.handshakeTimeout);
