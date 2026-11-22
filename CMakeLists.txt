@@ -234,6 +234,12 @@ if(BUILD_TESTS)
     add_test(NAME CtestSkipsAreRefused
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/CtestSkipsTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/ctest-skips.sh)
+
+    # The column limit, which clang-format doesn't apply to comments (#615): a line over it fails, counted in characters
+    # with a CRLF line's CR left out, against a made-up tree
+    add_test(NAME LineLengthIsChecked
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/LineLengthTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/line-length.sh)
 endif()
 
 if(BUILD_BENCHMARKS)

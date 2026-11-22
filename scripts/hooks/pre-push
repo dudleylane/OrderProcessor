@@ -11,7 +11,8 @@
 #                               under CI's 4G memory cap (scripts/memory-cap.sh,
 #                               #607), which needs systemd's user manager; a
 #                               test that skips fails it too (#635), as in CI
-#   3. clang-format --dry-run   (format.yml)
+#   3. clang-format --dry-run   (format.yml), and the column limit
+#                               (scripts/line-length.sh, #615)
 # It builds the working tree, so it refuses a push unless the working tree is
 # the commit pushed: HEAD, with nothing changed or untracked (#152). Left to CI:
 # the sanitizer jobs and the server image. The policy lists sanitizer and
@@ -169,10 +170,11 @@ fi
 "$ROOT/scripts/ctest-skips.sh" "$ctest_log" "$expected_skips" \
     || refuse "a test skipped, which ctest counts as a pass (#635): ctest-skips.sh names it above"
 
-# 3. Format check, identical to format.yml.
+# 3. Format check, identical to format.yml, and its column limit, which clang-format doesn't apply to comments (#615)
 step "$("$CLANG_FORMAT" --version) --dry-run"
 ( cd "$ROOT" && find src test app bench \( -name '*.h' -o -name '*.cpp' \) -print0 \
     | xargs -0 "$CLANG_FORMAT" --dry-run -Werror ) || refuse "format check failed"
+"$ROOT/scripts/line-length.sh" "$ROOT" || refuse "a line is over the column limit; line-length.sh names it above"
 
 echo
 echo "=== pre-push: all gates passed ==="
