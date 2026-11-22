@@ -54,7 +54,8 @@ uses 22.
 FIX 5.0 SP2 over FIXT.1.1 only (#377):
 
 - **Transport and sessions:** `ThreadedSocketAcceptor`, or `ThreadedSSLSocketAcceptor` with `--fix-tls-cert` and
-  `--fix-tls-key` (#228), `Session`, `SessionSettings`, `SessionID`, `FileStore`, `FileLog`, `Application`.
+  `--fix-tls-key` (#228), `Session`, `SessionSettings`, `SessionID`, `FileStore`, `Application`. Not `FileLog`: the
+  logs come from the gateway's own `FixRotatingLogFactory` (below).
 - **Stores (#513):** `MessageStore`, `MessageStoreFactory` and `TimeRange`, for `FixCarryingStore` (`app/FixStores.h`),
   which wraps each session's FileStore and carries what its client hasn't received into the next session day. It
   relies on three things QuickFIX does, the same in 22.1 and 22.3: a session stores each message it sends (`set()`)
@@ -78,9 +79,9 @@ FIX 5.0 SP2 over FIXT.1.1 only (#377):
   settings' `[DEFAULT]`, the only place QuickFIX's SSL code reads them (`app/FixTls.h`). QuickFIX's own default,
   `all -SSLv2`, would allow SSLv3, TLS 1.0 and TLS 1.1.
 - **Messages:** `NewOrderSingle`, `NewOrderMultileg` (FX swaps, with the `NoLegs` group),
-  `OrderCancelRequest`, `OrderCancelReplaceRequest`, `ExecutionReport`, `OrderCancelReject`,
-  `BusinessMessageReject`, `News`, from `quickfix/fix50sp2/`; FIXT.1.1's `Logon` and `Reject`, from
-  `quickfix/fixt11/`.
+  `OrderCancelRequest`, `OrderCancelReplaceRequest`, `OrderStatusRequest` (answered by the gateway itself, #383),
+  `ExecutionReport`, `OrderCancelReject` and `BusinessMessageReject`, from `quickfix/fix50sp2/`; FIXT.1.1's `Logon`
+  and `Reject`, from `quickfix/fixt11/`.
 - **Settings:** `config/fix.cfg` (acceptor on port 5001, `ResetOnLogon=N`, one session a day from 17:00 New York,
   read with `UseLocalTime=Y` (#240)). It names no session: the server makes one for each counterparty in
   `--fix-credentials` (#147).
@@ -94,7 +95,9 @@ FIX 5.0 SP2 over FIXT.1.1 only (#377):
   `BusinessMessageReject`, where it used to let QuickFIX answer them. On a FIXT session QuickFIX's own
   (`Session::generateBusinessReject`) carries `DefaultApplVerID` (1137), which FIX 5.0 SP2's `BusinessMessageReject`
   doesn't have, so a counterparty that validates refuses it: dudleylane/quickfix#173, inherited from upstream, where
-  quickfix/quickfix#387 was closed as not planned.
+  quickfix/quickfix#387 was closed as not planned. The fork fixed it on its master (3c7f180f, 2026-10-24), but no
+  release has the fix yet: it is past v22.3.0, the fork's latest tag, and v22.1.0, the pin (#595). So moving the pin
+  to a tag can't bring it in, and the gateway's own rejects stay until a release that has it is taken.
   The logs come from the project's `FixRotatingLogFactory` (`app/FixRotatingLog.cpp`), not `FileLog`:
   the same files and lines, rotated at `FileLogMaxMB` with `FileLogBackups` kept (#160).
 
