@@ -276,7 +276,6 @@ class DiscardingOutQueues final : public OutQueues
 public:
     void push(const ExecReportEvent &, const std::string &) override {}
     void push(const CancelRejectEvent &, const std::string &) override {}
-    void push(const BusinessRejectEvent &, const std::string &) override {}
     /// Counts the orders refused unstored for a ClOrdID in use, which a warm-up checks (#432)
     void push(const OrderRejectEvent &evnt, const std::string &) override
     {
@@ -561,7 +560,6 @@ public:
         }
     }
     void push(const CancelRejectEvent &, const std::string &) override {}
-    void push(const BusinessRejectEvent &, const std::string &) override {}
 
     /// Two a trade: one to each side
     u64 tradeReports() const

@@ -38,7 +38,6 @@ std::string serializeBookUpdate(const std::string &symbol, const BookSnapshot &s
 std::string serializeCancelReject(u64 orderId, const std::string &reason);
 /// Why a cancel was refused, in words for a cancel_reject's reason (#73)
 std::string cancelRejectReason(const Queues::CancelRejectEvent &evnt);
-std::string serializeBusinessReject(u64 refId, const std::string &reason);
 std::string serializeError(const std::string &message);
 
 struct SystemMetrics

@@ -189,11 +189,6 @@ public:
         events_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    void push(const BusinessRejectEvent &, const std::string &) override
-    {
-        events_.fetch_add(1, std::memory_order_relaxed);
-    }
-
     std::atomic<int> events_;
 };
 

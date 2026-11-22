@@ -34,12 +34,11 @@ public:
     /// reimplementeed from OutQueues
     virtual void push(const ExecReportEvent &evnt, const std::string &target);
     virtual void push(const CancelRejectEvent &evnt, const std::string &target);
-    virtual void push(const BusinessRejectEvent &evnt, const std::string &target);
 
 private:
     /// Unified event type using std::variant for lock-free queue
     using OutEventVariant = std::variant<std::monostate, // Default state for empty initialization
-                                         ExecReportEvent, CancelRejectEvent, BusinessRejectEvent>;
+                                         ExecReportEvent, CancelRejectEvent>;
 
     /// Queued outgoing event with target
     struct QueuedOutEvent

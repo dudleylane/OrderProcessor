@@ -54,7 +54,7 @@ namespace
 class TestOutQueues : public OutQueues
 {
 public:
-    TestOutQueues() : execReportCount_(0), cancelRejectCount_(0), businessRejectCount_(0) {}
+    TestOutQueues() : execReportCount_(0), cancelRejectCount_(0) {}
 
     /// What one execution report said when it was pushed; the report itself belongs to OrderStorage
     struct RecordedReport
@@ -187,19 +187,13 @@ public:
         return reports_.size();
     }
 
-    void push(const BusinessRejectEvent &, const std::string &) override
-    {
-        ++businessRejectCount_;
-    }
-
     int totalEvents() const
     {
-        return execReportCount_.load() + cancelRejectCount_.load() + businessRejectCount_.load();
+        return execReportCount_.load() + cancelRejectCount_.load();
     }
 
     std::atomic<int> execReportCount_;
     std::atomic<int> cancelRejectCount_;
-    std::atomic<int> businessRejectCount_;
     std::atomic<u64> lastCancelRejectOrderId_{ 0 };
 
     mutable std::mutex reportsLock_;

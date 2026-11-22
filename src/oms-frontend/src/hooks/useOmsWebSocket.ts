@@ -26,13 +26,13 @@ const MAX_METRICS_HISTORY = 300; // 5 minutes at 1/sec
 const MAX_NOTICES = 50;
 
 /**
- * A refusal the server sent, or a request the socket didn't take (#521): an error, a cancel or business reject, a
- * REJECT report for an order never stored, or a request not sent. Each stays until the user dismisses it.
+ * A refusal the server sent, or a request the socket didn't take (#521): an error, a cancel reject, a REJECT report for
+ * an order never stored, or a request not sent. Each stays until the user dismisses it.
  */
 export interface Notice {
   id: number;
   time: number;
-  kind: 'error' | 'cancel_reject' | 'business_reject' | 'reject' | 'not_sent';
+  kind: 'error' | 'cancel_reject' | 'reject' | 'not_sent';
   text: string;
 }
 
@@ -237,9 +237,6 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
           case 'cancel_reject':
             // To every session that may see the order's account, so the notice names the order
             notify('cancel_reject', msg.data.orderId ? `Order ${msg.data.orderId}: ${msg.data.reason}` : msg.data.reason);
-            break;
-          case 'business_reject':
-            notify('business_reject', `${msg.data.reason} (reference ${msg.data.refId})`);
             break;
           case 'error':
             notify('error', msg.message);

@@ -510,7 +510,6 @@ A client opens a WebSocket on `/ws` and offers the subprotocol `oms-v1`. Through
 | `execution_report` | `ExecutionReport` | On trade, reject, cancel, replace, correct |
 | `book_update` | `OrderBookSnapshot` | To a session that subscribes to the symbol, as it subscribes and with each execution report on the symbol, whoever the report goes to: each level's leaves as the resting orders' last reports give them, so it gives no fill not yet reported (#525). An order whose first report isn't out yet is left out |
 | `cancel_reject` | `{orderId, reason}` | When a cancel is refused; `reason` says why: unknown order, too late (with the order's status), or a replace pending |
-| `business_reject` | `{refId, reason}` | Not sent: nothing in the server raises one |
 | `metrics_update` | `SystemMetrics` | Every 1 second (broadcast to all) |
 | `error` | `{message}` | On server error |
 
