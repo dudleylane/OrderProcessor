@@ -813,7 +813,7 @@ TEST_F(TaskManagerTest, EventPushedWhileATaskFindsTheQueueEmptyIsProcessed)
 
     // Two events, though more tasks ran: the empty pops count as tasks, not as events. A task counts itself finished
     // after handing its processor back, so the last may still be on its way.
-    EXPECT_EQ(2, manager->eventsProcessed());
+    EXPECT_EQ(2u, manager->eventsProcessed());
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while ((manager->eventsFinished() != manager->eventsCreated()) && (std::chrono::steady_clock::now() < deadline))
     {
@@ -821,7 +821,7 @@ TEST_F(TaskManagerTest, EventPushedWhileATaskFindsTheQueueEmptyIsProcessed)
     }
     EXPECT_EQ(manager->eventsCreated(), manager->eventsFinished())
         << "a task that found the queue empty never finished";
-    EXPECT_LT(2, manager->eventsCreated());
+    EXPECT_LT(2u, manager->eventsCreated());
 }
 
 TEST_F(TaskManagerTest, EachEventPushedFromOutsideThePoolIsProcessed)
@@ -855,7 +855,7 @@ TEST_F(TaskManagerTest, EachEventPushedFromOutsideThePoolIsProcessed)
         ASSERT_TRUE(idleWithin(std::chrono::seconds(5))) << "cycle " << cycles << "'s buy was never processed";
         ++cycles;
     }
-    EXPECT_EQ(2 * cycles, manager->eventsProcessed());
+    EXPECT_EQ(static_cast<u64>(2 * cycles), manager->eventsProcessed());
 }
 
 // =============================================================================
@@ -990,7 +990,7 @@ TEST_F(TaskManagerTest, OrderWithAClOrdIdInUseIsRefusedWithoutBeingStored)
     ASSERT_NE(nullptr, stored);
     EXPECT_EQ(NEW_ORDSTATUS, stored->status_);
     EXPECT_EQ(BUY_SIDE, stored->side_);
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
     auto rejects = outQueues_->orderRejects();
     ASSERT_EQ(1u, rejects.size());
     EXPECT_EQ("second-client", rejects[0].second);
@@ -1026,7 +1026,7 @@ TEST_F(TaskManagerTest, AMarketOrderWithNothingToTradeWithAndAClOrdIdInUseIsRefu
     ASSERT_NE(nullptr, stored);
     EXPECT_EQ(NEW_ORDSTATUS, stored->status_);
     EXPECT_EQ(LIMIT_ORDERTYPE, stored->ordType_);
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
     auto rejects = outQueues_->orderRejects();
     ASSERT_EQ(1u, rejects.size());
     EXPECT_EQ("second-client", rejects[0].second);
@@ -1063,7 +1063,7 @@ TEST_F(TaskManagerTest, ReplacementWithAClOrdIdInUseIsRefusedWithoutBeingStored)
 
     EXPECT_EQ(NEW_ORDSTATUS, stored->status_);
     EXPECT_EQ(77u, stored->orderQty_);
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
     for (const auto &version : saver.versions())
     {
         if (stored->orderId_ == version.orderId)
@@ -1104,7 +1104,7 @@ TEST_F(TaskManagerTest, CancelOfAnUnknownOrderIsRejectedAndProcessingContinues)
     OrderEntry *saved = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, saved);
     EXPECT_EQ(NEW_ORDSTATUS, saved->status_);
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 TEST_F(TaskManagerTest, CancelRejectNamesTheOrder)
@@ -1134,7 +1134,7 @@ TEST_F(TaskManagerTest, EventThatThrowsDoesNotStopProcessing)
     OrderEntry *saved = OrderStorage::instance()->locateByClOrderId(clOrdId);
     ASSERT_NE(nullptr, saved);
     EXPECT_EQ(NEW_ORDSTATUS, saved->status_);
-    EXPECT_EQ(1, manager->tasksFailed());
+    EXPECT_EQ(1u, manager->tasksFailed());
 }
 
 TEST_F(TaskManagerTest, TransactionThatThrowsDoesNotStopProcessing)
@@ -1161,7 +1161,7 @@ TEST_F(TaskManagerTest, TransactionThatThrowsDoesNotStopProcessing)
     }
 
     EXPECT_TRUE(manager->waitUntilTransactionsFinished(5));
-    EXPECT_EQ(1, manager->tasksFailed());
+    EXPECT_EQ(1u, manager->tasksFailed());
     EXPECT_GE(outQueues_->execReportCount_.load(), 1);
 }
 
@@ -1192,7 +1192,7 @@ TEST_F(TaskManagerTest, CancelOfARestingOrderCompletesAndTheOrderStopsTrading)
     OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(sellId);
     ASSERT_NE(nullptr, sell);
     EXPECT_EQ(NEW_ORDSTATUS, sell->status_) << "the sell traded with the cancelled buy";
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 TEST_F(TaskManagerTest, CancelOfAPartiallyFilledOrderKeepsItsFills)
@@ -1351,7 +1351,7 @@ TEST_F(TaskManagerTest, CancelsRacingTradesLeaveBothSidesConsistent)
         sold += sell->cumQty_;
     }
     EXPECT_EQ(bought, sold) << "a fill without its other side";
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 // =============================================================================
@@ -1404,7 +1404,7 @@ TEST_F(TaskManagerTest, ReplaceOfARestingOrderCompletes)
     EXPECT_EQ(FILLED_ORDSTATUS, live->status_);
     EXPECT_EQ(REPLACED_ORDSTATUS, original->status_);
     EXPECT_EQ(0u, original->cumQty_);
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 TEST_F(TaskManagerTest, ReplaceOfAPartiallyFilledOrderKeepsItsFills)
@@ -1481,7 +1481,7 @@ TEST_F(TaskManagerTest, ReplaceToWhatIsFilledFillsTheReplacement)
     EXPECT_EQ(NEW_ORDSTATUS, sell->status_);
     EXPECT_EQ(10u, sell->leavesQty_);
     EXPECT_EQ(40u, live->cumQty_);
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 TEST_F(TaskManagerTest, ReplaceBelowWhatIsFilledIsAmendedToIt)
@@ -1513,7 +1513,7 @@ TEST_F(TaskManagerTest, ReplaceBelowWhatIsFilledIsAmendedToIt)
     ASSERT_EQ(1u, liveReports.size());
     EXPECT_EQ(REPLACE_EXECTYPE, liveReports[0].type);
     EXPECT_EQ(FILLED_ORDSTATUS, liveReports[0].status);
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 TEST_F(TaskManagerTest, ACancelOfAReplacementFilledFromTheStartIsTooLate)
@@ -1721,7 +1721,7 @@ TEST_F(TaskManagerTest, ReplacesRacingTradesLeaveBothSidesConsistent)
         sold += sell->cumQty_;
     }
     EXPECT_EQ(bought, sold) << "a fill without its other side";
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 // =============================================================================
@@ -1784,7 +1784,7 @@ TEST_F(TaskManagerTest, AFillsReportAndRecordCountNoLaterFill)
         }
     }
     EXPECT_EQ((std::vector<QuantityT>{ 100, 70, 40 }), leaves) << "the first fill's record counts the second";
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 TEST_F(TaskManagerTest, EachFillsReportAndRecordCountTheFillsUpToIt)
@@ -1842,7 +1842,7 @@ TEST_F(TaskManagerTest, EachFillsReportAndRecordCountTheFillsUpToIt)
     }
     EXPECT_EQ(101, versions);
     EXPECT_EQ(0, versionsAhead) << "records whose figures aren't their own fill's";
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 // =============================================================================
@@ -1931,7 +1931,7 @@ TEST_F(TaskManagerTest, ARestatementsReportCountsNoLaterFill)
         }
     }
     EXPECT_EQ((std::vector<QuantityT>{ 100, 100, 70 }), leaves) << "the booking's, the restatement's, the fill's";
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 // =============================================================================
@@ -2020,7 +2020,7 @@ TEST_F(TaskManagerTest, AnOrderSnapshotGivesEachOrderAsItsLastReportLeftIt)
     EXPECT_EQ("FILLED", buy->value("status", "?"));
     EXPECT_EQ(30u, buy->value("cumQty", 0u));
     EXPECT_EQ(0u, buy->value("leavesQty", 1u));
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 TEST_F(TaskManagerTest, AnOrderSnapshotTakenWhileOrdersTradeAndAreReplacedReadsEachUnderItsLock)
@@ -2086,7 +2086,7 @@ TEST_F(TaskManagerTest, AnOrderSnapshotTakenWhileOrdersTradeAndAreReplacedReadsE
     reader.join();
     ASSERT_TRUE(idle) << "the workers didn't finish: a replace and the snapshot can deadlock";
     EXPECT_LT(0, snapshots.load());
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
 
     const nlohmann::json snapshot = nlohmann::json::parse(App::serializeOrderSnapshot(OrderStorage::instance()));
     size_t given = 0;
@@ -2127,7 +2127,7 @@ TEST_F(TaskManagerTest, AWorkerThatRunsBothKindsOfTaskIsPinnedOnce)
 
     pushOrder(BUY_SIDE, 10.0, 100, "buyer");
     ASSERT_TRUE(waitUntilIdle(*manager));
-    EXPECT_EQ(0, manager->tasksFailed());
+    EXPECT_EQ(0u, manager->tasksFailed());
     ASSERT_EQ(std::vector<int>{ 1 % cores }, pinnedTo)
         << "the transaction task's worker isn't on the one core its first task pinned it to";
 }

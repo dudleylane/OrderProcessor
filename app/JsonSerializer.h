@@ -43,12 +43,12 @@ std::string serializeError(const std::string &message);
 
 struct SystemMetrics
 {
-    int32_t eventsCreated;
-    int32_t eventsProcessed;
-    int32_t eventsFinished;
-    int32_t transactionsCreated;
-    int32_t transactionsProcessed;
-    int32_t transactionsFinished;
+    u64 eventsCreated; ///< since the server started: 64-bit, where int32_t wrapped (#537)
+    u64 eventsProcessed;
+    u64 eventsFinished;
+    u64 transactionsCreated;
+    u64 transactionsProcessed;
+    u64 transactionsFinished;
     u64 transactionsFailed; ///< transactions that failed and were rolled back, each logged at error level too (#514)
     int32_t availableEventProcessors;
     int32_t totalEventProcessors;
