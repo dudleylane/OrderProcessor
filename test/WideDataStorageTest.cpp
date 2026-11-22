@@ -56,6 +56,20 @@ protected:
 // Basic Singleton Tests
 // =============================================================================
 
+TEST_F(WideDataStorageTest, AReferenceToAStringIsSetThoughItsIdIsNotValid)
+{
+    // A string's id is issued with date 0, which IdT::isValid() refuses, so a set source or destination isn't valid by
+    // it, and two files each worked around that in their own way (#624). The reference says whether it is set.
+    const SourceIdT stringId = storage()->addUnsaved(new StringT("CLNT"));
+    EXPECT_FALSE(stringId.isValid()) << "a string's id has a date now: isValid() would do, and this test is stale";
+    EXPECT_TRUE(namesEntry(stringId));
+    const WideDataLazyRef<StringT> set(stringId);
+    EXPECT_TRUE(set.isSet());
+    EXPECT_EQ("CLNT", set.get());
+    const WideDataLazyRef<StringT> unset(SourceIdT{});
+    EXPECT_FALSE(unset.isSet());
+}
+
 TEST_F(WideDataStorageTest, InstanceNotNull)
 {
     ASSERT_NE(nullptr, storage());
