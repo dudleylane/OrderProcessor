@@ -514,6 +514,23 @@ TEST_F(WsServerLimitsTest, BookUpdatesGoOutWhileAClientSubscribes)
     EXPECT_TRUE(stillAnswers(client));
 }
 
+TEST_F(WsServerLimitsTest, AcceptingGoesOnAfterAnAcceptFails)
+{
+    // #202's retry, the failure made by failNextAccept(), so that the sanitizer jobs run it too (#672): the case below
+    // starves the process of descriptors, which their runtimes need as well, and isn't compiled under them
+    start();
+    server_->failNextAccept();
+    Client refused;
+    EXPECT_FALSE(connect(refused, 1000ms)) << "the failed accept's connection was served";
+    Client later;
+    EXPECT_TRUE(connect(later)) << "the server stopped accepting after an accept failed";
+}
+
+// The sanitizers' runtimes need descriptors too, and in the window below there are none (#672): in CI's ASan job,
+// UBSan's vptr check reported a valid object as invalid there, and libubsan, which reads its options as it makes its
+// first report, couldn't read them and took its defaults, which don't halt. The case above covers #202's retry under
+// the sanitizers; this one keeps the kernel's own EMFILE, and the connection it leaves, in the Release suite.
+#if !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__)
 TEST_F(WsServerLimitsTest, AcceptingGoesOnAfterTheProcessRunsOutOfDescriptors)
 {
     // One failed accept stopped the server accepting for good: onAccept returned without accepting again (#202). Here
@@ -541,6 +558,7 @@ TEST_F(WsServerLimitsTest, AcceptingGoesOnAfterTheProcessRunsOutOfDescriptors)
 
     EXPECT_TRUE(connect(later)) << "the server stopped accepting after running out of descriptors";
 }
+#endif
 
 TEST_F(WsServerLimitsTest, AFloodingClientIsReadOnlyWhileTheWorkInFlightIsUnderTheBound)
 {
