@@ -175,7 +175,9 @@ chmod 0640 "$WORK/certs/tls.key"
 chmod 0644 "$WORK/certs/tls.crt"
 sed -i -e "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$TOKEN/" -e "s|^OMS_ALLOWED_ORIGINS=.*|OMS_ALLOWED_ORIGINS=$ORIGIN|" "$WORK/env"
 # Resets only the ports PUBLISHED names, which the step below checks are all there are: podman-compose 1.5.0 fails on a
-# !reset of a key the file doesn't have
+# !reset of a key the file doesn't have, which the Compose specification allows. Upstream: containers/podman-compose#1209
+# (override and reset handle only a few hardcoded parts of the schema; open on 2026-11-22, when 1.6.0 was the latest
+# release). Check it whenever podman-compose is upgraded on the runner host (#620).
 cat > "$WORK/override.yml" <<EOF
 # check-compose-stack.sh's changes to docker/docker-compose.yml: no host ports, .env.example for oms-db, and this run's
 # certificate for nginx
