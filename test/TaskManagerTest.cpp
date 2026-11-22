@@ -22,6 +22,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <oneapi/tbb/info.h>
 
 #include "TestFixtures.h"
 #include "TestAux.h"
@@ -1724,6 +1725,11 @@ TEST_F(TaskManagerTest, ReplacesRacingTradesLeaveBothSidesConsistent)
 
 TEST_F(TaskManagerTest, AFillsReportAndRecordCountNoLaterFill)
 {
+    // One worker holds the gate while a second applies the fill: oneTBB's default arena runs one fewer worker than the
+    // CPUs the process may use, so on fewer than three the gate is never reached (#755)
+    ASSERT_GE(oneapi::tbb::info::default_concurrency(), 3)
+        << "this case needs two workers at once, and this process may use " << oneapi::tbb::info::default_concurrency()
+        << " CPUs";
     // O rests, a sell of 100. A1 buys 30, then A2 buys 30. The transaction that persists and reports A1's fill waits,
     // before it runs, until A2's booking has applied its fill to O, as a worker preempted before it starts would: the
     // two transactions share nothing, so the manager orders them by nothing (#411). Each of O's records and trade
@@ -1845,6 +1851,11 @@ TEST_F(TaskManagerTest, EachFillsReportAndRecordCountTheFillsUpToIt)
 
 TEST_F(TaskManagerTest, ARestatementsReportCountsNoLaterFill)
 {
+    // One worker holds the gate while a second applies the fill: oneTBB's default arena runs one fewer worker than the
+    // CPUs the process may use, so on fewer than three the gate is never reached (#755)
+    ASSERT_GE(oneapi::tbb::info::default_concurrency(), 3)
+        << "this case needs two workers at once, and this process may use " << oneapi::tbb::info::default_concurrency()
+        << " CPUs";
     // O, a GTC sell of 100, rests. In the next business day O's restatement arrives, then a buy of 30. The
     // transaction that persists and reports the restatement names O alone, and the buy's booking, ready once the
     // transaction that decided the restatement has run, shares nothing with it, so the manager orders them by
