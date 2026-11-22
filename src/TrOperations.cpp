@@ -301,8 +301,8 @@ CreateTradeExecReportTrOperation::CreateTradeExecReportTrOperation(const TradeEx
     lastPx_ = trade->lastPx_;
     tradeDate_ = trade->tradeDate_;
     currency_ = trade->currency_;
-    // The leg comes from the trade: a swap's near leg reaches this report through the state machine, and its report used
-    // to say SINGLE_LEG (#153). A plain fill's trade says SINGLE_LEG itself.
+    // The leg comes from the trade: a swap's near leg reaches this report through the state machine, and its report
+    // used to say SINGLE_LEG (#153). A plain fill's trade says SINGLE_LEG itself.
     execLegType_ = trade->execLegType_;
     tradeLink_ = trade->tradeLink_; // a swap's near leg's link, as its far leg's report carries it (#199)
 }

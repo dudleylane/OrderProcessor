@@ -67,8 +67,8 @@ Walk walk(const OrderEntry &order, const OrderEntry &contra)
     const bool contraIsSwap = (FXSWAP_ORDERTYPE == contra.ordType_);
     if (FXSWAP_ORDERTYPE != order.ordType_)
     {
-        // A swap trades only with a swap, on both legs: an outright order passes over one, and keeps looking. It used to
-        // take a swap by its near price alone, and filled the swap's near leg without its far leg (#212). Any other
+        // A swap trades only with a swap, on both legs: an outright order passes over one, and keeps looking. It used
+        // to take a swap by its near price alone, and filled the swap's near leg without its far leg (#212). Any other
         // order it doesn't trade with ends the walk.
         return contraIsSwap ? Walk::PASS : Walk::END;
     }
@@ -186,8 +186,8 @@ bool FindOpositeOrder::match(const IdT &order, bool *stop) const
 
 bool OrderMatcher::tradesWith(const OrderEntry &order, const OrderEntry &contra)
 {
-    // A swap trades only with a swap (#212), on both legs: the same near and far dates, the near prices crossing, and the
-    // far prices crossing the other way, since the buyer of the near leg sells the far one
+    // A swap trades only with a swap (#212), on both legs: the same near and far dates, the near prices crossing, and
+    // the far prices crossing the other way, since the buyer of the near leg sells the far one
     const bool swap = (FXSWAP_ORDERTYPE == order.ordType_);
     if (swap != (FXSWAP_ORDERTYPE == contra.ordType_))
     {
@@ -229,8 +229,8 @@ void OrderMatcher::matchNew(OrderEntry *order, const Context &ctxt)
 {
     assert(nullptr != order);
     assert(nullptr != ctxt.orderBook_);
-    // Fill or kill (#240): in full at once, or not at all. The book can't change between this and the sweep: they run in
-    // one transaction, and every transaction that books, cancels or matches on the instrument relates to it.
+    // Fill or kill (#240): in full at once, or not at all. The book can't change between this and the sweep: they run
+    // in one transaction, and every transaction that books, cancels or matches on the instrument relates to it.
     if ((FOK_TIF == order->tif_) && !canFillAtOnce(order, *ctxt.orderBook_, ctxt.orderStorage_))
     {
         std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));

@@ -42,7 +42,8 @@ public:
 
     /// From now on no id is returned until a limit above it is durable. The saver saves a limit block ids ahead, and
     /// getId() saves the next one when the counter reaches it. A restart, after a crash too, continues past the last
-    /// limit saved, so ids clients have seen never repeat, execution ids included, whose reports aren't persisted (#81).
+    /// limit saved, so ids clients have seen never repeat, execution ids included, whose reports aren't persisted
+    /// (#81).
     void reserve(IdLimitSaver *saver, u64 block);
     /// Saves the exact next id as the limit, so that a clean restart continues without a gap, and stops reserving. An
     /// id drawn after this is past the saved limit, and is logged as an error. Throws if the limit can't be saved; the

@@ -51,7 +51,8 @@ public:
     {
         return totalWritten_.load(std::memory_order_relaxed);
     }
-    /// Requests Postgres refused, such as a value its column can't hold: each is logged, and the rest of its batch lands
+    /// Requests Postgres refused, such as a value its column can't hold: each is logged, and the rest of its batch
+    /// lands
     u64 totalErrors() const
     {
         return totalErrors_.load(std::memory_order_relaxed);

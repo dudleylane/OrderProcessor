@@ -688,7 +688,8 @@ static void BM_ProcessReplaceOrder(benchmark::State &state)
         return;
     }
 
-    // One resting buy per iteration, each replaced by a buy at a new price, which crosses nothing: the book holds no sell
+    // One resting buy per iteration, each replaced by a buy at a new price, which crosses nothing: the book holds no
+    // sell
     // (#457). The event enqueues a transaction, which runs inline: it decides the replace under the original's lock,
     // stores the replacement, takes the original off the book and books the replacement, persists both and reports
     // both. Each replacement is made just before its event, outside the timed span, as a session makes it on arrival.
@@ -1042,8 +1043,8 @@ BENCHMARK(BM_ProcessDuplicateClOrdId)->UseManualTime();
 
 namespace
 {
-/// A swap order: the order makeOrder makes, with a far leg. Two swaps match only when their near and far dates agree, so
-/// every swap here has the same ones.
+/// A swap order: the order makeOrder makes, with a far leg. Two swaps match only when their near and far dates agree,
+/// so every swap here has the same ones.
 OrderEntry *newSwap(EngineFixture &engine, const Side &side, PriceT price, QuantityT qty)
 {
     OrderEntry *order = engine.newOrder(side, price, qty);
@@ -1092,8 +1093,8 @@ static void BM_ProcessSwapWithMatch(benchmark::State &state)
 }
 BENCHMARK(BM_ProcessSwapWithMatch)->UseManualTime();
 
-// BM_ProcessSweep for swaps: a swap's sweep goes on through matchSwap()'s own next match, which is decided apart from an
-// outright order's (#477)
+// BM_ProcessSweep for swaps: a swap's sweep goes on through matchSwap()'s own next match, which is decided apart from
+// an outright order's (#477)
 static void BM_ProcessSwapSweep(benchmark::State &state)
 {
     EngineFixture engine;
@@ -1101,7 +1102,8 @@ static void BM_ProcessSwapSweep(benchmark::State &state)
     {
         return;
     }
-    // Where the timed path ends: a buy swap for 100 that takes four sell swaps of 25, so only a sweep of all four fills it
+    // Where the timed path ends: a buy swap for 100 that takes four sell swaps of 25, so only a sweep of all four fills
+    // it
     for (int i = 0; i < 4; ++i)
     {
         engine.submit(newSwap(engine, SELL_SIDE, 50.0, 25));
@@ -1112,10 +1114,11 @@ static void BM_ProcessSwapSweep(benchmark::State &state)
         return;
     }
 
-    // Four resting sell swaps of 25 per iteration, all at one near and one far price, and a buy swap for 100 at them, so
-    // each timed swap sweeps the four oldest: four swap trades, each reporting a near and a far leg for each side and
-    // removing its sell from the book, and between them the three matches that continue the sweep. The only benchmark in
-    // which a swap's next match finds another swap to trade with: BM_ProcessSwapWithMatch's swap trades once.
+    // Four resting sell swaps of 25 per iteration, all at one near and one far price, and a buy swap for 100 at them,
+    // so each timed swap sweeps the four oldest: four swap trades, each reporting a near and a far leg for each side
+    // and removing its sell from the book, and between them the three matches that continue the sweep. The only
+    // benchmark in which a swap's next match finds another swap to trade with: BM_ProcessSwapWithMatch's swap trades
+    // once.
     for (u64 i = 0; i < 4 * static_cast<u64>(state.max_iterations); ++i)
     {
         engine.submit(newSwap(engine, SELL_SIDE, 100.0, 25));
@@ -1169,8 +1172,8 @@ static void BM_ProcessSwapIocRemainder(benchmark::State &state)
 }
 BENCHMARK(BM_ProcessSwapIocRemainder)->UseManualTime();
 
-// BM_ProcessFokFill for swaps: a FOK swap the book fills at once, its check first (OrderMatcher::canFillAtOnce()), which
-// walks the other side as the swap's sweep does (#491), then the swap trade
+// BM_ProcessFokFill for swaps: a FOK swap the book fills at once, its check first (OrderMatcher::canFillAtOnce()),
+// which walks the other side as the swap's sweep does (#491), then the swap trade
 static void BM_ProcessSwapFokFill(benchmark::State &state)
 {
     EngineFixture engine;
@@ -1188,11 +1191,11 @@ static void BM_ProcessSwapFokFill(benchmark::State &state)
         return;
     }
 
-    // One resting sell swap per iteration, and a FOK buy swap for all of it at its near price, so every timed swap fills
-    // at once: the check that the book can fill it, which walks the sell swaps until what they have left is enough,
-    // then the swap trade, its deferred events, which report a near and a far leg for each side, and the book removal.
-    // The book holds swaps of one date pair alone, so the check takes the first swap it comes to, with #491's fix or
-    // without it. The only benchmark that reaches a swap's check: BM_ProcessFokFill's book holds no swap.
+    // One resting sell swap per iteration, and a FOK buy swap for all of it at its near price, so every timed swap
+    // fills at once: the check that the book can fill it, which walks the sell swaps until what they have left is
+    // enough, then the swap trade, its deferred events, which report a near and a far leg for each side, and the book
+    // removal. The book holds swaps of one date pair alone, so the check takes the first swap it comes to, with #491's
+    // fix or without it. The only benchmark that reaches a swap's check: BM_ProcessFokFill's book holds no swap.
     for (u64 i = 0; i < static_cast<u64>(state.max_iterations); ++i)
     {
         engine.submit(newSwap(engine, SELL_SIDE, 100.0, 100));

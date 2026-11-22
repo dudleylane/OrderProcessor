@@ -13,8 +13,8 @@ namespace App
 struct SeedDataArgs
 {
     std::string dataDir = "./data";
-    /// --if-empty: seed only a directory with no instrument yet, and leave one in use alone, since what seedData adds is
-    /// test data (#161). A directory a server ran on before it was seeded has an LMDB file, but no instrument.
+    /// --if-empty: seed only a directory with no instrument yet, and leave one in use alone, since what seedData adds
+    /// is test data (#161). A directory a server ran on before it was seeded has an LMDB file, but no instrument.
     bool ifEmpty = false;
     /// --file FILE: load FILE's reference data, and not the test set (#585). Empty when not given.
     std::string file;

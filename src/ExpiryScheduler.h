@@ -32,10 +32,10 @@ namespace Proc
 {
 
 /// Expires DAY and GTD orders at their time (#240): a GTD order at its expireTime_, and a DAY order at the end of the
-/// business day it was created in, or a replacement's, replaced in, 17:00 New York, the FX market's roll, in daylight and standard time alike (ruled
-/// 2026-10-16). At each it pushes the order's TimerEvent into the incoming queues, EXPIRATION for a GTD order and
-/// DAY_END for a DAY order, and the processor decides it on the transaction worker with the order's other
-/// transactions: an order filled, canceled or replaced since is left as it is.
+/// business day it was created in, or a replacement's, replaced in, 17:00 New York, the FX market's roll, in daylight
+/// and standard time alike (ruled 2026-10-16). At each it pushes the order's TimerEvent into the incoming queues,
+/// EXPIRATION for a GTD order and DAY_END for a DAY order, and the processor decides it on the transaction worker with
+/// the order's other transactions: an order filled, canceled or replaced since is left as it is.
 ///
 /// It restates the orders that outlive a business day, at each day's start (#244): the RESTATEMENT timer, at the day's
 /// end, begins the order's figures for the next one (OrderParams::startDay()) and sends a RESTATED report.

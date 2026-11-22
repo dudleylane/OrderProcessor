@@ -94,8 +94,8 @@ TEST_F(FixRotatingLogTest, ASessionsFilesAreBounded)
 
 TEST_F(FixRotatingLogTest, LinesAreWrittenAsFileLogWritesThem)
 {
-    // "<UTC timestamp> : <text>", messages in and out to one file, events to the other. A message's braces are text, not
-    // format syntax, and its SOH separators stay as they are.
+    // "<UTC timestamp> : <text>", messages in and out to one file, events to the other. A message's braces are text,
+    // not format syntax, and its SOH separators stay as they are.
     App::FixRotatingLogFactory factory(settings());
     std::unique_ptr<FIX::Log> log(factory.create(session()));
     log->onIncoming("8=FIXT.1.1\x01"

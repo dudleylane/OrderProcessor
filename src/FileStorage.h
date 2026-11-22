@@ -41,7 +41,8 @@ struct FileRecord
 /// file stored in following format:
 // first line contains '<Sxxxx::Version x.x.x.xE>'
 // '<S'<header>'::'<record body>'E>'
-// <header> ::= <4bytes record size (from '<S' until 'E>')>'.'<valid record Y/N>'.'<16 bytes record id>'.'<4 bytes version>
+// <header> ::= <4bytes record size (from '<S' until 'E>')>'.'<valid record Y/N>'.'<16 bytes record id>'.'<4 bytes
+// version>
 
 /// @deprecated FileStorage uses blocking stdio (fwrite/fflush/fseek) on the hot path.
 /// Use LMDBStorage for production — it provides memory-mapped I/O with no syscall overhead.

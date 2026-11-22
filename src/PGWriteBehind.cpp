@@ -340,9 +340,9 @@ void PGWriteBehind::run()
         lostInARow = 0;
         backoff = firstBackoff; // only once writes land: a database can accept connections and still drop each one
     };
-    // Whether a write failed because the connection is gone, not because Postgres refused it: libpqxx's broken_connection,
-    // or any error on a connection that no longer reads as open, such as in_doubt_error, a commit cut off. Its requests
-    // are written again, which PGWriteRequest allows.
+    // Whether a write failed because the connection is gone, not because Postgres refused it: libpqxx's
+    // broken_connection, or any error on a connection that no longer reads as open, such as in_doubt_error, a commit
+    // cut off. Its requests are written again, which PGWriteRequest allows.
     const auto connectionLost = [&](const std::exception &e)
     {
         return (nullptr != dynamic_cast<const pqxx::broken_connection *>(&e)) || !conn->is_open();

@@ -504,7 +504,8 @@ TEST_F(WsAuthorizationTest, AnOrderTradesOnlyTheIdentitysAccountsAndIsRecordedAs
 
     // Naming none: the identity's first account, not the server's default
     a->ws.write(net::buffer(std::string(
-        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD","capacity":"AGENCY","price":150.0,"orderQty":10}})")));
+        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD",)"
+        R"("capacity":"AGENCY","price":150.0,"orderQty":10}})")));
     std::optional<Queued> queued = takeQueued();
     ASSERT_TRUE(queued && queued->order);
     EXPECT_EQ("desk-a", queued->source) << "the order went to the engine under another source";
@@ -513,12 +514,14 @@ TEST_F(WsAuthorizationTest, AnOrderTradesOnlyTheIdentitysAccountsAndIsRecordedAs
 
     // Another identity's account is refused, in the words an account that doesn't exist gets
     a->ws.write(net::buffer(std::string(
-        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD","capacity":"AGENCY","price":150.0,"orderQty":10,"account":"CLIENT-A"}})")));
+        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD",)"
+        R"("capacity":"AGENCY","price":150.0,"orderQty":10,"account":"CLIENT-A"}})")));
     std::optional<nlohmann::json> refusal = readUntil(*a, "error");
     ASSERT_TRUE(refusal);
     EXPECT_EQ("Order refused: account CLIENT-A isn't one this connection may trade", refusal->value("message", ""));
     a->ws.write(net::buffer(std::string(
-        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD","capacity":"AGENCY","price":150.0,"orderQty":10,"account":"NO-SUCH"}})")));
+        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD",)"
+        R"("capacity":"AGENCY","price":150.0,"orderQty":10,"account":"NO-SUCH"}})")));
     refusal = readUntil(*a, "error");
     ASSERT_TRUE(refusal);
     EXPECT_EQ("Order refused: account NO-SUCH isn't one this connection may trade", refusal->value("message", ""));
@@ -528,11 +531,13 @@ TEST_F(WsAuthorizationTest, AnOrderTradesOnlyTheIdentitysAccountsAndIsRecordedAs
 TEST_F(WsAuthorizationTest, ASwapTradesOnlyTheIdentitysAccountsAndIsRecordedAsItsIdentitys)
 {
     // On this branch new_swap_order builds orders too, and took the server's default account or any it named, under the
-    // source "WebSocket". Under an identity a swap is held to new_order's rules (#225); the fixture's one instrument serves.
+    // source "WebSocket". Under an identity a swap is held to new_order's rules (#225); the fixture's one instrument
+    // serves.
     start();
     std::unique_ptr<Client> a = connect(TOKEN_A);
     const std::string swap =
-        R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":150.0,"farPrice":150.5,"settlDate":1000,"farSettlDate":2000,"orderQty":10,"currency":"USD","capacity":"AGENCY")";
+        R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":150.0,"farPrice":150.5,)"
+        R"("settlDate":1000,"farSettlDate":2000,"orderQty":10,"currency":"USD","capacity":"AGENCY")";
 
     a->ws.write(net::buffer(swap + "}}"));
     std::optional<Queued> queued = takeQueued();

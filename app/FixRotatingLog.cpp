@@ -20,7 +20,8 @@ std::shared_ptr<spdlog::logger> rotatingLogger(const std::string &name, const st
                                                std::size_t maxFileBytes, std::size_t backups)
 {
     auto sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(file, maxFileBytes, backups);
-    // Not registered: spdlog's registry belongs to the server's own log (Logger.cpp), whose shutdown drops what it holds
+    // Not registered: spdlog's registry belongs to the server's own log (Logger.cpp), whose shutdown drops what it
+    // holds
     auto logger = std::make_shared<spdlog::logger>(name, std::move(sink));
     // FileLog's line: the time as FIX writes it, in UTC, then " : " and the text
     logger->set_formatter(

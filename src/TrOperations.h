@@ -189,13 +189,12 @@ private:
     bool written_;
 };
 
-/// Writes a new persisted version of an instrument's last trade, its price and an id drawn when it was made (#237), and the
-/// held stops whose releases are pending on the instrument (#518), in the trade's transaction. It joins the trade's order
-/// persists in one commit (#163), so the price is durable with the fills it comes from. Rollback erases the version it
-/// wrote.
-/// Its object is an id of the instrument's last trade, (instrument number, 2), not the instrument: the transactions that
-/// write it run one after another, as #148's pruning needs of a record's writers, and a trade's fills stay unordered with
-/// the instrument's bookings, cancels and releases, as they were.
+/// Writes a new persisted version of an instrument's last trade, its price and an id drawn when it was made (#237), and
+/// the held stops whose releases are pending on the instrument (#518), in the trade's transaction. It joins the trade's
+/// order persists in one commit (#163), so the price is durable with the fills it comes from. Rollback erases the
+/// version it wrote. Its object is an id of the instrument's last trade, (instrument number, 2), not the instrument:
+/// the transactions that write it run one after another, as #148's pruning needs of a record's writers, and a trade's
+/// fills stay unordered with the instrument's bookings, cancels and releases, as they were.
 class PersistLastTradeTrOperation final : public Operation
 {
 public:

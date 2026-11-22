@@ -84,9 +84,8 @@ void TransactionMgr::addTransaction(std::unique_ptr<Transaction> &tr)
     int ready2Exec = 0;
     {
         tbb::mutex::scoped_lock lock(lock_);
-        IdT id =
-            idGenerator_
-                ->getId(); // should be just before add() call, because tree requires sequential order adding of transactions
+        IdT id = idGenerator_->getId(); // should be just before add() call, because tree requires sequential order
+                                        // adding of transactions
         tr->setTransactionId(id);
         transactionTree_.add(id, trPtr, objects, &ready2Exec);
     }

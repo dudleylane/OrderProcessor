@@ -497,8 +497,8 @@ protected:
         return msg;
     }
 
-    /// Sends msg from fixSid_ on a thread of its own, as a session's thread would, while the engine's input is held, and
-    /// lets the input through once the request is waiting for its order (#380). Returns whether it waited.
+    /// Sends msg from fixSid_ on a thread of its own, as a session's thread would, while the engine's input is held,
+    /// and lets the input through once the request is waiting for its order (#380). Returns whether it waited.
     template <typename Message> bool sendWhileHeld(const Message &msg)
     {
         std::thread client(
@@ -1037,7 +1037,8 @@ TEST_F(FixEndToEndTest, ReplaceOfARefusedReplacement_IsDecidedAgainstTheOrderItW
 {
     // EP284's D.2.c: Replace (Y,X) of a filled order is refused, and Replace (Z,Y), sent at once, waits for that
     // refusal rather than the timeout, and is then decided against X, the order Y was to replace (#398): the engine
-    // refuses it too, as too late, naming X. Before #398 the gateway answered it as unknown, and the engine never saw it.
+    // refuses it too, as too late, naming X. Before #398 the gateway answered it as unknown, and the engine never saw
+    // it.
     gateway_->onMessage(makeNOS("REF-S", FIX::Side_SELL, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
     waitForProcessing();
     gateway_->onMessage(makeNOS("REF-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
@@ -1133,8 +1134,8 @@ TEST_F(FixEndToEndTest, StatusRequests_FollowAnOrderThroughItsLife)
 {
     // EP284's G.1.c through the engine (#383): Pending New until the order is acknowledged, then New and Partially
     // Filled, each with the order's quantities; then, after Replace (Y,X), a request for X is answered with Y, naming
-    // X in OrigClOrdID (41), and one for Y with Y. The scenario replaces a filled order to raise its quantity, which the
-    // engine refuses (#74), so here the order is replaced while partly filled.
+    // X in OrigClOrdID (41), and one for Y with Y. The scenario replaces a filled order to raise its quantity, which
+    // the engine refuses (#74), so here the order is replaced while partly filled.
     holdingInQueues_->hold();
     gateway_->onMessage(makeNOS("LIFE-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
     const FIX50SP2::ExecutionReport pendingNew = statusOf("LIFE-X");
@@ -1216,11 +1217,11 @@ TEST_F(FixEndToEndTest, DuplicateClOrdId_IsRefusedBeforeTheEngine)
 
 TEST_F(FixEndToEndTest, ReplaceWithTheClOrdIdOfAnOrderOnItsWay_IsRefusedBeforeTheEngine)
 {
-    // Replace (K,X) while a new order K is still on its way, held in the engine's input. The gateway refuses the replace
-    // itself, as a ClOrdID in use (102=6), and never hands it on (#403). Before, both reached the engine, and with two
-    // or more event processors the replacement could be stored first and the new order refused. Here K is stored and X
-    // is untouched, and the engine refuses nothing. The gateway's own refusal goes to a session, which this fixture
-    // has none of: FixtSessionTest.AReplaceWhoseClOrdIdIsInUseIsRefusedBeforeTheEngine reads it.
+    // Replace (K,X) while a new order K is still on its way, held in the engine's input. The gateway refuses the
+    // replace itself, as a ClOrdID in use (102=6), and never hands it on (#403). Before, both reached the engine, and
+    // with two or more event processors the replacement could be stored first and the new order refused. Here K is
+    // stored and X is untouched, and the engine refuses nothing. The gateway's own refusal goes to a session, which
+    // this fixture has none of: FixtSessionTest.AReplaceWhoseClOrdIdIsInUseIsRefusedBeforeTheEngine reads it.
     gateway_->onMessage(makeNOS("RIU-X", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.0850, 100), fixSid_);
     waitForProcessing();
     holdingInQueues_->hold();

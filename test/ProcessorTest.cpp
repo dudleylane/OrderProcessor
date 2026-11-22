@@ -1368,10 +1368,10 @@ TEST_F(ProcessorTest, ASwapFillIsReportedAsItsNearLegAndItsFarLeg)
 TEST_F(ProcessorTest, EachOfASwapFillsLegsIsReportedWithWhatTheFillLeft)
 {
     // A swap fill's near and far reports both give what the fill left the order with (#411). O rests, a swap sell of
-    // 100; A1 and A2 each buy 30. Each booking applies its fill to both orders and enqueues the transaction that persists
-    // and reports it, which waits here, so the first fill's runs after the second fill was applied. A far leg's report
-    // has no state machine to take its figures, as a near leg's has: it took the order's as its transaction ran, and
-    // O's first far leg counted the second fill.
+    // 100; A1 and A2 each buy 30. Each booking applies its fill to both orders and enqueues the transaction that
+    // persists and reports it, which waits here, so the first fill's runs after the second fill was applied. A far
+    // leg's report has no state machine to take its figures, as a near leg's has: it took the order's as its
+    // transaction ran, and O's first far leg counted the second fill.
     using Figures = std::vector<std::pair<QuantityT, QuantityT>>; // a trade report's LeavesQty and CumQty
     LegRecordingOutQueues outQueues;
     ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
@@ -1418,10 +1418,10 @@ TEST_F(ProcessorTest, EachOfASwapFillsLegsIsReportedWithWhatTheFillLeft)
 
 TEST_F(ProcessorTest, ASwapSweepsEverySwapItCrosses)
 {
-    // A swap's sweep goes on to the next swap it crosses once its fill has applied (#477): the trade's event decides both
-    // sides' near legs, then hands the swap to afterSwapTrade(). matchSwap() queued the next match from the trade's
-    // quantity, before either fill ran. A buy swap of 60 takes two resting sell swaps of 30, each trade reporting both
-    // legs on each side.
+    // A swap's sweep goes on to the next swap it crosses once its fill has applied (#477): the trade's event decides
+    // both sides' near legs, then hands the swap to afterSwapTrade(). matchSwap() queued the next match from the
+    // trade's quantity, before either fill ran. A buy swap of 60 takes two resting sell swaps of 30, each trade
+    // reporting both legs on each side.
     LegRecordingOutQueues outQueues;
     ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(),
                            &outQueues, inQueues_.get(), transMgr_.get());
@@ -1674,9 +1674,9 @@ public:
 
 TEST_F(ProcessorTest, OrdersACrashLeftWithoutTheirFillsTradeAsTheyDidOnceRestarted)
 {
-    // X rests. Y crosses it, and W crosses what Y leaves. The transaction that books each commits, and a crash loses the
-    // transactions with their fills (#207). Restored, Y and W must trade as they did: Y with X at X's price, then W with
-    // Y at Y's. All three used to be booked as they were restored, crossed, and nothing traded them.
+    // X rests. Y crosses it, and W crosses what Y leaves. The transaction that books each commits, and a crash loses
+    // the transactions with their fills (#207). Restored, Y and W must trade as they did: Y with X at X's price, then W
+    // with Y at Y's. All three used to be booked as they were restored, crossed, and nothing traded them.
     const std::string dir = test::uniqueTestPath("uncross-restart");
     std::filesystem::remove_all(dir);
     IdT x;
@@ -2275,9 +2275,9 @@ std::vector<TransactionId> bookingsAsTheManagerOrdersThem(TestTransactionManager
 
 TEST_F(ProcessorTest, AMarketOrdersBookingWaitsForTheBookingBeforeItOnItsInstrument)
 {
-    // A market order's booking related only to the order: its match has no book operation, which is what relates a limit
-    // order's booking to the instrument. So the manager ran it alongside another booking on the instrument, both matched
-    // the same resting order, and the second's fill threw and left its order NEW for good (#209).
+    // A market order's booking related only to the order: its match has no book operation, which is what relates a
+    // limit order's booking to the instrument. So the manager ran it alongside another booking on the instrument, both
+    // matched the same resting order, and the second's fill threw and left its order NEW for good (#209).
     auto sell = createTestOrder(instrId1_, SELL_SIDE, 10.0, 100);
     inQueues_->push("test", OrderEvent(sell.release()));
     processor_->process();
@@ -2316,8 +2316,8 @@ TEST_F(ProcessorTest, AMarketOrdersBookingWaitsForTheBookingBeforeItOnItsInstrum
 
 TEST_F(ProcessorTest, ASuspendedOrderStaysOutOfTheBookAfterARestartAndIsBookedOnceWhenResumed)
 {
-    // Suspending an order takes it out of the book. A restart put it back, so it traded while suspended, and resuming it
-    // booked it a second time (#215).
+    // Suspending an order takes it out of the book. A restart put it back, so it traded while suspended, and resuming
+    // it booked it a second time (#215).
     const std::string dir = test::uniqueTestPath("suspended-restart");
     std::filesystem::remove_all(dir);
     IdT id;
@@ -2539,8 +2539,9 @@ TEST_F(ProcessorTest, AStopSellIsHeldUntilATradeReachesItsStopThenSellsAsAMarket
 
 TEST_F(ProcessorTest, AStopReachedDuringASweepIsReleasedOnceTheSweepIsDone)
 {
-    // A buy sweeps three levels, and its first trade reaches a buy stop. The sweep arrived first and takes every level it
-    // can; the stop's release runs after it, finds nothing left to buy, and the stop is canceled, as a market order is.
+    // A buy sweeps three levels, and its first trade reaches a buy stop. The sweep arrived first and takes every level
+    // it can; the stop's release runs after it, finds nothing left to buy, and the stop is canceled, as a market order
+    // is.
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
     engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 10));
     engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 10));
@@ -2875,8 +2876,8 @@ TEST_F(ProcessorTest, AStopsReleaseWaitsForTheTransactionThatBooksTheStop)
 
 TEST_F(ProcessorTest, AStopTwoTradesReachBeforeItsReleaseRunsIsReleasedOnce)
 {
-    // Each trade's transaction enqueues a release, and both are enqueued before either runs. The first releases the stop
-    // limit, which rests below the ask; the second finds it released and does nothing.
+    // Each trade's transaction enqueues a release, and both are enqueued before either runs. The first releases the
+    // stop limit, which rests below the ask; the second finds it released and does nothing.
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
     const OrderEntry *ask = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
     OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, BUY_SIDE, 9.5, 10), STOPLIMIT_ORDERTYPE, 10.0));
@@ -2929,7 +2930,8 @@ private:
 
 TEST_F(ProcessorTest, AStopsReleaseIsDurableBeforeItsTriggeredReport)
 {
-    // A client that hears TRIGGERED must find the release in the order's record after a crash, as for every report (#28)
+    // A client that hears TRIGGERED must find the release in the order's record after a crash, as for every report
+    // (#28)
     std::vector<std::string> log;
     StopVersionLog saver(&log);
     OrderStorage::instance()->attach(&saver);
@@ -3334,8 +3336,9 @@ TEST_F(ProcessorTest, AReplacementAveragesItsFillsWithTheOriginals)
 
 TEST_F(ProcessorTest, ASwapsAveragePriceIsItsNearLegs)
 {
-    // On this branch a swap's fills reach the engine through its near leg, so its average is the near leg's (#239): a buy
-    // swap takes 30 at 1.0850 and 30 at 1.0860 from two resting swaps of the same dates, whose far prices it crosses
+    // On this branch a swap's fills reach the engine through its near leg, so its average is the near leg's (#239): a
+    // buy swap takes 30 at 1.0850 and 30 at 1.0860 from two resting swaps of the same dates, whose far prices it
+    // crosses
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
     const auto swap = [this](Side side, PriceT nearPrice, QuantityT qty)
     {
@@ -3470,8 +3473,8 @@ TEST_F(ProcessorTest, AStopWhoseReleaseACrashLostIsReleasedOnceRestarted)
 
 TEST_F(ProcessorTest, AStopThatArrivedAfterTheLastTradeWaitsForTheNextOneAfterARestart)
 {
-    // The last trade is at 10, and then a sell stop at 10.5 arrives, which a trade at 10 would reach. No trade has since
-    // it arrived, so it waits for the next one, restart or not: releasing every stop the last price reaches would
+    // The last trade is at 10, and then a sell stop at 10.5 arrives, which a trade at 10 would reach. No trade has
+    // since it arrived, so it waits for the next one, restart or not: releasing every stop the last price reaches would
     // release it at every restart (#237).
     const std::string dir = test::uniqueTestPath("stop-after-last-trade");
     std::filesystem::remove_all(dir);
@@ -3509,9 +3512,9 @@ TEST_F(ProcessorTest, AStopThatArrivedAfterTheLastTradeWaitsForTheNextOneAfterAR
 
 TEST_F(ProcessorTest, AStopBookedAfterATradeWasDecidedIsNotReleasedByItLiveOrOnceRestarted)
 {
-    // The stop arrives before the trade, so its id is the smaller, but the transaction that books it runs after the trade
-    // is decided. The stop book didn't hold it then, so the trade doesn't release it, and neither may a restart. From
-    // the trade's price and id alone, the restore released it (#518).
+    // The stop arrives before the trade, so its id is the smaller, but the transaction that books it runs after the
+    // trade is decided. The stop book didn't hold it then, so the trade doesn't release it, and neither may a restart.
+    // From the trade's price and id alone, the restore released it (#518).
     const std::string dir = test::uniqueTestPath("stop-booked-after-trade");
     std::filesystem::remove_all(dir);
     IdT id;
@@ -3759,10 +3762,10 @@ TEST_F(ProcessorTest, AnIocOrderWithNothingToTradeIsCanceledNotRejected)
 
 TEST_F(ProcessorTest, AnOrderTheEngineStoresAndRejectsIsReportedWithNoLeaves)
 {
-    // A rejected order is closed, and a closed order's LeavesQty is 0, whatever closed it (#386, #427). The engine stores
-    // an order it rejects as it rejects it: one isValid() refuses, here a limit order at 0 (#188), and a market order
-    // with nothing to trade with, which until #436 the receive stored before finding it nothing to trade with. Each
-    // used to be reported with all of its quantity left.
+    // A rejected order is closed, and a closed order's LeavesQty is 0, whatever closed it (#386, #427). The engine
+    // stores an order it rejects as it rejects it: one isValid() refuses, here a limit order at 0 (#188), and a market
+    // order with nothing to trade with, which until #436 the receive stored before finding it nothing to trade with.
+    // Each used to be reported with all of its quantity left.
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
     const OrderEntry *invalid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 0.0, 100));
     auto order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 100);
@@ -3782,9 +3785,10 @@ TEST_F(ProcessorTest, AnOrderTheEngineStoresAndRejectsIsReportedWithNoLeaves)
 
 TEST_F(ProcessorTest, AnOrderItsChecksRefuseIsReportedWithTheirReason)
 {
-    // A new order its checks refuse takes a row of its own to Rejected, with no exception raised, where processReceive()
-    // threw and receive() rethrew (#436). Its report carries the reason the check gives, as the exception's message
-    // did: isValid()'s for a limit order at 0 (#188), and the market's for a market order with nothing to trade with.
+    // A new order its checks refuse takes a row of its own to Rejected, with no exception raised, where
+    // processReceive() threw and receive() rethrew (#436). Its report carries the reason the check gives, as the
+    // exception's message did: isValid()'s for a limit order at 0 (#188), and the market's for a market order with
+    // nothing to trade with.
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
     const OrderEntry *invalid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 0.0, 100));
     auto order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 100);
@@ -3801,9 +3805,9 @@ TEST_F(ProcessorTest, AnOrderItsChecksRefuseIsReportedWithTheirReason)
 
 TEST_F(ProcessorTest, AnOrderOnASideTheBookDoesntHoldIsRejected)
 {
-    // The book has two sides (#510). An order on any of the protocol's other four that rested was stored NEW in no book,
-    // with no report, and stopped every later start. One that didn't rest was matched as a sell, so a BUY_MINUS IOC
-    // traded with a resting buy: two buyers. Each is refused as its checks refuse an order, with their reason.
+    // The book has two sides (#510). An order on any of the protocol's other four that rested was stored NEW in no
+    // book, with no report, and stopped every later start. One that didn't rest was matched as a sell, so a BUY_MINUS
+    // IOC traded with a resting buy: two buyers. Each is refused as its checks refuse an order, with their reason.
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
     const OrderEntry *bid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 10));
     const OrderEntry *ask = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 10));
@@ -3839,10 +3843,10 @@ TEST_F(ProcessorTest, AnOrderOnASideTheBookDoesntHoldIsRejected)
 
 TEST_F(ProcessorTest, AnOpenOrderStoredOnASideTheBookDoesntHoldIsRestoredOutOfItAndCanBeCanceled)
 {
-    // Until #510 a resting order on a side the book doesn't hold was stored NEW, in no book, and every later start failed
-    // to restore it ("Unable to restore order into book - side is not supported!"), as it failed to hold a stop on one.
-    // Such a directory loads now, each order out of the book, and its client can still cancel it: the book has nothing to
-    // take out.
+    // Until #510 a resting order on a side the book doesn't hold was stored NEW, in no book, and every later start
+    // failed to restore it ("Unable to restore order into book - side is not supported!"), as it failed to hold a stop
+    // on one. Such a directory loads now, each order out of the book, and its client can still cancel it: the book has
+    // nothing to take out.
     const std::string dir = test::uniqueTestPath("side-restart");
     std::filesystem::remove_all(dir);
     IdT limit;
@@ -4014,9 +4018,9 @@ TEST_F(ProcessorTest, AnOrderStoredWithOpgTradesAsBeforeAndAReplaceMustGiveItAno
 
 TEST_F(ProcessorTest, AReplacementWhoseOriginalAStartDroppedIsRestoredAndCanBeCanceled)
 {
-    // A start given --keep-closed-days drops a replaced order of an earlier business day, and keeps its replacement, which
-    // is open (#597). Only a replacement still pending reads its original (Pend_Replace's rows), and one that is open was
-    // accepted, so its client can still cancel it.
+    // A start given --keep-closed-days drops a replaced order of an earlier business day, and keeps its replacement,
+    // which is open (#597). Only a replacement still pending reads its original (Pend_Replace's rows), and one that is
+    // open was accepted, so its client can still cancel it.
     const std::string dir = test::uniqueTestPath("dropped-original");
     std::filesystem::remove_all(dir);
     const DateTimeT today = ExpiryScheduler::dayStartOf(aux::currentDateTime());
@@ -4109,8 +4113,8 @@ TEST_F(ProcessorTest, AFokOrderExactlyTheBookCanFillTradesInFull)
 
 TEST_F(ProcessorTest, AnIocOrFokOrderIsNeverBooked)
 {
-    // Its rest is canceled by a transaction after the one that books it. Booked in between, it could trade with an order
-    // that came meanwhile (#240).
+    // Its rest is canceled by a transaction after the one that books it. Booked in between, it could trade with an
+    // order that came meanwhile (#240).
     for (const TimeInForce tif : { IOC_TIF, FOK_TIF })
     {
         SCOPED_TRACE(tif);
@@ -4407,8 +4411,8 @@ TEST_F(ProcessorTest, ASweepEndsAtAFillThatDoesntApply)
 TEST_F(ProcessorTest, AnIocOrderWhoseFillDoesntApplyIsCanceled)
 {
     // An order that never rests ends a sweep at a fill that didn't apply as it ends one that finds nothing to trade
-    // with: canceled with what it has left (#477). With nothing left to sweep for, nothing followed the IOC's one trade,
-    // so it was left NEW, neither booked nor canceled.
+    // with: canceled with what it has left (#477). With nothing left to sweep for, nothing followed the IOC's one
+    // trade, so it was left NEW, neither booked nor canceled.
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
     OrderEntry *unfillable = engine.submit(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
     ASSERT_NO_FATAL_FAILURE(makeUnfillable(engine, inQueues_.get(), unfillable));
@@ -4805,8 +4809,8 @@ std::unique_ptr<OrderEntry> asSwapOf(std::unique_ptr<OrderEntry> order, PriceT f
 TEST_F(ProcessorTest, AnOutrightFokOrderTheBookFillsBehindASwapFillsInFull)
 {
     // The FOK check walks as the sweep does (#491). An outright order's sweep passes over a swap (#212): a sell swap at
-    // 10 rests ahead of the outright sell at 10.5 that fills a FOK buy for 30 at 11. The check ended at the swap, and the
-    // FOK was canceled with nothing traded, where an IOC sent in its place filled in full.
+    // 10 rests ahead of the outright sell at 10.5 that fills a FOK buy for 30 at 11. The check ended at the swap, and
+    // the FOK was canceled with nothing traded, where an IOC sent in its place filled in full.
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
     const OrderEntry *swap =
         engine.submit(asSwapOf(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100), 10.2, 1000, 2000));
@@ -5002,10 +5006,10 @@ TEST_F(ProcessorTest, AFokSwapACrashLeftOpenIsCanceledOnceRestarted)
 TEST_F(ProcessorTest, AFokSwapACrashLeftHalfFilledFillsInFullOnceRestarted)
 {
     // An outright sell O for 50 at 1.0840 rests ahead of four sell swaps of 25 at 1.0850. FOK buy swap F for 100: its
-    // check passes over O, as its sweep does (#491), and the book fills it at once, a trade with each swap. A crash keeps
-    // the first two trades and loses the other two (#489). Restored with 50 left, F is matched again, its check first,
-    // which must pass over O again and count the two swaps it lost its trades with: F fills in full, and O is left as it
-    // was. Until #491 the check ended at O, and F was canceled at once.
+    // check passes over O, as its sweep does (#491), and the book fills it at once, a trade with each swap. A crash
+    // keeps the first two trades and loses the other two (#489). Restored with 50 left, F is matched again, its check
+    // first, which must pass over O again and count the two swaps it lost its trades with: F fills in full, and O is
+    // left as it was. Until #491 the check ended at O, and F was canceled at once.
     const std::string dir = test::uniqueTestPath("restart-fok-swap-fill");
     std::filesystem::remove_all(dir);
     IdT o;
@@ -5420,9 +5424,9 @@ TEST_F(ProcessorTest, ATradesDateIsTheBusinessDayItCountsIn)
 
 TEST_F(ProcessorTest, ASwapsLegsTradeOnTheDateOfTheDayItsFillCountsIn)
 {
-    // Every swap leg's trade had tradeDate 1, on both sides (#445): SwapExecutionDeferedEvent set none, where an outright
-    // trade has its business day's date (#258). A swap's legs settle on different dates, but they trade on one, the date
-    // of the day the fill counts in, so a fill at 17:00 New York has the next day's.
+    // Every swap leg's trade had tradeDate 1, on both sides (#445): SwapExecutionDeferedEvent set none, where an
+    // outright trade has its business day's date (#258). A swap's legs settle on different dates, but they trade on
+    // one, the date of the day the fill counts in, so a fill at 17:00 New York has the next day's.
     DateTimeT now = OCT15 + 13 * HOUR; // 09:00 EDT
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
                       [&now]
@@ -5493,9 +5497,10 @@ TEST_F(ProcessorTest, BothSidesOfATradeCountItInTheSameDay)
 
 TEST_F(ProcessorTest, ASwapsFillAfterTheDaysEndCountsInTheNewDay)
 {
-    // A swap's near legs are its fills (#239), applied by SwapExecutionDeferedEvent, which set no business day: a swap's
-    // fill after 17:00 New York counted in the day before (#244). Here the buy arrives in the day's last millisecond and
-    // trades at its end, so both sides count the fill in the new day: the resting sell, and the buy from the old day.
+    // A swap's near legs are its fills (#239), applied by SwapExecutionDeferedEvent, which set no business day: a
+    // swap's fill after 17:00 New York counted in the day before (#244). Here the buy arrives in the day's last
+    // millisecond and trades at its end, so both sides count the fill in the new day: the resting sell, and the buy
+    // from the old day.
     DateTimeT now = OCT15 + 13 * HOUR;
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
                       [&now]
@@ -5529,8 +5534,8 @@ TEST_F(ProcessorTest, ASwapsFillAfterTheDaysEndCountsInTheNewDay)
 
 TEST_F(ProcessorTest, BothSidesOfASwapCountItInTheSameDay)
 {
-    // A swap's match reads the clock once (#244), as an outright match does (BothSidesOfATradeCountItInTheSameDay): here
-    // each read moves the clock on a millisecond, across 17:00 New York
+    // A swap's match reads the clock once (#244), as an outright match does (BothSidesOfATradeCountItInTheSameDay):
+    // here each read moves the clock on a millisecond, across 17:00 New York
     DateTimeT now = OCT15 + 13 * HOUR;
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
                       [&now]

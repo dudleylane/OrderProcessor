@@ -31,10 +31,10 @@ public:
         }
     }
 
-    /// A copy takes the value only once it sees it loaded (#455). get() and load() write the value under the mutex, then
-    /// mark it loaded with a release store, so a copy that read the value before looking raced with another thread's
-    /// first load. A copy of a ref not yet loaded makes its own first load. loaded_ is read once, for both members: read
-    /// twice, a load between the reads would leave the copy marked loaded with no value.
+    /// A copy takes the value only once it sees it loaded (#455). get() and load() write the value under the mutex,
+    /// then mark it loaded with a release store, so a copy that read the value before looking raced with another
+    /// thread's first load. A copy of a ref not yet loaded makes its own first load. loaded_ is read once, for both
+    /// members: read twice, a load between the reads would leave the copy marked loaded with no value.
     WideDataLazyRef(const WideDataLazyRef &other)
         : WideDataLazyRef(other, other.loaded_.load(std::memory_order_acquire))
     {
