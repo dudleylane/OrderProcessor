@@ -229,16 +229,21 @@ bool TaskManager::allWorkDone() const
 // processor nothing ran after it (#364). So a task they start is enqueued: an enqueued task takes the fenced path
 // oneTBB promises to run, with a worker even where the arena has none. Enqueuing every task instead cost the pool
 // benchmarks about 10% (#364). defer() keeps the task in taskGroup_, so the destructor's wait() still covers it.
-template <typename F> void TaskManager::submit(F &&task)
+template <typename F> void TaskStarter::start(F &&task)
 {
     if (g_inTask)
     {
-        taskGroup_.run(std::forward<F>(task));
+        group_.run(std::forward<F>(task));
     }
     else
     {
-        oneapi::tbb::this_task_arena::enqueue(taskGroup_.defer(std::forward<F>(task)));
+        oneapi::tbb::this_task_arena::enqueue(group_.defer(std::forward<F>(task)));
     }
+}
+
+template <typename F> void TaskManager::submit(F &&task)
+{
+    taskGroup_.start(std::forward<F>(task));
 }
 
 void TaskManager::pinThisWorker() const
