@@ -1,7 +1,8 @@
 ================================================================================
 DEPRECATED: This file is retained for historical reference only.
 Many items in this list have been completed during the migration to C++23.
-See AUDIT_REPORT.md for current implementation status.
+AUDIT_REPORT.md is January 2026's audit, kept as a record of that time; it isn't the
+current status, which the issue tracker holds (#577).
 ================================================================================
 
 /**
