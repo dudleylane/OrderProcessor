@@ -80,10 +80,10 @@ ENV EXCHANGE_LOG=-
 USER oms
 
 # Healthy once the server answers HTTP on its port (#158). Any answer will do: a plain GET gets the WebSocket server's
-# 400. A TCP connect isn't enough, since a server that has stopped accepting (#202) still completes handshakes into its
-# listen backlog. The server listens only after restoring /data, so a large directory may need a longer start period, and
-# a server started on another port needs its own check. docker-compose.yml repeats this check, because podman builds
-# OCI images by default, and they don't keep it.
+# 426 Upgrade Required (app/WsSession.cpp; this said 400 until #578). A TCP connect isn't enough, since a server that
+# has stopped accepting (#202) still completes handshakes into its listen backlog. The server listens only after
+# restoring /data, so a large directory may need a longer start period, and a server started on another port needs its
+# own check. docker-compose.yml repeats this check, because podman builds OCI images by default, and they don't keep it.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=120s --retries=3 \
     CMD ["curl", "-s", "-o", "/dev/null", "--max-time", "2", "http://127.0.0.1:8080/"]
 
