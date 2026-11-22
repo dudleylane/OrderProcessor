@@ -209,7 +209,7 @@ Server options:
 | `--require-ws-auth` | | Refuses to start, with exit 2, without an access token or identities, where a server would run open (#643). Compose's command gives it |
 | `--pg-connection` | none | The Postgres to mirror to, a libpq connection string (#151). `OMS_PG_CONNECTION` gives it too, but not both: prefer it, since every user on the host can see a flag in the process list. Needs `BUILD_PG=ON` |
 | `--data-dir` | `./data` | LMDB persistence directory |
-| `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs. For now N runs N-1 at once (#711) |
+| `--workers` | 0 | Worker threads, and as many event and transaction processor pairs. N runs N workers at once, up to one fewer than the CPUs the server may use, where oneTBB's default arena stops (#711). 0 leaves oneTBB at that default, and runs 2 pairs. Before #711, N ran N-1 at once (one at 2): a server started with `--workers N` then runs one more worker now, so pass N-1 (at least 1) to keep what it ran. The default, compose's command and the image's CMD set no `--workers`, so they run as before |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
 | `--fix-cfg` | *(none)* | Path to QuickFIX settings file (enables FIX gateway); needs `--fix-credentials` |
 | `--fix-credentials` | *(none)* | The FIX counterparties: who may log on, with which password, to trade which accounts (#147). Each gets a session. Only with `--fix-cfg`: alone it's a usage error, exit 2 (#555) |
@@ -387,11 +387,14 @@ times an IOC swap that trades part of itself, and the engine's cancel of the res
 so nothing reaches LMDB.
 
 `BM_TaskManagerTrades` runs the same pool while every order trades: sells and buys in pairs at one price,
-dealt over 1 or 8 instruments, into a queue that counts the trade reports and keeps nothing (#290).
+dealt over 1 or 8 instruments, into a queue that counts the trade reports and keeps nothing (#290). Since #711 N
+processors run N workers at once, up to three on four CPUs, where 2 ran one and 4 and 8 three, so a comparison of
+the pool's benchmarks across #711, the ones below included, compares two pools.
 
-**What limits the pool (#583).** The processor count goes to oneTBB as `max_allowed_parallelism`, which counts a
-thread that joins the work, and the thread pushing these orders never does. So pinned to four CPUs, 2 runs one
-worker at a time, and 4 and 8 both run three (#711). From one worker to three, an order takes the same instructions
+**What limits the pool (#583).** Until #711 the processor count went to oneTBB as `max_allowed_parallelism`, which
+counts a thread that joins the work, and the thread pushing these orders never does: pinned to four CPUs, 2 ran one
+worker at a time, and 4 and 8 both ran three. The manager now asks for one more, so 2 runs two, and 4 and 8 still
+run three, the most oneTBB's default arena runs on four CPUs. From one worker to three, an order takes the same instructions
 in about twice the cycles. The workers wait mostly on `TransactionMgr::lock_`, which each transaction takes four
 times, and under which the transaction tree's sorted vectors move the pending entries at each removal (#712), and
 then on `OrderDataStorage::save()`, which clones the order under the store's write lock (#713). That's the pool's
