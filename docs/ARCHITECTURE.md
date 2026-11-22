@@ -1747,7 +1747,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | **This branch's** | `FxSwapTest.cpp`, and with `BUILD_FIX=ON`: `FixCredentialsTest.cpp`, `FixEndToEndTest.cpp`, `FixFullPipelineTest.cpp`, `FixGatewayTest.cpp`, `FixRotatingLogTest.cpp`, `FixStoresTest.cpp`, `FixTlsTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `DummyOrderSaver.h`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
-| **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `SeedDataFileTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh`, `MemoryCapTest.sh`, `CiBuildsCappedTest.sh`, `CiNamesTest.sh`, `CiJobsTest.sh`, `CpuBusyTest.sh`, `BenchmarkBaselineTest.sh`, `BenchmarkBusyStartTest.sh`, `LineEndingsTest.sh`, `CtestSkipsTest.sh`, `LineLengthTest.sh` |
+| **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `SeedDataFileTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh`, `MemoryCapTest.sh`, `CiBuildsCappedTest.sh`, `CiNamesTest.sh`, `CiJobsTest.sh`, `CpuBusyTest.sh`, `BenchmarkBaselineTest.sh`, `BenchmarkBusyStartTest.sh`, `LineEndingsTest.sh`, `CtestSkipsTest.sh`, `LineLengthTest.sh`, `SanitizerReportsTest.sh` |
 | **FIX ctest scripts** (`BUILD_FIX=ON`) | `FixLogonTest.py`, `FixRefusalTest.py`, `FixResendTest.py`, `FixTlsTest.py`, and the client they share, `fix_client.py`; with `BUILD_BENCHMARKS=ON` too, `FixBenchConfigTest.sh` |
 | **Fuzzing** | `fuzz/fuzz_client_message.cpp`, `fuzz/standalone_main.cpp`, `fuzz/corpus/` (`BUILD_FUZZ=ON`) |
 

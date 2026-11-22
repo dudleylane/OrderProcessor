@@ -283,6 +283,9 @@ jobs:
           scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 600 -j1 \
             | tee "$RUNNER_TEMP/tests.log"
           scripts/ctest-skips.sh "$RUNNER_TEMP/tests.log" 'PGWriteBehind|Postgres'
+          # A report that didn't halt its test, which then passed, still fails the job (#672): LastTest.log holds every
+          # test's output
+          scripts/sanitizer-reports.sh build/Testing/Temporary/LastTest.log
 
       - name: Postgres write-behind tests, against a throwaway database
         # As build-test.yml runs them (#151), here under the sanitizer: the writer is the code that runs a thread of its
@@ -302,6 +305,8 @@ jobs:
             -R 'PGWriteBehind|Postgres' | tee "$RUNNER_TEMP/pg-tests.log"
           # A test that found no database skipped, and ctest counts a skip as a pass: here none may skip (#563)
           scripts/ctest-skips.sh "$RUNNER_TEMP/pg-tests.log"
+          # This ctest's own LastTest.log, as the step before checks its (#672)
+          scripts/sanitizer-reports.sh build/Testing/Temporary/LastTest.log
 
       - name: Benchmark smoke run
         # Every benchmark once (#155), to show they run at all: not a timing, which #12 ruled out gating on. The

@@ -251,6 +251,12 @@ if(BUILD_TESTS)
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/CtestSkipsTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/ctest-skips.sh)
 
+    # The check CI's sanitizer jobs run after each ctest (#672): a report in LastTest.log fails the job, whether or not
+    # it halted its test. The test prints no report line itself, since LastTest.log holds its output too.
+    add_test(NAME SanitizerReportsAreRefused
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/SanitizerReportsTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/sanitizer-reports.sh)
+
     # The column limit, which clang-format doesn't apply to comments (#615): a line over it fails, counted in characters
     # with a CRLF line's CR left out, against a made-up tree
     add_test(NAME LineLengthIsChecked

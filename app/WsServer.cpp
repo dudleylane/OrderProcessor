@@ -86,6 +86,13 @@ void WsServer::onAccept(beast::error_code ec, tcp::socket socket)
     {
         return; // the acceptor was closed: the server is stopping
     }
+    if (!ec && failNextAccept_.exchange(false))
+    {
+        // failNextAccept()'s (#672): as EMFILE leaves it, the client's connection made by the kernel and not served
+        beast::error_code ignored;
+        socket.close(ignored);
+        ec = net::error::no_descriptors;
+    }
     if (ec)
     {
         // Accept again, after a pause. A failed accept used to stop the server accepting for good, without a word
