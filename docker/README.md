@@ -138,21 +138,7 @@ oms-server:
   command: ["--port", "8080", "--data-dir", "/data", "--keep-closed-days", "1", "--workers", "4"]
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--port` | 8080 | WebSocket listen port |
-| `--bind` | `0.0.0.0` | Address to listen on: an IP address, such as `127.0.0.1` for this host only (#146) |
-| `--ws-token-file` | none | A file whose first line is the access token. `OMS_WS_TOKEN` gives it too, but not both; with neither, any client may connect, and the server warns (#146) |
-| `--ws-credentials` | none | Identities instead of the shared token, each with its token's hash and its accounts (#225); see [Identities](#identities) |
-| `--allowed-origin` | any | An Origin a browser page may connect from; repeat it for more. `OMS_ALLOWED_ORIGINS` adds a comma-separated list (#146) |
-| `--data-dir` | `./data` | LMDB persistence directory. The image's command gives `/data`, its volume |
-| `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs |
-| `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
-| `--huge-pages` | off | Reports whether huge pages are available; nothing allocates from them yet |
-| `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
-| `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
-| `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock, and each order's own (#584) |
-| `--keep-closed-days` | 0 (1 in `docker-compose.yml`) | As the server starts, drops each closed order whose business day isn't one of the last N, the current one counted (#597). 0 keeps every order. The first start with it drops the earlier days' closed orders of a volume already in use; Postgres keeps their rows |
+README's [Standalone Server](../README.md#standalone-server) table gives every option the server takes, and is the only table of them: this file had a copy, which fell six options behind it (#706). In the image, `--data-dir` is `/data`, its volume, as the CMD above gives it.
 
 ## Common Operations
 
