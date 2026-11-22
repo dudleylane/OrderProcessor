@@ -198,6 +198,15 @@ enum OrderStatus
     CANCELED_ORDSTATUS
 };
 
+/// A status in which an order has no leaves (#386): closed, as filled, canceled, rejected, expired or replaced, or done
+/// for the day, which a new day or a resume reopens with what the order hasn't filled. Each action that takes an order
+/// to one of these zeroes its leaves at the decision, and Processor::persistOrder() checks that it did (#626).
+constexpr bool holdsNoLeaves(OrderStatus status) noexcept
+{
+    return (FILLED_ORDSTATUS == status) || (CANCELED_ORDSTATUS == status) || (REJECTED_ORDSTATUS == status) ||
+           (EXPIRED_ORDSTATUS == status) || (REPLACED_ORDSTATUS == status) || (DFD_ORDSTATUS == status);
+}
+
 enum Instructions
 {
     INVALID_INSTRUCTION = 0,

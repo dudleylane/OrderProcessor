@@ -492,6 +492,10 @@ void Processor::persistOrder(ACID::Scope *transaction, const OrderEntry &order)
     // What the decision left the order with, read now, under the order's write lock that every caller holds: the
     // transaction can run after a later decision about the order was applied (#411)
     const OrderFigures decided(order);
+    // A closed order has no leaves, whatever closed it, and the action that closed it zeroed them at the decision
+    // (#386). Each such action sets the 0 itself, and every decision persists through here, so a Debug build, as CI's
+    // sanitizer jobs are, refuses a decision that closed the order and left its leaves (#626).
+    assert(!holdsNoLeaves(decided.status_) || (0 == decided.leavesQty_));
     // Once per transaction (#148): LMDBStorage::update() keeps only the newest version it finds besides the one it
     // writes, so two versions of the order from one transaction would leave nothing to restore if it rolled back, and
     // the scope refuses a second persist (#632). A later decision in the transaction goes to the operation the first
