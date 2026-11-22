@@ -395,6 +395,22 @@ void StorageRecordDispatcher::finishLoad()
                 storage_->restore(executionsId, new ExecutionsT());
             }
         }
+        // Each of the order's two state ids must be one of its own region's states (#600), a pair MSM could have left:
+        // a zone-1 state in zone 2, or the reverse, would have the order's next event do whatever that pair's rows do.
+        // The decoder checks only that each is a state, since the golden records, bytes earlier builds wrote, hold a
+        // hand-made pair it must keep reading (#149); the pass that restores orders for trading, with the book, refuses
+        // a record that holds one, and the server doesn't start on it, as on a record the decoder refuses.
+        if (nullptr != orderBook_)
+        {
+            const OrdState::OrderStatePersistence &states = restored->stateMachinePersistance();
+            if (!OrdState::isZone1StateId(states.stateZone1Id_) || !OrdState::isZone2StateId(states.stateZone2Id_))
+            {
+                throw std::runtime_error("Order " + std::to_string(restored->orderId_.id_) + "'s state ids " +
+                                         std::to_string(states.stateZone1Id_) + ":" +
+                                         std::to_string(states.stateZone2Id_) +
+                                         " aren't a state of each region, so it can't be restored (#600)!");
+            }
+        }
         // Only a working order is booked: a live book holds only working orders, and a live market order is open only
         // while it is one (#207). Every other status is out of the book: finished, never accepted, or suspended, which
         // takes an order out until it is resumed (#215). A list of the statuses to leave out missed that one.
