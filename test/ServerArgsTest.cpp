@@ -212,6 +212,17 @@ TEST(ServerArgsTest, HelpIsAsked)
     }
 }
 
+TEST(ServerArgsTest, RequireWsAuthIsAFlagOffUnlessGiven)
+{
+    // Compose's command gives it (#643); a server run by hand without it may still run open, warning
+    const std::optional<ServerArgs> required = parse({ "--require-ws-auth" });
+    ASSERT_TRUE(required);
+    EXPECT_TRUE(required->requireWsAuth);
+    const std::optional<ServerArgs> plain = parse({});
+    ASSERT_TRUE(plain);
+    EXPECT_FALSE(plain->requireWsAuth);
+}
+
 TEST(ServerArgsTest, TheUsageNamesEveryOption)
 {
     const std::string usage = serverUsage();
@@ -228,6 +239,7 @@ TEST(ServerArgsTest, TheUsageNamesEveryOption)
         { "--max-connections", "1" },
         { "--bind", "0.0.0.0" },
         { "--ws-token-file", "f" },
+        { "--require-ws-auth" },
         { "--allowed-origin", "o" },
         { "--pg-connection", "s" },
         { "--max-session-queue-mb", "1" },
