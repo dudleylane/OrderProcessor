@@ -136,6 +136,14 @@ podman build --layers=false --pull=newer --format docker "${BUILD_ARGS[@]}" \
     || fail "the image didn't build"
 build_seconds=$SECONDS
 
+# One file and its links: COPY stored each link of libquickfix.so* as a full copy, three of a 2 MB library (#617)
+step "the image holds one copy of libquickfix"
+# shellcheck disable=SC2016 # the $ are the image's shell's, inside the single quotes on purpose
+copies="$(podman run --rm --entrypoint bash "$IMAGE" -c \
+    'n=0; for f in /usr/local/lib/libquickfix.so*; do [[ -L "$f" ]] || n=$((n + 1)); done; echo "$n"')" \
+    || fail "couldn't list the image's libquickfix"
+[[ "$copies" == 1 ]] || fail "the image holds $copies copies of libquickfix, where one file and its links do (#617)"
+
 step "seed a volume with seedData"
 podman run --rm -v "$NAME:/data" --entrypoint seedData "$IMAGE" --data-dir /data || fail "seedData failed"
 

@@ -74,12 +74,16 @@ RUN dnf install -y epel-release \
 
 COPY --from=builder /build/out/orderProcessorServer /usr/local/bin/
 COPY --from=builder /build/out/seedData /usr/local/bin/
-COPY --from=builder /usr/local/lib/libquickfix.so* /usr/local/lib/
+# The library alone, not its two links: COPY stores a link as a full copy of its target, so libquickfix.so* put three
+# copies of the library in the image, about 2 MB each (#617). ldconfig, below, makes the link the server needs.
+COPY --from=builder /usr/local/lib/libquickfix.so.*.* /usr/local/lib/
 COPY --from=builder /build/config/ /etc/orderprocessor/
 
 # The server finds libquickfix through its RUNPATH, /usr/local/lib, which CMake gives a build-tree binary
 # linked to a library outside the system directories. This loader entry isn't needed for it; it covers a
-# binary without that RUNPATH, such as one installed with `cmake --install` (#132, corrected in #135).
+# binary without that RUNPATH, such as one installed with `cmake --install` (#132, corrected in #135). But
+# ldconfig is: it makes libquickfix.so.22, the SONAME link the server's NEEDED entry names, since only the
+# library itself is copied (#617).
 RUN echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf && ldconfig
 
 # The server finds libpqxx through its RUNPATH, /usr/local/lib64; the loader entry covers a binary without one (#151)
