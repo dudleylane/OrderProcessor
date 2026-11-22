@@ -824,6 +824,8 @@ public:
     {
         seq_->push_back("publish");
     }
+    /// Not recorded: an order refused before it was stored is never persisted, so it has no order to sequence (#623)
+    void push(const Queues::OrderRejectEvent &, const std::string &) override {}
 
 private:
     std::vector<std::string> *seq_;
@@ -1187,6 +1189,8 @@ public:
     {
         rejects_.emplace_back(evnt.reason_, evnt.requestClOrdId_);
     }
+    /// Not recorded: only a cancel's answers are (#623)
+    void push(const Queues::OrderRejectEvent &, const std::string &) override {}
 
     std::vector<std::string> acks_;
     std::vector<std::pair<Queues::CancelRejectEvent::Reason, std::string>> rejects_;

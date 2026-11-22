@@ -244,9 +244,11 @@ public:
     virtual ~OutQueues() {}
     virtual void push(const ExecReportEvent &evnt, const std::string &target) = 0;
     virtual void push(const CancelRejectEvent &evnt, const std::string &target) = 0;
-    /// An order refused without being stored (#67); target is the order's source. Not pure, so that a queue which
-    /// never reaches clients may ignore it; one that does must override it.
-    virtual void push(const OrderRejectEvent & /*evnt*/, const std::string & /*target*/) {}
+    /// An order refused without being stored (#67); target is the order's source. Pure, as the other pushes are, so
+    /// that every queue says what it does with one: a queue that reaches clients answers it, and one that doesn't
+    /// overrides it empty, saying why (#623). With an empty default, a queue that reached clients and forgot the
+    /// override compiled, and every order refused before it was stored went unanswered, with nothing logged.
+    virtual void push(const OrderRejectEvent &evnt, const std::string &target) = 0;
 };
 
 } // namespace Queues
