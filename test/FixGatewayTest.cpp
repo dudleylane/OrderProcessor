@@ -906,6 +906,36 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_TooFewLegs_Rejected)
     gateway_->onMessage(msg, TEST_SID);
 }
 
+TEST_F(FixGatewayInboundTest, NewOrderMultileg_ThreeLegs_Rejected)
+{
+    // A swap has two legs. Only the first two were read, so a third, whatever it asked for, was taken unread (#550)
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    FIX50SP2::NewOrderMultileg msg = makeFxSwap("MLEG-3");
+    FIX50SP2::NewOrderMultileg::NoLegs third;
+    third.set(FIX::LegSymbol("aaa"));
+    third.set(FIX::LegSide(FIX::Side_BUY));
+    third.set(FIX::LegPrice(1.2700));
+    msg.addGroup(third);
+
+    gateway_->onMessage(msg, TEST_SID);
+}
+
+TEST_F(FixGatewayInboundTest, NewOrderMultileg_ALegOnAnotherSymbol_Rejected)
+{
+    // Both legs trade the swap's instrument. The symbol came from the root, or the first leg that named one, and a
+    // leg naming another was traded as if it named that one (#550)
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    for (const int leg : { 1, 2 })
+    {
+        FIX50SP2::NewOrderMultileg msg = makeFxSwap("MLEG-SYM-" + std::to_string(leg));
+        FIX50SP2::NewOrderMultileg::NoLegs group;
+        msg.getGroup(leg, group);
+        group.set(FIX::LegSymbol("bbb"));
+        msg.replaceGroup(leg, group);
+        gateway_->onMessage(msg, TEST_SID);
+    }
+}
+
 // =============================================================================
 // Quantities and prices the engine can't take are refused (#145)
 // =============================================================================
