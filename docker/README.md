@@ -283,7 +283,7 @@ docker compose restart oms-server
 
 | Stage | Base Image | Purpose |
 |-------|-----------|---------|
-| Builder | `centos:stream10` | Installs GCC 15 (gcc-toolset-15), CMake, TBB, spdlog, Boost, LMDB, numactl; compiles Release build |
+| Builder | `centos:stream10` | Installs GCC 15 (gcc-toolset-15), CMake, TBB, spdlog, Boost, LMDB, OpenSSL; compiles Release build |
 | Runtime | `centos:stream10` | Minimal image with only runtime libraries; copies `orderProcessorServer` and `seedData` |
 
 The build compiles with `-DCMAKE_BUILD_TYPE=Release` (LTO, -O3) and disables tests and benchmarks to minimize build time. It targets x86-64-v3 (`-DMARCH=x86-64-v3`), not the build machine's CPU, so the image runs on any CPU at that level, which has AVX2, BMI1/2, FMA and MOVBE: most Intel Core CPUs since Haswell (2013) and AMD CPUs since Excavator (2015), though not every Pentium or Celeron. CentOS Stream 10, its base, is built for the same level, so it can't run on less anyway. Builds outside the image default to `-march=native` (#170).
