@@ -129,7 +129,8 @@ cleanup() {
         "${COMPOSE[@]}" down -v -t 0 >/dev/null 2>&1 || true
     fi
     # Whatever compose down didn't reach, such as what a failed up left
-    podman ps -a -q --filter "label=io.podman.compose.project=$NAME" | xargs -r podman rm -f -t 0 \
+    # With -v (#561): a container left holding an anonymous volume would leak it into the store the runners share
+    podman ps -a -q --filter "label=io.podman.compose.project=$NAME" | xargs -r podman rm -f -v -t 0 \
         >/dev/null 2>&1 || true
     podman pod rm -f "pod_$NAME" >/dev/null 2>&1 || true
     podman network rm -f "${NAME}_default" >/dev/null 2>&1 || true
