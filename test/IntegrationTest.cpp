@@ -189,6 +189,9 @@ public:
         events_.fetch_add(1, std::memory_order_relaxed);
     }
 
+    /// Not counted: these cases count what the engine reports about the orders it stored (#623)
+    void push(const OrderRejectEvent &, const std::string &) override {}
+
     std::atomic<int> events_;
 };
 

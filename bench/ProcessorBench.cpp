@@ -560,6 +560,8 @@ public:
         }
     }
     void push(const CancelRejectEvent &, const std::string &) override {}
+    /// Not counted, as production's queues keep nothing: only trade reports are (#623)
+    void push(const OrderRejectEvent &, const std::string &) override {}
 
     /// Two a trade: one to each side
     u64 tradeReports() const

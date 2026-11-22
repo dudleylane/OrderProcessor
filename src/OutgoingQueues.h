@@ -34,6 +34,9 @@ public:
     /// reimplementeed from OutQueues
     virtual void push(const ExecReportEvent &evnt, const std::string &target);
     virtual void push(const CancelRejectEvent &evnt, const std::string &target);
+    /// Ignored: this queue keeps reports and cancel rejects, which the tests and benchmarks that use it read, and
+    /// reaches no client; a refusal of an order never stored goes to the clients' queues (#581, #623)
+    void push(const OrderRejectEvent &, const std::string &) override {}
 
 private:
     /// Unified event type using std::variant for lock-free queue

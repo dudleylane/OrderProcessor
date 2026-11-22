@@ -75,6 +75,8 @@ public:
         reports_.push_back(r);
     }
     void push(const CancelRejectEvent &, const std::string &) override {}
+    /// Not recorded: what the pipeline's two orders report is (#623)
+    void push(const OrderRejectEvent &, const std::string &) override {}
 
     std::deque<CapturedReport> getReports() const
     {
@@ -102,6 +104,11 @@ public:
         count_++;
     }
     void push(const CancelRejectEvent &, const std::string &) override
+    {
+        count_++;
+    }
+    /// Counted, as a cancel reject is: any answer the engine sends (#623)
+    void push(const OrderRejectEvent &, const std::string &) override
     {
         count_++;
     }
