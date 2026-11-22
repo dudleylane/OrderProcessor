@@ -25,14 +25,6 @@ namespace Codec
 /// original's ClOrdID, its source and its destination name. Carried, they need no records, and no commits, of their
 /// own. A field whose value the record doesn't carry is restored from a record of its own, as before version 3. A value
 /// is carried only for a field whose id is set; its id is the field's.
-/// Whether an order field names an entry, so that its record may carry its value (#192). An unset field's id is all
-/// zero. A string entry's id has date 0, which IdT::isValid() refuses, so isValid() would leave out every source and
-/// destination.
-inline bool namesEntry(const SourceIdT &id)
-{
-    return 0 != id.id_;
-}
-
 struct OrderStrings
 {
     std::optional<RawDataEntry> clOrderId;

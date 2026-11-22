@@ -33,6 +33,9 @@ struct IdT
     constexpr IdT() : id_(0), date_(0) {}
     IdT(const u64 &id, const u32 &date);
 
+    /// A stored entry's id: a number and a date, neither 0. Not for whether a reference is set: WideDataStorage issues
+    /// a string's id with date 0, so isValid() is false for every set source and destination (#624). Ask the
+    /// reference, WideDataLazyRef::isSet(), or namesEntry() for an id.
     constexpr bool isValid() const
     {
         return (0 != date_) && (0 != id_);

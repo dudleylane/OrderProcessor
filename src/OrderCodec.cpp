@@ -106,10 +106,8 @@ InstructionSetT instructionsFromMask(u32 mask)
 /// A string given for a field whose id isn't set could never be restored (#192)
 void expectCarriedIds(const OrderEntry &val, const OrderStrings &strings)
 {
-    if ((strings.clOrderId && !namesEntry(val.clOrderId_.getId())) ||
-        (strings.origClOrderId && !namesEntry(val.origClOrderId_.getId())) ||
-        (strings.source && !namesEntry(val.source_.getId())) ||
-        (strings.destination && !namesEntry(val.destination_.getId())))
+    if ((strings.clOrderId && !val.clOrderId_.isSet()) || (strings.origClOrderId && !val.origClOrderId_.isSet()) ||
+        (strings.source && !val.source_.isSet()) || (strings.destination && !val.destination_.isSet()))
     {
         throw std::invalid_argument("OrderCodec::encode: a string is given for an order field whose id isn't set");
     }
