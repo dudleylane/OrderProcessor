@@ -26,6 +26,18 @@ using namespace COP::App;
 namespace
 {
 
+/// The environment the resolvers read, as main() takes it from the process (#558)
+COP::App::ServerEnvironment environmentWith(const char *token, const char *credentials, const char *origins,
+                                            const char *pgConnection = nullptr)
+{
+    COP::App::ServerEnvironment environment;
+    environment.wsToken = token;
+    environment.wsCredentials = credentials;
+    environment.allowedOrigins = origins;
+    environment.pgConnection = pgConnection;
+    return environment;
+}
+
 const std::string TOKEN_A = "aaaaaaaaaaaaaaaa0123456789abcdef";
 const std::string TOKEN_B = "bbbbbbbbbbbbbbbb0123456789abcdef";
 
@@ -184,13 +196,13 @@ TEST(WsCredentialsTest, CredentialsComeFromTheirFileAndNeverBesideASharedToken)
     args.wsCredentialsFile = path;
     WsAuth auth;
     std::string error;
-    ASSERT_TRUE(resolveWsAuth(args, nullptr, nullptr, nullptr, &auth, &error)) << error;
+    ASSERT_TRUE(resolveWsAuth(args, environmentWith(nullptr, nullptr, nullptr), &auth, &error)) << error;
     ASSERT_NE(nullptr, auth.credentials);
     EXPECT_TRUE(auth.token.empty());
     EXPECT_NE(nullptr, auth.credentials->find(TOKEN_A));
 
     // Each identity's token, or one that everybody shares: not both
-    EXPECT_FALSE(resolveWsAuth(args, TOKEN_B.c_str(), nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(args, environmentWith(TOKEN_B.c_str(), nullptr, nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("can't both be given")) << error;
 
     // A file that names nobody would let nobody in: a mistake, said at startup
@@ -198,12 +210,12 @@ TEST(WsCredentialsTest, CredentialsComeFromTheirFileAndNeverBesideASharedToken)
         std::ofstream file(path);
         file << "# nobody yet\n";
     }
-    EXPECT_FALSE(resolveWsAuth(args, nullptr, nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(args, environmentWith(nullptr, nullptr, nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("names no identity")) << error;
 
     ServerArgs missing;
     missing.wsCredentialsFile = path + ".absent";
-    EXPECT_FALSE(resolveWsAuth(missing, nullptr, nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(missing, environmentWith(nullptr, nullptr, nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("can't read the WebSocket credentials file")) << error;
     std::remove(path.c_str());
 }
@@ -220,28 +232,28 @@ TEST(WsCredentialsTest, CredentialsComeFromTheFlagOrTheEnvironmentButNotBoth)
     WsAuth auth;
     std::string error;
     const ServerArgs none;
-    ASSERT_TRUE(resolveWsAuth(none, nullptr, path.c_str(), nullptr, &auth, &error)) << error;
+    ASSERT_TRUE(resolveWsAuth(none, environmentWith(nullptr, path.c_str(), nullptr), &auth, &error)) << error;
     ASSERT_NE(nullptr, auth.credentials);
     EXPECT_TRUE(auth.token.empty());
     EXPECT_NE(nullptr, auth.credentials->find(TOKEN_A));
 
     ServerArgs flag;
     flag.wsCredentialsFile = path;
-    EXPECT_FALSE(resolveWsAuth(flag, nullptr, path.c_str(), nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(flag, environmentWith(nullptr, path.c_str(), nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("given twice")) << error;
 
     // Set, but empty: a value that failed to render, refused rather than taken for none
-    EXPECT_FALSE(resolveWsAuth(none, nullptr, "", nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(none, environmentWith(nullptr, "", nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("OMS_WS_CREDENTIALS is set, but empty")) << error;
 
     // Never beside a shared token, whichever way each comes
-    EXPECT_FALSE(resolveWsAuth(none, TOKEN_B.c_str(), path.c_str(), nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(none, environmentWith(TOKEN_B.c_str(), path.c_str(), nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("can't both be given")) << error;
 
     // Identities satisfy --require-ws-auth, as a token does
     ServerArgs required;
     required.requireWsAuth = true;
-    EXPECT_TRUE(resolveWsAuth(required, nullptr, path.c_str(), nullptr, &auth, &error)) << error;
+    EXPECT_TRUE(resolveWsAuth(required, environmentWith(nullptr, path.c_str(), nullptr), &auth, &error)) << error;
     std::remove(path.c_str());
 }
 
