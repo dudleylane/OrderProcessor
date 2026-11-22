@@ -31,6 +31,26 @@ namespace COP
 namespace Tasks
 {
 
+/// The task group a TaskManager's tasks run in, which starts a task only the way the manager must (#364, #630): spawned
+/// from inside one of the manager's own tasks, enqueued from any other thread. A spawn waits for a worker to steal it,
+/// and oneTBB doesn't promise to wake one; the threads that push events never return to its dispatcher, so a task they
+/// spawned could sit unrun holding the only event processor. The group itself is private here, so no code of the
+/// manager's can call its run(), which spawns from any thread.
+class TaskStarter final
+{
+public:
+    /// Spawns the task from inside one of the manager's tasks, and enqueues it from any other thread
+    template <typename F> void start(F &&task);
+    /// Waits for every task started here, and rethrows a task's exception once they have all finished
+    void wait()
+    {
+        group_.wait();
+    }
+
+private:
+    oneapi::tbb::task_group group_;
+};
+
 struct TaskManagerParams
 {
     ACID::TransactionManager *transactMgr_;
@@ -149,8 +169,9 @@ private:
     mutable oneapi::tbb::mutex eventLock_;
 
     static std::unique_ptr<oneapi::tbb::global_control> scheduler_;
-    /// Tasks started by this manager. Per instance, so ~TaskManager can wait for exactly its own tasks (#21).
-    oneapi::tbb::task_group taskGroup_;
+    /// Tasks started by this manager. Per instance, so ~TaskManager can wait for exactly its own tasks (#21). Started
+    /// only by submit(), through the TaskStarter's start(): the group's own run() is out of reach (#630).
+    TaskStarter taskGroup_;
 
     ACID::TransactionManager *transactMgr_;
     ACID::TransactionIterator *transactIt_;
