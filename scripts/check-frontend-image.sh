@@ -102,9 +102,11 @@ cleanup() {
             podman logs "$container" 2>&1 | tail -n 50 || true
         done
     fi
-    podman rm -f -t 0 "$NAME" >/dev/null 2>&1 || true
-    podman rm -f -t 0 "$STAND_IN" >/dev/null 2>&1 || true
-    podman rm -f -t 0 "$NO_CERT" "$HSTS" >/dev/null 2>&1 || true
+    # With -v (#561), as scripts/ci-names.sh removes leftovers: the image declares no volume today, but a container
+    # holding an anonymous one would leak it into the store the runners share
+    podman rm -f -v -t 0 "$NAME" >/dev/null 2>&1 || true
+    podman rm -f -v -t 0 "$STAND_IN" >/dev/null 2>&1 || true
+    podman rm -f -v -t 0 "$NO_CERT" "$HSTS" >/dev/null 2>&1 || true
     podman network rm -f "$NAME" >/dev/null 2>&1 || true
     podman rmi -f "$IMAGE" >/dev/null 2>&1 || true
     rm -rf "${WORK:?}"
@@ -218,7 +220,7 @@ for _ in $(seq 1 "$START_TIMEOUT"); do
 done
 [[ "$sent" == "max-age=60" ]] || fail "with OMS_HSTS=max-age=60 it sends '${sent:-no Strict-Transport-Security}'"
 echo "with OMS_HSTS=max-age=60: Strict-Transport-Security: $sent"
-podman rm -f -t 0 "$HSTS" >/dev/null 2>&1 || true
+podman rm -f -v -t 0 "$HSTS" >/dev/null 2>&1 || true
 
 step "the image's health check"
 check="$(podman image inspect --format '{{json .HealthCheck}}' "$IMAGE")"
