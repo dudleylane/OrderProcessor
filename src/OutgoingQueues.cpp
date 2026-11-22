@@ -69,19 +69,3 @@ void OutgoingQueues::push(const CancelRejectEvent &evnt, const std::string &targ
         aux::ExchLogger::instance()->note("OutgoingQueues pushed new CancelRejectEvent.");
     }
 }
-
-void OutgoingQueues::push(const BusinessRejectEvent &evnt, const std::string &target)
-{
-    if (aux::ExchLogger::instance()->isNoteOn())
-    {
-        aux::ExchLogger::instance()->note("OutgoingQueues push new BusinessRejectEvent.");
-    }
-
-    // Lock-free push to concurrent queue
-    eventQueue_.push(QueuedOutEvent(target, evnt));
-
-    if (aux::ExchLogger::instance()->isNoteOn())
-    {
-        aux::ExchLogger::instance()->note("OutgoingQueues pushed new BusinessRejectEvent.");
-    }
-}

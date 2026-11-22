@@ -244,20 +244,6 @@ static void BM_OutQueuePushCancelReject(benchmark::State &state)
 }
 BENCHMARK(BM_OutQueuePushCancelReject)->Range(8, 8 << 10);
 
-static void BM_OutQueuePushBusinessReject(benchmark::State &state)
-{
-    BenchmarkSetup setup;
-    OutgoingQueues queues;
-
-    for (auto _ : state)
-    {
-        BusinessRejectEvent event;
-        queues.push(event, "target");
-    }
-    state.SetItemsProcessed(state.iterations());
-}
-BENCHMARK(BM_OutQueuePushBusinessReject)->Range(8, 8 << 10);
-
 // =============================================================================
 // High Volume Throughput Benchmark
 // =============================================================================

@@ -296,7 +296,6 @@ COP (Concurrent Order Processor)
 │ Event Types Produced:                                            │
 │   • ExecReportEvent    - Execution report (fill, ack, etc.)    │
 │   • CancelRejectEvent  - Cancel request rejection              │
-│   • BusinessRejectEvent - nothing makes one (#603)               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

@@ -275,14 +275,6 @@ std::string App::cancelRejectReason(const Queues::CancelRejectEvent &evnt)
     }
 }
 
-std::string App::serializeBusinessReject(u64 refId, const std::string &reason)
-{
-    json j;
-    j["type"] = "business_reject";
-    j["data"] = { { "refId", refId }, { "reason", reason } };
-    return j.dump();
-}
-
 std::string App::serializeError(const std::string &message)
 {
     json j;

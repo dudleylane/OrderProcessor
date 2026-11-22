@@ -2663,19 +2663,6 @@ TEST_F(MultiOutQueuesTest, FansOutOrderReject)
     queues.push(evt, "FIX:session");
 }
 
-TEST_F(MultiOutQueuesTest, FansOutBusinessReject)
-{
-    MockOutQueues mock1, mock2;
-    MultiOutQueues multi;
-    multi.addDelegate(&mock1);
-    multi.addDelegate(&mock2);
-
-    BusinessRejectEvent evt;
-    EXPECT_CALL(mock1, push(testing::An<const BusinessRejectEvent &>(), _)).Times(1);
-    EXPECT_CALL(mock2, push(testing::An<const BusinessRejectEvent &>(), _)).Times(1);
-    multi.push(evt, "target");
-}
-
 TEST_F(MultiOutQueuesTest, EmptyDelegatesNoCrash)
 {
     MultiOutQueues multi;
@@ -3222,8 +3209,8 @@ TEST_F(FixtSessionTest, TheGatewaysOwnRefusalsAreTaken)
 
 TEST_F(FixtSessionTest, TheEnginesRefusalsAreTaken)
 {
-    // What the engine refuses, as the gateway reports it: a new order and a replacement whose ClOrdID is in use, a
-    // cancel too late, and a business reject naming an order
+    // What the engine refuses, as the gateway reports it: a new order and a replacement whose ClOrdID is in use, and a
+    // cancel too late
     ASSERT_NO_FATAL_FAILURE(logOn());
     OrderEntry *order = saveOrderOf(sid_, "ORD-1");
     const std::string source = FixGateway::makeSourceString(sid_);
@@ -3235,10 +3222,8 @@ TEST_F(FixtSessionTest, TheEnginesRefusalsAreTaken)
     tooLate.ordStatus_ = FILLED_ORDSTATUS;
     tooLate.requestClOrdId_ = "CXL-LATE";
     gateway_->sendCancelReject(tooLate, source);
-    gateway_->sendBusinessReject(order->orderId_, "refused");
     EXPECT_EQ(1u, sentOfType(FIX::MsgType_ExecutionReport).size()) << sentText();
     EXPECT_EQ(2u, sentOfType(FIX::MsgType_OrderCancelReject).size()) << sentText();
-    EXPECT_EQ(1u, sentOfType(FIX::MsgType_BusinessMessageReject).size()) << sentText();
     expectEverythingSentIsTaken();
 }
 

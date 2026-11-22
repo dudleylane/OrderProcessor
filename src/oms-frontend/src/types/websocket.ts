@@ -17,7 +17,6 @@ export type ServerMessage =
   | { type: 'instrument_list'; data: Instrument[] }
   | { type: 'account_list'; data: Account[] }
   | { type: 'cancel_reject'; data: { orderId: number; reason: string } }
-  | { type: 'business_reject'; data: { refId: number; reason: string } }
   | { type: 'metrics_update'; data: SystemMetrics }
   | { type: 'error'; message: string };
 

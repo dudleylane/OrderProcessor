@@ -67,11 +67,6 @@ void WsOutQueues::push(const Queues::CancelRejectEvent &evnt, const std::string 
     }
 }
 
-void WsOutQueues::push(const Queues::BusinessRejectEvent &evnt, const std::string &target)
-{
-    sessionMgr_->sendToSource(target, serializeBusinessReject(evnt.id_.id_, "Business reject"));
-}
-
 void WsOutQueues::push(const Queues::OrderRejectEvent &evnt, const std::string &target)
 {
     // The order was never stored, so it has no id: a REJECT report with orderId 0, and the reason (#67)

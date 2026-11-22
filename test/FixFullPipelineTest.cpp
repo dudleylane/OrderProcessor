@@ -75,7 +75,6 @@ public:
         reports_.push_back(r);
     }
     void push(const CancelRejectEvent &, const std::string &) override {}
-    void push(const BusinessRejectEvent &, const std::string &) override {}
 
     std::deque<CapturedReport> getReports() const
     {
@@ -103,10 +102,6 @@ public:
         count_++;
     }
     void push(const CancelRejectEvent &, const std::string &) override
-    {
-        count_++;
-    }
-    void push(const BusinessRejectEvent &, const std::string &) override
     {
         count_++;
     }

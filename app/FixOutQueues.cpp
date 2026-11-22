@@ -43,15 +43,6 @@ void FixOutQueues::push(const CancelRejectEvent &evnt, const std::string &target
     gateway_->sendCancelReject(evnt, target);
 }
 
-void FixOutQueues::push(const BusinessRejectEvent &evnt, const std::string & /*target*/)
-{
-    // FIX BusinessMessageReject (35=j)
-    // evnt.id_ references the order that triggered the business reject (or
-    // invalid if no specific order). FixGateway resolves the target session
-    // from the order's source string, or broadcasts if no reference.
-    gateway_->sendBusinessReject(evnt.id_, "Business rule violation");
-}
-
 void FixOutQueues::push(const OrderRejectEvent &evnt, const std::string &target)
 {
     // The order was never stored, so there is no order to look up: target is its source, which names the session (#67)
