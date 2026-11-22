@@ -4,4 +4,10 @@
 # GitHub honors this file automatically in the blame UI.
 
 # Apply clang-format tree-wide (BSD/Allman, 120 cols)
-bed1530
+bed1530bc58768a9594d854ee04d2ab32022eaaf
+
+# Convert master's three LF C++ files to CRLF, as every other C++ file is (#639)
+61d152576c62ae30f3810c0c7fd9685b7fad0cbb
+
+# Wrap the comments that ran past 120 columns (#615)
+8c609f19675a3dfcc27d2682eeac4b1d8cf8ba95

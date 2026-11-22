@@ -389,4 +389,29 @@ TEST_F(DocConsistencyTest, ReadmeInstallsWhatTheServerImageBuildsWith)
     }
 }
 
+// .git-blame-ignore-revs names the commits `git blame` skips, read as an fsck skip list: one full object name a line.
+// It named its one commit abbreviated, bed1530, which git refuses ("fatal: invalid object name"), so a clone set up as
+// its own comment says couldn't run git blame at all (#753). Each line that isn't a comment or blank is 40 hex digits;
+// running git blame here would fail in CI's shallow checkout, which lacks the commits.
+TEST_F(DocConsistencyTest, BlameIgnoreRevsNamesFullCommits)
+{
+    std::ifstream in(test::sourceRoot() / ".git-blame-ignore-revs");
+    ASSERT_TRUE(in) << "can't read .git-blame-ignore-revs";
+    const std::regex full("[0-9a-f]{40}");
+    std::string line;
+    size_t commits = 0;
+    while (std::getline(in, line))
+    {
+        line.erase(std::remove(line.begin(), line.end(), '\r'), line.end());
+        if (line.empty() || ('#' == line.front()))
+        {
+            continue;
+        }
+        ++commits;
+        EXPECT_TRUE(std::regex_match(line, full))
+            << ".git-blame-ignore-revs names " << line << ", which isn't a full commit: git refuses the file for it";
+    }
+    EXPECT_LT(0u, commits) << ".git-blame-ignore-revs names no commit";
+}
+
 } // namespace
