@@ -572,10 +572,9 @@ protected:
         return replacement;
     }
 
-    /// Polls until the work is done, where waitUntilTransactionsFinished(N) takes at least two seconds: it sleeps a
-    /// second between its two checks. One check is enough since #263, when it began to count the transactions still in
-    /// the manager: an idle pool alone could be a finished transaction's task between handing its processor back and
-    /// removing the transaction, with the transactions that removal releases still to run.
+    /// Polls until the work is done, with a timeout in milliseconds. waitUntilTransactionsFinished(N) takes whole
+    /// seconds, and until #587 took at least two: it slept a second between two checks, though one has been enough
+    /// since #263, when it began to count the transactions still in the manager.
     bool waitUntilIdle(TaskManager &manager, std::chrono::milliseconds timeout = std::chrono::seconds(10))
     {
         const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -2131,6 +2130,20 @@ TEST_F(TaskManagerTest, AWorkerThatRunsBothKindsOfTaskIsPinnedOnce)
     EXPECT_EQ(0, manager->tasksFailed());
     ASSERT_EQ(std::vector<int>{ 1 % cores }, pinnedTo)
         << "the transaction task's worker isn't on the one core its first task pinned it to";
+}
+
+TEST_F(TaskManagerTest, AWaitOnAManagerWithNothingToDoReturnsAtOnce)
+{
+    // One check that finds the work done is enough since #263; a second, a second later, made every wait take at least
+    // one second, and two when the work was still running at the first check (#587): the server's shutdown, and every
+    // test that waits. Timed once the work is done, so the time the work takes doesn't count.
+    auto manager = createTaskManager(1, 1);
+    pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    const auto start = std::chrono::steady_clock::now();
+    ASSERT_TRUE(manager->waitUntilTransactionsFinished(10));
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(500))
+        << "a wait with nothing left to do slept before it returned";
 }
 
 } // namespace
