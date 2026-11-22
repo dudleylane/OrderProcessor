@@ -44,6 +44,18 @@ using namespace COP::Store;
 namespace
 {
 
+/// The environment the resolvers read, as main() takes it from the process (#558)
+COP::App::ServerEnvironment environmentWith(const char *token, const char *credentials, const char *origins,
+                                            const char *pgConnection = nullptr)
+{
+    COP::App::ServerEnvironment environment;
+    environment.wsToken = token;
+    environment.wsCredentials = credentials;
+    environment.allowedOrigins = origins;
+    environment.pgConnection = pgConnection;
+    return environment;
+}
+
 const std::string TOKEN = "0123456789abcdef0123456789abcdef";
 
 // --- What decides an upgrade, by itself ---
@@ -122,28 +134,28 @@ TEST(WsAuthTest, TheTokenComesFromItsFileOrTheEnvironmentButNotBoth)
     args.wsTokenFile = path;
     WsAuth auth;
     std::string error;
-    ASSERT_TRUE(resolveWsAuth(args, nullptr, nullptr, nullptr, &auth, &error)) << error;
+    ASSERT_TRUE(resolveWsAuth(args, environmentWith(nullptr, nullptr, nullptr), &auth, &error)) << error;
     EXPECT_EQ(TOKEN, auth.token);
 
-    EXPECT_FALSE(resolveWsAuth(args, TOKEN.c_str(), nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(args, environmentWith(TOKEN.c_str(), nullptr, nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("given twice")) << error;
 
     ServerArgs fromEnv;
-    ASSERT_TRUE(resolveWsAuth(fromEnv, TOKEN.c_str(), nullptr, nullptr, &auth, &error)) << error;
+    ASSERT_TRUE(resolveWsAuth(fromEnv, environmentWith(TOKEN.c_str(), nullptr, nullptr), &auth, &error)) << error;
     EXPECT_EQ(TOKEN, auth.token);
     // Set but empty, or a file with nothing on its first line, is a mistake that would leave the server open
-    EXPECT_FALSE(resolveWsAuth(fromEnv, "", nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(fromEnv, environmentWith("", nullptr, nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("set, but empty")) << error;
     {
         std::ofstream file(path);
         file << "\r\n" << TOKEN << "\n";
     }
-    EXPECT_FALSE(resolveWsAuth(args, nullptr, nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(args, environmentWith(nullptr, nullptr, nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("has no token")) << error;
 
     ServerArgs missing;
     missing.wsTokenFile = path + ".absent";
-    EXPECT_FALSE(resolveWsAuth(missing, nullptr, nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(missing, environmentWith(nullptr, nullptr, nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("can't read the token file")) << error;
     std::remove(path.c_str());
 }
@@ -156,13 +168,13 @@ TEST(WsAuthTest, RequireWsAuthRefusesAServerThatWouldLetAnyoneIn)
     required.requireWsAuth = true;
     WsAuth auth;
     std::string error;
-    EXPECT_FALSE(resolveWsAuth(required, nullptr, nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(required, environmentWith(nullptr, nullptr, nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("--require-ws-auth")) << error;
-    EXPECT_TRUE(resolveWsAuth(required, TOKEN.c_str(), nullptr, nullptr, &auth, &error)) << error;
+    EXPECT_TRUE(resolveWsAuth(required, environmentWith(TOKEN.c_str(), nullptr, nullptr), &auth, &error)) << error;
 
     // Without it, a server with neither runs open, as before, and warns once at startup (#146)
     const ServerArgs open;
-    EXPECT_TRUE(resolveWsAuth(open, nullptr, nullptr, nullptr, &auth, &error)) << error;
+    EXPECT_TRUE(resolveWsAuth(open, environmentWith(nullptr, nullptr, nullptr), &auth, &error)) << error;
     EXPECT_TRUE(auth.token.empty());
 }
 
@@ -171,9 +183,10 @@ TEST(WsAuthTest, ATokenThatCannotTravelInASubprotocolIsRefusedAtStartup)
     ServerArgs args;
     WsAuth auth;
     std::string error;
-    EXPECT_FALSE(resolveWsAuth(args, "too-short", nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(args, environmentWith("too-short", nullptr, nullptr), &auth, &error));
     EXPECT_NE(std::string::npos, error.find("at least 16")) << error;
-    EXPECT_FALSE(resolveWsAuth(args, "0123456789abcdef/with/slashes", nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(
+        resolveWsAuth(args, environmentWith("0123456789abcdef/with/slashes", nullptr, nullptr), &auth, &error));
 }
 
 TEST(WsAuthTest, OriginsComeFromTheFlagsAndTheEnvironment)
@@ -183,7 +196,9 @@ TEST(WsAuthTest, OriginsComeFromTheFlagsAndTheEnvironment)
     args.allowedOrigins = { "http://a.example/" };
     WsAuth auth;
     std::string error;
-    ASSERT_TRUE(resolveWsAuth(args, nullptr, nullptr, "http://b.example, https://c.example/", &auth, &error)) << error;
+    ASSERT_TRUE(
+        resolveWsAuth(args, environmentWith(nullptr, nullptr, "http://b.example, https://c.example/"), &auth, &error))
+        << error;
     EXPECT_EQ((std::vector<std::string>{ "http://a.example", "http://b.example", "https://c.example" }),
               auth.allowedOrigins);
 }
