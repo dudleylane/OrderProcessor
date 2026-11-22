@@ -1,6 +1,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -185,8 +186,8 @@ int main(int argc, char *argv[])
             });
         if (hasInstrument)
         {
-            std::cout << "seedData: " << dataDir << " has instruments already, so it isn't seeded (--if-empty)\n";
             cleanup();
+            std::cout << "seedData: " << dataDir << " has instruments already, so it isn't seeded (--if-empty)\n";
             return 0;
         }
     }
@@ -197,18 +198,24 @@ int main(int argc, char *argv[])
         const std::vector<std::string> otherwise = storedOtherwise(*data, *Store::WideDataStorage::instance());
         if (!otherwise.empty())
         {
+            cleanup();
             for (const std::string &line : otherwise)
             {
                 std::cerr << "seedData: " << line << "\n";
             }
             std::cerr << "seedData: nothing is written: seedData adds what isn't stored, and changes nothing that is\n";
-            cleanup();
             return 1;
         }
     }
 
     // Bind storage so new adds get persisted
     Store::WideDataStorage::instance()->bindStorage(dispatcher.get());
+
+    // The report is written once the logger is gone (#719). The log can go to standard output as well (EXCHANGE_LOG=-,
+    // as the server image sets it), through spdlog's async worker, which writes each line when it gets to it, so a log
+    // line landed in the middle of a report line. Destroying the logger joins the worker once it has written every
+    // line queued (spdlog::shutdown()), so the report follows the whole log, and nothing logs after the destroy.
+    std::ostringstream report;
 
     // 3. Add instruments
     int instrCount = 0;
@@ -217,11 +224,11 @@ int main(int argc, char *argv[])
         // Check if already exists
         if (Store::WideDataStorage::instance()->findInstrumentBySymbol(def.symbol_).isValid())
         {
-            std::cout << "  Instrument " << def.symbol_ << " already exists, skipping\n";
+            report << "  Instrument " << def.symbol_ << " already exists, skipping\n";
             continue;
         }
         SourceIdT id = Store::WideDataStorage::instance()->add(new InstrumentEntry(def));
-        std::cout << "  Added instrument: " << def.symbol_ << " (id=" << id.id_ << ")\n";
+        report << "  Added instrument: " << def.symbol_ << " (id=" << id.id_ << ")\n";
         instrCount++;
     }
 
@@ -231,11 +238,11 @@ int main(int argc, char *argv[])
     {
         if (Store::WideDataStorage::instance()->findAccountByName(def.account_).isValid())
         {
-            std::cout << "  Account " << def.account_ << " already exists, skipping\n";
+            report << "  Account " << def.account_ << " already exists, skipping\n";
             continue;
         }
         SourceIdT id = Store::WideDataStorage::instance()->add(new AccountEntry(def));
-        std::cout << "  Added account: " << def.account_ << " @ " << def.firm_ << " (id=" << id.id_ << ")\n";
+        report << "  Added account: " << def.account_ << " @ " << def.firm_ << " (id=" << id.id_ << ")\n";
         acctCount++;
     }
 
@@ -245,23 +252,24 @@ int main(int argc, char *argv[])
     {
         if (Store::WideDataStorage::instance()->findClearingByFirm(def.firm_).isValid())
         {
-            std::cout << "  Clearing firm " << def.firm_ << " already exists, skipping\n";
+            report << "  Clearing firm " << def.firm_ << " already exists, skipping\n";
             continue;
         }
         SourceIdT id = Store::WideDataStorage::instance()->add(new ClearingEntry(def));
-        std::cout << "  Added clearing firm: " << def.firm_ << " (id=" << id.id_ << ")\n";
+        report << "  Added clearing firm: " << def.firm_ << " (id=" << id.id_ << ")\n";
         clearingCount++;
     }
 
-    std::cout << "\nSeeded " << instrCount << " instruments, " << acctCount << " accounts and " << clearingCount
-              << " clearing firms into " << dataDir;
+    report << "\nSeeded " << instrCount << " instruments, " << acctCount << " accounts and " << clearingCount
+           << " clearing firms into " << dataDir;
     if (!parsed->file.empty())
     {
-        std::cout << " from " << parsed->file;
+        report << " from " << parsed->file;
     }
-    std::cout << "\n";
+    report << "\n";
 
-    // 6. Cleanup
+    // 6. Cleanup, the logger last, then the report
     cleanup();
+    std::cout << report.str();
     return 0;
 }
