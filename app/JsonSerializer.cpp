@@ -85,8 +85,8 @@ json execToJson(const ExecutionEntry *exec)
     j["market"] = exec->market_;
     j["transactTime"] = exec->transactTime_;
 
-    // The extra fields follow the report's class, not type_: an order cancel is a plain ExecutionEntry with type CANCEL,
-    // and a rejected replace is a RejectExecEntry with type REPLACE (#56)
+    // The extra fields follow the report's class, not type_: an order cancel is a plain ExecutionEntry with type
+    // CANCEL, and a rejected replace is a RejectExecEntry with type REPLACE (#56)
     if (auto *trade = dynamic_cast<const TradeExecEntry *>(exec))
     {
         j["lastQty"] = trade->lastQty_;

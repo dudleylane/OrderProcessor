@@ -504,7 +504,8 @@ TEST_F(WsAuthorizationTest, AnOrderTradesOnlyTheIdentitysAccountsAndIsRecordedAs
 
     // Naming none: the identity's first account, not the server's default
     a->ws.write(net::buffer(std::string(
-        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD","capacity":"AGENCY","price":150.0,"orderQty":10}})")));
+        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD",)"
+        R"("capacity":"AGENCY","price":150.0,"orderQty":10}})")));
     std::optional<Queued> queued = takeQueued();
     ASSERT_TRUE(queued && queued->order);
     EXPECT_EQ("desk-a", queued->source) << "the order went to the engine under another source";
@@ -513,12 +514,14 @@ TEST_F(WsAuthorizationTest, AnOrderTradesOnlyTheIdentitysAccountsAndIsRecordedAs
 
     // Another identity's account is refused, in the words an account that doesn't exist gets
     a->ws.write(net::buffer(std::string(
-        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD","capacity":"AGENCY","price":150.0,"orderQty":10,"account":"CLIENT-A"}})")));
+        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD",)"
+        R"("capacity":"AGENCY","price":150.0,"orderQty":10,"account":"CLIENT-A"}})")));
     std::optional<nlohmann::json> refusal = readUntil(*a, "error");
     ASSERT_TRUE(refusal);
     EXPECT_EQ("Order refused: account CLIENT-A isn't one this connection may trade", refusal->value("message", ""));
     a->ws.write(net::buffer(std::string(
-        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD","capacity":"AGENCY","price":150.0,"orderQty":10,"account":"NO-SUCH"}})")));
+        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD",)"
+        R"("capacity":"AGENCY","price":150.0,"orderQty":10,"account":"NO-SUCH"}})")));
     refusal = readUntil(*a, "error");
     ASSERT_TRUE(refusal);
     EXPECT_EQ("Order refused: account NO-SUCH isn't one this connection may trade", refusal->value("message", ""));

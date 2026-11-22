@@ -53,8 +53,8 @@ public:
     virtual bool getParentTransactions(const TransactionId &id, TransactionIdsT *parent) const;
     virtual bool getRelatedTransactions(const TransactionId &id, TransactionIdsT *related) const;
     virtual TransactionIterator *iterator();
-    /// The transactions added and not yet removed, waiting or running. A transaction's deferred events add theirs before
-    /// it is removed, so this is 0 only once every transaction and each it led to is done (#223).
+    /// The transactions added and not yet removed, waiting or running. A transaction's deferred events add theirs
+    /// before it is removed, so this is 0 only once every transaction and each it led to is done (#223).
     virtual size_t pendingTransactions() const;
 
 public:

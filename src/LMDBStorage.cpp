@@ -314,8 +314,8 @@ int LMDBStorage::newestVersion(MDB_txn *txn, const IdT &id, bool *found, u32 *ne
     }
 
     // The key is {id, version} compared byte-wise, so all versions of an id are contiguous: seek to the first one and
-    // walk just that range. Those bytes are not in numeric order (little-endian u32), so take the maximum by value rather
-    // than the last key.
+    // walk just that range. Those bytes are not in numeric order (little-endian u32), so take the maximum by value
+    // rather than the last key.
     const CompositeKey first(id, 0);
     *found = false;
     *newest = 0;
@@ -606,8 +606,8 @@ void LMDBStorage::erase(const IdT &id, u32 version)
 
 void LMDBStorage::eraseVersions(const std::vector<std::pair<IdT, u32>> &versions)
 {
-    // A version already gone is skipped, as erase(id, version) skips it, so a batch that write() runs again after growing
-    // the map erases the same
+    // A version already gone is skipped, as erase(id, version) skips it, so a batch that write() runs again after
+    // growing the map erases the same
     for (size_t first = 0; first < versions.size(); first += ERASE_BATCH)
     {
         const size_t last = std::min(versions.size(), first + ERASE_BATCH);

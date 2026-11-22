@@ -59,7 +59,8 @@ private:
 };
 
 /// Runs the call on a thread of its own, and says whether it returned within five seconds. One that didn't is left
-/// running, detached, so a test that finds a call hung fails instead of hanging: it must leave what the call uses alive.
+/// running, detached, so a test that finds a call hung fails instead of hanging: it must leave what the call uses
+/// alive.
 bool returnsWithinFiveSeconds(std::function<void()> call)
 {
     auto returned = std::make_shared<std::promise<void>>();
@@ -358,10 +359,10 @@ TEST(ExpirySchedulerTest, ATimePastWhatTheSystemClockCanHoldHasNoDeadline)
 
 TEST(ExpirySchedulerTest, ATimerPastWhatTheSystemClockCanHoldLetsTheThreadFireTheOthersAndStop)
 {
-    // A GTD order's expireTime past what the system clock can hold, at the timers' top, made the thread spin holding its
-    // lock (#511): every schedule() after it, an event worker's for each new order among them, and stop() waited for
-    // good. The thread now waits for it with no deadline: a timer scheduled meanwhile fires, and the thread stops. At the
-    // bound itself it waits until that deadline, the latest the clock holds, and the same holds.
+    // A GTD order's expireTime past what the system clock can hold, at the timers' top, made the thread spin holding
+    // its lock (#511): every schedule() after it, an event worker's for each new order among them, and stop() waited
+    // for good. The thread now waits for it with no deadline: a timer scheduled meanwhile fires, and the thread stops.
+    // At the bound itself it waits until that deadline, the latest the clock holds, and the same holds.
     const DateTimeT lastSecondOf9999 = 253402300799000ULL; // 9999-12-31T23:59:59Z
     for (const DateTimeT far : { ExpiryScheduler::LATEST_TIME, ExpiryScheduler::LATEST_TIME + 1, lastSecondOf9999,
                                  std::numeric_limits<DateTimeT>::max() })

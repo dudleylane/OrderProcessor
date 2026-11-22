@@ -369,9 +369,9 @@ private:
     bool released_ = false;
 };
 
-/// Hands each pop to a real processor, which it owns, since TaskManager deletes this one. Once armed, its next empty pop
-/// says so and waits to be released before returning: a task between finding the queue empty and handing its processor
-/// back (#298).
+/// Hands each pop to a real processor, which it owns, since TaskManager deletes this one. Once armed, its next empty
+/// pop says so and waits to be released before returning: a task between finding the queue empty and handing its
+/// processor back (#298).
 class HoldEmptyPopProcessor final : public InQueueProcessor
 {
 public:
@@ -761,8 +761,8 @@ TEST_F(TaskManagerTest, NotFinishedWhileAFinishedTransactionWaitsToBeRemoved)
 
 TEST_F(TaskManagerTest, EventPushedWhileATaskFindsTheQueueEmptyIsProcessed)
 {
-    // A task whose pop finds the queue empty hands its processor back, and a push meanwhile finds no processor free: the
-    // task must look at the queue again, or nothing starts the event until the next push (#298). With one event
+    // A task whose pop finds the queue empty hands its processor back, and a push meanwhile finds no processor free:
+    // the task must look at the queue again, or nothing starts the event until the next push (#298). With one event
     // processor, hold its task in that window and push then.
     TaskManagerParams params;
     params.transactMgr_ = transMgr_.get();
@@ -2005,7 +2005,8 @@ TEST_F(TaskManagerTest, AnOrderSnapshotTakenWhileOrdersTradeAndAreReplacedReadsE
     // under the order's lock, and takes no order's lock while it holds the store's: a replace holds its original's
     // write lock while it stores the replacement, which takes the store's. Under the store's lock the snapshot would
     // deadlock with the replace, and without the order's lock it reads what a fill writes (TSan). Once every
-    // transaction has run, each order has had its last decision reported, and the snapshot gives the orders as they are.
+    // transaction has run, each order has had its last decision reported, and the snapshot gives the orders as they
+    // are.
     auto manager = createTaskManager(2, 2);
     constexpr int ORDERS = 40;
     std::vector<RawDataEntry> restingIds;

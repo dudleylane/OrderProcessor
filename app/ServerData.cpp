@@ -44,8 +44,9 @@ App::ServerData App::loadServerData(const std::string &dataDir, size_t lmdbMapSi
 {
     ServerData data;
 
-    // Phase 1: Load reference data (instruments, accounts, strings) — orderBook is null. Its orders are restored too, and
-    // the closed ones of earlier business days dropped (#597): their records are erased, so the second pass finds none.
+    // Phase 1: Load reference data (instruments, accounts, strings) — orderBook is null. Its orders are restored too,
+    // and the closed ones of earlier business days dropped (#597): their records are erased, so the second pass finds
+    // none.
     const DateTimeT keptFrom = keptDaysStart(now, keepClosedDays);
     data.lmdbStorage = std::make_unique<Store::LMDBStorage>(lmdbMapSize);
     data.dispatcher = std::make_unique<Store::StorageRecordDispatcher>();

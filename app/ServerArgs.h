@@ -40,8 +40,8 @@ struct ServerArgs
     WsLimits wsLimits; // what WebSocket clients may hold of the server (#159)
     // The engine's work in flight at which the WebSocket sessions stop reading their clients' messages (#519)
     std::size_t maxInFlight = DEFAULT_MAX_IN_FLIGHT;
-    // Who may open a WebSocket session (#146): the file the access token is in, and the Origins a browser may come from.
-    // The token may come from OMS_WS_TOKEN instead, and the Origins from OMS_ALLOWED_ORIGINS, which main() reads.
+    // Who may open a WebSocket session (#146): the file the access token is in, and the Origins a browser may come
+    // from. The token may come from OMS_WS_TOKEN instead, and the Origins from OMS_ALLOWED_ORIGINS, which main() reads.
     std::string wsTokenFile;
     std::vector<std::string> allowedOrigins;
     // Identities instead of the shared token (#225): the file with each one's token hash and accounts
@@ -312,10 +312,10 @@ inline bool resolvePgConnection(const ServerArgs &args, const char *env, std::st
 
 /// Who may open a WebSocket session (#146), from the arguments and the environment: the access token from
 /// --ws-token-file or OMS_WS_TOKEN, not both, or identities from --ws-credentials (#225), and the Origins from
-/// --allowed-origin and OMS_ALLOWED_ORIGINS, comma-separated. Returns false, with the reason in *error, for a token file
-/// it can't read, two tokens, a token isValidWsToken() refuses, a credentials file it can't read or use, or credentials
-/// with a token: a usage error, as a flag it can't read is. The identities' accounts are resolved later, once the data
-/// directory is loaded (WsCredentials::resolveAccounts()).
+/// --allowed-origin and OMS_ALLOWED_ORIGINS, comma-separated. Returns false, with the reason in *error, for a token
+/// file it can't read, two tokens, a token isValidWsToken() refuses, a credentials file it can't read or use, or
+/// credentials with a token: a usage error, as a flag it can't read is. The identities' accounts are resolved later,
+/// once the data directory is loaded (WsCredentials::resolveAccounts()).
 inline bool resolveWsAuth(const ServerArgs &args, const char *envToken, const char *envOrigins, WsAuth *auth,
                           std::string *error)
 {

@@ -136,8 +136,8 @@ TEST_F(ServerDataTest, IdsContinuePastTheBlockTheLastStartReserved)
 
 TEST_F(ServerDataTest, IdsContinuePastTheLargerOfTheLastOrderAndTheSavedLimit)
 {
-    // lastIssued = max(the largest order number restored, the saved limit - 1): no new order may take a restored order's
-    // number (#58), and no id may repeat one issued below the limit (#81)
+    // lastIssued = max(the largest order number restored, the saved limit - 1): no new order may take a restored
+    // order's number (#58), and no id may repeat one issued below the limit (#81)
     struct Case
     {
         u64 orderNumber_;
@@ -430,8 +430,8 @@ TEST_F(ServerDataTest, ARecordOfATypeThisBuildDoesNotKnowStopsTheLoad)
 TEST_F(ServerDataTest, AStartDropsTheClosedOrdersOfBusinessDaysBeforeTheKeptOnes)
 {
     // --keep-closed-days N (#597): a closed order whose business day isn't one of the last N, the current one counted,
-    // isn't restored, and every version of its record is erased. Every other order is kept, whatever its day. The start is
-    // at 22:00 New York on 2026-11-08, in the business day that began there at 17:00.
+    // isn't restored, and every version of its record is erased. Every other order is kept, whatever its day. The start
+    // is at 22:00 New York on 2026-11-08, in the business day that began there at 17:00.
     const DateTimeT now = utc(2026, 11, 9, 3);
     DateTimeT days[3]; // two business days before the start's, the one before it, and the start's own
     days[2] = Proc::ExpiryScheduler::dayStartOf(now);

@@ -112,9 +112,9 @@ TEST(ClientMessageParserTest, AGtdOrderNeedsAnExpireTimeAndNoOtherOrderHasOne)
 
 TEST(ClientMessageParserTest, AnExpireTimePastWhatTheServerCanWaitUntilIsRefused)
 {
-    // Past 2262-04-11T23:47:16.854Z an expireTime overflowed the system clock in the expiry thread's wait, and the thread
-    // spun holding its lock, so every order after it, and the server's stop, waited for good (#511). A datetime-local
-    // input allows the year 9999.
+    // Past 2262-04-11T23:47:16.854Z an expireTime overflowed the system clock in the expiry thread's wait, and the
+    // thread spun holding its lock, so every order after it, and the server's stop, waited for good (#511). A
+    // datetime-local input allows the year 9999.
     const std::string base = R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","price":10,)"
                              R"("orderQty":5,"currency":"USD","capacity":"AGENCY","tif":"GTD","expireTime":)";
     const std::string replace = R"({"type":"replace_order","data":{"orderId":7,"expireTime":)";

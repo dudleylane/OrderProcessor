@@ -126,8 +126,8 @@ public:
 };
 
 /// The time since start, for SetIterationTime() in a benchmark registered with UseManualTime(): a batch timed by hand,
-/// with nothing else in it (#305). Pausing the timer instead reads the thread's CPU clock, a system call, and each pause
-/// and resume counted about 1.5 us with the batch, more than a batch of 8 takes.
+/// with nothing else in it (#305). Pausing the timer instead reads the thread's CPU clock, a system call, and each
+/// pause and resume counted about 1.5 us with the batch, more than a batch of 8 takes.
 double secondsSince(std::chrono::steady_clock::time_point start)
 {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
