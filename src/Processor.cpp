@@ -1007,7 +1007,7 @@ void Processor::matchRestored(OrderEntry *order)
         scope.addOperation(match);
         if (OrderParams::Book::PRICE == order->book())
         {
-            std::unique_ptr<Operation> book(new AddToOrderBookTrOperation(*order, order->instrument_.getId()));
+            std::unique_ptr<Operation> book(new AddToOrderBookTrOperation(*order));
             scope.addOperation(book);
         }
     }

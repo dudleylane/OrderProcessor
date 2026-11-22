@@ -171,9 +171,26 @@ protected:
 // AddToOrderBookTrOperation Tests
 // =============================================================================
 
+TEST_F(OrderBookOperationTest, BookOperations_NameTheOrderAndItsInstrument)
+{
+    // Each names the order's instrument as well as the order, from the order itself (#637), so that its transaction
+    // runs in order with every other transaction on the instrument's book
+    AddToOrderBookTrOperation add(*testOrder_);
+    RemoveFromOrderBookTrOperation remove(*testOrder_);
+    AddToStopBookTrOperation addStop(*testOrder_);
+    RemoveFromStopBookTrOperation removeStop(*testOrder_);
+    for (const Operation *op :
+         { static_cast<const Operation *>(&add), static_cast<const Operation *>(&remove),
+           static_cast<const Operation *>(&addStop), static_cast<const Operation *>(&removeStop) })
+    {
+        EXPECT_EQ(testOrder_->orderId_, op->getObjectId());
+        EXPECT_EQ(instrumentId_, op->getRelatedId());
+    }
+}
+
 TEST_F(OrderBookOperationTest, AddToOrderBook_Execute_AddsOrderToBook)
 {
-    AddToOrderBookTrOperation op(*testOrder_, instrumentId_);
+    AddToOrderBookTrOperation op(*testOrder_);
     Context ctx = createContext();
 
     op.execute(ctx);
@@ -186,7 +203,7 @@ TEST_F(OrderBookOperationTest, AddToOrderBook_Execute_AddsOrderToBook)
 
 TEST_F(OrderBookOperationTest, AddToOrderBook_Rollback_RemovesOrderFromBook)
 {
-    AddToOrderBookTrOperation op(*testOrder_, instrumentId_);
+    AddToOrderBookTrOperation op(*testOrder_);
     Context ctx = createContext();
 
     // Execute then rollback
@@ -204,7 +221,7 @@ TEST_F(OrderBookOperationTest, AddToOrderBook_ExecuteThenRollback_BookUnchanged)
     IdT initialTop = orderBook_->getTop(instrumentId_, BUY_SIDE);
     EXPECT_FALSE(initialTop.isValid());
 
-    AddToOrderBookTrOperation op(*testOrder_, instrumentId_);
+    AddToOrderBookTrOperation op(*testOrder_);
     Context ctx = createContext();
 
     op.execute(ctx);
@@ -224,7 +241,7 @@ TEST_F(OrderBookOperationTest, RemoveFromOrderBook_Execute_RemovesOrderFromBook)
     // First add the order to the book
     orderBook_->add(*testOrder_);
 
-    RemoveFromOrderBookTrOperation op(*testOrder_, instrumentId_);
+    RemoveFromOrderBookTrOperation op(*testOrder_);
     Context ctx = createContext();
 
     op.execute(ctx);
@@ -239,7 +256,7 @@ TEST_F(OrderBookOperationTest, RemoveFromOrderBook_Rollback_ReAddsOrderToBook)
     // First add the order to the book
     orderBook_->add(*testOrder_);
 
-    RemoveFromOrderBookTrOperation op(*testOrder_, instrumentId_);
+    RemoveFromOrderBookTrOperation op(*testOrder_);
     Context ctx = createContext();
 
     // Execute then rollback
@@ -261,7 +278,7 @@ TEST_F(OrderBookOperationTest, RemoveFromOrderBook_ExecuteThenRollback_BookUncha
     IdT initialTop = orderBook_->getTop(instrumentId_, BUY_SIDE);
     EXPECT_TRUE(initialTop.isValid());
 
-    RemoveFromOrderBookTrOperation op(*testOrder_, instrumentId_);
+    RemoveFromOrderBookTrOperation op(*testOrder_);
     Context ctx = createContext();
 
     op.execute(ctx);
@@ -508,6 +525,14 @@ TEST_F(ExecReportOperationTest, CreateReplaceExecReport_Rollback_IsNoOp)
 // =============================================================================
 // Cancel Operations (#73)
 // =============================================================================
+
+TEST_F(MatchOrderOperationTest, MatchOrder_RelatesToTheOrderAndItsInstrument)
+{
+    // A match reads the instrument's book, so it runs after every earlier transaction on the instrument (#209, #637)
+    MatchOrderTrOperation op(buyOrder_);
+    EXPECT_EQ(buyOrder_->orderId_, op.getObjectId());
+    EXPECT_EQ(buyOrder_->instrument_.getId(), op.getRelatedId());
+}
 
 TEST_F(MatchOrderOperationTest, CancelOrder_RelatesToTheOrderAndItsInstrument)
 {
