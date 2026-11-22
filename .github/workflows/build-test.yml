@@ -154,10 +154,15 @@ jobs:
         # laptop the runners share.  The larger suite, FX's with the
         # gateway, peaks at about 0.5 GiB here.  As many run at once as
         # the job's share of the host's threads, as in its build (#738).
+        # ctest counts a skipped test as a pass, so a skip fails the step
+        # (#563): only the Postgres tests may skip here, for want of the
+        # database the next step starts for them.
         shell: bash
         run: |
           jobs=$(scripts/ci-jobs.sh)
-          scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 300 -j"$jobs"
+          scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 300 -j"$jobs" \
+            | tee "$RUNNER_TEMP/tests.log"
+          scripts/ctest-skips.sh "$RUNNER_TEMP/tests.log" 'PGWriteBehind|Postgres'
 
       - name: Postgres write-behind tests, against a throwaway database
         # The step above built these and skipped them, for want of a database (#151). This starts one with the schema,
@@ -172,8 +177,5 @@ jobs:
           # Under the Test step's memory cap (#607); the database's container stays outside it
           scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 300 --no-tests=error \
             -R 'PGWriteBehind|Postgres' | tee "$RUNNER_TEMP/pg-tests.log"
-          # A test that found no database skipped, and ctest counts a skip as a pass
-          if grep -q '(Skipped)' "$RUNNER_TEMP/pg-tests.log"; then
-            echo "::error::a Postgres test skipped: PG_CONNECTION_STRING didn't reach it"
-            exit 1
-          fi
+          # A test that found no database skipped, and ctest counts a skip as a pass: here none may skip (#563)
+          scripts/ctest-skips.sh "$RUNNER_TEMP/pg-tests.log"
