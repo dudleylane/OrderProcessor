@@ -20,8 +20,6 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **Memory Tiers:** 5-tier memory hierarchy — stack, arena (<!-- DOC_CHECK:arena_size -->2048<!-- /DOC_CHECK -->-byte bump), CAS pool (<!-- DOC_CHECK:pool_size -->1024<!-- /DOC_CHECK --> slots), TBB scalable allocator, heap fallback. A transaction takes its `TransactionScope` out of the pool for good, and the slot allocates another: one heap allocation per transaction, counted as `poolAllocations` (#515)
 - **Lock-Free Pool:** TransactionScopePool with exponential backoff CAS and cache miss tracking
 - **CPU Affinity:** Thread-to-core pinning, for the main thread (`--cpu-affinity`) and the TaskManager's workers. `CpuAffinity` can also set SCHED_FIFO priority, but nothing calls it
-- **NUMA-Aware Allocation:** `TransactionScopePool` can bind its slots to the local NUMA node (`mbind()` via NumaAllocator). The server builds its pools in the default mode, so it doesn't use this
-- **Huge Pages:** `TransactionScopePool` can put its slots in 2 MB pages. The server doesn't ask it to: `--huge-pages` only reports whether huge pages are available
 - **False-Sharing Prevention:** `CacheAlignedAtomic<T>` (`alignas(64)`) on all shared atomics
 - **Branch Prediction:** `[[likely]]`, `[[unlikely]]`, `[[assume]]` (C++23) throughout hot path
 
@@ -153,7 +151,6 @@ Server options:
 | `--data-dir` | `./data` | LMDB persistence directory |
 | `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs. For now N runs N-1 at once (#711) |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
-| `--huge-pages` | off | Reports whether huge pages are available; nothing allocates from them yet |
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
 | `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
 | `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock, and each order's own (#584) |
@@ -430,7 +427,7 @@ On 2026-10-28, pinned, the queue that keeps nothing took 4 to 15% off each per-o
 7%, a cancel 12%, a match 14%, an IOC's remainder 15%; median 10% at 6 × 1) and 3 to 4% off
 `BM_TaskManagerThroughput` (20 × 3): what that queue cost at the time.
 
-For the queue, order book, state machine, arena, pool, NUMA and field-layout microbenchmarks, run the binary:
+For the queue, order book, state machine, arena, pool and field-layout microbenchmarks, run the binary:
 `./build/orderProcessorBench --benchmark_list_tests` shows everything available.
 
 ---
@@ -612,10 +609,8 @@ OrderProcessor/
 │   ├── TransactionMgr.cpp/h # ACID transaction management
 │   ├── TransactionScopePool.h  # Lock-free object pool
 │   ├── LMDBStorage.cpp/h   # LMDB persistent key-value backend
-│   ├── NumaAllocator.h     # NUMA-aware memory allocation
 │   ├── CacheAlignedAtomic.h # Cache-aligned atomic wrapper
 │   ├── CpuAffinity.h       # CPU thread pinning utilities
-│   ├── HugePages.h         # Huge page allocation utilities
 │   └── oms-frontend/       # React TypeScript frontend
 │       ├── src/App.tsx      # Main app with 6 tabs
 │       ├── src/components/  # UI components

@@ -269,66 +269,6 @@ TEST_F(TransactionScopePoolTest, PooledScopeOperatorArrow)
 }
 
 // =============================================================================
-// Allocation Modes
-// =============================================================================
-
-TEST_F(TransactionScopePoolTest, DefaultAllocMode)
-{
-    TransactionScopePool pool(SMALL_POOL, TransactionScopePool::ALLOC_DEFAULT);
-
-    size_t idx;
-    auto *scope = pool.acquire(idx);
-    ASSERT_NE(nullptr, scope);
-
-    if (idx != TransactionScopePool::INVALID_INDEX)
-    {
-        pool.releaseByIndex(idx);
-    }
-    else
-    {
-        delete scope;
-    }
-}
-
-TEST_F(TransactionScopePoolTest, HugePagesAllocMode)
-{
-    // HugePages may not be available — pool should fall back gracefully
-    TransactionScopePool pool(SMALL_POOL, TransactionScopePool::ALLOC_HUGE_PAGES);
-
-    size_t idx;
-    auto *scope = pool.acquire(idx);
-    ASSERT_NE(nullptr, scope);
-
-    if (idx != TransactionScopePool::INVALID_INDEX)
-    {
-        pool.releaseByIndex(idx);
-    }
-    else
-    {
-        delete scope;
-    }
-}
-
-TEST_F(TransactionScopePoolTest, NumaLocalAllocMode)
-{
-    // NUMA may not be available — pool should fall back gracefully
-    TransactionScopePool pool(SMALL_POOL, TransactionScopePool::ALLOC_NUMA_LOCAL);
-
-    size_t idx;
-    auto *scope = pool.acquire(idx);
-    ASSERT_NE(nullptr, scope);
-
-    if (idx != TransactionScopePool::INVALID_INDEX)
-    {
-        pool.releaseByIndex(idx);
-    }
-    else
-    {
-        delete scope;
-    }
-}
-
-// =============================================================================
 // Concurrent Acquire/Release
 // =============================================================================
 

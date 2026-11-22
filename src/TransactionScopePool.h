@@ -36,8 +36,6 @@ inline void cpu_pause() noexcept
 #endif
 
 #include "TransactionScope.h"
-#include "HugePages.h"
-#include "NumaAllocator.h"
 
 namespace COP
 {
@@ -65,50 +63,12 @@ public:
     static constexpr size_t DEFAULT_POOL_SIZE = 1024;
     static constexpr size_t INVALID_INDEX = SIZE_MAX;
 
-    enum AllocMode
+    /// The slots' array comes from the heap. A huge-pages mode and a NUMA-local one were never asked for: they placed
+    /// only this array, since each slot's scope is newed and since #515 replaced at each acquire() after a detach, so
+    /// they went with --huge-pages (#603).
+    explicit TransactionScopePool(size_t poolSize = DEFAULT_POOL_SIZE)
+        : poolSize_(poolSize), pool_(new Node[poolSize]), head_(0), allocations_(0), cacheMisses_(0)
     {
-        ALLOC_DEFAULT = 0,
-        ALLOC_HUGE_PAGES = 1,
-        ALLOC_NUMA_LOCAL = 2
-    };
-
-    explicit TransactionScopePool(size_t poolSize = DEFAULT_POOL_SIZE, AllocMode mode = ALLOC_DEFAULT)
-        : poolSize_(poolSize), pool_(nullptr), allocMode_(ALLOC_DEFAULT), head_(0), allocations_(0), cacheMisses_(0)
-    {
-        const size_t allocBytes = poolSize * sizeof(Node);
-
-        // Try requested allocation strategy, falling back to default on failure
-        if (mode == ALLOC_HUGE_PAGES)
-        {
-            void *mem = HugePages::allocate(allocBytes);
-            if (mem)
-            {
-                pool_ = static_cast<Node *>(mem);
-                for (size_t i = 0; i < poolSize_; ++i)
-                {
-                    new (&pool_[i]) Node();
-                }
-                allocMode_ = ALLOC_HUGE_PAGES;
-            }
-        }
-        else if (mode == ALLOC_NUMA_LOCAL)
-        {
-            void *mem = NumaAllocator::allocateLocal(allocBytes);
-            if (mem)
-            {
-                pool_ = static_cast<Node *>(mem);
-                for (size_t i = 0; i < poolSize_; ++i)
-                {
-                    new (&pool_[i]) Node();
-                }
-                allocMode_ = ALLOC_NUMA_LOCAL;
-            }
-        }
-        if (!pool_)
-        {
-            pool_ = new Node[poolSize];
-        }
-
         // Pre-allocate all TransactionScope objects
         for (size_t i = 0; i < poolSize_; ++i)
         {
@@ -123,25 +83,7 @@ public:
         {
             delete pool_[i].scope;
         }
-        if (allocMode_ != ALLOC_DEFAULT)
-        {
-            for (size_t i = 0; i < poolSize_; ++i)
-            {
-                pool_[i].~Node();
-            }
-            if (allocMode_ == ALLOC_HUGE_PAGES)
-            {
-                HugePages::deallocate(pool_, poolSize_ * sizeof(Node));
-            }
-            else
-            {
-                NumaAllocator::deallocate(pool_, poolSize_ * sizeof(Node));
-            }
-        }
-        else
-        {
-            delete[] pool_;
-        }
+        delete[] pool_;
     }
 
     /**
@@ -249,7 +191,6 @@ private:
 
     size_t poolSize_;
     Node *pool_;
-    AllocMode allocMode_;
 
     // Cache-line aligned to prevent false sharing
     alignas(64) std::atomic<size_t> head_;

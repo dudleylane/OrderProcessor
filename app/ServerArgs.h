@@ -28,8 +28,7 @@ struct ServerArgs
     std::string bindAddress = "0.0.0.0"; // the address the server listens on (#146)
     std::string dataDir = "./data";
     int workers = 0;
-    int cpuAffinityStart = -1; // -1 = disabled, >= 0 = pin starting from this core
-    bool hugePages = false;
+    int cpuAffinityStart = -1;                        // -1 = disabled, >= 0 = pin starting from this core
     std::string clearingFirm = DEFAULT_CLEARING_FIRM; // the clearing firm on every order (#34)
     std::string defaultAccount = DEFAULT_ACCOUNT;     // the account of an order that names none (#34)
     bool debug = false;                               // debug logging, off unless asked for (#76)
@@ -63,7 +62,6 @@ inline std::string serverUsage()
            "  --workers N               TBB worker threads, and as many event and transaction processor pairs\n"
            "                            (default 0: TBB's default, and 2 pairs)\n"
            "  --cpu-affinity CORE       pin the main thread to CORE (default -1: no pinning)\n"
-           "  --huge-pages              report whether huge pages are available\n"
            "  --clearing-firm FIRM      the clearing firm on every order (default " +
            std::string(DEFAULT_CLEARING_FIRM) +
            ")\n"
@@ -130,11 +128,6 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
         if (("--help" == arg) || ("-h" == arg))
         {
             parsed.help = true;
-            continue;
-        }
-        if ("--huge-pages" == arg)
-        {
-            parsed.hugePages = true;
             continue;
         }
         if ("--debug" == arg)
