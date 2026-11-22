@@ -17,6 +17,9 @@
 #include <cstring>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <regex>
 #include <thread>
 
 #include "LMDBStorage.h"
@@ -108,6 +111,35 @@ const std::string BIG_RECORD(64 * 1024, 'r');
 // =============================================================================
 // Basic Initialization Tests
 // =============================================================================
+
+TEST(LMDBStorageSourceTest, EveryTransactionIsOpenedByLoadWriteOrRead)
+{
+    // LMDB grows a full map only while no transaction is open in the process, and checks only for a write, so
+    // LMDBStorage holds txnLock_ around every transaction, reads included (#148). Each read took the lock by hand;
+    // since #631 every read goes through read(), as every write goes through write(), and load() opens its own. So
+    // mdb_txn_begin() is called three times, all in LMDBStorage.cpp: a fourth is a transaction opened another way.
+    const std::regex call(R"(\bmdb_txn_begin\s*\()");
+    auto calls = [&](const std::filesystem::path &file)
+    {
+        std::ifstream in(file);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        return std::distance(std::sregex_iterator(text.begin(), text.end(), call), std::sregex_iterator());
+    };
+    const std::filesystem::path root = test::sourceRoot();
+    EXPECT_EQ(3, calls(root / "src/LMDBStorage.cpp"))
+        << "open an LMDB transaction through LMDBStorage's read() or write(), which take txnLock_ (#631)";
+    for (const char *dir : { "src", "app" })
+    {
+        for (const auto &entry : std::filesystem::directory_iterator(root / dir))
+        {
+            const std::filesystem::path &file = entry.path();
+            if ((file.filename() != "LMDBStorage.cpp") && ((file.extension() == ".cpp") || (file.extension() == ".h")))
+            {
+                EXPECT_EQ(0, calls(file)) << file << " opens an LMDB transaction: only LMDBStorage may (#148)";
+            }
+        }
+    }
+}
 
 TEST_F(LMDBStorageTest, CreateDefaultLMDBStorage)
 {

@@ -241,6 +241,16 @@ template <typename Body> void LMDBStorage::write(const char *context, Body &&bod
     }
 }
 
+template <typename Body> auto LMDBStorage::read(const char *context, Body &&body) const
+{
+    assert(nullptr != env_);
+    std::lock_guard<std::mutex> lock(txnLock_);
+    MDB_txn *txn = nullptr;
+    checkLMDB(mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn), context);
+    TxnGuard guard(txn); // a read commits nothing: the guard aborts it, after body, or as body throws
+    return body(txn);
+}
+
 void LMDBStorage::grow(const char *context)
 {
     MDB_envinfo info;
@@ -447,15 +457,11 @@ u32 LMDBStorage::stage(const IdT &id, const char *buf, size_t size)
     }
     bool found = false;
     u32 newest = 0;
-    {
-        // A read transaction, under the lock every transaction takes (#148)
-        std::lock_guard<std::mutex> lock(txnLock_);
-        MDB_txn *txn = nullptr;
-        checkLMDB(mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn), "LMDBStorage::update (group)");
-        const int rc = newestVersion(txn, id, &found, &newest);
-        mdb_txn_abort(txn);
-        checkLMDB(rc, "LMDBStorage::update (group)");
-    }
+    read("LMDBStorage::update (group)",
+         [&](MDB_txn *txn)
+         {
+             checkLMDB(newestVersion(txn, id, &found, &newest), "LMDBStorage::update (group)");
+         });
     const u32 version = found ? newest + 1 : 0;
     group_.push_back(StagedUpdate{ id, version, std::vector<char>(buf, buf + size) });
     return version;
@@ -671,175 +677,137 @@ void LMDBStorage::erase(const IdT &id)
 
 bool LMDBStorage::isExists(const IdT &id) const
 {
-    assert(nullptr != env_);
-    std::lock_guard<std::mutex> lock(txnLock_);
-
-    MDB_txn *txn = nullptr;
-    int rc = mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn);
-    checkLMDB(rc, "LMDBStorage::isExists mdb_txn_begin");
-
-    bool found = false;
-    MDB_cursor *cursor = nullptr;
-    rc = mdb_cursor_open(txn, dbi_, &cursor);
-    if (rc == MDB_SUCCESS)
-    {
-        MDB_val curKey, curData;
-        rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_FIRST);
-        while (rc == MDB_SUCCESS)
-        {
-            if (curKey.mv_size == sizeof(CompositeKey))
-            {
-                CompositeKey ck = readKey(curKey);
-                if (ck.id_ == id)
+    return read("LMDBStorage::isExists",
+                [&](MDB_txn *txn)
                 {
-                    found = true;
-                    break;
-                }
-            }
-            rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);
-        }
-        mdb_cursor_close(cursor);
-    }
-
-    mdb_txn_abort(txn);
-    return found;
+                    bool found = false;
+                    MDB_cursor *cursor = nullptr;
+                    int rc = mdb_cursor_open(txn, dbi_, &cursor);
+                    if (rc == MDB_SUCCESS)
+                    {
+                        MDB_val curKey, curData;
+                        rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_FIRST);
+                        while (rc == MDB_SUCCESS)
+                        {
+                            if (curKey.mv_size == sizeof(CompositeKey))
+                            {
+                                CompositeKey ck = readKey(curKey);
+                                if (ck.id_ == id)
+                                {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);
+                        }
+                        mdb_cursor_close(cursor);
+                    }
+                    return found;
+                });
 }
 
 bool LMDBStorage::isExists(const IdT &id, u32 version) const
 {
-    assert(nullptr != env_);
-    std::lock_guard<std::mutex> lock(txnLock_);
-
     CompositeKey ck(id, version);
     MDB_val key = makeKey(ck);
-    MDB_val data;
-
-    MDB_txn *txn = nullptr;
-    int rc = mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn);
-    checkLMDB(rc, "LMDBStorage::isExists(version) mdb_txn_begin");
-
-    rc = mdb_get(txn, dbi_, &key, &data);
-    mdb_txn_abort(txn);
-
-    return rc == MDB_SUCCESS;
+    return read("LMDBStorage::isExists(version)",
+                [&](MDB_txn *txn)
+                {
+                    MDB_val data;
+                    return MDB_SUCCESS == mdb_get(txn, dbi_, &key, &data);
+                });
 }
 
 FileSaver::Newest LMDBStorage::loadNewest(const IdT &id, std::vector<char> *buf)
 {
-    assert(nullptr != env_);
     assert(nullptr != buf);
-    std::lock_guard<std::mutex> lock(txnLock_);
-
-    MDB_txn *txn = nullptr;
-    int rc = mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn);
-    checkLMDB(rc, "LMDBStorage::loadNewest mdb_txn_begin");
     // One read transaction for both steps, and the id's own versions only: getTopVersion() walks every record
-    bool found = false;
-    u32 newest = 0;
-    rc = newestVersion(txn, id, &found, &newest);
-    MDB_val data{};
-    if ((MDB_SUCCESS == rc) && found)
-    {
-        const CompositeKey ck(id, newest);
-        MDB_val key = makeKey(ck);
-        rc = mdb_get(txn, dbi_, &key, &data);
-    }
-    if ((MDB_SUCCESS != rc) || !found)
-    {
-        mdb_txn_abort(txn);
-        checkLMDB(rc, "LMDBStorage::loadNewest");
-        return Newest::None;
-    }
-    buf->assign(static_cast<const char *>(data.mv_data), static_cast<const char *>(data.mv_data) + data.mv_size);
-    mdb_txn_abort(txn);
-    return Newest::Found;
+    return read("LMDBStorage::loadNewest",
+                [&](MDB_txn *txn)
+                {
+                    bool found = false;
+                    u32 newest = 0;
+                    int rc = newestVersion(txn, id, &found, &newest);
+                    MDB_val data{};
+                    if ((MDB_SUCCESS == rc) && found)
+                    {
+                        const CompositeKey ck(id, newest);
+                        MDB_val key = makeKey(ck);
+                        rc = mdb_get(txn, dbi_, &key, &data);
+                    }
+                    if ((MDB_SUCCESS != rc) || !found)
+                    {
+                        checkLMDB(rc, "LMDBStorage::loadNewest");
+                        return Newest::None;
+                    }
+                    buf->assign(static_cast<const char *>(data.mv_data),
+                                static_cast<const char *>(data.mv_data) + data.mv_size);
+                    return Newest::Found;
+                });
 }
 
 u32 LMDBStorage::getTopVersion(const IdT &id) const
 {
-    assert(nullptr != env_);
-    std::lock_guard<std::mutex> lock(txnLock_);
-
-    MDB_txn *txn = nullptr;
-    int rc = mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn);
-    checkLMDB(rc, "LMDBStorage::getTopVersion mdb_txn_begin");
-
-    u32 topVersion = 0;
-    bool found = false;
-
-    MDB_cursor *cursor = nullptr;
-    rc = mdb_cursor_open(txn, dbi_, &cursor);
-    if (rc == MDB_SUCCESS)
-    {
-        MDB_val curKey, curData;
-        rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_FIRST);
-        while (rc == MDB_SUCCESS)
-        {
-            if (curKey.mv_size == sizeof(CompositeKey))
-            {
-                CompositeKey ck = readKey(curKey);
-                if (ck.id_ == id)
+    return read("LMDBStorage::getTopVersion",
+                [&](MDB_txn *txn)
                 {
-                    if (!found || ck.version_ > topVersion)
+                    u32 topVersion = 0;
+                    bool found = false;
+                    MDB_cursor *cursor = nullptr;
+                    int rc = mdb_cursor_open(txn, dbi_, &cursor);
+                    if (rc == MDB_SUCCESS)
                     {
-                        topVersion = ck.version_;
+                        MDB_val curKey, curData;
+                        rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_FIRST);
+                        while (rc == MDB_SUCCESS)
+                        {
+                            if (curKey.mv_size == sizeof(CompositeKey))
+                            {
+                                CompositeKey ck = readKey(curKey);
+                                if (ck.id_ == id)
+                                {
+                                    if (!found || ck.version_ > topVersion)
+                                    {
+                                        topVersion = ck.version_;
+                                    }
+                                    found = true;
+                                }
+                            }
+                            rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);
+                        }
+                        mdb_cursor_close(cursor);
                     }
-                    found = true;
-                }
-            }
-            rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);
-        }
-        mdb_cursor_close(cursor);
-    }
-
-    mdb_txn_abort(txn);
-    return topVersion;
+                    return topVersion;
+                });
 }
 
 size_t LMDBStorage::recordSize(const IdT &id, u32 version) const
 {
-    assert(nullptr != env_);
-    std::lock_guard<std::mutex> lock(txnLock_);
-
     CompositeKey ck(id, version);
     MDB_val key = makeKey(ck);
-    MDB_val data;
-
-    MDB_txn *txn = nullptr;
-    int rc = mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn);
-    checkLMDB(rc, "LMDBStorage::recordSize mdb_txn_begin");
-
-    rc = mdb_get(txn, dbi_, &key, &data);
-    size_t sz = (rc == MDB_SUCCESS) ? data.mv_size : 0;
-
-    mdb_txn_abort(txn);
-    return sz;
+    return read("LMDBStorage::recordSize",
+                [&](MDB_txn *txn)
+                {
+                    MDB_val data;
+                    return (MDB_SUCCESS == mdb_get(txn, dbi_, &key, &data)) ? data.mv_size : size_t(0);
+                });
 }
 
 bool LMDBStorage::loadRecord(const IdT &id, u32 version, std::vector<char> *buf)
 {
-    assert(nullptr != env_);
     assert(nullptr != buf);
-    std::lock_guard<std::mutex> lock(txnLock_);
-
     CompositeKey ck(id, version);
     MDB_val key = makeKey(ck);
-    MDB_val data;
-
-    MDB_txn *txn = nullptr;
-    int rc = mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn);
-    checkLMDB(rc, "LMDBStorage::loadRecord mdb_txn_begin");
-
-    rc = mdb_get(txn, dbi_, &key, &data);
-    if (rc != MDB_SUCCESS)
-    {
-        mdb_txn_abort(txn);
-        return false;
-    }
-
-    buf->resize(data.mv_size);
-    std::memcpy(buf->data(), data.mv_data, data.mv_size);
-
-    mdb_txn_abort(txn);
-    return true;
+    return read("LMDBStorage::loadRecord",
+                [&](MDB_txn *txn)
+                {
+                    MDB_val data;
+                    if (MDB_SUCCESS != mdb_get(txn, dbi_, &key, &data))
+                    {
+                        return false;
+                    }
+                    buf->resize(data.mv_size);
+                    std::memcpy(buf->data(), data.mv_data, data.mv_size);
+                    return true;
+                });
 }
