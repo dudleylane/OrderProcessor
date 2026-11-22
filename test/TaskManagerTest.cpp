@@ -2035,6 +2035,21 @@ TEST_F(TaskManagerTest, AnOrderSnapshotTakenWhileOrdersTradeAndAreReplacedReadsE
                 }
             }
         });
+    // The reader takes its first snapshot before the replaces and the sells go in (#741). Nothing else makes it run
+    // before the trades end: on a loaded host (#739's job, at a load of 52) a reader the scheduler hadn't run yet took
+    // none, and the case failed with nothing wrong. Whether its later snapshots overlap the trades is still the
+    // scheduler's to decide, as it always was.
+    const auto readerDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while ((0 == snapshots.load()) && (std::chrono::steady_clock::now() < readerDeadline))
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (0 == snapshots.load())
+    {
+        stop = true;
+        reader.join();
+        FAIL() << "the reader took no snapshot in 30 s, with no order trading";
+    }
     for (int i = 0; i < ORDERS; ++i)
     {
         inQueues_->push("buyer" + std::to_string(i),
