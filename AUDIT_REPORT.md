@@ -1,5 +1,7 @@
 # OrderProcessor Comprehensive Audit Report
 
+> **Historical record.** This report describes the code as it stood in January 2026, and is kept as a record of that audit. Much has changed since, and some of its findings, figures and claims ("PRODUCTION READY", the test count, code coverage) no longer hold or were never measured: it isn't the current status, which the issue tracker holds (#577).
+
 **Generated:** 2026-01-20
 **Updated:** 2026-01-21
 **Methodology:** Claude Code Project Audit Methodology (4-Level Tiered Approach)
