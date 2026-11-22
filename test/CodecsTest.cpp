@@ -10,7 +10,9 @@
 */
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -319,6 +321,126 @@ TEST_F(OrderCodecTest, OrderCodecEmpty)
     EXPECT_EQ(decVal->instrument_.getId(), val.instrument_.getId());
     EXPECT_EQ(decVal->status_, val.status_);
     EXPECT_EQ(decVal->orderId_, val.orderId_);
+}
+
+TEST_F(OrderCodecTest, AnEnumOutOfItsRangeIsRefused)
+{
+    // The decoder copied each enum's bytes as they were, so a damaged record restored an order with a status or a side
+    // no enumerator has, which later code switches on (#540). Each field out of range by one is refused, naming it;
+    // each enum's last value, and 0, its INVALID, decode. The value out of range is written into the record's bytes:
+    // an enum object can't hold it, since loading one outside its enum's range is undefined (UBSan's enum check).
+    SourceIdT instrId = addInstrument("instrument");
+    auto encoded = [&](const std::function<void(OrderEntry &)> &set)
+    {
+        OrderEntry val(SourceIdT(1, 1), SourceIdT(2, 2), SourceIdT(3, 3), SourceIdT(4, 4), instrId, SourceIdT(6, 6),
+                       SourceIdT(7, 7), SourceIdT(8, 8));
+        val.orderId_ = IdT(42, 1);
+        val.stateMachinePersistance_.stateZone1Id_ = 2; // New, so that the record restores
+        val.stateMachinePersistance_.stateZone2Id_ = 8; // NoCnlReplace
+        set(val);
+        std::string buf;
+        IdT id;
+        u32 version = 0;
+        OrderCodec::encode(val, &buf, &id, &version);
+        return std::make_pair(id, buf);
+    };
+    auto decodes = [](const std::pair<IdT, std::string> &record)
+    {
+        std::unique_ptr<OrderEntry>(
+            OrderCodec::decode(record.first, OrderCodec::FORMAT_VERSION, record.second.c_str(), record.second.size()));
+    };
+    struct Field
+    {
+        const char *name;
+        std::function<void(OrderEntry &, int)> set;
+        int last;
+    };
+    const std::vector<Field> fields = {
+        { "status_",
+          [](OrderEntry &o, int v)
+          {
+              o.status_ = static_cast<OrderStatus>(v);
+          },
+          CANCELED_ORDSTATUS },
+        { "side_",
+          [](OrderEntry &o, int v)
+          {
+              o.side_ = static_cast<Side>(v);
+          },
+          CROSS_SIDE },
+        { "ordType_",
+          [](OrderEntry &o, int v)
+          {
+              o.ordType_ = static_cast<OrderType>(v);
+          },
+          STOPLIMIT_ORDERTYPE },
+        { "tif_",
+          [](OrderEntry &o, int v)
+          {
+              o.tif_ = static_cast<TimeInForce>(v);
+          },
+          ATCLOSE_TIF },
+        { "settlType_",
+          [](OrderEntry &o, int v)
+          {
+              o.settlType_ = static_cast<SettlTypeBase>(v);
+          },
+          TENOR_SETTLTYPE },
+        { "capacity_",
+          [](OrderEntry &o, int v)
+          {
+              o.capacity_ = static_cast<Capacity>(v);
+          },
+          AGENT_FOR_ANOTHER_MEMBER_CAPACITY },
+        { "currency_",
+          [](OrderEntry &o, int v)
+          {
+              o.currency_ = static_cast<Currency>(v);
+          },
+          EUR_CURRENCY },
+    };
+    for (const Field &field : fields)
+    {
+        EXPECT_NO_THROW(decodes(encoded(
+            [&](OrderEntry &o)
+            {
+                field.set(o, field.last);
+            })))
+            << field.name;
+        EXPECT_NO_THROW(decodes(encoded(
+            [&](OrderEntry &o)
+            {
+                field.set(o, 0);
+            })))
+            << field.name;
+        // The field's bytes are where two records that differ only in it differ: its first byte, little-endian
+        auto record = encoded(
+            [&](OrderEntry &o)
+            {
+                field.set(o, 0);
+            });
+        const std::string other = encoded(
+                                      [&](OrderEntry &o)
+                                      {
+                                          field.set(o, 1);
+                                      })
+                                      .second;
+        ASSERT_EQ(record.second.size(), other.size()) << field.name;
+        const size_t at =
+            std::mismatch(record.second.begin(), record.second.end(), other.begin()).first - record.second.begin();
+        ASSERT_LE(at + sizeof(u32), record.second.size()) << field.name;
+        const u32 outOfRange = static_cast<u32>(field.last) + 1;
+        memcpy(&record.second[at], &outOfRange, sizeof(outOfRange));
+        try
+        {
+            decodes(record);
+            ADD_FAILURE() << field.name << " " << outOfRange << " decoded";
+        }
+        catch (const std::runtime_error &e)
+        {
+            EXPECT_NE(std::string::npos, std::string(e.what()).find(field.name)) << e.what();
+        }
+    }
 }
 
 TEST_F(OrderCodecTest, OrderCodecFilled)
