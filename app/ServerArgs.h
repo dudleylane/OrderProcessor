@@ -2,6 +2,7 @@
 
 #include <charconv>
 #include <cstddef>
+#include <cstdlib>
 #include <fstream>
 #include <limits>
 #include <optional>
@@ -357,11 +358,34 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
     return parsed;
 }
 
+/// The environment variables the server reads beside its arguments, each null when unset: named here, where a test
+/// checks each name, rather than only in main()'s calls (#558). The compose check was the only test of the names, and
+/// it runs only on changes to docker/.
+struct ServerEnvironment
+{
+    const char *wsToken = nullptr;        ///< OMS_WS_TOKEN: the access token (#146)
+    const char *wsCredentials = nullptr;  ///< OMS_WS_CREDENTIALS: the identities' file (#643)
+    const char *allowedOrigins = nullptr; ///< OMS_ALLOWED_ORIGINS: the browser Origins that may connect (#146)
+    const char *pgConnection = nullptr;   ///< OMS_PG_CONNECTION: the Postgres to mirror to (#151)
+
+    static ServerEnvironment fromProcess()
+    {
+        ServerEnvironment env;
+        env.wsToken = std::getenv("OMS_WS_TOKEN");
+        env.wsCredentials = std::getenv("OMS_WS_CREDENTIALS");
+        env.allowedOrigins = std::getenv("OMS_ALLOWED_ORIGINS");
+        env.pgConnection = std::getenv("OMS_PG_CONNECTION");
+        return env;
+    }
+};
+
 /// The Postgres connection string (#151), from --pg-connection or OMS_PG_CONNECTION, not both; empty when neither is
 /// set, and the server then keeps LMDB only, as it always had. Returns false, with the reason in *error, for both, for
 /// OMS_PG_CONNECTION set but empty, or for either in a build without BUILD_PG, which couldn't use it.
-inline bool resolvePgConnection(const ServerArgs &args, const char *env, std::string *connection, std::string *error)
+inline bool resolvePgConnection(const ServerArgs &args, const ServerEnvironment &environment, std::string *connection,
+                                std::string *error)
 {
+    const char *env = environment.pgConnection;
     std::string resolved = args.pgConnection;
     if (nullptr != env)
     {
@@ -395,9 +419,12 @@ inline bool resolvePgConnection(const ServerArgs &args, const char *env, std::st
 /// two credentials files, a credentials file it can't read or use, credentials with a token, or, with
 /// --require-ws-auth, neither: a usage error, as a flag it can't read is. The identities' accounts are resolved later,
 /// once the data directory is loaded (WsCredentials::resolveAccounts()).
-inline bool resolveWsAuth(const ServerArgs &args, const char *envToken, const char *envCredentials,
-                          const char *envOrigins, WsAuth *auth, std::string *error)
+inline bool resolveWsAuth(const ServerArgs &args, const ServerEnvironment &environment, WsAuth *auth,
+                          std::string *error)
 {
+    const char *envToken = environment.wsToken;
+    const char *envCredentials = environment.wsCredentials;
+    const char *envOrigins = environment.allowedOrigins;
     WsAuth resolved;
     if (!args.wsTokenFile.empty())
     {
