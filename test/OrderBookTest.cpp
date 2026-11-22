@@ -418,8 +418,8 @@ TEST_F(OrderBookTest, AHeldStopIsInNeitherSideOfThePriceBook)
 
 TEST_F(OrderBookTest, ATradeReachesBuyStopsAtOrBelowItAndSellStopsAtOrAboveIt)
 {
-    // In the order a moving price would reach them: buy stops from the lowest, sell stops from the highest, and stops at
-    // one price in the order they were added
+    // In the order a moving price would reach them: buy stops from the lowest, sell stops from the highest, and stops
+    // at one price in the order they were added
     const struct
     {
         u64 id_;

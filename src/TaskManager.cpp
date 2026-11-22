@@ -213,8 +213,8 @@ bool TaskManager::waitUntilTransactionsFinished(int waitIntervalSeconds) const
     return false;
 }
 
-// A spawn (task_group::run) waits for a worker to steal it, and oneTBB doesn't promise to wake one: its arena.h says the
-// spawn's double check is "deliberately sloppy about memory fences" (2021.11, advertise_new_work()). A worker that
+// A spawn (task_group::run) waits for a worker to steal it, and oneTBB doesn't promise to wake one: its arena.h says
+// the spawn's double check is "deliberately sloppy about memory fences" (2021.11, advertise_new_work()). A worker that
 // spawns runs its own spawn when it returns to the dispatcher, so a task started from inside one of these tasks, as
 // almost every task is (a task's tail starts the next), is spawned, the cheaper start. The threads that push events and
 // transactions here don't return to the dispatcher: the IO thread, the FIX gateway, the expiry scheduler, restore, a

@@ -679,7 +679,8 @@ bool NLinkTree::isCurrentValid() const
 void NLinkTree::dumpTree()
 {
     // The transaction manager calls this as it is destroyed. Transactions still in the tree then never ran, which is
-    // worth a warning; the dump of the tree is detail for debugging. Both were logged as fatal, at every shutdown (#76).
+    // worth a warning; the dump of the tree is detail for debugging. Both were logged as fatal, at every shutdown
+    // (#76).
     char buf[64];
     buf[0] = 0;
     aux::toStr(buf, keys_.size());

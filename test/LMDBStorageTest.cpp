@@ -324,8 +324,8 @@ TEST_F(LMDBStorageTest, UpdateErasesEveryVersionOlderThanTheNewest)
     EXPECT_TRUE(storage.isExists(IdT(1, 1), 3));
 }
 
-// A version is a little-endian u32 in the key, so the keys aren't in numeric order: 256 comes before 255. update() keeps
-// the newest by value, whether it comes before the versions it erases or after them.
+// A version is a little-endian u32 in the key, so the keys aren't in numeric order: 256 comes before 255. update()
+// keeps the newest by value, whether it comes before the versions it erases or after them.
 TEST_F(LMDBStorageTest, UpdateKeepsTheNewestVersionByValueNotByKeyOrder)
 {
     {

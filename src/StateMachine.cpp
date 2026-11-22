@@ -31,9 +31,10 @@ const std::string state_names[ORDER_STATE_COUNT] = { "Rcvd_New",     "Pend_Repla
                                                      "NoCnlReplace", "GoingCancel",  "GoingReplace", "CnclReplaced",
                                                      "Rejected" };
 
-// Every stored order holds its states' ids (#150), so each id is pinned here to the index of its name above. MSM numbers
-// the states by their first appearance in the transition table, sources first, then the states that are only targets.
-// An edit of the table that moves a state fails to compile here, instead of reinterpreting every order already stored.
+// Every stored order holds its states' ids (#150), so each id is pinned here to the index of its name above. MSM
+// numbers the states by their first appearance in the transition table, sources first, then the states that are only
+// targets. An edit of the table that moves a state fails to compile here, instead of reinterpreting every order already
+// stored.
 template <typename State> constexpr int stateId = boost::msm::back::get_state_id<OrderState::stt, State>::value;
 static_assert(stateId<Rcvd_New> == 0, "Rcvd_New's id is persisted");
 static_assert(stateId<Pend_Replace> == 1, "Pend_Replace's id is persisted");
@@ -175,9 +176,9 @@ void OrderState_::receive(onOrderReceived const &evnt)
     }
 }
 
-/// Whether the order is refused before it is stored: isValid() refuses it, or it is a market order with nothing to trade
-/// with. A refused order takes its own row to Rejected, where processReceive() used to throw and receive() to rethrow:
-/// two exceptions raised, about 45% of a reject's time (#436). Test mode refuses what its check fails.
+/// Whether the order is refused before it is stored: isValid() refuses it, or it is a market order with nothing to
+/// trade with. A refused order takes its own row to Rejected, where processReceive() used to throw and receive() to
+/// rethrow: two exceptions raised, about 45% of a reject's time (#436). Test mode refuses what its check fails.
 bool OrderState_::refused(onOrderReceived const &evnt)
 {
     if (evnt.testStateMachine_)

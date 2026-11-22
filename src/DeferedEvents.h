@@ -145,8 +145,8 @@ struct ReleaseStopDeferedEvent : public DeferedEventBase
     virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
 };
 
-/// A client's replace, queued by ReplaceOrderTrOperation once the transactions before it on the original are done (#74).
-/// It owns the replacement; the processor stores a copy if it accepts it.
+/// A client's replace, queued by ReplaceOrderTrOperation once the transactions before it on the original are done
+/// (#74). It owns the replacement; the processor stores a copy if it accepts it.
 struct ReplaceRequestDeferedEvent : public DeferedEventBase
 {
     OrderEntry *original_;

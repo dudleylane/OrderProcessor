@@ -71,8 +71,8 @@ public:
     {
         return identity_.get();
     }
-    /// Gives a session that has no connection an identity, as an upgrade would: for the benchmarks, whose sessions never
-    /// upgrade. Call it before the session is added to a SessionManager.
+    /// Gives a session that has no connection an identity, as an upgrade would: for the benchmarks, whose sessions
+    /// never upgrade. Call it before the session is added to a SessionManager.
     void setIdentityForBenchmark(std::shared_ptr<const WsIdentity> identity)
     {
         identity_ = std::move(identity);
@@ -146,7 +146,8 @@ private:
     /// How many of writeQueue_'s first messages are the initial state, which queuedBytes_ doesn't count (#512)
     std::size_t initialMessages_ = 0;
     /// Set as the session ends with its read not failed: dropped for not reading (#159), or after a write failed. It
-    /// sends nothing more, and a wait for the work in flight to drain, in place of a read, ends when it next looks (#519).
+    /// sends nothing more, and a wait for the work in flight to drain, in place of a read, ends when it next looks
+    /// (#519).
     bool dropped_ = false;
 };
 

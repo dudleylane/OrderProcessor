@@ -72,8 +72,8 @@ void expectInSchema(const std::map<std::string, std::set<std::string>> &schema, 
 
 TEST(PGSchemaTest, EveryEnumStringIsOneTheSchemasTypeHas)
 {
-    // A string the schema lacks makes Postgres refuse the row: the FX branch drifted so before #154. Nothing checked them
-    // against each other on master (#151).
+    // A string the schema lacks makes Postgres refuse the row: the FX branch drifted so before #154. Nothing checked
+    // them against each other on master (#151).
     const auto schema = schemaEnums();
     expectInSchema(schema, "side", CROSS_SIDE);
     expectInSchema(schema, "order_type", STOPLIMIT_ORDERTYPE);

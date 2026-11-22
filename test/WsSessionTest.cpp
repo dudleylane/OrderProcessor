@@ -662,9 +662,9 @@ TEST_F(WsSessionTest, ReplaceWithAStopPxOfAnOrderThatIsntAStopOrderIsRefused)
 
 TEST_F(WsSessionTest, OrderWithAFieldTheServerDoesNotKnowIsRefusedBeforeAnythingIsStored)
 {
-    // An order whose side, type, time in force, currency or capacity was missing or unknown parsed to INVALID, went to the
-    // engine, and was stored to be rejected: from then on every client got it with "INVALID" in that field, a value none
-    // of their types has (#166). It must be refused at once, with nothing queued.
+    // An order whose side, type, time in force, currency or capacity was missing or unknown parsed to INVALID, went to
+    // the engine, and was stored to be rejected: from then on every client got it with "INVALID" in that field, a value
+    // none of their types has (#166). It must be refused at once, with nothing queued.
     const std::string order = R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
                               R"("price":150.25,"orderQty":100,"tif":"DAY","currency":"USD","capacity":"AGENCY"}})";
     struct Field

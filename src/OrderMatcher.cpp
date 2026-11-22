@@ -163,8 +163,8 @@ void OrderMatcher::matchNew(OrderEntry *order, const Context &ctxt)
 {
     assert(nullptr != order);
     assert(nullptr != ctxt.orderBook_);
-    // Fill or kill (#240): in full at once, or not at all. The book can't change between this and the sweep: they run in
-    // one transaction, and every transaction that books, cancels or matches on the instrument relates to it.
+    // Fill or kill (#240): in full at once, or not at all. The book can't change between this and the sweep: they run
+    // in one transaction, and every transaction that books, cancels or matches on the instrument relates to it.
     if ((FOK_TIF == order->tif_) && !canFillAtOnce(order, *ctxt.orderBook_, ctxt.orderStorage_))
     {
         std::unique_ptr<CancelOrderDeferedEvent> defEvnt(new CancelOrderDeferedEvent(order));

@@ -688,7 +688,8 @@ static void BM_ProcessReplaceOrder(benchmark::State &state)
         return;
     }
 
-    // One resting buy per iteration, each replaced by a buy at a new price, which crosses nothing: the book holds no sell
+    // One resting buy per iteration, each replaced by a buy at a new price, which crosses nothing: the book holds no
+    // sell
     // (#457). The event enqueues a transaction, which runs inline: it decides the replace under the original's lock,
     // stores the replacement, takes the original off the book and books the replacement, persists both and reports
     // both. Each replacement is made just before its event, outside the timed span, as a session makes it on arrival.
