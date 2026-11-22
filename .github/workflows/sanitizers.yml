@@ -210,13 +210,18 @@ jobs:
         # an address-space limit can't hold them.  A test that runs away
         # is killed at the cap and named, and the rest run.  The larger
         # suite, FX's with the gateway, peaks at about 0.5 GiB here
-        # under either sanitizer.
+        # under either sanitizer.  ctest counts a skipped test as a pass,
+        # so a skip fails the step (#563): only the Postgres tests may skip
+        # here, for want of the database the next step starts for them.
         shell: bash
         env:
           ASAN_OPTIONS: "abort_on_error=1:halt_on_error=1:detect_leaks=1"
           UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
           TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1"
-        run: scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 600 -j1
+        run: |
+          scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 600 -j1 \
+            | tee "$RUNNER_TEMP/tests.log"
+          scripts/ctest-skips.sh "$RUNNER_TEMP/tests.log" 'PGWriteBehind|Postgres'
 
       - name: Postgres write-behind tests, against a throwaway database
         # As build-test.yml runs them (#151), here under the sanitizer: the writer is the code that runs a thread of its
@@ -234,11 +239,8 @@ jobs:
           # Under the Test step's memory cap (#607); the database's container stays outside it
           scripts/memory-cap.sh 4G ctest --test-dir build --output-on-failure --timeout 600 -j1 --no-tests=error \
             -R 'PGWriteBehind|Postgres' | tee "$RUNNER_TEMP/pg-tests.log"
-          # A test that found no database skipped, and ctest counts a skip as a pass
-          if grep -q '(Skipped)' "$RUNNER_TEMP/pg-tests.log"; then
-            echo "::error::a Postgres test skipped: PG_CONNECTION_STRING didn't reach it"
-            exit 1
-          fi
+          # A test that found no database skipped, and ctest counts a skip as a pass: here none may skip (#563)
+          scripts/ctest-skips.sh "$RUNNER_TEMP/pg-tests.log"
 
       - name: Benchmark smoke run
         # Every benchmark once (#155), to show they run at all: not a timing, which #12 ruled out gating on. The
