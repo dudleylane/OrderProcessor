@@ -11,15 +11,19 @@ RUN npm run build
 
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-# A template: the image's entrypoint renders it into conf.d, filling in the container's own DNS resolver (#158) and
-# OMS_HSTS (#226). OMS_HSTS is set, empty, because the entrypoint fills in only variables that are set, and nginx refuses
-# the one it would leave.
+# A template: the image's entrypoint renders it into conf.d, filling in the container's own DNS resolver (#158),
+# OMS_HSTS (#226) and OMS_PUBLIC_HOST (#564). Each is set here, because the entrypoint fills in only variables that are
+# set, and nginx refuses the one it would leave: OMS_HSTS empty, and OMS_PUBLIC_HOST, where plain HTTP is redirected,
+# localhost:3000, for the image run on its own; compose requires the deployment's own.
 COPY docker/nginx.conf /etc/nginx/templates/default.conf.template
 ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 \
-    OMS_HSTS=""
+    OMS_HSTS="" \
+    OMS_PUBLIC_HOST="localhost:3000"
 # Run by the entrypoint before nginx: without a certificate and key it can read, the container stops, saying how to make
 # them (#226)
 COPY --chmod=755 docker/nginx-tls-check.sh /docker-entrypoint.d/05-oms-tls-check.sh
+# Then OMS_PUBLIC_HOST must be a host and an optional port, with no scheme and no path (#564)
+COPY --chmod=755 docker/nginx-public-host-check.sh /docker-entrypoint.d/06-oms-public-host-check.sh
 # Not root (#158): nginx keeps its pid in /tmp, and the user nginx owns what nginx and its entrypoint write. nginx is
 # also in group 0 (#226), so it can read a key mounted with mode 0640: under rootless podman or Docker, the host user's
 # own group is group 0 in the container.
