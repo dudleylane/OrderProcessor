@@ -290,6 +290,8 @@ The styles are Tailwind CSS 4 (#220), so the app needs a browser from 2023 or la
 - **Changed defaults:** `src/index.css` keeps the defaults Tailwind 4 changed: border colour, the button cursor, placeholder colour, and table-cell and option padding.
 - **Hover:** Tailwind 4 applies `hover:` styles only on a device that can hover, so a touch screen no longer shows them after a tap.
 
+`package.json`'s `overrides` holds rollup at 4.62.3 (#141): from 4.62.4 rollup declared an optional `@napi-rs/lzma-linux-x64-gnu`, a native binding its code never loads, which every install on Linux x64 then fetched. Upstream removed it in 4.67.5 (rollup/rollup#6626, closed by #6627). On 2026-11-22 `npm view rollup@<version> optionalDependencies` listed it for 4.62.4 and for none of 4.62.3, 4.67.5 and 4.68.8, the latest. So the override can go at the next bump of the frontend's dependencies (#570), once the same check shows no such entry for the version taken (#593). `package.json` takes no comments, so the record is here.
+
 ---
 
 ## Testing
