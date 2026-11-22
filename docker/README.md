@@ -13,8 +13,11 @@ This directory contains everything needed to run the full OrderProcessor OMS sta
 
 ```bash
 cd docker
-cp .env.example .env          # Set PostgreSQL credentials
+cp .env.example .env          # Its required settings are empty: compose refuses it until each is set
 sed -i "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$(openssl rand -hex 32)/" .env   # The access token
+sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 32)/" .env   # Postgres's superuser (#568)
+sed -i "s/^OMS_DB_SERVER_PASSWORD=.*/OMS_DB_SERVER_PASSWORD=$(openssl rand -hex 32)/" .env   # The server's role (#568)
+sed -i "s/^OMS_PUBLIC_HOST=.*/OMS_PUBLIC_HOST=localhost:3000/" .env   # Where browsers reach the app (#564)
 # A FIX counterparty, CLIENT_A, trading TRADING-1 (#147): it asks for the password, and the file keeps only its hash
 python3 -c 'import getpass, hashlib, os; s = os.urandom(16); k = hashlib.pbkdf2_hmac("sha256", getpass.getpass("FIX password for CLIENT_A: ").encode(), s, 600000); print(f"CLIENT_A client_a pbkdf2-sha256$600000${s.hex()}${k.hex()} TRADING-1")' > fix-credentials
 mkdir -p certs && openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN=localhost" \
@@ -62,7 +65,7 @@ All three restart unless stopped (`restart: unless-stopped`), and each has a hea
 
 On a host with SELinux enforcing, as el10 is by default, compose relabels `init-db/` so the database container can read it (the `z` on its mount, #201). Without that, Postgres can't read its init scripts and never starts.
 
-CI brings this stack up with `scripts/check-compose-stack.sh` (#140), when `docker/` changes and weekly. The script checks that compose refuses to start without an access token and publishes only the frontend's port and the FIX acceptor's, that every service becomes healthy, that Postgres loaded the schema, that the server seeded its volume, that `/ws` refuses an upgrade without the token or from another Origin, that a new order sent to the frontend's `/ws` with the token gets its execution report, and that the order and the seeded reference data reach Postgres (#151). It reaches nginx over `https` and `wss` with a certificate made for the run, verifying it (#226). Run it before changing `docker-compose.yml`, `nginx.conf`, `.env.example` or `init-db/`. It takes about three minutes, and it publishes no host port, so it can run beside a stack that is already up.
+CI brings this stack up with `scripts/check-compose-stack.sh` (#140), when `docker/` changes and weekly. The script checks that compose refuses to start without each of its required settings, `OMS_WS_TOKEN`, `OMS_PUBLIC_HOST`, `POSTGRES_PASSWORD` and `OMS_DB_SERVER_PASSWORD` (#146, #564, #568), and publishes only the frontend's port and the FIX acceptor's, that every service becomes healthy, that Postgres loaded the schema, that the server seeded its volume, that `/ws` refuses an upgrade without the token or from another Origin, that a new order sent to the frontend's `/ws` with the token gets its execution report, that the order and the seeded reference data reach Postgres (#151), and that the server's role there can't create a table or truncate the orders (#568). It reaches nginx over `https` and `wss` with a certificate made for the run, verifying it (#226). Run it before changing `docker-compose.yml`, `nginx.conf`, `.env.example` or `init-db/`. It takes about three minutes, and it publishes no host port, so it can run beside a stack that is already up.
 
 The server runs as the user `oms`, which owns `/data`, and nginx as the user `nginx`; neither container runs as root. nginx looks the server up through the container's own DNS resolver when a request needs it, so it starts while the server is still down, and it finds a re-created server container at its new address.
 
@@ -86,13 +89,16 @@ Copy `.env.example` to `.env` and set values:
 
 ```bash
 POSTGRES_USER=oms              # PostgreSQL username
-POSTGRES_PASSWORD=changeme     # PostgreSQL password (change this!). Any character, since libpq gets it on its own (#642); write a $ as $$
+POSTGRES_PASSWORD=             # The superuser's password, required (#568): openssl rand -hex 32 makes one
+OMS_DB_SERVER_PASSWORD=        # The server's role's password, required (#568). Quotes and backslashes are fine, since libpq gets it on its own (#642); leave out $, below
 POSTGRES_DB=oms                # Database name
 OMS_WS_TOKEN=                  # WebSocket access token, required: openssl rand -hex 32 makes one (#146)
 OMS_ALLOWED_ORIGINS=           # Pages a browser may connect from, comma-separated; empty allows any (#146)
 OMS_HSTS=                      # Strict-Transport-Security, such as max-age=31536000, once certs/ holds a certificate browsers trust (#226)
 OMS_PUBLIC_HOST=               # Host and port browsers reach the app at, required: localhost:3000, or oms.example.com:3000 (#564)
 ```
+
+A password in `.env` may hold a quote or a backslash (#642), but leave out `$`. podman-compose 1.5.0 reads `${NAME}` as a variable, in quotes too, and keeps a lone `$` and `$$` as written; Docker Compose reads a `$` its own way. A password without one, such as `openssl rand -hex 32` makes, is taken as written by both.
 
 ### Access
 
@@ -268,6 +274,15 @@ Server images before #158 ran as root, so the files they wrote in `oms-data` bel
 
 ```bash
 docker compose run --rm --no-deps --user 0 --entrypoint chown oms-server -R oms:oms /data
+```
+
+### A database made before the server had its own role
+
+Since #568 the server connects to Postgres as `oms_server`, a role that may read and write only the rows it mirrors, where it connected as the superuser. `init-db/002_server_role.sh` makes the role, but Postgres runs `init-db` only when it initialises a new volume. On a volume made before, set `OMS_DB_SERVER_PASSWORD` in `.env`, run `docker compose up -d` (the server can't reach Postgres yet, and runs on LMDB alone meanwhile), then make the role once with the same script, which reads the password from `oms-db`'s environment:
+
+```bash
+docker compose exec oms-db sh /docker-entrypoint-initdb.d/002_server_role.sh
+docker compose restart oms-server
 ```
 
 ## Build Details
