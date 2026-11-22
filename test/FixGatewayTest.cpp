@@ -1558,8 +1558,9 @@ TEST(FixSessionTimeTest, ASessionsDayEndsAt1700NewYork)
     FIX::TimeRange range(FIX::LocalTimeOnly(start.getHour(), start.getMinute(), start.getSecond()),
                          FIX::LocalTimeOnly(end.getHour(), end.getMinute(), end.getSecond()));
     // Asked as QuickFIX's Session asks it, the later time first: now, then when the session began. Daylight time: 17:00
-    // EDT is 21:00 UTC, and New York's midnight is no boundary. (QuickFIX's arithmetic puts the session's last second,
-    // 16:59:59, in the next one, so the checks keep off it.)
+    // EDT is 21:00 UTC, and New York's midnight is no boundary. (QuickFIX's arithmetic makes the session's last
+    // second, 16:59:59, a day of its own, which ends at 17:00, so the checks keep off it: #656, and FixStoresTest's
+    // AClientLoggedOnAsTheDayEndsGetsWhatWasSentBeforeItLoggedOnAgain for the two resets.)
     EXPECT_FALSE(
         range.isInSameRange(FIX::UtcTimeStamp(21, 0, 1, 15, 10, 2026), FIX::UtcTimeStamp(20, 59, 58, 15, 10, 2026)));
     EXPECT_TRUE(
