@@ -10,6 +10,13 @@
 #   ./scripts/benchmark-regression.sh --no-build --pinned 2-5    # compare "after" against it
 #   ./scripts/benchmark-regression.sh --no-build --filter "Pool" # only matching benchmarks
 #
+# With --no-build it times the binary in --build-dir (default: build) as it stands. Without it, it builds a fresh
+# Release tree of its own, in --build-dir (default: build-benchmark), which it deletes first: a directory it didn't
+# make, such as one a person configured with tests, it refuses to delete, and stops (#588). Its build turns tests and
+# the app off, and on a tree that has the FIX gateway's BUILD_FIX option it turns that on, so a baseline has the
+# BM_Fix* benchmarks; QuickFIX is then found as CMake finds it, through CMAKE_PREFIX_PATH in the environment if it
+# isn't under /usr/local. It builds with gcc-toolset-15 where that is installed, as CI and the pre-push hook do (#614).
+#
 # A comparison runs the saved binary and the current one in alternating rounds,
 # flipping which goes first every round, so drift between runs (clock frequency,
 # temperature, other load) falls on both sides alike. Each benchmark is judged by
@@ -127,9 +134,13 @@ while [[ $# -gt 0 ]]; do
             echo "  --threshold N        Slowdown that fails the comparison, in percent (default: 5)"
             echo "  --rounds N           Alternating rounds of baseline and current runs (default: 6)"
             echo "  --repetitions N      Repetitions per binary per round (default: 1)"
-            echo "  --no-build           Skip the clean build (use the existing build)"
+            echo "  --no-build           Time the existing build in --build-dir (default: build). Without"
+            echo "                       it, the script builds its own tree in --build-dir (default:"
+            echo "                       build-benchmark), deleting it first, and refuses a directory it"
+            echo "                       didn't make (#588)"
             echo "  --baseline FILE      Baseline binary (default: benchmark_baseline.bin in the repo root)"
-            echo "  --build-dir DIR      Override build directory path"
+            echo "  --build-dir DIR      The build directory (default: build with --no-build,"
+            echo "                       build-benchmark without it)"
             echo "  --filter REGEX       Run only matching benchmarks"
             echo "  --pinned CORES       Pin the runs to CORES (taskset list; use a range such as 2-5)"
             echo "                       and request real-time priority where permitted"
@@ -190,7 +201,15 @@ else
 fi
 
 BASELINE="${BASELINE:-$PROJECT_ROOT/benchmark_baseline.bin}"
-BUILD_DIR="${BUILD_DIR:-$PROJECT_ROOT/build}"
+# A build of the script's own goes in a directory of its own, which it may delete: the default build/ is a person's, and
+# deleting it cost a worktree its configured build (#588)
+if [[ -z "$BUILD_DIR" ]]; then
+    if $DO_BUILD; then
+        BUILD_DIR="$PROJECT_ROOT/build-benchmark"
+    else
+        BUILD_DIR="$PROJECT_ROOT/build"
+    fi
+fi
 # Made absolute once (#180): the binaries run from a scratch directory, where a relative path given here named nothing,
 # and --update-baseline and a comparison have to agree on where the baseline is
 BASELINE="$(realpath -m -- "$BASELINE")"
@@ -263,12 +282,31 @@ build_source_dir() {
 }
 
 # --- Step 1: Build ---
+# The file that marks a build directory as this script's own, which it may delete (#588)
+OWN_BUILD_MARK=.benchmark-regression-build
 if $DO_BUILD; then
     echo "=== Clean Release Build ==="
-    rm -rf "$BUILD_DIR"
+    if [[ -e "$BUILD_DIR" && ! -e "$BUILD_DIR/$OWN_BUILD_MARK" ]]; then
+        echo "ERROR: $BUILD_DIR isn't a build this script made, so it won't delete it to build afresh (#588)." >&2
+        echo "Time it as it stands with --no-build, or give a --build-dir that is new or the script's own." >&2
+        exit 2
+    fi
+    # The toolchain CI and the pre-push hook use (#614): the system's GCC 14 lacks <flat_map>
+    TOOLSET=/opt/rh/gcc-toolset-15/root/usr
+    if [[ -d "$TOOLSET" ]]; then
+        export PATH="$TOOLSET/bin:$PATH"
+        export LD_LIBRARY_PATH="$TOOLSET/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        export CC="$TOOLSET/bin/gcc" CXX="$TOOLSET/bin/g++"
+    fi
+    # On a tree with the FIX gateway (feature/fx-swap-support), the baseline has its benchmarks too (#588)
+    BUILD_OPTIONS=(-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_APP=OFF)
+    if grep -q 'option(BUILD_FIX' "$PROJECT_ROOT/CMakeLists.txt"; then
+        BUILD_OPTIONS+=(-DBUILD_FIX=ON)
+    fi
+    rm -rf -- "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
-    cmake -S "$PROJECT_ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_TESTS=OFF -DBUILD_APP=OFF
+    touch "$BUILD_DIR/$OWN_BUILD_MARK"
+    cmake -S "$PROJECT_ROOT" -B "$BUILD_DIR" "${BUILD_OPTIONS[@]}"
     cmake --build "$BUILD_DIR" -j"$(nproc)"
     echo ""
 fi

@@ -164,6 +164,15 @@ check "a build whose cache names no tree is said to" \
     "unknown: $work/master-build/CMakeCache.txt doesn't name the tree it was built from" \
     "$(current_commit master-build)"
 
+# --- A build of the script's own never deletes a directory it didn't make (#588) ---
+mkdir -p "$work/persons-build"
+echo "a person's configured build" > "$work/persons-build/CMakeCache.txt"
+compare --update-baseline --build-dir "$work/persons-build" --baseline "$work/other.bin" > "$work/out"
+check "building into a directory the script didn't make is refused" 2 $?
+check "and the directory is left as it was" "a person's configured build" \
+    "$(cat "$work/persons-build/CMakeCache.txt" 2>&1)"
+check "the refusal says how to go on" 1 "$(grep -c 'Time it as it stands with --no-build' "$work/out")"
+
 if (( failures )); then
     echo "$failures check(s) failed"
     exit 1
