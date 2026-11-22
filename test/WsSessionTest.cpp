@@ -28,6 +28,7 @@
 #include "DataModelDef.h"
 #include "IdTGenerator.h"
 #include "IncomingQueues.h"
+#include "LogThrottle.h"
 #include "OrderStorage.h"
 #include "SessionManager.h"
 #include "WideDataStorage.h"
@@ -300,6 +301,105 @@ TEST_F(WsSessionTest, RequestThatThrowsIsAnsweredAndTheSessionKeepsReading)
     EXPECT_EQ("Internal error: request not processed", reply->value("message", ""));
     EXPECT_EQ("", escaped());
     EXPECT_TRUE(stillAnswers(client));
+}
+
+TEST_F(WsSessionTest, ThrowingRequestsInARowAreEachAnswered)
+{
+    // A client could make its session contain an exception for every message it sent, each logged at error level with
+    // its bytes (#547). The log is throttled and escaped now (LogThrottleTest checks the line); here, each of three
+    // throwing requests in a row, with bytes that aren't ASCII, is still answered, and the session reads on. The log
+    // isn't read here: the server's thread writes it, which CapturedLog doesn't allow.
+    ON_CALL(failingQueues_, push(testing::_, testing::An<const Queues::OrderCancelEvent &>()))
+        .WillByDefault(testing::Throw(std::runtime_error("injected\x01"
+                                                         "failure\xff")));
+    sessionQueues_ = &failingQueues_;
+
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    for (int i = 0; i < 3; ++i)
+    {
+        send(client, "{\"type\":\"cancel_order\",\"data\":{\"orderId\":1,\"clOrderId\":\"caf\xc3\xa9\"}}");
+        auto reply = readUntil(client, "error");
+        ASSERT_TRUE(reply.has_value()) << "no error reply; escaped: " << escaped();
+        EXPECT_EQ("Internal error: request not processed", reply->value("message", ""));
+    }
+    EXPECT_EQ("", escaped());
+    EXPECT_TRUE(stillAnswers(client));
+}
+
+TEST_F(WsSessionTest, ABinaryFrameClosesTheSessionWith1003)
+{
+    // The protocol is text JSON (#547). A binary frame was parsed as text, and one of bytes that weren't UTF-8 made
+    // the serializer throw on the error answering it, logged with its bytes, for every such frame. The session now
+    // closes, with 1003, unsupported data.
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    client.ws.binary(true);
+    client.ws.write(net::buffer(std::string("\xff\xfe{\"type\":\"subscribe_book\"}")));
+    // Anything sent before the close, then the close, which fails the read; read as readUntil() reads, so that a
+    // session left open fails at the deadline rather than holding the test
+    std::optional<beast::error_code> failed;
+    const auto deadline = std::chrono::steady_clock::now() + REPLY_TIMEOUT;
+    while (!failed && (std::chrono::steady_clock::now() < deadline))
+    {
+        client.buffer.clear();
+        client.ws.async_read(client.buffer,
+                             [&](beast::error_code ec, std::size_t)
+                             {
+                                 if (ec)
+                                 {
+                                     failed = ec;
+                                 }
+                             });
+        client.ioc.restart();
+        client.ioc.run_for(deadline - std::chrono::steady_clock::now());
+    }
+    ASSERT_TRUE(failed.has_value()) << "the session wasn't closed";
+    EXPECT_EQ(beast::error_code(websocket::error::closed), *failed) << failed->message();
+    EXPECT_EQ(websocket::close_code::unknown_data, client.ws.reason().code);
+    EXPECT_EQ("", escaped()); // the server's thread runs on
+}
+
+TEST(LogThrottleTest, AllowsOneLineAPeriodAndCountsTheRest)
+{
+    // #547
+    App::LogThrottle throttle(std::chrono::seconds(1));
+    const auto t0 = std::chrono::steady_clock::time_point() + std::chrono::hours(1);
+    u64 skipped = 99;
+    EXPECT_TRUE(throttle.allow(t0, &skipped));
+    EXPECT_EQ(0u, skipped);
+    EXPECT_FALSE(throttle.allow(t0 + std::chrono::milliseconds(100), &skipped));
+    EXPECT_FALSE(throttle.allow(t0 + std::chrono::milliseconds(999), &skipped));
+    EXPECT_TRUE(throttle.allow(t0 + std::chrono::seconds(1), &skipped));
+    EXPECT_EQ(2u, skipped);
+    EXPECT_FALSE(throttle.allow(t0 + std::chrono::milliseconds(1500), &skipped));
+    EXPECT_TRUE(throttle.allow(t0 + std::chrono::milliseconds(2100), &skipped));
+    EXPECT_EQ(1u, skipped);
+}
+
+TEST(LogThrottleTest, AContainedExceptionsLineEscapesItsTextAndTheRequest)
+{
+    // #547: the exception's text and the request, both escaped, the request cut at 20 bytes (before its closing brace),
+    // and the lines the throttle left out
+    EXPECT_EQ(
+        "WsSession: contained exception #7 in request: injected\\x01failure\\xFF (2 more in this session since the "
+        "last logged weren't: one a second is); request: {\"clOrderId\":\"caf\\xC3\\xA9\"",
+        App::containedExceptionLine("WsSession", 7, "request",
+                                    "injected\x01"
+                                    "failure\xff",
+                                    "{\"clOrderId\":\"caf\xc3\xa9\"}", 20, 2));
+    EXPECT_EQ("WsSession: contained exception #1 in initial state: boom",
+              App::containedExceptionLine("WsSession", 1, "initial state", "boom", "", 256, 0));
+}
+
+TEST(LogThrottleTest, EscapeForLogKeepsPrintableAsciiAndEscapesEveryOtherByte)
+{
+    // #547: a backslash doubled, so that an escape in the log can't be forged
+    EXPECT_EQ("plain text {}", App::escapeForLog("plain text {}"));
+    EXPECT_EQ("a\\\\b\\x01\\xFF\\x7F caf\\xC3\\xA9\\x0A", App::escapeForLog("a\\b\x01\xff\x7f caf\xc3\xa9\n"));
+    EXPECT_EQ("\\x00", App::escapeForLog(std::string_view("\0", 1)));
 }
 
 TEST_F(WsSessionTest, InitialStateThatThrowsIsAnsweredAndTheSessionKeepsReading)

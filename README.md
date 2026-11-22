@@ -554,7 +554,7 @@ which matches the stop as a market order with the sell above it (#480). It takes
 
 ## WebSocket Protocol
 
-The server communicates with clients via JSON messages over WebSocket. All messages have a `type` field for dispatch. A server message's payload is in a `data` field, except `error`'s, whose text is a top-level `message`. A client's `new_order`, `cancel_order` and `replace_order` put theirs in `data` too, `{"type": "new_order", "data": {...}}`, while `subscribe_book` and `unsubscribe_book` give `symbol` at the top level.
+The server communicates with clients via JSON messages over WebSocket, each a text frame: a binary frame closes the session, with close code 1003, unsupported data (#547). All messages have a `type` field for dispatch. A server message's payload is in a `data` field, except `error`'s, whose text is a top-level `message`. A client's `new_order`, `cancel_order` and `replace_order` put theirs in `data` too, `{"type": "new_order", "data": {...}}`, while `subscribe_book` and `unsubscribe_book` give `symbol` at the top level.
 
 ### Connecting
 

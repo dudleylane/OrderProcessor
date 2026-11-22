@@ -54,18 +54,20 @@ DateTimeT nowMillis()
 
 /// Longest prefix of a client's request that goes into the log.
 const size_t MAX_LOGGED_REQUEST = 256;
+} // namespace
 
-void logContained(const char *where, const std::string &request, const char *what)
+void WsSession::logContained(const char *where, const std::string &request, const char *what)
 {
     const u64 n = containedExceptions.fetch_add(1, std::memory_order_relaxed) + 1;
-    std::string text = "WsSession: contained exception #" + std::to_string(n) + " in " + where + ": " + what;
-    if (!request.empty())
+    u64 skipped = 0;
+    if (!containedLog_.allow(std::chrono::steady_clock::now(), &skipped))
     {
-        text += "; request: " + request.substr(0, MAX_LOGGED_REQUEST);
+        return;
     }
-    aux::ExchLogger::instance()->error(text);
+    // The exception's text can hold the client's bytes too, as a parser's does
+    aux::ExchLogger::instance()->error(
+        containedExceptionLine("WsSession", n, where, what, request, MAX_LOGGED_REQUEST, skipped));
 }
-} // namespace
 
 WsSession::WsSession(tcp::socket &&socket, SessionManager *sessionMgr, Store::WideParamsDataStorage *wideData,
                      Store::OrderDataStorage *orderStorage, Queues::InQueues *inQueues, IdTValueGenerator *idGen,
@@ -282,6 +284,21 @@ void WsSession::onRead(beast::error_code ec, std::size_t /*bytesTransferred*/)
         sessionMgr_->removeSession(shared_from_this());
         return;
     }
+    if (closing_)
+    {
+        // Until the client answers the close, which ends the read (#547)
+        buffer_.consume(buffer_.size());
+        doRead();
+        return;
+    }
+    // The protocol is text JSON (#547). A binary frame was parsed as text, and one of bytes that weren't UTF-8 made the
+    // serializer throw on the error that answered it: logged at error level with its bytes, for every such frame.
+    if (!ws_.got_text())
+    {
+        buffer_.consume(buffer_.size());
+        refuseBinary();
+        return;
+    }
 
     std::string msg = beast::buffers_to_string(buffer_.data());
     buffer_.consume(buffer_.size());
@@ -303,6 +320,24 @@ void WsSession::onRead(beast::error_code ec, std::size_t /*bytesTransferred*/)
         send(serializeError("Internal error: request not processed"));
     }
     readWhenUnderBound();
+}
+
+void WsSession::refuseBinary()
+{
+    closing_ = true;
+    // Nothing more is sent, as for a client dropped for not reading (#159): the write in progress, if any, ends first,
+    // and Beast sends the close after it
+    dropped_ = true;
+    sessionMgr_->removeSession(shared_from_this());
+    beast::error_code ec;
+    const tcp::endpoint peer = beast::get_lowest_layer(ws_).socket().remote_endpoint(ec);
+    aux::ExchLogger::instance()->note(
+        "WsSession: closed the session of the client at " +
+        (ec ? std::string("an unknown address") : peer.address().to_string() + ":" + std::to_string(peer.port())) +
+        ", which sent a binary frame: the protocol is text JSON (#547)");
+    ws_.async_close(websocket::close_reason(websocket::close_code::unknown_data, "the protocol is text JSON"),
+                    [self = shared_from_this()](beast::error_code) {});
+    doRead();
 }
 
 void WsSession::handleMessage(const std::string &msgStr)
