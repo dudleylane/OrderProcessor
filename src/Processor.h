@@ -115,9 +115,10 @@ public:
     /// Matches a restored order that lost its fills, or the cancel of what it couldn't trade, as the transaction that
     /// booked it did when it ran (#207, #489), and books it if it rests in the price book: a market, IOC or FOK order
     /// never does, and what it can't trade is canceled. The fills and the cancel go to the transaction manager, each in
-    /// a transaction of its own, but they are applied before this returns, so the next order matched sees them. Call it
-    /// before the server takes orders, for each of StorageRecordDispatcher::ordersToMatch() in turn. Throws if the
-    /// order can't be matched or booked.
+    /// a transaction of its own, but they are applied before this returns, so the next order matched sees them. The
+    /// releases of the held stops its trades reach are enqueued once its whole sweep is decided, as production's order
+    /// runs them (#533). Call it before the server takes orders, for each of
+    /// StorageRecordDispatcher::ordersToMatch() in turn. Throws if the order can't be matched or booked.
     void matchRestored(OrderEntry *order);
     /// Releases a restored held stop whose release a crash lost (#237, #518), as that release would have: in a
     /// transaction of its own, on a transaction worker. Call it for each of StorageRecordDispatcher::stopsReached()
@@ -157,6 +158,8 @@ public:
 
 private:
     void processDeferedEvent();
+    /// matchRestored()'s drain (#533): processDeferedEvent()'s, but the stops' releases wait until the drain is done
+    void processRestoredDeferedEvent();
     void clearDeferedEvents();
     /// Tells the sender that its new order or replacement was refused without being stored (#67)
     void rejectUnstoredOrder(const std::string &source, const OrderEntry &order, bool replacement);

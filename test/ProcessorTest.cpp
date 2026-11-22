@@ -144,7 +144,7 @@ public:
             ++running_;
             try
             {
-                proc_->process(tr->transactionId(), tr.get());
+                run(tr.get());
             }
             catch (...)
             {
@@ -218,9 +218,40 @@ public:
     /// While set, a transaction added while another runs is kept, not run: one a deferred event adds, a trade's or a
     /// cancel's. Each is lost, as a crash would lose it after the transaction before it committed.
     bool keepNested_ = false;
+    /// While set, each transaction runs at once, to its end, on a thread of its own, as a worker would take it the
+    /// moment it is enqueued: the caller waits for it. Run on the caller's thread, the transaction's own drain would
+    /// take the events of a chain the caller is still draining, which share its thread_local queue (#533).
+    bool onAnotherThread_ = false;
     std::vector<std::unique_ptr<Transaction>> kept_;
 
 private:
+    void run(Transaction *tr)
+    {
+        if (!onAnotherThread_)
+        {
+            proc_->process(tr->transactionId(), tr);
+            return;
+        }
+        std::exception_ptr failure;
+        std::thread worker(
+            [this, tr, &failure]()
+            {
+                try
+                {
+                    proc_->process(tr->transactionId(), tr);
+                }
+                catch (...)
+                {
+                    failure = std::current_exception();
+                }
+            });
+        worker.join();
+        if (failure)
+        {
+            std::rethrow_exception(failure);
+        }
+    }
+
     int transactionCount_;
     int running_ = 0;
 };
@@ -290,6 +321,9 @@ protected:
         order->ordType_ = LIMIT_ORDERTYPE;
         return order;
     }
+
+    /// A crash before a restored order's sweep reaches a held stop (#533), defined beside the tests that use it
+    IdT crashBeforeASweepThatReachesAStop(const std::string &dir, IdT *stop);
 
 protected:
     std::unique_ptr<IncomingQueues> inQueues_;
@@ -3424,6 +3458,133 @@ TEST_F(ProcessorTest, ATradeTheRestartMatchesStillNamesTheReleasesPendingBeforeT
         << "the last trade the first restart wrote dropped the release it hadn't run";
     restarted.processor_.releaseRestored(restored);
     EXPECT_EQ(std::vector<std::string>{ "10@8" }, reports.tradesOf(id));
+    std::filesystem::remove_all(dir);
+}
+
+// Sells of 5 at 10 and 5 at 11 rest, and a buy stop at 10 for 5 is held. An IOC buy for 10 at 11 sweeps both sells, and
+// its trade at 10 reaches the stop. The crash loses everything the IOC's own transaction queued, its fills included, so
+// the restart matches it again (#489). Returns the IOC's id, and the stop's in *stop.
+IdT ProcessorTest::crashBeforeASweepThatReachesAStop(const std::string &dir, IdT *stop)
+{
+    const SourceIdT instrument = instrId1_;
+    IncomingQueues *inQueues = inQueues_.get();
+    TradeRecorder reports;
+    EngineOverDirectory crashed(dir, instrument, inQueues, &reports);
+    auto order = createTestOrder(instrument, SELL_SIDE, 10.0, 5);
+    RawDataEntry clOrdId = order->clOrderId_.get();
+    inQueues->push("test", OrderEvent(order.release()));
+    crashed.process(clOrdId);
+    order = createTestOrder(instrument, SELL_SIDE, 11.0, 5);
+    clOrdId = order->clOrderId_.get();
+    inQueues->push("test", OrderEvent(order.release()));
+    crashed.process(clOrdId);
+    order = asStop(createTestOrder(instrument, BUY_SIDE, 0.0, 5), STOP_ORDERTYPE, 10.0);
+    clOrdId = order->clOrderId_.get();
+    inQueues->push("test", OrderEvent(order.release()));
+    *stop = crashed.process(clOrdId)->orderId_;
+
+    crashed.transactions_.keepNested_ = true;
+    order = createTestOrder(instrument, BUY_SIDE, 11.0, 10);
+    order->tif_ = IOC_TIF;
+    clOrdId = order->clOrderId_.get();
+    inQueues->push("test", OrderEvent(order.release()));
+    return crashed.process(clOrdId)->orderId_;
+}
+
+TEST_F(ProcessorTest, TheRestartDecidesAnOrdersWholeSweepBeforeTheStopsItReachesAreReleased)
+{
+    // In production a trade's chain is drained inside the trade's transaction, which holds the instrument, so the
+    // release of a stop the trade reaches waits until the whole sweep is decided. The restart drains on its own thread,
+    // holding nothing, and enqueued the release at once: a manager free to run it there and then let the released stop
+    // take the sell at 11 ahead of the IOC's next match, and the IOC was canceled with 5 left (#533). This test's
+    // manager runs each transaction as it is enqueued, on a thread of its own as a worker would, which is that order.
+    const std::string dir = test::uniqueTestPath("restart-sweep-before-release");
+    std::filesystem::remove_all(dir);
+    IdT stop;
+    const IdT ioc = crashBeforeASweepThatReachesAStop(dir, &stop);
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    restarted.transactions_.onAnotherThread_ = true;
+    ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+    ASSERT_EQ(ioc, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+    ASSERT_TRUE(restarted.dispatcher_.stopsReached().empty()) << "no trade committed before the crash";
+    OrderEntry *held = restarted.storage_.locateByOrderId(stop);
+    ASSERT_NE(nullptr, held);
+    ASSERT_FALSE(held->stopTriggered_);
+
+    restarted.processor_.matchRestored(restarted.dispatcher_.ordersToMatch()[0]);
+
+    EXPECT_EQ((std::vector<std::string>{ "5@10", "5@11" }), reports.tradesOf(ioc))
+        << "the stop's release ran ahead of the sweep's next match";
+    EXPECT_EQ(FILLED_ORDSTATUS, restarted.storage_.locateByOrderId(ioc)->status_);
+    EXPECT_TRUE(held->stopTriggered_) << "the trade at 10 reached the stop, and its release didn't run";
+    EXPECT_TRUE(reports.tradesOf(stop).empty()) << "the sweep had taken the sell at 11";
+    EXPECT_FALSE(restarted.book_.holdsStops(instrId1_));
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AReleaseTheRestartHeldIsEnqueuedEvenWhenTheSweepFails)
+{
+    // As above, but the manager refuses the transaction of the sweep's next match. The release was held for the end of
+    // the drain, and its stop is already claimed, reached and pending, so it must still be enqueued before
+    // matchRestored() throws (#533): dropped, the stop would stay held until a restart released it.
+    const std::string dir = test::uniqueTestPath("restart-release-after-failure");
+    std::filesystem::remove_all(dir);
+    IdT stop;
+    const IdT ioc = crashBeforeASweepThatReachesAStop(dir, &stop);
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    restarted.transactions_.onAnotherThread_ = true;
+    ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+    OrderEntry *held = restarted.storage_.locateByOrderId(stop);
+    ASSERT_NE(nullptr, held);
+    int adds = 0;
+    restarted.transactions_.onAdd_ = [&adds]()
+    {
+        if (2 == ++adds) // the first holds the trade at 10's fills; the second is the sweep's next match's
+        {
+            throw std::runtime_error("injected: the next match's transaction can't be enqueued");
+        }
+    };
+
+    EXPECT_THROW(restarted.processor_.matchRestored(restarted.dispatcher_.ordersToMatch()[0]), std::runtime_error);
+
+    EXPECT_EQ(std::vector<std::string>{ "5@10" }, reports.tradesOf(ioc));
+    EXPECT_TRUE(held->stopTriggered_) << "the release was dropped with the failed sweep";
+    EXPECT_FALSE(restarted.book_.holdsStops(instrId1_));
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AReleaseTheRestartHeldIsEnqueuedWhateverTheSweepThrows)
+{
+    // As above, but what the manager throws isn't a std::exception: the drain's handler takes anything, and still
+    // enqueues the release before the throw goes on (#533)
+    const std::string dir = test::uniqueTestPath("restart-release-after-odd-failure");
+    std::filesystem::remove_all(dir);
+    IdT stop;
+    crashBeforeASweepThatReachesAStop(dir, &stop);
+
+    TradeRecorder reports;
+    EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+    restarted.transactions_.onAnotherThread_ = true;
+    ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+    OrderEntry *held = restarted.storage_.locateByOrderId(stop);
+    ASSERT_NE(nullptr, held);
+    int adds = 0;
+    restarted.transactions_.onAdd_ = [&adds]()
+    {
+        if (2 == ++adds) // the sweep's next match's transaction, as above
+        {
+            throw 42;
+        }
+    };
+
+    EXPECT_THROW(restarted.processor_.matchRestored(restarted.dispatcher_.ordersToMatch()[0]), int);
+
+    EXPECT_TRUE(held->stopTriggered_) << "the release was dropped with the failed sweep";
+    EXPECT_FALSE(restarted.book_.holdsStops(instrId1_));
     std::filesystem::remove_all(dir);
 }
 
