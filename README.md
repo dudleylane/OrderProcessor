@@ -90,7 +90,6 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 | spdlog | 1.x+ | Fast logging |
 | Boost | 1.70+ | Headers only (MPL for Meta State Machine) |
 | LMDB | Latest | Persistent key-value storage backend |
-| numactl | Latest | NUMA-aware memory allocation |
 | OpenSSL | Latest | libcrypto: SHA-256 for the WebSocket server's token hashes (#225) and, with `BUILD_FIX=ON`, PBKDF2 for the FIX credentials' password hashes (#147) |
 | QuickFIX | 22 | FIX protocol engine (optional, `BUILD_FIX=ON`), from the maintained fork, at the ref that `QUICKFIX_REF` in `docker/Dockerfile.oms-server` pins: CI and the image both build it (#178) |
 
@@ -99,7 +98,7 @@ Install on CentOS 10. spdlog-devel comes from EPEL and lmdb-devel from CRB, so t
 # Core dependencies
 sudo dnf install epel-release 'dnf-command(config-manager)'
 sudo dnf config-manager --set-enabled crb
-sudo dnf install gcc-toolset-15 tbb-devel spdlog-devel boost-devel cmake lmdb-devel numactl-devel openssl-devel git
+sudo dnf install gcc-toolset-15 tbb-devel spdlog-devel boost-devel cmake lmdb-devel openssl-devel git
 
 # Optional: QuickFIX 22 for FIX protocol support. scripts/build-quickfix.sh builds the pinned ref
 # (see docs/QUICKFIX_DEPENDENCY.md)
