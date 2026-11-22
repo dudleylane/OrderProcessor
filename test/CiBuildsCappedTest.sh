@@ -20,8 +20,10 @@ check() { # <what> <expected> <actual>
 cd "$ROOT" || exit 1
 workflows=(.github/workflows/*.yml)
 
-# Each line that builds, comments left out: cmake --build, and on feature/fx-swap-support scripts/build-quickfix.sh
-builds=$(grep -n -E 'cmake --build|build-quickfix\.sh' "${workflows[@]}" | grep -v -E '^[^:]+:[0-9]+:[[:space:]]*#')
+# Each line that builds, comments left out: cmake --build, and on feature/fx-swap-support scripts/build-quickfix.sh run
+# with its arguments. A line that only reads the script, as the QuickFIX cache's key hashes it (#562), builds nothing.
+builds=$(grep -n -E 'cmake --build|build-quickfix\.sh[[:space:]]+[^|)[:space:]]' "${workflows[@]}" |
+    grep -v -E '^[^:]+:[0-9]+:[[:space:]]*#')
 check "the workflows build" yes "$(grep -q 'cmake --build' <<< "$builds" && echo yes)"
 check "every build runs under memory-cap.sh, with a size" "" \
     "$(grep -v -E 'scripts/memory-cap\.sh [1-9][0-9]*[KMGT] (cmake --build|scripts/build-quickfix\.sh) ' <<< "$builds")"
