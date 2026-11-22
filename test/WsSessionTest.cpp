@@ -21,6 +21,9 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
 
 #include "MockQueues.h"
 #include "MockStorage.h"
@@ -73,6 +76,7 @@ protected:
             {
                 if (!ec)
                 {
+                    serverFd_ = socket.native_handle(); // for the kernel's word on its options (#653)
                     std::make_shared<App::WsSession>(
                         std::move(socket), &sessionMgr_, WideDataStorage::instance(), OrderStorage::instance(),
                         sessionQueues_.load(), IdTGenerator::instance(), nullptr,
@@ -273,6 +277,8 @@ protected:
     // What the next session gets as the server's defaults, and the queue it sends requests to. Set before connecting;
     // read on the server thread.
     std::atomic<Queues::InQueues *> sessionQueues_{ &inQueues_ };
+    /// The accepted socket's descriptor, which a test asks the kernel about without touching the session's socket
+    std::atomic<int> serverFd_{ -1 };
     testing::NiceMock<test::MockInQueues> failingQueues_;
     std::atomic<bool> useDefaultClearing_{ true };
     std::atomic<bool> useDefaultAccount_{ true };
@@ -400,6 +406,20 @@ TEST(LogThrottleTest, EscapeForLogKeepsPrintableAsciiAndEscapesEveryOtherByte)
     EXPECT_EQ("plain text {}", App::escapeForLog("plain text {}"));
     EXPECT_EQ("a\\\\b\\x01\\xFF\\x7F caf\\xC3\\xA9\\x0A", App::escapeForLog("a\\b\x01\xff\x7f caf\xc3\xa9\n"));
     EXPECT_EQ("\\x00", App::escapeForLog(std::string_view("\0", 1)));
+}
+
+TEST_F(WsSessionTest, ASessionTurnsNaglesAlgorithmOff)
+{
+    // Each message is a write of its own, and most are small: with Nagle's algorithm on, the second of a fill's two
+    // messages waited for the client's delayed ACK of the first (#653). Asked of the kernel by the accepted socket's
+    // descriptor, so that this thread never touches the session's socket object, which its own thread runs.
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    int noDelay = 0;
+    socklen_t length = sizeof(noDelay);
+    ASSERT_EQ(0, ::getsockopt(serverFd_.load(), IPPROTO_TCP, TCP_NODELAY, &noDelay, &length));
+    EXPECT_NE(0, noDelay);
 }
 
 TEST_F(WsSessionTest, InitialStateThatThrowsIsAnsweredAndTheSessionKeepsReading)
