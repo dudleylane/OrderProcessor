@@ -91,6 +91,8 @@ public:
         count_++;
     }
     void push(const CancelRejectEvent &, const std::string &) override {}
+    /// Ignored, as the cancel rejects are: the gateway's benchmarks send their refusals through the gateway (#623)
+    void push(const OrderRejectEvent &, const std::string &) override {}
     int count_ = 0;
 };
 
@@ -112,6 +114,8 @@ public:
         }
     }
     void push(const CancelRejectEvent &, const std::string &) override {}
+    /// Not counted: only the reports the pool's workers push are (#623)
+    void push(const OrderRejectEvent &, const std::string &) override {}
 
     u64 reports() const
     {
