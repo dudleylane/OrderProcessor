@@ -82,6 +82,11 @@ TEST_F(FixEnumTest, SideConversion)
     EXPECT_EQ(BUY_SIDE, FixGateway::toSide(FIX::Side_BUY));
     EXPECT_EQ(SELL_SIDE, FixGateway::toSide(FIX::Side_SELL));
     EXPECT_EQ(SELL_SHORT_SIDE, FixGateway::toSide(FIX::Side_SELL_SHORT));
+    EXPECT_EQ(BUY_MINUS_SIDE, FixGateway::toSide(FIX::Side_BUY_MINUS));
+    EXPECT_EQ(SELL_PLUS_SIDE, FixGateway::toSide(FIX::Side_SELL_PLUS));
+    EXPECT_EQ(CROSS_SIDE, FixGateway::toSide(FIX::Side_CROSS));
+    // 54=6 is Sell Short Exempt, which the engine has no side for: it isn't Cross, which is 8 (#549)
+    EXPECT_EQ(INVALID_SIDE, FixGateway::toSide(FIX::Side_SELL_SHORT_EXEMPT));
     EXPECT_EQ(INVALID_SIDE, FixGateway::toSide('Z'));
 }
 
@@ -91,6 +96,10 @@ TEST_F(FixEnumTest, SideRoundTrip)
     EXPECT_EQ(FIX::Side_SELL, FixGateway::fromSide(SELL_SIDE));
     EXPECT_EQ(FIX::Side_SELL_SHORT, FixGateway::fromSide(SELL_SHORT_SIDE));
     EXPECT_EQ(FIX::Side_CROSS, FixGateway::fromSide(CROSS_SIDE));
+    EXPECT_EQ(FIX::Side_BUY_MINUS, FixGateway::fromSide(BUY_MINUS_SIDE));
+    EXPECT_EQ(FIX::Side_SELL_PLUS, FixGateway::fromSide(SELL_PLUS_SIDE));
+    // No side isn't a buy (#549)
+    EXPECT_EQ(FIX::Side_UNDISCLOSED, FixGateway::fromSide(INVALID_SIDE));
 }
 
 TEST_F(FixEnumTest, OrdTypeConversion)
@@ -3650,6 +3659,52 @@ TEST_F(FixtSessionTest, AMinQtyOtherThanZeroIsRefusedOnEveryOrderMessage)
     EXPECT_EQ("RPL-MIN", fieldOf(rejects[0], FIX::FIELD::ClOrdID));
     EXPECT_EQ("ORD-X", fieldOf(rejects[0], FIX::FIELD::OrigClOrdID));
     EXPECT_EQ("Replace refused: " + why, fieldOf(rejects[0], FIX::FIELD::Text));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ASideTheServerHasNoValueForIsRefusedWithTheSideAsSent)
+{
+    // 54=6, Sell Short Exempt, was taken for Cross and reported as 54=8, and a side the gateway couldn't map was
+    // reported as a buy (#549). A side the engine has no value for is refused at entry now, with the Side it was sent
+    // with, and nothing reaches the engine; a NewOrderMultileg is held to the same rule. The four sides the engine has
+    // and doesn't trade are its to refuse (#510; FixEndToEndTest).
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    const std::vector<char> sides{ FIX::Side_SELL_SHORT_EXEMPT, FIX::Side_UNDISCLOSED, FIX::Side_CROSS_SHORT };
+    for (char side : sides)
+    {
+        receive(makeNewOrderSingle(std::string("ORD-SIDE-") + side, "aaa", side, FIX::OrdType_LIMIT, 10.0, 100));
+    }
+    FIX50SP2::NewOrderMultileg swap = makeFxSwap("SWAP-SIDE");
+    swap.set(FIX::Side(FIX::Side_SELL_SHORT_EXEMPT));
+    receive(swap);
+    // And a replace, whose side went to the engine as no side: an OrderCancelReject, as for any refused replace
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, NEW_ORDSTATUS, 100, 0, 100);
+    FIX50SP2::OrderCancelReplaceRequest replace = makeLimitReplace("ORD-X", "RPL-SIDE");
+    replace.set(FIX::Side(FIX::Side_SELL_SHORT_EXEMPT));
+    receive(replace);
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(1u, rejects.size()) << sentText();
+    EXPECT_EQ("RPL-SIDE", fieldOf(rejects[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("Replace refused: Side (54) 6 isn't one the server has: only BUY (1) and SELL (2) orders are traded",
+              fieldOf(rejects[0], FIX::FIELD::Text));
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(4u, reports.size()) << sentText();
+    for (size_t i = 0; i < reports.size(); ++i)
+    {
+        const char sent = (i < sides.size()) ? sides[i] : FIX::Side_SELL_SHORT_EXEMPT;
+        SCOPED_TRACE(fieldOf(reports[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ(std::string(1, sent), fieldOf(reports[i], FIX::FIELD::Side));
+        EXPECT_EQ(std::string(1, FIX::ExecType_REJECTED), fieldOf(reports[i], FIX::FIELD::ExecType));
+        EXPECT_EQ(std::to_string(FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC),
+                  fieldOf(reports[i], FIX::FIELD::OrdRejReason));
+        EXPECT_EQ(std::string("Order refused: Side (54) ") + sent +
+                      " isn't one the server has: only BUY (1) and SELL (2) orders are traded",
+                  fieldOf(reports[i], FIX::FIELD::Text));
+    }
     expectEverythingSentIsTaken();
 }
 

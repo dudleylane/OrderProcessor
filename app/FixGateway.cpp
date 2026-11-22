@@ -935,6 +935,18 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
     {
         return;
     }
+
+    // A Side (54) the engine has no value for is refused here, with the Side as it was sent: the engine's reject could
+    // report only a side it has, and reported such an order as a buy. 54=6, Sell Short Exempt, is one: the gateway took
+    // it for Cross, which is 8, and reported it as 8 (#549). The four the engine has and doesn't trade, 3, 4, 5 and 8,
+    // are the engine's to refuse, as for the WebSocket's orders (#510).
+    if (INVALID_SIDE == toSide(side.getValue()))
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC,
+                    std::string("Order refused: Side (54) ") + side.getValue() +
+                        " isn't one the server has: only BUY (1) and SELL (2) orders are traded");
+        return;
+    }
     // An FX swap is a NewOrderMultileg (#527): FIX 5.0 deprecated a NewOrderSingle's far-leg fields for it, OrderQty2
     // (192), SettlDate2 (193) and Price2 (640). The gateway read the far leg from 6500 and 6501 until then, tags no
     // dictionary defines, so the session refused such an order before the gateway saw it.
@@ -1133,6 +1145,18 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
     const std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
     if (answerRepeatedOrder(msg, sid, sourceStr, clOrdStr, clOrdId.getString(), side.getValue()))
     {
+        return;
+    }
+
+    // A Side (54) the engine has no value for is refused here, with the Side as it was sent: the engine's reject could
+    // report only a side it has, and reported such an order as a buy. 54=6, Sell Short Exempt, is one: the gateway took
+    // it for Cross, which is 8, and reported it as 8 (#549). The four the engine has and doesn't trade, 3, 4, 5 and 8,
+    // are the engine's to refuse, as for the WebSocket's orders (#510).
+    if (INVALID_SIDE == toSide(side.getValue()))
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC,
+                    std::string("Order refused: Side (54) ") + side.getValue() +
+                        " isn't one the server has: only BUY (1) and SELL (2) orders are traded");
         return;
     }
 
@@ -1486,6 +1510,14 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
     if (msg.isSet(side))
     {
         msg.get(side);
+        // A side the engine has no value for is refused here, as on a new order (#549): carried over, it reached the
+        // engine as no side
+        if (INVALID_SIDE == toSide(side.getValue()))
+        {
+            refuse(std::string("Replace refused: Side (54) ") + side.getValue() +
+                   " isn't one the server has: only BUY (1) and SELL (2) orders are traded");
+            return;
+        }
         replacement->side_ = toSide(side.getValue());
     }
     FIX::Symbol symbol;
@@ -2444,12 +2476,16 @@ Side FixGateway::toSide(char fixSide)
         return BUY_SIDE;
     case FIX::Side_SELL:
         return SELL_SIDE;
+    case FIX::Side_BUY_MINUS:
+        return BUY_MINUS_SIDE;
+    case FIX::Side_SELL_PLUS:
+        return SELL_PLUS_SIDE;
     case FIX::Side_SELL_SHORT:
         return SELL_SHORT_SIDE;
-    case '6':
-        return CROSS_SIDE; // FIX Cross
+    case FIX::Side_CROSS:
+        return CROSS_SIDE;
     default:
-        return INVALID_SIDE;
+        return INVALID_SIDE; // 54=6, Sell Short Exempt, among them: it isn't Cross, which is 8 (#549)
     }
 }
 
@@ -2740,13 +2776,22 @@ char FixGateway::fromSide(Side s)
         return FIX::Side_BUY;
     case SELL_SIDE:
         return FIX::Side_SELL;
+    case BUY_MINUS_SIDE:
+        return FIX::Side_BUY_MINUS;
+    case SELL_PLUS_SIDE:
+        return FIX::Side_SELL_PLUS;
     case SELL_SHORT_SIDE:
         return FIX::Side_SELL_SHORT;
     case CROSS_SIDE:
         return FIX::Side_CROSS;
-    default:
-        return FIX::Side_BUY;
+    case INVALID_SIDE:
+        break;
     }
+    // Every side has a case, so a new one fails -Wswitch. A FIX order or replace with no side is refused at entry
+    // (#549), so a report of one is of a record gone wrong: it says Undisclosed, where the default said BUY, and is
+    // logged
+    aux::ExchLogger::instance()->error("FixGateway: a report of an order with no side, sent as Undisclosed (54=7)");
+    return FIX::Side_UNDISCLOSED;
 }
 
 #endif // BUILD_FIX
