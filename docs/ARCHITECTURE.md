@@ -1420,6 +1420,8 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 │     commit, by ruling: about 2 ms a write.                                   │
 │   • Each update erases every version older than the newest it finds,         │
 │     so an order keeps two (#148); a rollback erases its own version.         │
+│   • At its last version, u32's maximum, a write renumbers the record:        │
+│     its newest becomes 0, and the new one 1 (#539).                          │
 │   • Execution reports aren't persisted (#582).                               │
 │                                                                              │
 │   Recovery: LMDB is read twice (reference data, then the orders,             │
