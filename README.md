@@ -62,14 +62,13 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 | spdlog | 1.x+ | Fast logging |
 | Boost | 1.70+ | Headers only (MPL for Meta State Machine) |
 | LMDB | Latest | Persistent key-value storage backend |
-| numactl | Latest | NUMA-aware memory allocation |
 | OpenSSL | Latest | libcrypto's SHA-256, for the WebSocket server's token hashes (#225) |
 
 Install on CentOS 10. spdlog-devel comes from EPEL and lmdb-devel from CRB, so the first two lines enable both, as the server image's builder does (`docker/Dockerfile.oms-server`). git is for the clone below and for the build's FetchContent:
 ```bash
 sudo dnf install epel-release 'dnf-command(config-manager)'
 sudo dnf config-manager --set-enabled crb
-sudo dnf install gcc-toolset-15 tbb-devel spdlog-devel boost-devel cmake lmdb-devel numactl-devel openssl-devel git
+sudo dnf install gcc-toolset-15 tbb-devel spdlog-devel boost-devel cmake lmdb-devel openssl-devel git
 ```
 
 ---
