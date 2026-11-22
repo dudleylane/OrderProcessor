@@ -14,6 +14,7 @@ build*
 # Runtime data, logs and benchmark baselines
 data
 **/exchange.log
+**/exchange.*.log
 benchmark_baseline*
 # Secrets: the stack's environment (the WebSocket token, the Postgres password), its TLS key, and the identities
 docker/.env
