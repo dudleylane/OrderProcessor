@@ -40,9 +40,8 @@ target_sources(orderProcessorTest
 
         # C++23 ultra low-latency infrastructure tests
         TransactionScopePoolTest.cpp
-        NumaAllocatorTest.cpp
         CacheAlignedAtomicTest.cpp
-        CpuAffinityHugePagesTest.cpp
+        CpuAffinityTest.cpp
         # A std::map's nodes in a pool of their own (#467)
         NodePoolTest.cpp
 

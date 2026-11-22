@@ -49,7 +49,6 @@ TEST(ServerArgsTest, NoArgumentsGiveTheDefaults)
     EXPECT_EQ("./data", parsed->dataDir);
     EXPECT_EQ(0, parsed->workers);
     EXPECT_EQ(-1, parsed->cpuAffinityStart);
-    EXPECT_FALSE(parsed->hugePages);
     EXPECT_TRUE(parsed->fixCfg.empty()) << "no FIX gateway unless asked for";
     EXPECT_EQ(COP::App::DEFAULT_CLEARING_FIRM, parsed->clearingFirm);
     EXPECT_EQ(COP::App::DEFAULT_ACCOUNT, parsed->defaultAccount);
@@ -74,7 +73,6 @@ TEST(ServerArgsTest, EveryOptionIsRead)
                                                      "4",
                                                      "--cpu-affinity",
                                                      "2",
-                                                     "--huge-pages",
                                                      "--clearing-firm",
                                                      "FIRM",
                                                      "--default-account",
@@ -105,7 +103,6 @@ TEST(ServerArgsTest, EveryOptionIsRead)
     EXPECT_EQ("/data", parsed->dataDir);
     EXPECT_EQ(4, parsed->workers);
     EXPECT_EQ(2, parsed->cpuAffinityStart);
-    EXPECT_TRUE(parsed->hugePages);
     EXPECT_EQ("FIRM", parsed->clearingFirm);
     EXPECT_EQ("ACCT", parsed->defaultAccount);
     EXPECT_TRUE(parsed->debug);
@@ -170,6 +167,9 @@ TEST(ServerArgsTest, AnUnknownOptionIsRefused)
     EXPECT_EQ("unknown option: --workres", error);
     EXPECT_FALSE(parse({ "4" }, &error));
     EXPECT_EQ("unknown option: 4", error);
+    // --huge-pages only reported whether huge pages were available, and nothing allocated from them, so it went (#603)
+    EXPECT_FALSE(parse({ "--huge-pages" }, &error));
+    EXPECT_EQ("unknown option: --huge-pages", error);
 }
 
 TEST(ServerArgsTest, AnOptionWithoutItsValueIsRefused)
@@ -294,7 +294,6 @@ TEST(ServerArgsTest, TheUsageNamesEveryOption)
         { "--data-dir", "d" },
         { "--workers", "1" },
         { "--cpu-affinity", "0" },
-        { "--huge-pages" },
         { "--clearing-firm", "f" },
         { "--default-account", "a" },
         { "--debug" },

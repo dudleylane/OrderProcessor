@@ -20,8 +20,6 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **Memory Tiers:** 5-tier memory hierarchy — stack, arena (<!-- DOC_CHECK:arena_size -->2048<!-- /DOC_CHECK -->-byte bump), CAS pool (<!-- DOC_CHECK:pool_size -->1024<!-- /DOC_CHECK --> slots), TBB scalable allocator, heap fallback. A transaction takes its `TransactionScope` out of the pool for good, and the slot allocates another: one heap allocation per transaction, counted as `poolAllocations` (#515)
 - **Lock-Free Pool:** TransactionScopePool with exponential backoff CAS and cache miss tracking
 - **CPU Affinity:** Thread-to-core pinning, for the main thread (`--cpu-affinity`) and the TaskManager's workers. `CpuAffinity` can also set SCHED_FIFO priority, but nothing calls it
-- **NUMA-Aware Allocation:** `TransactionScopePool` can bind its slots to the local NUMA node (`mbind()` via NumaAllocator). The server builds its pools in the default mode, so it doesn't use this
-- **Huge Pages:** `TransactionScopePool` can put its slots in 2 MB pages. The server doesn't ask it to: `--huge-pages` only reports whether huge pages are available
 - **False-Sharing Prevention:** `CacheAlignedAtomic<T>` (`alignas(64)`) on all shared atomics
 - **Branch Prediction:** `[[likely]]`, `[[unlikely]]`, `[[assume]]` (C++23) throughout hot path
 
@@ -211,7 +209,6 @@ Server options:
 | `--data-dir` | `./data` | LMDB persistence directory |
 | `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs. For now N runs N-1 at once (#711) |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
-| `--huge-pages` | off | Reports whether huge pages are available; nothing allocates from them yet |
 | `--fix-cfg` | *(none)* | Path to QuickFIX settings file (enables FIX gateway); needs `--fix-credentials` |
 | `--fix-credentials` | *(none)* | The FIX counterparties: who may log on, with which password, to trade which accounts (#147). Each gets a session |
 | `--hash-fix-password` | | Read a password from standard input, print its hash for `--fix-credentials`, and exit |
@@ -366,7 +363,7 @@ Each run's address space is capped, at half of RAM by default. Many benchmarks k
 The benchmarks measure the engine with note and debug logging off (#121), and since #584 a server
 writes no note for an order's normal path either: those lines are debug logging, which `--debug`
 asks for. For the queue, order book, state machine,
-arena, pool, NUMA, field-layout and FIX gateway microbenchmarks, run the binary:
+arena, pool, field-layout and FIX gateway microbenchmarks, run the binary:
 `./build/orderProcessorBench --benchmark_list_tests` shows everything available, and
 `scripts/benchmark-regression.sh` compares two builds (above).
 
@@ -671,10 +668,8 @@ OrderProcessor/
 │   ├── TransactionMgr.cpp/h # ACID transaction management
 │   ├── TransactionScopePool.h  # Lock-free object pool
 │   ├── LMDBStorage.cpp/h   # LMDB persistent key-value backend
-│   ├── NumaAllocator.h     # NUMA-aware memory allocation
 │   ├── CacheAlignedAtomic.h # Cache-aligned atomic wrapper
 │   ├── CpuAffinity.h       # CPU thread pinning utilities
-│   ├── HugePages.h         # Huge page allocation utilities
 │   └── oms-frontend/       # React TypeScript frontend
 │       ├── src/App.tsx      # Main app with 6 tabs
 │       ├── src/components/  # UI components

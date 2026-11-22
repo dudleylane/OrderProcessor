@@ -1,10 +1,9 @@
 /**
- * Concurrent Order Processor library - CpuAffinity & HugePages Tests
+ * Concurrent Order Processor library - CpuAffinity Tests
  *
- * Tests for CPU affinity pinning, ScopedCpuAffinity RAII, HugePages
- * allocation with fallback, and utility functions.
- * Note: actual CPU pinning and huge page allocation may require
- * elevated privileges — tests handle EPERM gracefully.
+ * Tests for CPU affinity pinning, ScopedCpuAffinity RAII, and utility
+ * functions. Note: actual CPU pinning may require elevated privileges —
+ * tests handle EPERM gracefully.
  */
 
 #include <gtest/gtest.h>
@@ -12,7 +11,6 @@
 #include <cstring>
 
 #include "CpuAffinity.h"
-#include "HugePages.h"
 
 using namespace COP;
 
@@ -122,80 +120,6 @@ TEST(ScopedCpuAffinityTest, ManualRestore)
     std::vector<int> after;
     CpuAffinity::getThreadAffinity(after);
     EXPECT_EQ(before.size(), after.size());
-}
-
-// =============================================================================
-// HugePages Tests
-// =============================================================================
-
-TEST(HugePagesTest, RoundUpToHugePage)
-{
-    EXPECT_EQ(HugePages::HUGE_PAGE_SIZE, HugePages::roundUpToHugePage(1));
-    EXPECT_EQ(HugePages::HUGE_PAGE_SIZE, HugePages::roundUpToHugePage(HugePages::HUGE_PAGE_SIZE));
-    EXPECT_EQ(2 * HugePages::HUGE_PAGE_SIZE, HugePages::roundUpToHugePage(HugePages::HUGE_PAGE_SIZE + 1));
-    EXPECT_EQ(HugePages::HUGE_PAGE_SIZE, HugePages::roundUpToHugePage(4096));
-}
-
-TEST(HugePagesTest, AllocateWithFallback)
-{
-    // Should always succeed — falls back to regular pages if huge pages unavailable
-    void *ptr = HugePages::allocate(4096, true);
-    ASSERT_NE(nullptr, ptr);
-
-    std::memset(ptr, 0xAB, 4096);
-
-    HugePages::deallocate(ptr, 4096);
-}
-
-TEST(HugePagesTest, DeallocateNullIsSafe)
-{
-    HugePages::deallocate(nullptr, 4096);
-    SUCCEED();
-}
-
-TEST(HugePagesTest, GetConfiguredCountReturnsValidValue)
-{
-    int count = HugePages::getConfiguredCount();
-    // Returns -1 on error, or >= 0 for the actual count
-    EXPECT_GE(count, -1);
-}
-
-TEST(HugePagesTest, GetFreeCountReturnsValidValue)
-{
-    int count = HugePages::getFreeCount();
-    EXPECT_GE(count, -1);
-}
-
-TEST(HugePagesTest, IsAvailableDoesNotCrash)
-{
-    // Just verify it doesn't crash — result depends on system config
-    bool available = HugePages::isAvailable();
-    (void)available;
-    SUCCEED();
-}
-
-TEST(HugePagesTest, AllocateLargeRegion)
-{
-    const size_t size = 4 * 1024 * 1024; // 4MB
-    void *ptr = HugePages::allocate(size, true);
-    ASSERT_NE(nullptr, ptr);
-
-    // Touch all pages
-    std::memset(ptr, 0, size);
-
-    HugePages::deallocate(ptr, size);
-}
-
-TEST(HugePagesTest, AllocateWithoutFallback)
-{
-    // Without fallback, may return nullptr if huge pages aren't configured
-    void *ptr = HugePages::allocate(4096, false);
-    if (ptr)
-    {
-        HugePages::deallocate(ptr, 4096);
-    }
-    // Either way, should not crash
-    SUCCEED();
 }
 
 } // namespace
