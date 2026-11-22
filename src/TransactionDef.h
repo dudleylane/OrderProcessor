@@ -153,6 +153,10 @@ struct Context
 class Operation
 {
 public:
+    /// A transaction names what its operations name, their objects and related objects, and TransactionMgr runs two
+    /// transactions in order only when they name a common one. An operation that reads or changes the instrument's book
+    /// or stop book, or decides something that does, derives from BookOperation (TrOperations.h), whose constructor
+    /// names the order's instrument itself (#637).
     explicit Operation(OperationType type, const IdT &id) : type_(type), id_(id), relatedId_() {}
     explicit Operation(OperationType type, const IdT &id, const IdT &relId) : type_(type), id_(id), relatedId_(relId) {}
     virtual ~Operation() {}

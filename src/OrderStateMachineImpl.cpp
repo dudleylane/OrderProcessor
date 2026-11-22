@@ -61,7 +61,7 @@ void addBooking(OrderEntry *order, Scope *transaction)
     assert(nullptr != transaction);
     if (order->heldStop())
     {
-        std::unique_ptr<Operation> hold(new AddToStopBookTrOperation(*order, order->instrument_.getId()));
+        std::unique_ptr<Operation> hold(new AddToStopBookTrOperation(*order));
         transaction->addOperation(hold);
         return;
     }
@@ -69,7 +69,7 @@ void addBooking(OrderEntry *order, Scope *transaction)
     transaction->addOperation(match);
     if (OrderParams::Book::PRICE == order->book())
     {
-        std::unique_ptr<Operation> book(new AddToOrderBookTrOperation(*order, order->instrument_.getId()));
+        std::unique_ptr<Operation> book(new AddToOrderBookTrOperation(*order));
         transaction->addOperation(book);
     }
 }
@@ -83,13 +83,13 @@ void addUnbooking(const OrderEntry &order, Scope *transaction)
     {
     case OrderParams::Book::STOP:
     {
-        std::unique_ptr<Operation> op(new RemoveFromStopBookTrOperation(order, order.instrument_.getId()));
+        std::unique_ptr<Operation> op(new RemoveFromStopBookTrOperation(order));
         transaction->addOperation(op);
         break;
     }
     case OrderParams::Book::PRICE:
     {
-        std::unique_ptr<Operation> op(new RemoveFromOrderBookTrOperation(order, order.instrument_.getId()));
+        std::unique_ptr<Operation> op(new RemoveFromOrderBookTrOperation(order));
         transaction->addOperation(op);
         break;
     }

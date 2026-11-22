@@ -428,8 +428,13 @@ void CreateReplaceExecReportTrOperation::execute(const Context &cnxt)
 
 void CreateReplaceExecReportTrOperation::rollback(const Context &) {}
 
-AddToOrderBookTrOperation::AddToOrderBookTrOperation(const OrderEntry &order, const IdT &instrId)
-    : Operation(ADD_ORDERBOOK_TROPERATION, order.orderId_, instrId), order_(order)
+BookOperation::BookOperation(OperationType type, const OrderEntry &order)
+    : Operation(type, order.orderId_, order.instrument_.getId())
+{
+}
+
+AddToOrderBookTrOperation::AddToOrderBookTrOperation(const OrderEntry &order)
+    : BookOperation(ADD_ORDERBOOK_TROPERATION, order), order_(order)
 {
 }
 AddToOrderBookTrOperation::~AddToOrderBookTrOperation() {}
@@ -519,8 +524,8 @@ void PersistLastTradeTrOperation::rollback(const Context &cnxt)
     }
 }
 
-RemoveFromOrderBookTrOperation::RemoveFromOrderBookTrOperation(const OrderEntry &order, const IdT &instrId)
-    : Operation(REMOVE_ORDERBOOK_TROPERATION, order.orderId_, instrId), order_(order)
+RemoveFromOrderBookTrOperation::RemoveFromOrderBookTrOperation(const OrderEntry &order)
+    : BookOperation(REMOVE_ORDERBOOK_TROPERATION, order), order_(order)
 {
 }
 RemoveFromOrderBookTrOperation::~RemoveFromOrderBookTrOperation() {}
@@ -572,8 +577,8 @@ void CancelRejectTrOperation::rollback(const Context &) {}
 
 ReplaceOrderTrOperation::ReplaceOrderTrOperation(OrderEntry *original, std::unique_ptr<OrderEntry> replacement,
                                                  const std::string &requester)
-    : Operation(REPLACE_ORDER_TROPERATION, original->orderId_, original->instrument_.getId()), original_(original),
-      replacement_(std::move(replacement)), requester_(requester), eventCountBefore_(0)
+    : BookOperation(REPLACE_ORDER_TROPERATION, *original), original_(original), replacement_(std::move(replacement)),
+      requester_(requester), eventCountBefore_(0)
 {
 }
 
@@ -616,8 +621,8 @@ void RefuseReplaceTrOperation::rollback(const Context &) {}
 
 CancelOrderTrOperation::CancelOrderTrOperation(OrderEntry *order, const std::string &requester,
                                                const std::string &requestClOrdId)
-    : Operation(CANCEL_ORDER_TROPERATION, order->orderId_, order->instrument_.getId()), order_(order),
-      requester_(requester), requestClOrdId_(requestClOrdId), eventCountBefore_(0)
+    : BookOperation(CANCEL_ORDER_TROPERATION, *order), order_(order), requester_(requester),
+      requestClOrdId_(requestClOrdId), eventCountBefore_(0)
 {
 }
 
@@ -642,8 +647,7 @@ void CancelOrderTrOperation::rollback(const Context &cnxt)
 }
 
 ChangeOrderStateTrOperation::ChangeOrderStateTrOperation(OrderEntry *order, OrderStateChange change)
-    : Operation(CHANGE_ORDER_STATE_TROPERATION, order->orderId_, order->instrument_.getId()), order_(order),
-      change_(change), eventCountBefore_(0)
+    : BookOperation(CHANGE_ORDER_STATE_TROPERATION, *order), order_(order), change_(change), eventCountBefore_(0)
 {
 }
 
@@ -671,15 +675,14 @@ void ChangeOrderStateTrOperation::rollback(const Context &cnxt)
 // every earlier transaction on the instrument, and a market order's booking, which has no book operation, is ordered
 // with the others too. Without it two orders could match the same resting order at once (#209).
 MatchOrderTrOperation::MatchOrderTrOperation(OrderEntry *order)
-    : Operation(MATCH_ORDER_TROPERATION, order->orderId_, order->instrument_.getId()), order_(order),
-      eventCountBefore_(0)
+    : BookOperation(MATCH_ORDER_TROPERATION, *order), order_(order), eventCountBefore_(0)
 {
 }
 
 MatchOrderTrOperation::~MatchOrderTrOperation() {}
 
-AddToStopBookTrOperation::AddToStopBookTrOperation(const OrderEntry &order, const IdT &instrId)
-    : Operation(ADD_STOPBOOK_TROPERATION, order.orderId_, instrId), order_(order)
+AddToStopBookTrOperation::AddToStopBookTrOperation(const OrderEntry &order)
+    : BookOperation(ADD_STOPBOOK_TROPERATION, order), order_(order)
 {
 }
 
@@ -695,8 +698,8 @@ void AddToStopBookTrOperation::rollback(const Context &cnxt)
     cnxt.orderBook_->removeStop(order_);
 }
 
-RemoveFromStopBookTrOperation::RemoveFromStopBookTrOperation(const OrderEntry &order, const IdT &instrId)
-    : Operation(REMOVE_STOPBOOK_TROPERATION, order.orderId_, instrId), order_(order)
+RemoveFromStopBookTrOperation::RemoveFromStopBookTrOperation(const OrderEntry &order)
+    : BookOperation(REMOVE_STOPBOOK_TROPERATION, order), order_(order)
 {
 }
 
@@ -714,7 +717,7 @@ void RemoveFromStopBookTrOperation::rollback(const Context &cnxt)
 
 // Related to the instrument, as a match is: the release matches the order against the instrument's book (#209)
 ReleaseStopTrOperation::ReleaseStopTrOperation(OrderEntry *order)
-    : Operation(RELEASE_STOP_TROPERATION, order->orderId_, order->instrument_.getId()), order_(order)
+    : BookOperation(RELEASE_STOP_TROPERATION, *order), order_(order)
 {
 }
 
