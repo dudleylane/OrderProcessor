@@ -100,7 +100,6 @@ public:
     {
         rejects_.emplace_back(evnt, target);
     }
-    void push(const Queues::BusinessRejectEvent &, const std::string &) override {}
     void push(const Queues::OrderRejectEvent &evnt, const std::string &target) override
     {
         refusals_.emplace_back(evnt, target);

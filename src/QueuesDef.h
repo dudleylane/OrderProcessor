@@ -121,10 +121,6 @@ struct CancelRejectEvent : public EventBase
     std::string requestClOrdId_;                // the ClOrdID of the refused cancel request, if it had one (#98)
 };
 
-struct BusinessRejectEvent : public EventBase
-{
-};
-
 /// A new order or a replacement the engine refused without storing it, so it has no order id and cannot be reported
 /// through a transaction: today, one whose ClOrdID is already in use (#67). It carries what the sender needs to
 /// recognise its order.
@@ -248,7 +244,6 @@ public:
     virtual ~OutQueues() {}
     virtual void push(const ExecReportEvent &evnt, const std::string &target) = 0;
     virtual void push(const CancelRejectEvent &evnt, const std::string &target) = 0;
-    virtual void push(const BusinessRejectEvent &evnt, const std::string &target) = 0;
     /// An order refused without being stored (#67); target is the order's source. Not pure, so that a queue which
     /// never reaches clients may ignore it; one that does must override it.
     virtual void push(const OrderRejectEvent & /*evnt*/, const std::string & /*target*/) {}
