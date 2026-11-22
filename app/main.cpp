@@ -152,17 +152,17 @@ int main(int argc, char *argv[])
         return 0;
     }
     App::ServerArgs cfg = *parsed;
+    const App::ServerEnvironment env = App::ServerEnvironment::fromProcess();
     // Who may open a WebSocket session (#146). A token that can't be used is a usage error too.
     App::WsAuth wsAuth;
-    if (!App::resolveWsAuth(cfg, std::getenv("OMS_WS_TOKEN"), std::getenv("OMS_WS_CREDENTIALS"),
-                            std::getenv("OMS_ALLOWED_ORIGINS"), &wsAuth, &usageError))
+    if (!App::resolveWsAuth(cfg, env, &wsAuth, &usageError))
     {
         std::cerr << "orderProcessorServer: " << usageError << "\n";
         return 2;
     }
     // The Postgres to mirror to (#151), if any
     std::string pgConnection;
-    if (!App::resolvePgConnection(cfg, std::getenv("OMS_PG_CONNECTION"), &pgConnection, &usageError))
+    if (!App::resolvePgConnection(cfg, env, &pgConnection, &usageError))
     {
         std::cerr << "orderProcessorServer: " << usageError << "\n";
         return 2;

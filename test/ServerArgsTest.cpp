@@ -15,10 +15,23 @@
 
 using COP::App::parseServerArgs;
 using COP::App::ServerArgs;
+using COP::App::ServerEnvironment;
 using COP::App::serverUsage;
 
 namespace
 {
+
+/// The environment the resolvers read, as main() takes it from the process (#558)
+COP::App::ServerEnvironment environmentWith(const char *token, const char *credentials, const char *origins,
+                                            const char *pgConnection = nullptr)
+{
+    COP::App::ServerEnvironment environment;
+    environment.wsToken = token;
+    environment.wsCredentials = credentials;
+    environment.allowedOrigins = origins;
+    environment.pgConnection = pgConnection;
+    return environment;
+}
 
 /// The arguments parsed, or nullopt with the reason in *error for arguments refused
 std::optional<ServerArgs> parse(const std::vector<std::string> &args, std::string *error = nullptr)
@@ -109,22 +122,27 @@ TEST(ServerArgsTest, ThePostgresConnectionComesFromItsFlagOrTheEnvironmentButNot
     ServerArgs neither;
     std::string connection = "unchanged";
     std::string error;
-    ASSERT_TRUE(resolvePgConnection(neither, nullptr, &connection, &error)) << error;
+    ASSERT_TRUE(resolvePgConnection(neither, environmentWith(nullptr, nullptr, nullptr, nullptr), &connection, &error))
+        << error;
     EXPECT_TRUE(connection.empty()); // LMDB only, as before
-    EXPECT_FALSE(resolvePgConnection(neither, "", &connection, &error));
+    EXPECT_FALSE(resolvePgConnection(neither, environmentWith(nullptr, nullptr, nullptr, ""), &connection, &error));
     EXPECT_NE(std::string::npos, error.find("set, but empty")) << error;
     ServerArgs flag;
     flag.pgConnection = "host=db";
-    EXPECT_FALSE(resolvePgConnection(flag, "host=other", &connection, &error));
+    EXPECT_FALSE(
+        resolvePgConnection(flag, environmentWith(nullptr, nullptr, nullptr, "host=other"), &connection, &error));
     EXPECT_NE(std::string::npos, error.find("given twice")) << error;
 #ifdef BUILD_PG
-    ASSERT_TRUE(resolvePgConnection(flag, nullptr, &connection, &error)) << error;
+    ASSERT_TRUE(resolvePgConnection(flag, environmentWith(nullptr, nullptr, nullptr, nullptr), &connection, &error))
+        << error;
     EXPECT_EQ("host=db", connection);
-    ASSERT_TRUE(resolvePgConnection(neither, "host=env", &connection, &error)) << error;
+    ASSERT_TRUE(
+        resolvePgConnection(neither, environmentWith(nullptr, nullptr, nullptr, "host=env"), &connection, &error))
+        << error;
     EXPECT_EQ("host=env", connection);
 #else
     // A build that can't use it says so, rather than run without the mirror it was asked for
-    EXPECT_FALSE(resolvePgConnection(flag, nullptr, &connection, &error));
+    EXPECT_FALSE(resolvePgConnection(flag, environmentWith(nullptr, nullptr, nullptr, nullptr), &connection, &error));
     EXPECT_NE(std::string::npos, error.find("without BUILD_PG")) << error;
 #endif
 }
@@ -220,6 +238,51 @@ TEST(ServerArgsTest, RequireWsAuthIsAFlagOffUnlessGiven)
     const std::optional<ServerArgs> plain = parse({});
     ASSERT_TRUE(plain);
     EXPECT_FALSE(plain->requireWsAuth);
+}
+
+TEST(ServerArgsTest, TheServerReadsEachVariableByItsName)
+{
+    // main() takes the variables through ServerEnvironment (#558): a name changed by mistake, here or in compose, would
+    // leave its setting unread, and only the compose check, which runs on changes to docker/, read them before
+    const std::vector<std::pair<const char *, const char *ServerEnvironment::*>> names = {
+        { "OMS_WS_TOKEN", &ServerEnvironment::wsToken },
+        { "OMS_WS_CREDENTIALS", &ServerEnvironment::wsCredentials },
+        { "OMS_ALLOWED_ORIGINS", &ServerEnvironment::allowedOrigins },
+        { "OMS_PG_CONNECTION", &ServerEnvironment::pgConnection },
+    };
+    std::vector<std::optional<std::string>> saved;
+    for (const auto &[name, field] : names)
+    {
+        const char *value = std::getenv(name);
+        saved.push_back(value ? std::optional<std::string>(value) : std::nullopt);
+        ::unsetenv(name);
+    }
+    const ServerEnvironment unset = ServerEnvironment::fromProcess();
+    for (const auto &[name, field] : names)
+    {
+        EXPECT_EQ(nullptr, unset.*field) << name;
+    }
+    for (const auto &[name, field] : names)
+    {
+        ::setenv(name, (std::string("value of ") + name).c_str(), 1);
+    }
+    const ServerEnvironment set = ServerEnvironment::fromProcess();
+    for (const auto &[name, field] : names)
+    {
+        ASSERT_NE(nullptr, set.*field) << name;
+        EXPECT_EQ(std::string("value of ") + name, set.*field) << name;
+    }
+    for (size_t i = 0; i < names.size(); ++i)
+    {
+        if (saved[i])
+        {
+            ::setenv(names[i].first, saved[i]->c_str(), 1);
+        }
+        else
+        {
+            ::unsetenv(names[i].first);
+        }
+    }
 }
 
 TEST(ServerArgsTest, TheUsageNamesEveryOption)
