@@ -52,6 +52,12 @@ public:
     {
         return acceptor_.local_endpoint();
     }
+    /// Makes the next accept fail as a process out of descriptors makes it fail (EMFILE), closing the connection it
+    /// took: a test of #202's retry where the sanitizers' runtimes, which need descriptors too, can't be starved (#672)
+    void failNextAccept() noexcept
+    {
+        failNextAccept_.store(true);
+    }
 
 private:
     void doAccept();
@@ -82,7 +88,8 @@ private:
     InFlightGauge *inFlight_; // the engine's work in flight, which each session checks before it reads (#519)
     /// Sessions alive, against limits_.maxConnections: each one's destructor counts itself out (#159)
     std::shared_ptr<std::atomic<std::size_t>> connections_ = std::make_shared<std::atomic<std::size_t>>(0);
-    boost::asio::steady_timer acceptRetry_; // the pause before accepting again after an accept failed (#202)
+    boost::asio::steady_timer acceptRetry_;     // the pause before accepting again after an accept failed (#202)
+    std::atomic<bool> failNextAccept_{ false }; // failNextAccept()'s, which the IO thread takes (#672)
     ThrottledWarning acceptFailures_;
     ThrottledWarning refusals_;
 };
