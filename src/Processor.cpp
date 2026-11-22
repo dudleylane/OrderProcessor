@@ -1102,23 +1102,46 @@ OrderRejectEvent Processor::makeReplaceRefusal(const OrderEntry &replacement, co
     event.side_ = replacement.side_;
     event.orderQty_ = replacement.orderQty_;
     event.reason_ = reason;
-    try
+    // Each reference is resolved on its own, so that one that can't be resolved costs only its own field (#611). In one
+    // try, the symbol's lookup, second, threw past the original's ClOrdID and status, and the client got a refusal that
+    // didn't say which order it refused to replace, or in what state.
+    auto resolve = [](auto &&lookup)
     {
-        event.clOrderId_ = text(replacement.clOrderId_.get());
-        event.symbol_ = replacement.instrument_.get().symbol_;
-        if (nullptr != original)
+        try
         {
-            event.origClOrderId_ = text(original->clOrderId_.get());
-            event.origStatus_ = original->status_;
+            lookup();
         }
-        else if (SourceIdT() != replacement.origClOrderId_.getId())
+        catch (const std::exception &)
         {
-            event.origClOrderId_ = text(replacement.origClOrderId_.get());
+            // a reference the order carries could not be resolved: report what is known
         }
+    };
+    resolve(
+        [&]
+        {
+            event.clOrderId_ = text(replacement.clOrderId_.get());
+        });
+    resolve(
+        [&]
+        {
+            event.symbol_ = replacement.instrument_.get().symbol_;
+        });
+    if (nullptr != original)
+    {
+        event.origStatus_ = original->status_;
+        resolve(
+            [&]
+            {
+                event.origClOrderId_ = text(original->clOrderId_.get());
+            });
     }
-    catch (const std::exception &)
+    else if (SourceIdT() != replacement.origClOrderId_.getId())
     {
-        // a reference the order carries could not be resolved: report what is known
+        resolve(
+            [&]
+            {
+                event.origClOrderId_ = text(replacement.origClOrderId_.get());
+            });
     }
     return event;
 }
