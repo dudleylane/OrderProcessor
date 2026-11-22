@@ -58,6 +58,11 @@ void MetricsPublisher::onTimer(boost::system::error_code ec)
 
 void MetricsPublisher::collectAndBroadcast()
 {
+    sessionMgr_->broadcast(serializeMetricsUpdate(collect()));
+}
+
+SystemMetrics MetricsPublisher::collect() const
+{
     SystemMetrics m{};
 
     // TaskManager stats (all relaxed reads — no hot-path overhead)
@@ -107,6 +112,5 @@ void MetricsPublisher::collectAndBroadcast()
     m.timestamp = static_cast<u64>(
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
             .count());
-
-    sessionMgr_->broadcast(serializeMetricsUpdate(m));
+    return m;
 }
