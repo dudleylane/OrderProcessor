@@ -85,10 +85,16 @@ LMDBStorage::CompositeKey LMDBStorage::readKey(const MDB_val &val)
 
 LMDBStorage::LMDBStorage() : LMDBStorage(DEFAULT_MAP_SIZE) {}
 
-LMDBStorage::LMDBStorage(size_t mapSize)
-    : env_(nullptr), dbi_(0), open_(false), generator_(), initialMapSize_(mapSize), pageSize_(0), mapSize_(0),
-      mapUsed_(0)
+LMDBStorage::LMDBStorage(size_t mapSize) : LMDBStorage(mapSize, LAST_VERSION) {}
+
+LMDBStorage::LMDBStorage(size_t mapSize, u32 lastVersion)
+    : env_(nullptr), dbi_(0), open_(false), generator_(), initialMapSize_(mapSize), lastVersion_(lastVersion),
+      pageSize_(0), mapSize_(0), mapUsed_(0)
 {
+    if (0 == lastVersion_)
+    {
+        throw std::invalid_argument("LMDBStorage: a record's last version must be at least 1");
+    }
 }
 
 LMDBStorage::LMDBStorage(const std::string &path, FileStorageObserver *observer, size_t mapSize) : LMDBStorage(mapSize)
@@ -353,6 +359,15 @@ int LMDBStorage::newestVersion(MDB_txn *txn, const IdT &id, bool *found, u32 *ne
     return (MDB_NOTFOUND == rc) ? MDB_SUCCESS : rc;
 }
 
+u32 LMDBStorage::nextVersion(bool found, u32 newest) const noexcept
+{
+    if (!found)
+    {
+        return 0;
+    }
+    return (newest < lastVersion_) ? (newest + 1) : 1;
+}
+
 int LMDBStorage::writeVersion(MDB_txn *txn, const IdT &id, const char *buf, size_t size, u32 *version, bool staged)
 {
     bool found = false;
@@ -362,7 +377,7 @@ int LMDBStorage::writeVersion(MDB_txn *txn, const IdT &id, const char *buf, size
     {
         return rc;
     }
-    const u32 next = found ? newest + 1 : 0;
+    const u32 next = nextVersion(found, newest);
     if (staged && (next != *version))
     {
         // The transactions that persist an order run one after another, so nothing writes it between a group's update()
@@ -418,6 +433,38 @@ int LMDBStorage::writeVersion(MDB_txn *txn, const IdT &id, const char *buf, size
         }
     }
 
+    // At its last version the record is renumbered, in this transaction, rather than its version wrapping to 0 (#539):
+    // the newest becomes 0, the one before the new one, which a rollback erasing the new one then finds
+    if (found && (newest >= lastVersion_))
+    {
+        const CompositeKey from(id, newest);
+        MDB_val fromKey = makeKey(from);
+        MDB_val fromData;
+        rc = mdb_get(txn, dbi_, &fromKey, &fromData);
+        if (MDB_SUCCESS != rc)
+        {
+            return rc;
+        }
+        // LMDB's pointer into the map holds only until this transaction's next write
+        const std::vector<char> previous(static_cast<const char *>(fromData.mv_data),
+                                         static_cast<const char *>(fromData.mv_data) + fromData.mv_size);
+        rc = mdb_del(txn, dbi_, &fromKey, nullptr);
+        if (MDB_SUCCESS != rc)
+        {
+            return rc;
+        }
+        const CompositeKey to(id, 0);
+        MDB_val toKey = makeKey(to);
+        MDB_val toData;
+        toData.mv_size = previous.size();
+        toData.mv_data = const_cast<char *>(previous.data());
+        rc = mdb_put(txn, dbi_, &toKey, &toData, 0);
+        if (MDB_SUCCESS != rc)
+        {
+            return rc;
+        }
+    }
+
     // Insert the new version
     *version = next;
     const CompositeKey ck(id, next);
@@ -462,7 +509,7 @@ u32 LMDBStorage::stage(const IdT &id, const char *buf, size_t size)
          {
              checkLMDB(newestVersion(txn, id, &found, &newest), "LMDBStorage::update (group)");
          });
-    const u32 version = found ? newest + 1 : 0;
+    const u32 version = nextVersion(found, newest);
     group_.push_back(StagedUpdate{ id, version, std::vector<char>(buf, buf + size) });
     return version;
 }
