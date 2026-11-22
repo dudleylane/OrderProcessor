@@ -2566,7 +2566,8 @@ TEST_F(StorageRecordDispatcherTest, AnFxSwapRecordIsRefusedNotMisread)
     }
     catch (const std::runtime_error &ex)
     {
-        // The far leg: '.', its price, '.', its date (#149's bounds check)
-        EXPECT_NE(std::string::npos, std::string(ex.what()).find("18 bytes after its last field")) << ex.what();
+        // Its order type, FX's swap, is out of this branch's OrderType range, which the decoder checks first since
+        // #540. Past it, the far leg's '.', price, '.' and date would be refused as bytes after its last field (#149).
+        EXPECT_NE(std::string::npos, std::string(ex.what()).find("ordType_ 5 is out of range")) << ex.what();
     }
 }
