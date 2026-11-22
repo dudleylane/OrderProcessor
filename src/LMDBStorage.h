@@ -13,6 +13,7 @@
 #pragma once
 
 #include <atomic>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -34,10 +35,17 @@ public:
     static constexpr size_t DEFAULT_MAP_SIZE = 256UL * 1024UL * 1024UL;
     /// The versions eraseVersions() erases in one transaction (#597)
     static constexpr size_t ERASE_BATCH = 1000;
+    /// The highest version a record reaches (#539): an instrument's last trade takes a new one with every trade, and a
+    /// version past this would wrap to 0, which restore takes for the oldest. A write past it renumbers the record in
+    /// its own transaction instead: the newest version becomes 0, and the new one 1, so a rollback, which erases the
+    /// new one, still finds the one before.
+    static constexpr u32 LAST_VERSION = std::numeric_limits<u32>::max();
 
     LMDBStorage();
     /// mapSize: the map to start with. A directory that holds more opens with what it holds.
     explicit LMDBStorage(size_t mapSize);
+    /// lastVersion: LAST_VERSION, lowered for a test that reaches it (#539); at least 1
+    LMDBStorage(size_t mapSize, u32 lastVersion);
     LMDBStorage(const std::string &path, FileStorageObserver *observer, size_t mapSize = DEFAULT_MAP_SIZE);
     ~LMDBStorage();
 
@@ -112,6 +120,9 @@ private:
     static CompositeKey readKey(const MDB_val &val);
     /// id's newest version, in any transaction; *found is false when it has none
     int newestVersion(MDB_txn *txn, const IdT &id, bool *found, u32 *newest) const;
+    /// The version a write gives a record whose newest version, if it has one, is newest: the next, or 1 past the last
+    /// version, when the write renumbers the newest 0 (#539)
+    u32 nextVersion(bool found, u32 newest) const noexcept;
     /// update()'s work in a write transaction: the version after the newest, with every version but the newest erased
     /// (#148). When staged, *version is the one a group's update() returned, which must still be the next.
     int writeVersion(MDB_txn *txn, const IdT &id, const char *buf, size_t size, u32 *version, bool staged);
@@ -141,6 +152,7 @@ private:
     bool open_;
     IdTValueGenerator generator_;
     size_t initialMapSize_;
+    u32 lastVersion_;
     size_t pageSize_;
     std::atomic<size_t> mapSize_;
     std::atomic<size_t> mapUsed_;
