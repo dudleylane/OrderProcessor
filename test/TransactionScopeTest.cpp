@@ -829,3 +829,24 @@ TEST_F(TransactionScopeTest, AddOperationFirstKeepsStageBoundariesCorrect)
     EXPECT_EQ(3, execOrder_[0]);
     EXPECT_EQ(1, execOrder_[1]);
 }
+
+// Only an ASan build can see the poison (#586): elsewhere the macros do nothing, and these tests aren't compiled,
+// rather than skipped, which ctest would count as passes
+#if defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/asan_interface.h>
+
+TEST_F(TransactionScopeTest, TheArenaIsPoisonedWhereNothingIsAllocatedUnderASan)
+{
+    TransactionScope scope;
+    char *block = static_cast<char *>(scope.arenaAllocate(64, 8));
+    ASSERT_NE(nullptr, block);
+    EXPECT_EQ(nullptr, __asan_region_is_poisoned(block, 64));
+    EXPECT_TRUE(__asan_address_is_poisoned(block + 64)) << "the arena past its allocations can be used unreported";
+
+    scope.reset();
+    EXPECT_TRUE(__asan_address_is_poisoned(block)) << "an arena block can be used after reset() unreported";
+    char *again = static_cast<char *>(scope.arenaAllocate(64, 8));
+    EXPECT_EQ(block, again);
+    EXPECT_EQ(nullptr, __asan_region_is_poisoned(again, 64));
+}
+#endif

@@ -271,9 +271,10 @@ valgrind --tool=memcheck --track-origins=yes --leak-check=full \
 ASAN_OPTIONS="abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1" \
   ./build-asan/orderProcessorTest
 
-# A larger quarantine keeps freed memory poisoned longer, so a use long after its free is caught. It covers only what
-# free and delete return: the transaction scope pool, NodePool and the scopes' arenas reuse memory without telling ASan,
-# so a use after a slot, node or arena block goes back to its pool reads live memory unreported (#586)
+# A larger quarantine keeps freed memory poisoned longer, so a use long after its free is caught. It covers what free
+# and delete return. The pools keep their own: the transaction scope pool's idle scopes, NodePool's free blocks and the
+# scopes' arena blocks are poisoned until handed out again, so a use after one goes back is reported, as a
+# use-after-poison, whatever the quarantine (#586)
 ASAN_OPTIONS="quarantine_size_mb=256:abort_on_error=1" \
   ./build-asan/orderProcessorTest
 
