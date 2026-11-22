@@ -20,6 +20,14 @@
 namespace COP
 {
 
+/// Whether an id names an entry, set rather than default (#624): its number isn't 0. A string entry's id has date 0,
+/// which IdT::isValid() refuses, so isValid() would take every set source and destination for unset; and every
+/// directory written since #192 holds such ids, so issuing new ones with date 1 wouldn't be enough.
+inline bool namesEntry(const SourceIdT &id)
+{
+    return 0 != id.id_;
+}
+
 template <typename T> class WideDataLazyRef
 {
 public:
@@ -85,6 +93,12 @@ public:
     {
         return id_;
     };
+
+    /// Whether the reference names an entry (#624): see namesEntry()
+    bool isSet() const
+    {
+        return namesEntry(id_);
+    }
 
 private:
     WideDataLazyRef(const WideDataLazyRef &other, bool loaded)

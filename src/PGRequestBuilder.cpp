@@ -69,7 +69,7 @@ OrderWrite PGRequestBuilder::fromOrder(const OrderEntry &val, const OrderFigures
     w.source = source;
 
     // Resolve RawDataEntry references for client order IDs
-    if (val.clOrderId_.getId().isValid())
+    if (val.clOrderId_.isSet())
     {
         const auto &clOrdId = val.clOrderId_.get();
         if (clOrdId.data_ && clOrdId.length_ > 0)
@@ -78,7 +78,7 @@ OrderWrite PGRequestBuilder::fromOrder(const OrderEntry &val, const OrderFigures
         }
     }
 
-    if (val.origClOrderId_.getId().isValid())
+    if (val.origClOrderId_.isSet())
     {
         const auto &origClOrdId = val.origClOrderId_.get();
         if (origClOrdId.data_ && origClOrdId.length_ > 0)
