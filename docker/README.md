@@ -238,6 +238,8 @@ docker compose up -d
 
 On a volume in use, stop the server first and start it after, as above.
 
+The file must give the clearing firm and the account the server takes as its defaults: `HOUSE-CLEARING` and `TRADING-1`, unless compose's `command:` names others with `--clearing-firm` and `--default-account`. A volume that holds reference data without them stops the server's start, with `Can't start:` naming the missing one and exit 1 (#640), since every order, or every order that names no account, would be refused. Under `--ws-credentials` the default account isn't needed.
+
 ### Shell Access
 
 ```bash
