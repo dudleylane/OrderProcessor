@@ -13,7 +13,8 @@
 # throwaway certificate where docker/certs would be, so it doesn't read that either
 # (#226). Then:
 #   0. Before it builds anything: compose refuses .env.example as it is, which sets no
-#      access token, and docker-compose.yml publishes only the frontend's port (#146).
+#      passwords, and each of its required settings left empty, and docker-compose.yml
+#      publishes only the frontend's port (#146, #564, #568).
 #   1. The services become healthy, in their depends_on order: oms-db, oms-server,
 #      oms-frontend, within START_TIMEOUT. Their health checks are compose's, since
 #      podman-compose builds OCI images, which keep none of their own. On an SELinux
@@ -32,6 +33,10 @@
 #      reference data the server mirrored at startup (#151).
 #   6. Stopping the stack ends every container with exit code 0, and the server's log
 #      has no errors.
+#   7. The server refuses to start, exit 2, with neither an access token nor identities,
+#      and with both (#643), through compose run, which applies no restart policy.
+#   8. With identities instead of the token, the stack starts: an identity's token gets
+#      101, the shared one 401, and an order on its account comes back NEW (#643).
 # The containers, pod, network, volumes and images it makes are removed when it exits,
 # pass or fail. The base images stay, so the next build only checks them for an update.
 #
@@ -103,6 +108,9 @@ fail() {
     exit 1
 }
 
+# The identities' file step 8 writes into docker/ws-identities, which git ignores, and cleanup removes
+IDENTITIES="check-compose-stack-$$"
+
 # podman-compose on the committed file plus this run's override. --layers=false and --pull=newer as in the image checks:
 # no intermediate images left in the store this user shares, and current base images.
 COMPOSE=(podman-compose "--podman-build-args=--layers=false --pull=newer" "${JOBS_ARG[@]}" -p "$NAME"
@@ -137,6 +145,7 @@ cleanup() {
     podman volume ls -q --filter "label=io.podman.compose.project=$NAME" | xargs -r podman volume rm -f \
         >/dev/null 2>&1 || true
     podman rmi -f "localhost/${NAME}_oms-server" "localhost/${NAME}_oms-frontend" >/dev/null 2>&1 || true
+    rm -f "$ROOT/docker/ws-identities/$IDENTITIES"
     rm -rf "${WORK:?}"
     exit "$status"
 }
@@ -162,6 +171,7 @@ DB_NAME="$(setting POSTGRES_DB)"
 [[ -n "$DB_USER" && -n "$DB_NAME" ]] || fail "docker/.env.example sets no POSTGRES_USER or POSTGRES_DB"
 # This run's access token, and the one Origin a browser page may connect from (#146)
 grep -q '^OMS_WS_TOKEN=' "$WORK/env" || fail "docker/.env.example has no OMS_WS_TOKEN line"
+grep -q '^OMS_WS_CREDENTIALS=' "$WORK/env" || fail "docker/.env.example has no OMS_WS_CREDENTIALS line"
 grep -q '^OMS_ALLOWED_ORIGINS=' "$WORK/env" || fail "docker/.env.example has no OMS_ALLOWED_ORIGINS line"
 grep -q '^OMS_PUBLIC_HOST=' "$WORK/env" || fail "docker/.env.example has no OMS_PUBLIC_HOST line"
 TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -199,7 +209,7 @@ services:
       - $WORK/certs:$CERTS:ro,z
 EOF
 
-step "what compose would publish, and whether it starts without a token"
+step "what compose would publish, and what it refuses"
 # docker-compose.yml as committed: this run's override publishes nothing, so the stack's ports are checked here
 published="$(podman-compose -p "$NAME" -f docker/docker-compose.yml --env-file "$WORK/env" config 2>/dev/null | awk '
     /^  [^ ].*:$/ { service = $1; sub(/:$/, "", service); inports = 0; next }
@@ -210,12 +220,14 @@ published="$(podman-compose -p "$NAME" -f docker/docker-compose.yml --env-file "
     || fail "docker-compose.yml publishes '${published//$'\n'/, }', not only '${PUBLISHED[*]}'"
 echo "published: ${published//$'\n'/, }"
 if podman-compose -p "$NAME" -f docker/docker-compose.yml --env-file docker/.env.example config >/dev/null 2>&1; then
-    fail "compose accepts docker/.env.example as it is, which sets no access token and no passwords"
+    fail "compose accepts docker/.env.example as it is, which sets no passwords"
 fi
 echo "compose refuses docker/.env.example as it is"
-# Each required setting refused on its own (#568): .env.example leaves four empty, so its refusal alone no longer shows
-# that any one of them is required. Each is blanked in turn from this run's settings, whose others are all set.
-for variable in OMS_WS_TOKEN OMS_PUBLIC_HOST POSTGRES_PASSWORD OMS_DB_SERVER_PASSWORD; do
+# Each required setting refused on its own (#568): .env.example leaves three empty, so its refusal alone doesn't show
+# that any one of them is required. Each is blanked in turn from this run's settings, whose others are all set. The
+# access token isn't one: compose can require only one variable, and identities may replace the token, so the server
+# refuses to start without either, which step 7 checks (#643).
+for variable in OMS_PUBLIC_HOST POSTGRES_PASSWORD OMS_DB_SERVER_PASSWORD; do
     sed "s/^$variable=.*/$variable=/" "$WORK/env" > "$WORK/env.blank"
     if podman-compose -p "$NAME" -f docker/docker-compose.yml --env-file "$WORK/env.blank" config \
         > "$WORK/blank.log" 2>&1; then
@@ -224,7 +236,7 @@ for variable in OMS_WS_TOKEN OMS_PUBLIC_HOST POSTGRES_PASSWORD OMS_DB_SERVER_PAS
     grep -q "$variable" "$WORK/blank.log" || fail "compose refused settings without $variable without naming it: $(tail -n 2 "$WORK/blank.log")"
 done
 rm -f "$WORK/env.blank" "$WORK/blank.log"
-echo "compose refuses settings without any one of OMS_WS_TOKEN, OMS_PUBLIC_HOST, POSTGRES_PASSWORD and OMS_DB_SERVER_PASSWORD"
+echo "compose refuses settings without any one of OMS_PUBLIC_HOST, POSTGRES_PASSWORD and OMS_DB_SERVER_PASSWORD"
 
 if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
     chcon -R --reference=docker docker/init-db || fail "couldn't give docker/init-db its directory's SELinux label"
@@ -254,22 +266,25 @@ fi
 
 step "the services' health"
 # up waited for oms-db and oms-server, which other services depend on, but not for oms-frontend
-deadline=$((SECONDS + START_TIMEOUT))
-for service in "${SERVICES[@]}"; do
-    health=""
-    while :; do
-        c="$(container "$service")"
-        if [[ -n "$c" ]]; then
-            health="$(podman inspect --format '{{.State.Health.Status}}' "$c")"
-            [[ "$health" == healthy ]] && break
-            [[ "$(podman inspect --format '{{.State.Status}}' "$c")" != exited ]] \
-                || fail "$service exited, with code $(podman inspect --format '{{.State.ExitCode}}' "$c")"
-        fi
-        (( SECONDS < deadline )) || fail "$service isn't healthy after ${START_TIMEOUT}s (${health:-no container})"
-        sleep 2
+wait_healthy() {
+    local deadline=$((SECONDS + START_TIMEOUT)) service c health
+    for service in "${SERVICES[@]}"; do
+        health=""
+        while :; do
+            c="$(container "$service")"
+            if [[ -n "$c" ]]; then
+                health="$(podman inspect --format '{{.State.Health.Status}}' "$c")"
+                [[ "$health" == healthy ]] && break
+                [[ "$(podman inspect --format '{{.State.Status}}' "$c")" != exited ]] \
+                    || fail "$service exited, with code $(podman inspect --format '{{.State.ExitCode}}' "$c")"
+            fi
+            (( SECONDS < deadline )) || fail "$service isn't healthy after ${START_TIMEOUT}s (${health:-no container})"
+            sleep 2
+        done
+        echo "$service ($c): healthy"
     done
-    echo "$service ($c): healthy"
-done
+}
+wait_healthy
 db="$(container oms-db)"
 server="$(container oms-server)"
 frontend="$(container oms-frontend)"
@@ -346,10 +361,12 @@ ws.onmessage = (event) => {
         process.exit(0);
     }
 };'
-# Over wss, trusting this run's certificate and nothing else it would not trust anyway (#226)
-report="$(podman run --rm --network "$network" -v "$WORK/certs:/certs:ro,z" -e NODE_EXTRA_CA_CERTS=/certs/tls.crt \
-    "$node_image" node -e "$client" "wss://oms-frontend:$FRONTEND_PORT/ws" "$TOKEN" 2>&1)" \
-    || fail "the order got no execution report: $report"
+# Over wss, trusting this run's certificate and nothing else it would not trust anyway (#226), offering the token given
+send_order() {
+    podman run --rm --network "$network" -v "$WORK/certs:/certs:ro,z" -e NODE_EXTRA_CA_CERTS=/certs/tls.crt \
+        "$node_image" node -e "$client" "wss://oms-frontend:$FRONTEND_PORT/ws" "$1" 2>&1
+}
+report="$(send_order "$TOKEN")" || fail "the order got no execution report: $report"
 [[ "$report" == "execution_report NEW" ]] || fail "the order got '$report', not an execution report with status NEW"
 echo "$report"
 
@@ -393,5 +410,62 @@ if (( errors > 0 )); then
     fail "the server logged $errors error(s)"
 fi
 echo "the server's log: $(wc -l < "$WORK/server.log") lines, no errors"
+
+step "who may connect, as the server starts (#643)"
+# Compose can require only one of OMS_WS_TOKEN and OMS_WS_CREDENTIALS, so with neither, or with both, the server refuses
+# to start (--require-ws-auth, in compose's command). Checked through run, which applies no restart policy, under
+# timeout: through up, a refusal would leave the frontend waiting for a server that never turns healthy. The stack is
+# stopped, so the server's volume, which run's container mounts too, has no other writer. An empty variable never
+# reaches the server: the entrypoint unsets it, so the server's own refusal of one is WsAuthTest's.
+refused() { # <settings file> <what the refusal says>
+    local out code
+    # The refusal is the run's failure, so its code is taken without set -e stopping the check
+    code=0
+    out="$(timeout 180 podman-compose -p "$NAME" -f docker/docker-compose.yml -f "$WORK/override.yml" --env-file "$1" \
+        run --rm --no-deps -T oms-server 2>&1)" || code=$?
+    (( code == 2 )) || fail "with $(basename "$1"), the server's start ended with code $code, not 2: $(tail -n 3 <<< "$out")"
+    grep -qF -- "$2" <<< "$out" || fail "with $(basename "$1"), the server refused without saying '$2': $(tail -n 3 <<< "$out")"
+}
+sed -e "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=/" -e "s/^OMS_WS_CREDENTIALS=.*/OMS_WS_CREDENTIALS=/" "$WORK/env" \
+    > "$WORK/env.neither"
+refused "$WORK/env.neither" "--require-ws-auth"
+echo "neither a token nor identities: the server refuses to start, with exit code 2"
+sed "s|^OMS_WS_CREDENTIALS=.*|OMS_WS_CREDENTIALS=/etc/oms/ws-identities/$IDENTITIES|" "$WORK/env" > "$WORK/env.both"
+refused "$WORK/env.both" "can't both be given"
+echo "a token and identities: the server refuses to start, with exit code 2"
+
+step "the stack with identities instead of the token (#643)"
+# An identity of this run's own, trading TRADING-1, which the seeded volume has, in a file of docker/ws-identities, as
+# docker/README.md says to write it: mode 0640, which oms reads through group 0. The run with the token above had the
+# directory empty but for its .gitignore, which is the mount's case with no identities.
+IDENTITY_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+printf 'check-desk sha256$%s TRADING-1\n' "$(printf '%s' "$IDENTITY_TOKEN" | sha256sum | cut -d ' ' -f 1)" \
+    > "docker/ws-identities/$IDENTITIES"
+chmod 0640 "docker/ws-identities/$IDENTITIES"
+# OMS_WS_TOKEN as .env.example leaves it, empty, which the entrypoint unsets: the identities alone decide
+sed -e "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=/" \
+    -e "s|^OMS_WS_CREDENTIALS=.*|OMS_WS_CREDENTIALS=/etc/oms/ws-identities/$IDENTITIES|" "$WORK/env" \
+    > "$WORK/env.identities"
+IDENTITY_COMPOSE=(podman-compose -p "$NAME" -f docker/docker-compose.yml -f "$WORK/override.yml"
+    --env-file "$WORK/env.identities")
+# --force-recreate: the server's settings changed, and a container kept from the first run would keep the token
+timeout "$START_TIMEOUT" "${IDENTITY_COMPOSE[@]}" up -d --force-recreate > "$WORK/up-identities.log" 2>&1 \
+    || fail "compose up with identities failed: $(tail -n 5 "$WORK/up-identities.log")"
+wait_healthy
+frontend="$(container oms-frontend)"
+answer="$(upgrade -H "Sec-WebSocket-Protocol: oms-v1, oms-token.$IDENTITY_TOKEN" -H "Origin: $ORIGIN")"
+[[ "$answer" == "HTTP/1.1 101"* ]] || fail "/ws answered '${answer%%$'\n'*}' to an identity's token, not 101"
+echo "/ws, with an identity's token: ${answer%%$'\n'*}"
+answer="$(upgrade -H "$OFFER" -H "Origin: $ORIGIN")"
+[[ "$answer" == "HTTP/1.1 401"* ]] || fail "/ws answered '${answer%%$'\n'*}' to the shared token, which isn't set, not 401"
+echo "/ws, with the shared token, which this stack doesn't take: ${answer%%$'\n'*}"
+report="$(send_order "$IDENTITY_TOKEN")" || fail "the identity's order got no execution report: $report"
+[[ "$report" == "execution_report NEW" ]] || fail "the identity's order got '$report', not a report with status NEW"
+echo "an order from the identity, on its account: $report"
+"${IDENTITY_COMPOSE[@]}" stop >/dev/null 2>&1 || fail "compose stop failed"
+server="$(container oms-server)"
+code="$(podman inspect --format '{{.State.ExitCode}}' "$server")"
+[[ "$code" == 0 ]] || fail "the server with identities exited with code $code"
+echo "the server with identities exited with code 0"
 
 step "passed in ${SECONDS}s (the build took ${build_seconds}s)"
