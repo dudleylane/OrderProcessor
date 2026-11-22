@@ -230,7 +230,8 @@ FIX50SP2::NewOrderSingle makeBenchNOS(const std::string &clOrdId, char side, cha
 }
 
 /// An FX swap as a counterparty sends one, a NewOrderMultileg (35=AB) with its two legs: the near leg on the order's
-/// side, the far leg on the other
+/// side, the far leg on the other. Each leg gives its quantity and ratio, and the swap asks to be reported by leg,
+/// as an even swap may (#698, #701), so that the gateway's checks of them read each field
 FIX50SP2::NewOrderMultileg makeBenchSwap(const std::string &clOrdId)
 {
     FIX50SP2::NewOrderMultileg msg;
@@ -240,6 +241,7 @@ FIX50SP2::NewOrderMultileg makeBenchSwap(const std::string &clOrdId)
     msg.set(FIX::OrdType(FIX::OrdType_FOREX_SWAP));
     msg.set(FIX::Symbol("BENCHFX"));
     msg.set(FIX::OrderQty(100));
+    msg.set(FIX::MultiLegRptTypeReq(FIX::MultiLegRptTypeReq_REPORT_BY_INSTRUMENT_LEGS_ONLY));
     msg.set(FIX::Account("BENCHACCT"));
     msg.set(FIX::Currency("USD"));
 
@@ -248,6 +250,8 @@ FIX50SP2::NewOrderMultileg makeBenchSwap(const std::string &clOrdId)
     nearLeg.set(FIX::LegSide(FIX::Side_BUY));
     nearLeg.set(FIX::LegPrice(1.2650));
     nearLeg.set(FIX::LegSettlDate("20261027"));
+    nearLeg.set(FIX::LegOrderQty(100));
+    nearLeg.set(FIX::LegRatioQty(1));
     msg.addGroup(nearLeg);
 
     FIX50SP2::NewOrderMultileg::NoLegs farLeg;
@@ -255,6 +259,8 @@ FIX50SP2::NewOrderMultileg makeBenchSwap(const std::string &clOrdId)
     farLeg.set(FIX::LegSide(FIX::Side_SELL));
     farLeg.set(FIX::LegPrice(1.2660));
     farLeg.set(FIX::LegSettlDate("20261127"));
+    farLeg.set(FIX::LegOrderQty(100));
+    farLeg.set(FIX::LegRatioQty(1));
     msg.addGroup(farLeg);
     return msg;
 }
