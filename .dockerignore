@@ -19,3 +19,4 @@ benchmark_baseline*
 docker/.env
 docker/certs
 docker/ws-credentials
+docker/ws-identities
