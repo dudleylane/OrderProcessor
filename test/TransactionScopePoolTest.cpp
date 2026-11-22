@@ -129,6 +129,34 @@ TEST_F(TransactionScopePoolTest, CacheMissCounterIncrementsOnExhaustion)
     pool.releaseByIndex(idx1);
 }
 
+TEST_F(TransactionScopePoolTest, SumPoolFiguresAddsEveryPool)
+{
+    // The metrics give every processor's pools together; they gave the first event processor's alone (#542)
+    TransactionScopePool small(2);
+    TransactionScopePool other(3);
+    size_t i1, i2, i3, i4;
+    TransactionScope *s1 = small.acquire(i1);
+    TransactionScope *s2 = small.acquire(i2);
+    TransactionScope *s3 = small.acquire(i3); // a miss: every slot is in use
+    TransactionScope *s4 = other.acquire(i4);
+    ASSERT_NE(nullptr, s1);
+    ASSERT_NE(nullptr, s2);
+    ASSERT_NE(nullptr, s3);
+    ASSERT_NE(nullptr, s4);
+
+    const PoolFigures sum = sumPoolFigures({ &small, nullptr, &other });
+    EXPECT_EQ(5u, sum.poolSize);
+    EXPECT_EQ(small.cacheMisses() + other.cacheMisses(), sum.cacheMisses);
+    EXPECT_LE(1u, sum.cacheMisses);
+    EXPECT_EQ(small.allocations() + other.allocations(), sum.allocations);
+    EXPECT_EQ(0u, sumPoolFigures({}).poolSize);
+
+    delete s3; // the miss's, from the heap
+    small.releaseByIndex(i2);
+    small.releaseByIndex(i1);
+    other.releaseByIndex(i4);
+}
+
 // =============================================================================
 // Allocations (#515)
 // =============================================================================

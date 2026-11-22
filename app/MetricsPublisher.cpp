@@ -16,10 +16,10 @@ using namespace COP::App;
 MetricsPublisher::MetricsPublisher(boost::asio::io_context &ioc, SessionManager *sessionMgr,
                                    Tasks::TaskManager *taskMgr, Queues::InQueuesContainer *inQueues,
                                    const ACID::TransactionManager *transactMgr, Store::OrderDataStorage *orderStorage,
-                                   const ACID::TransactionScopePool *scopePool, const Store::LMDBStorage *storage,
-                                   std::chrono::milliseconds interval)
+                                   std::vector<const ACID::TransactionScopePool *> scopePools,
+                                   const Store::LMDBStorage *storage, std::chrono::milliseconds interval)
     : timer_(ioc), interval_(interval), running_(false), sessionMgr_(sessionMgr), taskMgr_(taskMgr),
-      inQueues_(inQueues), transactMgr_(transactMgr), orderStorage_(orderStorage), scopePool_(scopePool),
+      inQueues_(inQueues), transactMgr_(transactMgr), orderStorage_(orderStorage), scopePools_(std::move(scopePools)),
       storage_(storage)
 {
 }
@@ -77,10 +77,11 @@ void MetricsPublisher::collectAndBroadcast()
     m.queueDepth = inQueues_->size();
     m.pendingTransactions = transactMgr_->pendingTransactions();
 
-    // Pool stats
-    m.poolSize = scopePool_->poolSize();
-    m.poolCacheMisses = scopePool_->cacheMisses();
-    m.poolAllocations = scopePool_->allocations(); // one per transaction (#515)
+    // Pool stats, summed over every processor's pool (#542)
+    const ACID::PoolFigures pools = ACID::sumPoolFigures(scopePools_);
+    m.poolSize = pools.poolSize;
+    m.poolCacheMisses = pools.cacheMisses;
+    m.poolAllocations = pools.allocations; // one per transaction (#515)
     m.poolArenaSize = ACID::TransactionScope::ARENA_SIZE;
 
     // Sessions

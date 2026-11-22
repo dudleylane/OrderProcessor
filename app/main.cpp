@@ -483,10 +483,20 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    // 10c. Create MetricsPublisher for system monitoring
+    // 10c. Create MetricsPublisher for system monitoring. Its pool figures are every processor's, event and transaction
+    // alike: it was given the first event processor's pool alone (#542)
+    std::vector<const ACID::TransactionScopePool *> scopePools;
+    for (auto *processor : evntProcessors)
+    {
+        scopePools.push_back(static_cast<Proc::Processor *>(processor)->scopePool());
+    }
+    for (auto *processor : transactProcessors)
+    {
+        scopePools.push_back(static_cast<Proc::Processor *>(processor)->scopePool());
+    }
     auto metricsPublisher = std::make_shared<App::MetricsPublisher>(
         ioc, sessionMgr.get(), taskMgr.get(), inQueues.get(), transactMgr.get(), Store::OrderStorage::instance(),
-        static_cast<Proc::Processor *>(evntProcessors[0])->scopePool(), lmdbStorage.get());
+        std::move(scopePools), lmdbStorage.get());
     metricsPublisher->start();
 
     // 11. Signal handling for graceful shutdown
