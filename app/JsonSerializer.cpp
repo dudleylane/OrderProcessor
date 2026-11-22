@@ -14,16 +14,9 @@ namespace
 // client left out. Resolving an unset id throws, so these are read only when set (#35). Only clOrderId and the
 // instrument always resolve: OrderDataStorage requires the first and the OrderEntry constructor loads the second.
 
-/// Set means not the default id. Not IdT::isValid(): WideDataStorage gives string ids a zero date, which
-/// isValid() rejects, so a set source or destination would read as unset.
-template <typename T> bool isSet(const WideDataLazyRef<T> &ref)
-{
-    return SourceIdT() != ref.getId();
-}
-
 std::string rawDataText(const WideDataLazyRef<RawDataEntry> &ref)
 {
-    if (!isSet(ref))
+    if (!ref.isSet())
     {
         return std::string();
     }
@@ -33,7 +26,7 @@ std::string rawDataText(const WideDataLazyRef<RawDataEntry> &ref)
 
 StringT stringOrEmpty(const WideDataLazyRef<StringT> &ref)
 {
-    return isSet(ref) ? ref.get() : StringT();
+    return ref.isSet() ? ref.get() : StringT();
 }
 
 /// The order with the figures given for the fields its decisions change (#411): a report's, or its own
@@ -66,7 +59,7 @@ json orderToJson(const OrderEntry &order, const OrderFigures &figures)
     j["tif"] = toJsonString(order.tif_);
     j["capacity"] = toJsonString(order.capacity_);
     j["currency"] = toJsonString(order.currency_);
-    j["account"] = isSet(order.account_) ? order.account_.get().account_ : StringT();
+    j["account"] = order.account_.isSet() ? order.account_.get().account_ : StringT();
     j["destination"] = stringOrEmpty(order.destination_);
     j["source"] = stringOrEmpty(order.source_);
     j["creationTime"] = order.creationTime_;

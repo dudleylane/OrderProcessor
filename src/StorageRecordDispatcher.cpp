@@ -561,20 +561,20 @@ Codec::OrderStrings orderStringsOf(const OrderEntry &val, const DataStorageResto
         return strings;
     }
     RawDataEntry raw;
-    if (Codec::namesEntry(val.clOrderId_.getId()) && store->find(val.clOrderId_.getId(), &raw))
+    if (val.clOrderId_.isSet() && store->find(val.clOrderId_.getId(), &raw))
     {
         strings.clOrderId = raw;
     }
-    if (Codec::namesEntry(val.origClOrderId_.getId()) && store->find(val.origClOrderId_.getId(), &raw))
+    if (val.origClOrderId_.isSet() && store->find(val.origClOrderId_.getId(), &raw))
     {
         strings.origClOrderId = raw;
     }
     StringT str;
-    if (Codec::namesEntry(val.source_.getId()) && store->find(val.source_.getId(), &str))
+    if (val.source_.isSet() && store->find(val.source_.getId(), &str))
     {
         strings.source = str;
     }
-    if (Codec::namesEntry(val.destination_.getId()) && store->find(val.destination_.getId(), &str))
+    if (val.destination_.isSet() && store->find(val.destination_.getId(), &str))
     {
         strings.destination = str;
     }
