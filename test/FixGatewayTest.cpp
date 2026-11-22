@@ -3747,6 +3747,90 @@ TEST_F(FixtSessionTest, AMinQtyOfZeroIsTaken)
     EXPECT_TRUE(sentOfType(FIX::MsgType_OrderCancelReject).empty()) << sentText();
 }
 
+TEST_F(FixtSessionTest, AnUnevenSwapOrOneAskingForOtherReportsIsRefused)
+{
+    // The engine trades both legs of a swap at OrderQty (#698) and reports its fills by leg (#529). A leg whose
+    // LegOrderQty (685) or LegQty (687) isn't OrderQty, or whose LegRatioQty (623) isn't 1, and a MultiLegRptTypeReq
+    // (563) other than 2 (#701), are refused before anything is stored, each with an ExecutionReport, 150=8 and
+    // OrdRejReason 103=11, which the counterparty takes
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    const auto withLegField = [this](const std::string &clOrdId, int leg, int field, const std::string &value)
+    {
+        FIX50SP2::NewOrderMultileg swap = makeFxSwap(clOrdId);
+        FIX50SP2::NewOrderMultileg::NoLegs group;
+        swap.getGroup(leg, group);
+        group.setField(field, value);
+        swap.replaceGroup(leg, group);
+        return swap;
+    };
+    const std::string uneven = "a leg's LegOrderQty (685) and LegQty (687) must be OrderQty (38) or left out: the "
+                               "server trades both legs of a swap at OrderQty";
+    const std::string ratio =
+        "a leg's LegRatioQty (623) must be 1 or left out: the server trades both legs of a swap at OrderQty";
+    const std::string byLeg = "MultiLegRptTypeReq (563) must be 2 or left out: the server reports a swap by its legs";
+    receive(withLegField("SWAP-LOQ", 2, FIX::FIELD::LegOrderQty, "500000")); // the far leg half the near
+    receive(withLegField("SWAP-LQ", 1, FIX::FIELD::LegQty, "1000001"));
+    receive(withLegField("SWAP-RATIO", 2, FIX::FIELD::LegRatioQty, "2"));
+    for (const int type : { FIX::MultiLegRptTypeReq_REPORT_BY_MULITLEG_SECURITY_ONLY,
+                            FIX::MultiLegRptTypeReq_REPORT_BY_MULTILEG_SECURITY_AND_INSTRUMENT_LEGS })
+    {
+        FIX50SP2::NewOrderMultileg swap = makeFxSwap("SWAP-RPT" + std::to_string(type));
+        swap.set(FIX::MultiLegRptTypeReq(type));
+        receive(swap);
+    }
+
+    const std::vector<std::pair<std::string, std::string>> refused{ { "SWAP-LOQ", uneven },
+                                                                    { "SWAP-LQ", uneven },
+                                                                    { "SWAP-RATIO", ratio },
+                                                                    { "SWAP-RPT0", byLeg },
+                                                                    { "SWAP-RPT1", byLeg } };
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(refused.size(), reports.size()) << sentText();
+    for (size_t i = 0; i < reports.size(); ++i)
+    {
+        SCOPED_TRACE(refused[i].first);
+        EXPECT_EQ(refused[i].first, fieldOf(reports[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ(std::string(1, FIX::ExecType_REJECTED), fieldOf(reports[i], FIX::FIELD::ExecType));
+        EXPECT_EQ(std::to_string(FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC),
+                  fieldOf(reports[i], FIX::FIELD::OrdRejReason));
+        EXPECT_EQ("Order refused: " + refused[i].second, fieldOf(reports[i], FIX::FIELD::Text));
+    }
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AnEvenSwapThatGivesItsLegsQuantitiesIsTaken)
+{
+    // A leg may give OrderQty as its quantity, compared as a number (1000000.00 is OrderQty's 1000000), and a ratio of
+    // 1, and a swap may ask for reports by leg, 563=2: such a swap reaches the engine, as one that gives none does
+    // (#698, #701)
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::vector<std::unique_ptr<OrderEntry>> pushed; // never reach an engine
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .Times(2)
+        .WillRepeatedly(Invoke(
+            [&](const std::string &, const OrderEvent &evt)
+            {
+                pushed.emplace_back(evt.order_);
+            }));
+    FIX50SP2::NewOrderMultileg even = makeFxSwap("SWAP-EVEN");
+    even.set(FIX::MultiLegRptTypeReq(FIX::MultiLegRptTypeReq_REPORT_BY_INSTRUMENT_LEGS_ONLY));
+    for (int leg = 1; leg <= 2; ++leg)
+    {
+        FIX50SP2::NewOrderMultileg::NoLegs group;
+        even.getGroup(leg, group);
+        group.setField(FIX::FIELD::LegOrderQty, "1000000.00");
+        group.setField(FIX::FIELD::LegQty, "1000000");
+        group.setField(FIX::FIELD::LegRatioQty, "1.0");
+        even.replaceGroup(leg, group);
+    }
+    receive(even);
+    receive(makeFxSwap("SWAP-PLAIN"));
+
+    EXPECT_EQ(2u, pushed.size());
+    EXPECT_TRUE(sentOfType(FIX::MsgType_ExecutionReport).empty()) << sentText();
+}
+
 TEST_F(FixtSessionTest, ASwapAsANewOrderSingleIsRefusedReadably)
 {
     // An FX swap is a NewOrderMultileg (#527). A NewOrderSingle with OrdType G and FIX's own far-leg fields, which FIX

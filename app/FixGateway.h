@@ -354,6 +354,14 @@ public:
     /// filled below one, so a MinQty other than 0 is refused rather than ignored, until a matching rule enforces it
     /// (#666). MinQtyMethod (1822) means nothing without it, and isn't read.
     static std::optional<std::string> minQtyRefusal(const FIX::FieldMap &msg);
+    /// Why a swap's leg asks for an uneven swap, which the engine doesn't trade, or nothing (#698): it trades both
+    /// legs at the order's OrderQty (38), so a leg's LegOrderQty (685) and the deprecated LegQty (687) must be that
+    /// quantity, compared as numbers, and its LegRatioQty (623) 1, each where it is given. Trading uneven swaps would
+    /// be a feature of its own.
+    static std::optional<std::string> legQuantityRefusal(const FIX::FieldMap &leg, double orderQty);
+    /// Why a NewOrderMultileg asks for reports a swap doesn't get, or nothing (#701): a swap's fills are reported by
+    /// leg (#529), which MultiLegRptTypeReq (563) 2 asks for, so any other value is refused rather than ignored.
+    static std::optional<std::string> reportTypeRefusal(const FIX::FieldMap &msg);
     /// An expiry the engine keeps as an ExpireTime (126) carries it, to the millisecond (#240)
     static FIX::UtcTimeStamp toUtcTimeStamp(DateTimeT when);
 
