@@ -138,6 +138,8 @@ private:
     void taskFailed(const char *kind, const char *what);
     /// Starts a task of this manager's: spawned from inside one of its tasks, enqueued from any other thread (#364)
     template <typename F> void submit(F &&task);
+    /// Pins the calling worker to the next core, once per thread, when the manager was given a first core (#536)
+    void pinThisWorker() const;
 
     mutable oneapi::tbb::mutex lock_;
     mutable oneapi::tbb::mutex transactLock_;
