@@ -153,7 +153,10 @@ jobs:
       - name: Build TSan-instrumented oneTBB (cached)
         # Same oneTBB version as the system tbb-devel, built with
         # -fsanitize=thread by the job's compiler and installed under the
-        # runner's home.  Rebuilt only when the version or compiler changes.
+        # runner's home.  Rebuilt when the version, the compiler or the recipe
+        # changes: the key ends with a hash of RECIPE, the configure options
+        # below (#562), which had changed nothing until the version or
+        # compiler did.  Keep every option of the build in RECIPE.
         # The version is pinned, and the job fails when tbb-devel moves
         # (#176): the TSan job would otherwise test a oneTBB the Release
         # builds don't link.  Follow an update by changing TBB_VERSION, which
@@ -170,7 +173,10 @@ jobs:
             echo "::error::the system's tbb-devel is $SYSTEM_TBB, but this job builds oneTBB $TBB_VERSION for TSan (#176)"
             exit 1
           fi
-          PREFIX="$HOME/.cache/orderprocessor/onetbb-$TBB_VERSION-tsan-gcc$(g++ -dumpfullversion)"
+          RECIPE=(-G Ninja -DCMAKE_BUILD_TYPE=Debug -DTBB_SANITIZE=thread
+                  -DTBB_TEST=OFF -DTBB_EXAMPLES=OFF -DTBB_STRICT=OFF)
+          RECIPE_KEY=$(printf '%s\n' "${RECIPE[@]}" | sha256sum | cut -c1-12)
+          PREFIX="$HOME/.cache/orderprocessor/onetbb-$TBB_VERSION-tsan-gcc$(g++ -dumpfullversion)-$RECIPE_KEY"
           # Another runner's TSan job may find the cache cold at the same time (#736): under the lock, the second waits
           # for the first, and finds it built
           mkdir -p "$(dirname "$PREFIX")"
@@ -179,9 +185,7 @@ jobs:
           if [ ! -f "$PREFIX/lib64/cmake/TBB/TBBConfig.cmake" ]; then
             SRC=$(mktemp -d)
             git clone -q --depth 1 --branch "$TBB_VERSION" https://github.com/uxlfoundation/oneTBB.git "$SRC"
-            cmake -S "$SRC" -B "$SRC/build" -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-              -DTBB_SANITIZE=thread -DTBB_TEST=OFF -DTBB_EXAMPLES=OFF -DTBB_STRICT=OFF \
-              -DCMAKE_INSTALL_PREFIX="$PREFIX"
+            cmake -S "$SRC" -B "$SRC/build" "${RECIPE[@]}" -DCMAKE_INSTALL_PREFIX="$PREFIX"
             jobs=$(scripts/ci-jobs.sh) # the job's share of the host's threads, as in its build (#738)
             scripts/memory-cap.sh 8G cmake --build "$SRC/build" -j"$jobs" # under the job's build's cap (#740)
             cmake --install "$SRC/build"
