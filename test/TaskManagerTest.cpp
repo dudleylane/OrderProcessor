@@ -27,6 +27,7 @@
 #include "TestAux.h"
 #include "MockQueues.h"
 
+#include "CpuAffinity.h"
 #include "TaskManager.h"
 #include "TransactionMgr.h"
 #include "Processor.h"
@@ -310,6 +311,30 @@ public:
 private:
     std::unique_ptr<Processor> processor_;
     ReportGate *gate_;
+};
+
+/// Hands each transaction to a real processor, which it owns, and notes the cores the thread that runs the first may
+/// run on (#536)
+class AffinityRecordingProcessor final : public TransactionProcessor
+{
+public:
+    AffinityRecordingProcessor(std::unique_ptr<Processor> processor, std::vector<int> *cores)
+        : processor_(std::move(processor)), cores_(cores)
+    {
+    }
+
+    void process(const TransactionId &id, Transaction *tr) override
+    {
+        if (cores_->empty())
+        {
+            CpuAffinity::getThreadAffinity(*cores_);
+        }
+        processor_->process(id, tr);
+    }
+
+private:
+    std::unique_ptr<Processor> processor_;
+    std::vector<int> *cores_;
 };
 
 /// Holds the first removal it is asked for until released. TaskManager hands a finished transaction's processor back
@@ -2081,6 +2106,35 @@ TEST_F(TaskManagerTest, AnOrderSnapshotTakenWhileOrdersTradeAndAreReplacedReadsE
         });
     EXPECT_EQ(given, snapshot["data"].size());
     EXPECT_LT(static_cast<size_t>(2 * ORDERS), given) << "the replacements and the sells are in it";
+}
+
+TEST_F(TaskManagerTest, AWorkerThatRunsBothKindsOfTaskIsPinnedOnce)
+{
+    // With a first core given (--cpu-affinity), each worker pins itself to the next core the first time it runs a task.
+    // The event task and the transaction task each kept a flag of their own, so a worker that ran both took a core for
+    // each and stayed on the second, and the cores ran out faster than the workers (#536). A limit of 2 runs one worker
+    // (#711), which runs both: the order's event task, and the transaction its event adds.
+    const int cores = CpuAffinity::getAvailableCores();
+    ASSERT_LE(2, cores) << "the first and the second core must differ for this to tell them apart";
+    std::vector<int> pinnedTo;
+    TaskManagerParams params;
+    params.transactMgr_ = transMgr_.get();
+    params.inQueues_ = inQueues_.get();
+    params.cpuAffinityStart_ = 0;
+    auto evntProc = std::make_unique<Processor>();
+    evntProc->init(*procParams_);
+    params.evntProcessors_.push_back(evntProc.release());
+    auto trProc = std::make_unique<Processor>();
+    trProc->init(*procParams_);
+    params.transactProcessors_.push_back(new AffinityRecordingProcessor(std::move(trProc), &pinnedTo));
+    auto manager = std::make_unique<TaskManager>(params);
+    manager->init(2);
+
+    pushOrder(BUY_SIDE, 10.0, 100, "buyer");
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    EXPECT_EQ(0, manager->tasksFailed());
+    ASSERT_EQ(std::vector<int>{ 1 % cores }, pinnedTo)
+        << "the transaction task's worker isn't on the one core its first task pinned it to";
 }
 
 } // namespace
