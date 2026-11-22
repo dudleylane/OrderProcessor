@@ -95,9 +95,11 @@ services:
     environment:
       OMS_WS_TOKEN: "${OMS_WS_TOKEN:?set OMS_WS_TOKEN in docker/.env, as docker/README.md says}"
       OMS_ALLOWED_ORIGINS: "${OMS_ALLOWED_ORIGINS:-}"
-      # The Postgres the server mirrors its reference data and orders to, behind LMDB (#151). libpq reads the password in
-      # single quotes, so it may not hold a quote or a backslash, and compose takes a $ in .env for a variable.
-      OMS_PG_CONNECTION: "host=oms-db port=5432 dbname=${POSTGRES_DB:-oms} user=${POSTGRES_USER:-oms} password='${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env}'"
+      # The Postgres the server mirrors its reference data and orders to, behind LMDB (#151). The password goes to libpq
+      # on its own, in PGPASSWORD, not in the connection string's single quotes, which a quote ended and a backslash
+      # changed (#642): it may hold any character, though compose reads a $ in .env as a variable's, so write $$.
+      OMS_PG_CONNECTION: "host=oms-db port=5432 dbname=${POSTGRES_DB:-oms} user=${POSTGRES_USER:-oms}"
+      PGPASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env}"
     # Room for a large book and LMDB's map; raise it with them (#158)
     mem_limit: 2g
     pids_limit: 512
