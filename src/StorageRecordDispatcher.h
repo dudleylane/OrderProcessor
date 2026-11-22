@@ -39,8 +39,6 @@ namespace Store
 class OrderDataStorage;
 class WideParamsDataStorage;
 
-class FileStorage;
-
 /// parse incoming buffer into the record
 /// buffer format: <type - 32 bit><body, format depends on type>
 class StorageRecordDispatcher : public FileStorageObserver, public DataSaver, public OrderSaver, public IdLimitSaver

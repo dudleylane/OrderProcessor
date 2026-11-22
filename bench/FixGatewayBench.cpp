@@ -61,7 +61,6 @@
 #include "OrderMatcher.h"
 #include "DeferedEvents.h"
 #include "Logger.h"
-#include "SubscrManager.h"
 #include "DummyOrderSaver.h"
 #include "InFlightGauge.h"
 #include "ServerDefaults.h"
@@ -144,7 +143,6 @@ public:
         aux::ExchLogger::instance()->setNoteOn(false);  // measure the gateway, not spdlog (#121)
         aux::ExchLogger::instance()->setDebugOn(false); // measure the gateway, not debug logging (#76)
         WideDataStorage::create();
-        SubscrMgr::SubscriptionMgr::create();
         IdTGenerator::create();
         OrderStorage::create();
 
@@ -170,7 +168,6 @@ public:
     {
         OrderStorage::destroy();
         IdTGenerator::destroy();
-        SubscrMgr::SubscriptionMgr::destroy();
         WideDataStorage::destroy();
         aux::ExchLogger::destroy();
     }

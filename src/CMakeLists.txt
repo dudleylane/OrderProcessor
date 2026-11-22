@@ -7,13 +7,9 @@ target_sources(orderEngine
         StateChangeDeferedEvent.cpp
         ClearingCodec.cpp
         DataModelDef.cpp
-        EntryFilter.cpp
-        EventManager.cpp
         ExchUtils.cpp
         ExecutionDeferedEvent.cpp
         ExpiryScheduler.cpp
-        FileStorage.cpp
-        FilterImpl.cpp
         IdTGenerator.cpp
         IncomingQueues.cpp
         InstrumentCodec.cpp
@@ -25,21 +21,17 @@ target_sources(orderEngine
         NLinkedTree.cpp
         OrderBookImpl.cpp
         OrderCodec.cpp
-        OrderFilter.cpp
         OrderMatcher.cpp
         OrderStateMachineImpl.cpp
         OrderStates.cpp
         OrderStorage.cpp
         OutgoingQueues.cpp
         Processor.cpp
-        QueuesManager.cpp
         RawDataCodec.cpp
         StateMachine.cpp
         StorageRecordDispatcher.cpp
         SwapExecutionDeferedEvent.cpp
         StringTCodec.cpp
-        SubscriptionLayerImpl.cpp
-        SubscrManager.cpp
         TaskManager.cpp
         TransactionMgr.cpp
         TransactionScope.cpp

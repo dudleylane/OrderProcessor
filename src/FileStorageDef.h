@@ -42,8 +42,7 @@ public:
     virtual IdT save(const char *buf, size_t size) = 0;
     virtual void save(const IdT &id, const char *buf, size_t size) = 0;
     /// saves new version of the record and return version. LMDBStorage also erases every version older than the newest
-    /// one it finds, which leaves two: that one and the new one (#148). FileStorage, which is deprecated, keeps them
-    /// all.
+    /// one it finds, which leaves two: that one and the new one (#148).
     virtual u32 update(const IdT &id, const char *buf, size_t size) = 0;
     /// saves new version of the record and erase existing version.
     /// return 0 if replaced version not exists, returns version otherwise
@@ -68,7 +67,7 @@ public:
     {
         Found,
         None,
-        /// The storage can't say: this default's answer, which FileStorage, deprecated, and test doubles give
+        /// The storage can't say: this default's answer, which test doubles give
         Unknown,
     };
     /// Loads the newest version of the record into buf, as the storage holds it now (#151): after a rollback erased a
