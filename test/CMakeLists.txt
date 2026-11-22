@@ -10,7 +10,6 @@ target_sources(orderProcessorTest
 
         # Google Test converted tests
         CodecsTest.cpp
-        FileStorageTest.cpp
         IncomingQueuesTest.cpp
         NLinkTreeTest.cpp
         OrderBookTest.cpp
@@ -31,18 +30,13 @@ target_sources(orderProcessorTest
 
         # Phase 4.2-4.3: Remaining new tests
         DeferedEventsTest.cpp
-        FiltersTest.cpp
         IdTGeneratorTest.cpp
         LoggerTest.cpp
-        QueuesManagerTest.cpp
-        SubscriptionTest.cpp
 
         # Transaction rollback tests
         TransactionScopeTest.cpp
         TrOperationsTest.cpp
 
-        # Subscription event benchmark tests
-        EventBenchmarkTest.cpp
 
         # C++23 ultra low-latency infrastructure tests
         TransactionScopePoolTest.cpp

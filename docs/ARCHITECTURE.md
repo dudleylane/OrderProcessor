@@ -123,7 +123,7 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 │    Order (OrderCodec), IdLimit (#81), LastTrade (#237, #518)                 │
 │    Execution reports aren't persisted (#582): none is written                │
 │                                                                              │
-│  FileStorage, the file-based store before LMDB, is legacy: unused (#581)     │
+│  FileStorage, the file-based store before LMDB, was deleted with #581        │
 └─────────────────────────────────────────────────────────────────────────────┘
                                │
                                ▼
@@ -155,9 +155,6 @@ COP (Concurrent Order Processor)
 ├── ACID        → Transaction management (TransactionManager, Transaction, Scope, TransactionScopePool)
 ├── OrdState    → Order state machine (OrderState_, OrderStatePersistence)
 ├── Store       → Storage and persistence (OrderDataStorage)
-├── SubscrMgr   → Subscription management (SubscrManager, OrderFilter, EntryFilter): compiled in, unused by the server (#581)
-├── SL          → Subscription layer (SubscriptionLayerImpl): compiled in, unused by the server (#581)
-├── EventMgr    → Event management (EventManager, EventDispatcher): compiled in, unused by the server (#581)
 ├── PG          → PostgreSQL write-behind (PGWriteBehind, PGRequestBuilder) [optional]
 ├── Tasks       → Task scheduling (TaskManager, oneTBB integration)
 ├── Impl        → Internal implementation details
@@ -1404,11 +1401,10 @@ So after a failure, memory, disk and clients can disagree. #659 holds the struct
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ LAYER 3: File Persistence (FileStorage), legacy                              │
+│ LAYER 3: File Persistence (FileStorage): deleted                             │
 │                                                                              │
-│   The file-based store LMDB replaced. FileStorage is still compiled into     │
-│   the engine, and only its own tests use it: the server persists to LMDB     │
-│   (#20, #581). FileStorageDef.h stays live: it declares FileSaver and        │
+│   The file-based store LMDB replaced (#20) was deleted with #581, along      │
+│   with its tests. FileStorageDef.h stays: it declares FileSaver and          │
 │   FileStorageObserver, which LMDBStorage and the dispatcher implement.       │
 └─────────────────────────────────────────────────────────────────────────────┘
 
@@ -1535,7 +1531,6 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | Test File | Test Cases | Coverage |
 |-----------|------------|----------|
 | `CodecsTest.cpp` | `InstrumentCodecFilled`, `OrderCodecFilled`, etc. | All codec types |
-| `FileStorageTest.cpp` | `FileStorageTest.*` | File I/O operations |
 | `StorageRecordDispatcherTest.cpp` | `StorageRecordDispatcherTest.*` | Record routing; golden records (#149) |
 | `OrderStorageTest.cpp` | `OrderStorageTest.*` | Order storage operations |
 | `WideDataStorageTest.cpp` | `WideDataStorageTest.*` | Reference data storage |
@@ -1555,16 +1550,16 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Codecs** | `CodecsTest.cpp`; `StorageRecordDispatcherTest.cpp`, which holds the golden records (#149) | `ProcessorBench.cpp` (`BM_ProcessNewOrderWithMatchRecorded`, through the dispatcher, #442) |
 | **State Machine** | `StatesTest.cpp`, `StateMachineTest.cpp`, both through `StateMachineHelper` | `StateMachineBench.cpp` |
 | **Order Book & Matching** | `OrderBookTest.cpp`, `OrderMatcherTest.cpp` | `OrderMatchingBench.cpp` |
-| **Queues** | `IncomingQueuesTest.cpp`, `OutgoingQueuesTest.cpp`, `QueuesManagerTest.cpp` | `EventProcessingBench.cpp` |
+| **Queues** | `IncomingQueuesTest.cpp`, `OutgoingQueuesTest.cpp` | `EventProcessingBench.cpp` |
 | **Processor** | `ProcessorTest.cpp`, `DeferedEventsTest.cpp`, `IntegrationTest.cpp` | `ProcessorBench.cpp` |
 | **Transactions** | `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `NLinkTreeTest.cpp` | - |
 | **Concurrency** | `TaskManagerTest.cpp` | `ProcessorBench.cpp` (`BM_TaskManagerThroughput`, `BM_TaskManagerTrades`) |
-| **Storage** | `LMDBStorageTest.cpp`, `OrderStorageTest.cpp`, `WideDataStorageTest.cpp`; `FileStorageTest.cpp` for the legacy file storage | - |
+| **Storage** | `LMDBStorageTest.cpp`, `OrderStorageTest.cpp`, `WideDataStorageTest.cpp` | - |
 | **Low-Latency** | `CacheAlignedAtomicTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `NodePoolTest.cpp`, `NumaAllocatorTest.cpp`, `TransactionScopePoolTest.cpp` | `TransactionScopePoolBench.cpp`, `NumaAllocatorBench.cpp`, `OrderParamsLayoutBench.cpp` |
 | **Server (`app/`)** | `ClientMessageParserTest.cpp`, `JsonSerializerTest.cpp`, `WsSessionTest.cpp`, `WsServerLimitsTest.cpp`, `InFlightGaugeTest.cpp`, `WsAuthTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `SeedDataArgsTest.cpp`, `ReferenceDataFileTest.cpp`; the ctest scripts `ServerThatCannotStartExits`, `SeedDataIfEmptySeedsOnlyADirectoryWithoutInstruments` and `SeedDataLoadsAFile` (`SeedDataFileTest.sh`: the reference data `seedData --file` loads, #585), and `SeedDataRunsCleanly`; with `BUILD_FUZZ=ON`, `test/fuzz/` | `SessionManagerBench.cpp`, `ClientMessageParserBench.cpp`, `WsSessionBench.cpp` |
 | **PostgreSQL** | `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`; with `BUILD_PG=ON`, `PGWriteBehindTest.cpp`, whose integration cases need `PG_CONNECTION_STRING` | - |
 | **CI runner** | the ctest script `JobStartedHookDecides` (`JobStartedHookTest.sh`): the job-started hook's verdicts, a fork's pull request and anything Dependabot sent refused (#143, #168); the ctest script `CiTestedTreeDecides` (`CiTestedTreeTest.sh`): when the push of a merge may skip the jobs its pull request's run passed (#314); the ctest script `MemoryCapStopsARunaway` (`MemoryCapTest.sh`): the memory cap CI's builds and test steps and the pre-push hook's ctest run under kills a runaway at the cap and names it, lets the rest of the run go on, passes a status through, and refuses before running anything when it can't make the cap (#607); with `MEMORY_CAP_SLICE` its scope goes in that slice, which must have a limit and no swap, and a kill at the slice's limit is named as the slice's (#740); the ctest script `CiBuildsRunCapped` (`CiBuildsCappedTest.sh`): every build in the workflows runs under the cap (#740); the ctest script `CiNamesKeepRunnersApart` (`CiNamesTest.sh`): the runners' jobs run at once and share one podman store, so each names what it makes after its runner, and a job's cleanup removes its own runner's leftovers and nothing of another runner's (#736); the ctest script `CiJobsTakeTheirShare` (`CiJobsTest.sh`): each job builds, links and tests with its share of the host's threads, which `scripts/ci-jobs.sh` prints from `CI_BUILD_JOBS`, or refuses, and no workflow step, server image build or Release link takes every thread (#738) | - |
-| **Other** | `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `FiltersTest.cpp`, `SubscriptionTest.cpp`, `IdTGeneratorTest.cpp`, `LoggerTest.cpp`; the ctest script `CpuBusyDecides` (`CpuBusyTest.sh`): the CPUs a pinned benchmark comparison watches, and the busiest of them (#406); the ctest script `BenchmarkBaselineKeepsItsConfig` (`BenchmarkBaselineTest.sh`): a saved baseline keeps a copy of the `config/` its binary reads, a comparison hands it that copy, and a benchmark that fails in the first round stops a comparison there (#415), and each `commit:` line, the `.info`'s too, names the commit of the tree its binary was built from, or says that tree is unknown or gone (#448); the ctest script `BenchmarkBusyStartIsInconclusive` (`BenchmarkBusyStartTest.sh`): a comparison in which a pinned run started with a watched CPU busy is inconclusive, naming the run (#422); the ctest script `LineEndingsAreChecked` (`LineEndingsTest.sh`): `scripts/line-endings.sh`, which `scripts/lint.sh` runs, fails on a committed C++ or CMake file that isn't CRLF, a shell script, file under `.github/` or README.md that isn't LF, and any file that mixes the two, naming each (#639); the ctest script `CtestSkipsAreRefused` (`CtestSkipsTest.sh`): `scripts/ctest-skips.sh`, which CI's test steps and the pre-push hook run after ctest, fails on a test ctest counted as skipped, and so as passed, unless its name is one the caller expects to skip (#563, #635); the ctest script `LineLengthIsChecked` (`LineLengthTest.sh`): `scripts/line-length.sh`, which Format Check and the pre-push hook run, fails on a line of C++ longer than `.clang-format`'s ColumnLimit, counting characters, with a CRLF line's CR left out, since clang-format leaves long comments as they are (#615) | - |
+| **Other** | `DocConsistencyTest.cpp`, `IdTGeneratorTest.cpp`, `LoggerTest.cpp`; the ctest script `CpuBusyDecides` (`CpuBusyTest.sh`): the CPUs a pinned benchmark comparison watches, and the busiest of them (#406); the ctest script `BenchmarkBaselineKeepsItsConfig` (`BenchmarkBaselineTest.sh`): a saved baseline keeps a copy of the `config/` its binary reads, a comparison hands it that copy, and a benchmark that fails in the first round stops a comparison there (#415), and each `commit:` line, the `.info`'s too, names the commit of the tree its binary was built from, or says that tree is unknown or gone (#448); the ctest script `BenchmarkBusyStartIsInconclusive` (`BenchmarkBusyStartTest.sh`): a comparison in which a pinned run started with a watched CPU busy is inconclusive, naming the run (#422); the ctest script `LineEndingsAreChecked` (`LineEndingsTest.sh`): `scripts/line-endings.sh`, which `scripts/lint.sh` runs, fails on a committed C++ or CMake file that isn't CRLF, a shell script, file under `.github/` or README.md that isn't LF, and any file that mixes the two, naming each (#639); the ctest script `CtestSkipsAreRefused` (`CtestSkipsTest.sh`): `scripts/ctest-skips.sh`, which CI's test steps and the pre-push hook run after ctest, fails on a test ctest counted as skipped, and so as passed, unless its name is one the caller expects to skip (#563, #635); the ctest script `LineLengthIsChecked` (`LineLengthTest.sh`): `scripts/line-length.sh`, which Format Check and the pre-push hook run, fails on a line of C++ longer than `.clang-format`'s ColumnLimit, counting characters, with a CRLF line's CR left out, since clang-format leaves long comments as they are (#615) | - |
 
 ### 9.2 State Machine Tests
 
@@ -1584,7 +1579,6 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | `OrderStateWrapper` | `StateMachineHelper.h/cpp` | State machine event processing |
 | `TestInQueueObserver` | Various test files | Queue event capture |
 | `TestOrderFunctor` | `OrderBookTest.cpp`, `mocks/MockOrderBook.h` | Mock order matching |
-| `TestFileStorageObserver` | `FileStorageTest.cpp` | File storage callbacks |
 | `TestDataStorageRestore` | `StorageRecordDispatcherTest.cpp` | Data restoration verification |
 
 ---
@@ -1597,17 +1591,16 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 
 | Category | Files |
 |----------|-------|
-| **Core Pipeline** | `Processor.h/cpp`, `IncomingQueues.h/cpp`, `OutgoingQueues.h/cpp`, `QueuesManager.h/cpp`, `ExpiryScheduler.h/cpp` |
+| **Core Pipeline** | `Processor.h/cpp`, `IncomingQueues.h/cpp`, `OutgoingQueues.h/cpp`, `ExpiryScheduler.h/cpp` |
 | **State Machine** | `StateMachine.h/cpp`, `StateMachineDef.h`, `OrderStateMachineImpl.h/cpp`, `OrderStates.h/cpp`, `OrderStateEvents.h` |
 | **Order Matching** | `OrderMatcher.h/cpp`, `OrderBookImpl.h/cpp` |
 | **Transactions** | `TransactionDef.h`, `TransactionMgr.h/cpp`, `TransactionScope.h/cpp`, `TransactionScopePool.h`, `TrOperations.h/cpp`, `NLinkedTree.h/cpp` |
-| **Storage** | `FileStorage.h/cpp`, `FileStorageDef.h`, `OrderStorage.h/cpp`, `StorageRecordDispatcher.h/cpp`, `LMDBStorage.h/cpp` |
-| **Data Models** | `DataModelDef.h/cpp`, `TypesDef.h`, `QueuesDef.h`, `EventDef.h`, `TasksDef.h` |
+| **Storage** | `FileStorageDef.h`, `OrderStorage.h/cpp`, `StorageRecordDispatcher.h/cpp`, `LMDBStorage.h/cpp` |
+| **Data Models** | `DataModelDef.h/cpp`, `TypesDef.h`, `QueuesDef.h`, `TasksDef.h` |
 | **Codecs** | `OrderCodec.h/cpp`, `InstrumentCodec.h/cpp`, `AccountCodec.h/cpp`, `ClearingCodec.h/cpp`, `RawDataCodec.h/cpp`, `StringTCodec.h/cpp`, `CodecChecks.h` |
 | **Concurrency** | `TaskManager.h/cpp`, `AllocateCache.h/cpp` |
 | **Low-Latency** | `TransactionScopePool.h`, `CacheAlignedAtomic.h`, `CpuAffinity.h`, `HugePages.h`, `NumaAllocator.h`, `NodePool.h` |
-| **Subscriptions** | `SubscrManager.h/cpp`, `SubscriptionLayerImpl.h/cpp`, `SubscriptionLayerDef.h`, `SubscriptionDef.h`, `FilterImpl.h/cpp`, `EntryFilter.h/cpp`, `OrderFilter.h/cpp` |
-| **Events** | `EventManager.h/cpp`, `DeferedEvents.h`, `CancelOrderDeferedEvent.cpp`, `ExecutionDeferedEvent.cpp`, `MatchOrderDeferedEvent.cpp`, `ReleaseStopDeferedEvent.cpp`, `ReplaceRequestDeferedEvent.cpp`, `StateChangeDeferedEvent.cpp` |
+| **Events** | `DeferedEvents.h`, `CancelOrderDeferedEvent.cpp`, `ExecutionDeferedEvent.cpp`, `MatchOrderDeferedEvent.cpp`, `ReleaseStopDeferedEvent.cpp`, `ReplaceRequestDeferedEvent.cpp`, `StateChangeDeferedEvent.cpp` |
 | **PostgreSQL** | `PGWriteBehind.h/cpp`, `PGRequestBuilder.h/cpp`, `PGWriteRequest.h`, `PGEnumStrings.h` (optional) |
 | **Utilities** | `Logger.h/cpp`, `IdTGenerator.h/cpp`, `ExchUtils.h/cpp`, `Singleton.h`, `WideDataStorage.h/cpp`, `WideDataLazyRef.h` |
 
@@ -1615,7 +1608,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 
 | Category | Files |
 |----------|-------|
-| **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EventBenchmarkTest.cpp`, `ExpirySchedulerTest.cpp`, `FileStorageTest.cpp`, `FiltersTest.cpp`, `IdTGeneratorTest.cpp`, `InFlightGaugeTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NodePoolTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `QueuesManagerTest.cpp`, `ReferenceDataFileTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `SubscriptionTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
+| **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `ExpirySchedulerTest.cpp`, `IdTGeneratorTest.cpp`, `InFlightGaugeTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NodePoolTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `ReferenceDataFileTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `DummyOrderSaver.h`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 | **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `SeedDataFileTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh`, `MemoryCapTest.sh`, `CiBuildsCappedTest.sh`, `CiNamesTest.sh`, `CiJobsTest.sh`, `CpuBusyTest.sh`, `BenchmarkBaselineTest.sh`, `BenchmarkBusyStartTest.sh`, `LineEndingsTest.sh`, `CtestSkipsTest.sh`, `LineLengthTest.sh` |
