@@ -9,7 +9,8 @@
 #                               a test that depends on running alone, or on
 #                               another's timing, fails in one of the two),
 #                               under CI's 4G memory cap (scripts/memory-cap.sh,
-#                               #607), which needs systemd's user manager
+#                               #607), which needs systemd's user manager; a
+#                               test that skips fails it too (#635), as in CI
 #   3. clang-format --dry-run   (format.yml)
 # It builds the working tree, so it refuses a push unless the working tree is
 # the commit pushed: HEAD, with nothing changed or untracked (#152). Left to CI:
@@ -135,8 +136,19 @@ cmake --build "$BUILD_DIR" -j"$(nproc)" || refuse "build failed"
 # memory cap (#607): a test that runs away is killed at the cap and named, and
 # the rest run, before it can take down the host.
 step "ctest -j1 --timeout 300, under a 4G memory cap"
+ctest_log="$(mktemp)"
+trap 'rm -f -- "$ctest_log"' EXIT
 "$ROOT/scripts/memory-cap.sh" 4G ctest --test-dir "$BUILD_DIR" --output-on-failure --timeout 300 -j1 \
-    || refuse "tests failed"
+    | tee "$ctest_log" || refuse "tests failed"
+# ctest counts a skipped test as a pass (#635), as CI's test steps now refuse (#563): every case of a suite whose
+# SetUpTestSuite() records a failure skips (#374), and a shell test skips for want of a tool. Only the Postgres tests
+# may skip, in a BUILD_PG=ON directory with no database given; with PG_CONNECTION_STRING set, not even they.
+expected_skips='PGWriteBehind|Postgres'
+if [[ -n "${PG_CONNECTION_STRING:-}" ]]; then
+    expected_skips=""
+fi
+"$ROOT/scripts/ctest-skips.sh" "$ctest_log" "$expected_skips" \
+    || refuse "a test skipped, which ctest counts as a pass (#635): ctest-skips.sh names it above"
 
 # 3. Format check, identical to format.yml.
 step "$("$CLANG_FORMAT" --version) --dry-run"
