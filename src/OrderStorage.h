@@ -139,6 +139,13 @@ public:
     /// With a guard, the new order is write-locked before it becomes reachable; the caller releases
     /// the guard once the order is fully initialised.
     OrderEntry *save(const OrderEntry &order, IdTValueGenerator *idGenerator, PublishGuard *publishGuard = nullptr);
+    /// save(), but a ClOrdID already in use refuses the order without an exception (#605): it returns null, stores
+    /// nothing, and points *refusal at the reason save() would throw. Every other refusal throws, as save()'s does.
+    /// A new order's receive stores through it, since a duplicate ClOrdID is a client's mistake, not a failure.
+    OrderEntry *saveUnlessClOrdIdInUse(const OrderEntry &order, IdTValueGenerator *idGenerator,
+                                       PublishGuard *publishGuard, const char **refusal);
+    /// The reason a ClOrdID already in use refuses an order, which its reject reports
+    static constexpr char CLORDID_IN_USE[] = "Unable to save order - order with same ClOrderId already exists.";
     void restore(OrderEntry *order);
 
     /// Calls fn with each stored order, under the store's read lock. A reader outside a transaction gives each order
