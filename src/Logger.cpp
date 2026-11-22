@@ -22,6 +22,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/stdout_sinks.h>
 
@@ -82,6 +83,7 @@ struct LoggerImpl
     LoggerImpl()
     {
         loggingMask_.store(ALL_ENABLED_FLAG);
+        std::vector<std::string> warnings; // the rotation's, written once the logger exists
         try
         {
             // Use async logging to avoid blocking the hot path.
@@ -97,8 +99,21 @@ struct LoggerImpl
             }
             else
             {
-                logger_ = spdlog::basic_logger_mt<spdlog::async_factory>(
-                    "exchange", ((nullptr != target) && ('\0' != *target)) ? target : "exchange.log");
+                // A file rotates, by default at 256 MiB keeping five before it, where it grew without bound (#569)
+                const std::string path = ((nullptr != target) && ('\0' != *target)) ? target : "exchange.log";
+                const LogRotation rotation =
+                    logRotationFrom(std::getenv("EXCHANGE_LOG_MAX_MB"), std::getenv("EXCHANGE_LOG_FILES"));
+                warnings = rotation.warnings;
+                if (0 == rotation.maxMb)
+                {
+                    logger_ = spdlog::basic_logger_mt<spdlog::async_factory>("exchange", path);
+                }
+                else
+                {
+                    logger_ = spdlog::rotating_logger_mt<spdlog::async_factory>(
+                        "exchange", path, static_cast<std::size_t>(rotation.maxMb) * 1024 * 1024,
+                        static_cast<std::size_t>(rotation.files));
+                }
             }
         }
         catch (const spdlog::spdlog_ex &)
@@ -112,6 +127,10 @@ struct LoggerImpl
         // fills. Before, every level went in as info, so that flush never happened, and a crash lost them.
         logger_->set_level(spdlog::level::trace);
         logger_->flush_on(spdlog::level::warn);
+        for (const std::string &warning : warnings)
+        {
+            logger_->warn(warning);
+        }
     }
 
     ~LoggerImpl()
@@ -225,6 +244,72 @@ struct LoggerImpl
     }
 };
 } // namespace aux
+
+namespace
+{
+// A whole decimal number from low to high, with nothing else in text
+bool wholeNumberIn(const char *text, unsigned long long low, unsigned long long high, unsigned long long *value)
+{
+    if ((nullptr == text) || ('\0' == *text))
+    {
+        return false;
+    }
+    unsigned long long parsed = 0;
+    for (const char *p = text; '\0' != *p; ++p)
+    {
+        if ((*p < '0') || (*p > '9'))
+        {
+            return false;
+        }
+        parsed = parsed * 10 + static_cast<unsigned long long>(*p - '0');
+        if (parsed > high)
+        {
+            return false;
+        }
+    }
+    if (parsed < low)
+    {
+        return false;
+    }
+    *value = parsed;
+    return true;
+}
+} // namespace
+
+LogRotation aux::logRotationFrom(const char *maxMb, const char *files)
+{
+    LogRotation rotation;
+    unsigned long long value = 0;
+    if (nullptr != maxMb)
+    {
+        if (wholeNumberIn(maxMb, 0, LogRotation::MAX_MAX_MB, &value))
+        {
+            rotation.maxMb = value;
+        }
+        else
+        {
+            rotation.warnings.push_back("EXCHANGE_LOG_MAX_MB is '" + std::string(maxMb) +
+                                        "', not a whole number of MiB from 0 to " +
+                                        std::to_string(LogRotation::MAX_MAX_MB) + ": the log rotates at the default, " +
+                                        std::to_string(LogRotation::DEFAULT_MAX_MB) + " MiB (#569)");
+        }
+    }
+    if (nullptr != files)
+    {
+        if (wholeNumberIn(files, 1, LogRotation::MAX_FILES, &value))
+        {
+            rotation.files = value;
+        }
+        else
+        {
+            rotation.warnings.push_back("EXCHANGE_LOG_FILES is '" + std::string(files) +
+                                        "', not a whole number from 1 to " + std::to_string(LogRotation::MAX_FILES) +
+                                        ": the log keeps the default, " + std::to_string(LogRotation::DEFAULT_FILES) +
+                                        " files (#569)");
+        }
+    }
+    return rotation;
+}
 
 Logger::Logger(void)
 {

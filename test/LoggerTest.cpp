@@ -91,3 +91,47 @@ TEST(LoggerTest, DebugLinesAreStillWritten)
     EXPECT_TRUE(reachesTheFile(mark, from));
     aux::ExchLogger::instance()->setDebugOn(debugWasOn);
 }
+
+TEST(LoggerTest, TheRotationTakesItsDefaultsUnlessGivenAWholeNumberInRange)
+{
+    // EXCHANGE_LOG_MAX_MB and EXCHANGE_LOG_FILES (#569): unset, the defaults, which delete the oldest files
+    aux::LogRotation rotation = aux::logRotationFrom(nullptr, nullptr);
+    EXPECT_EQ(aux::LogRotation::DEFAULT_MAX_MB, rotation.maxMb);
+    EXPECT_EQ(aux::LogRotation::DEFAULT_FILES, rotation.files);
+    EXPECT_TRUE(rotation.warnings.empty());
+
+    rotation = aux::logRotationFrom("64", "2");
+    EXPECT_EQ(64u, rotation.maxMb);
+    EXPECT_EQ(2u, rotation.files);
+    EXPECT_TRUE(rotation.warnings.empty());
+
+    // 0 keeps one file that grows without bound, as before; the largest values in range are taken
+    rotation = aux::logRotationFrom("0", "1000");
+    EXPECT_EQ(0u, rotation.maxMb);
+    EXPECT_EQ(1000u, rotation.files);
+    EXPECT_TRUE(rotation.warnings.empty());
+    EXPECT_EQ(aux::LogRotation::MAX_MAX_MB, aux::logRotationFrom("1048576", nullptr).maxMb);
+
+    // Anything else takes the default, and says so, naming the variable and the value
+    for (const char *bad : { "", "-1", "+5", " 5", "5 ", "abc", "1.5", "1048577", "99999999999999999999999" })
+    {
+        rotation = aux::logRotationFrom(bad, nullptr);
+        EXPECT_EQ(aux::LogRotation::DEFAULT_MAX_MB, rotation.maxMb) << "'" << bad << "'";
+        ASSERT_EQ(1u, rotation.warnings.size()) << "'" << bad << "'";
+        EXPECT_NE(std::string::npos, rotation.warnings[0].find("EXCHANGE_LOG_MAX_MB is '" + std::string(bad) + "'"))
+            << rotation.warnings[0];
+    }
+    for (const char *bad : { "", "0", "-2", "x", "1001" })
+    {
+        rotation = aux::logRotationFrom(nullptr, bad);
+        EXPECT_EQ(aux::LogRotation::DEFAULT_FILES, rotation.files) << "'" << bad << "'";
+        ASSERT_EQ(1u, rotation.warnings.size()) << "'" << bad << "'";
+        EXPECT_NE(std::string::npos, rotation.warnings[0].find("EXCHANGE_LOG_FILES is '" + std::string(bad) + "'"))
+            << rotation.warnings[0];
+    }
+    // Each variable on its own: a bad one leaves the other as given
+    rotation = aux::logRotationFrom("x", "3");
+    EXPECT_EQ(aux::LogRotation::DEFAULT_MAX_MB, rotation.maxMb);
+    EXPECT_EQ(3u, rotation.files);
+    EXPECT_EQ(1u, rotation.warnings.size());
+}
