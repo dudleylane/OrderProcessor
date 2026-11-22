@@ -42,6 +42,9 @@ services:
     environment:
       # Strict-Transport-Security, such as max-age=31536000, once the certificate is one browsers trust (#226)
       OMS_HSTS: "${OMS_HSTS:-}"
+      # The host and port browsers reach the app at, such as oms.example.com:3000: plain HTTP is redirected there, not
+      # to the client's own Host header (#564). Required, as the token is.
+      OMS_PUBLIC_HOST: "${OMS_PUBLIC_HOST:?set OMS_PUBLIC_HOST in docker/.env, the host and port browsers reach the app at}"
     mem_limit: 128m
     pids_limit: 64
     # The image's health check, repeated: podman builds OCI images by default, and they don't keep one (#158)

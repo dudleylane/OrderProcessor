@@ -91,6 +91,7 @@ POSTGRES_DB=oms                # Database name
 OMS_WS_TOKEN=                  # WebSocket access token, required: openssl rand -hex 32 makes one (#146)
 OMS_ALLOWED_ORIGINS=           # Pages a browser may connect from, comma-separated; empty allows any (#146)
 OMS_HSTS=                      # Strict-Transport-Security, such as max-age=31536000, once certs/ holds a certificate browsers trust (#226)
+OMS_PUBLIC_HOST=               # Host and port browsers reach the app at, required: localhost:3000, or oms.example.com:3000 (#564)
 ```
 
 ### Access
