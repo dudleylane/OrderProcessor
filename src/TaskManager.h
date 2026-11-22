@@ -87,29 +87,29 @@ public:
 
     // Read-only accessors for monitoring (relaxed ordering — statistics only)
     /// Event tasks started
-    int eventsCreated() const noexcept
+    u64 eventsCreated() const noexcept
     {
         return created_.load(std::memory_order_relaxed);
     }
     /// Events taken off the incoming queues, those that threw included: a task that found them empty took none (#298)
-    int eventsProcessed() const noexcept
+    u64 eventsProcessed() const noexcept
     {
         return processed_.load(std::memory_order_relaxed);
     }
     /// Event tasks finished: each task started, once its last statement has run (#298)
-    int eventsFinished() const noexcept
+    u64 eventsFinished() const noexcept
     {
         return finished_.load(std::memory_order_relaxed);
     }
-    int transactionsCreated() const noexcept
+    u64 transactionsCreated() const noexcept
     {
         return createdTr_.load(std::memory_order_relaxed);
     }
-    int transactionsProcessed() const noexcept
+    u64 transactionsProcessed() const noexcept
     {
         return processedTr_.load(std::memory_order_relaxed);
     }
-    int transactionsFinished() const noexcept
+    u64 transactionsFinished() const noexcept
     {
         return finishedTr_.load(std::memory_order_relaxed);
     }
@@ -130,7 +130,7 @@ public:
         return totalAvailableTransactProcessor_.load(std::memory_order_relaxed);
     }
     /// Tasks whose exception was logged and contained, rather than stopping this manager (#57)
-    int tasksFailed() const noexcept
+    u64 tasksFailed() const noexcept
     {
         return failed_.load(std::memory_order_relaxed);
     }
@@ -169,16 +169,17 @@ private:
     CacheAlignedAtomic<int> lastAvailableEvntProcessor_;
     CacheAlignedAtomic<int> totalAvailableEvntProcessor_;
 
-    // Statistics counters - cache aligned for independent access
-    CacheAlignedAtomic<int> created_;
-    CacheAlignedAtomic<int> processed_;
-    CacheAlignedAtomic<int> finished_;
+    // Statistics counters - cache aligned for independent access. 64-bit (#537): as int they wrapped after 2^31 tasks,
+    // about 50 days at 500 events a second, and went negative in metrics_update.
+    CacheAlignedAtomic<u64> created_;
+    CacheAlignedAtomic<u64> processed_;
+    CacheAlignedAtomic<u64> finished_;
 
-    CacheAlignedAtomic<int> createdTr_;
-    CacheAlignedAtomic<int> processedTr_;
-    CacheAlignedAtomic<int> finishedTr_;
+    CacheAlignedAtomic<u64> createdTr_;
+    CacheAlignedAtomic<u64> processedTr_;
+    CacheAlignedAtomic<u64> finishedTr_;
 
-    CacheAlignedAtomic<int> failed_;
+    CacheAlignedAtomic<u64> failed_;
 };
 
 } // namespace Tasks
