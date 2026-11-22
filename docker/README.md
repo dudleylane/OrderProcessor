@@ -69,7 +69,7 @@ Copy `.env.example` to `.env` and set values:
 
 ```bash
 POSTGRES_USER=oms              # PostgreSQL username
-POSTGRES_PASSWORD=changeme     # PostgreSQL password (change this! The server's connection string quotes it, so no ', \ or $)
+POSTGRES_PASSWORD=changeme     # PostgreSQL password (change this!). Any character, since libpq gets it on its own (#642); write a $ as $$
 POSTGRES_DB=oms                # Database name
 OMS_WS_TOKEN=                  # WebSocket access token, required: openssl rand -hex 32 makes one (#146)
 OMS_ALLOWED_ORIGINS=           # Pages a browser may connect from, comma-separated; empty allows any (#146)
