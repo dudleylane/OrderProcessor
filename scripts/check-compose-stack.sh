@@ -163,6 +163,7 @@ DB_NAME="$(setting POSTGRES_DB)"
 # This run's access token, and the one Origin a browser page may connect from (#146)
 grep -q '^OMS_WS_TOKEN=' "$WORK/env" || fail "docker/.env.example has no OMS_WS_TOKEN line"
 grep -q '^OMS_ALLOWED_ORIGINS=' "$WORK/env" || fail "docker/.env.example has no OMS_ALLOWED_ORIGINS line"
+grep -q '^OMS_PUBLIC_HOST=' "$WORK/env" || fail "docker/.env.example has no OMS_PUBLIC_HOST line"
 TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 ORIGIN="https://localhost:$FRONTEND_PORT"
 # This run's certificate (#226), named for each way the checks reach nginx: 127.0.0.1 inside its container, and
@@ -173,7 +174,8 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
     -keyout "$WORK/certs/tls.key" -out "$WORK/certs/tls.crt" 2>/dev/null || fail "openssl couldn't make a certificate"
 chmod 0640 "$WORK/certs/tls.key"
 chmod 0644 "$WORK/certs/tls.crt"
-sed -i -e "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$TOKEN/" -e "s|^OMS_ALLOWED_ORIGINS=.*|OMS_ALLOWED_ORIGINS=$ORIGIN|" "$WORK/env"
+sed -i -e "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$TOKEN/" -e "s|^OMS_ALLOWED_ORIGINS=.*|OMS_ALLOWED_ORIGINS=$ORIGIN|" \
+    -e "s/^OMS_PUBLIC_HOST=.*/OMS_PUBLIC_HOST=localhost:3000/" "$WORK/env"
 # Resets only the ports PUBLISHED names, which the step below checks are all there are: podman-compose 1.5.0 fails on a
 # !reset of a key the file doesn't have, which the Compose specification allows. Upstream: containers/podman-compose#1209
 # (override and reset handle only a few hardcoded parts of the schema; open on 2026-11-22, when 1.6.0 was the latest
