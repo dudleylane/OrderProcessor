@@ -4,4 +4,10 @@
 # GitHub honors this file automatically in the blame UI.
 
 # Apply clang-format tree-wide (BSD/Allman, 120 cols)
-0994881
+0994881622a7ad4652b545998a56047379635d3a
+
+# Convert FX's 29 LF C++ files to CRLF, as every other C++ file is (#639)
+57ffe60694dadb8de663fd96ea3654a21293ea92
+
+# Wrap the comments that ran past 120 columns (#615)
+43e25a3562d35bca07d20b02df2591f1807c96f5
