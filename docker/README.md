@@ -88,7 +88,7 @@ Everyone with the shared token sees every account and order, and can trade on an
 
 #### Identities
 
-With `--ws-credentials` (#225), each client has a token of its own, and its session sees and trades only its identity's accounts: their orders, in the snapshot and in every report after, and its new orders on them alone. Book depth, which shows no account, still goes to every subscriber. README's [Configuration](../README.md#configuration) gives the file's format. To use it with this stack:
+With `--ws-credentials` (#225), each client has a token of its own, and its session sees and trades only its identity's accounts: their orders, in the snapshot and in every report after, and its new orders on them alone. Book depth, which shows no account, still goes to every subscriber. README's [Standalone Server](../README.md#standalone-server) gives the file's format. To use it with this stack:
 
 1. Make a token per identity with `openssl rand -hex 32`, and its hash with the server's `--hash-ws-token`: `printf '%s' "$TOKEN" | orderProcessorServer --hash-ws-token`, from any build of the server.
 2. Write `docker/ws-credentials`, a line per identity: its name, its token's hash, and its accounts. The file holds only hashes, so `chmod 0644` is fine, and the server's user in the image (uid 10001) can read it.
@@ -195,7 +195,6 @@ docker compose exec oms-db psql -U oms -d oms
 # Common queries
 SELECT count(*) FROM orders;
 SELECT * FROM orders WHERE status = 'NEW' ORDER BY created_at DESC LIMIT 10;
-SELECT * FROM executions ORDER BY exec_time DESC LIMIT 10;
 \dt                                  -- List all tables
 \dT+                                 -- List all enum types
 ```
@@ -294,10 +293,10 @@ The schema is initialized automatically on first boot from `init-db/001_schema.s
 | `accounts` | Reference data — account name, firm, type |
 | `clearing_firms` | Reference data — clearing firm names |
 | `orders` | Order archive with full order parameters |
-| `executions` | Execution reports (single-table inheritance via `exec_type`) |
+| `executions` | Unused: nothing writes execution reports to Postgres, which mirrors orders and reference data alone (#575, #599) |
 | `audit_log` | Audit trail with JSONB detail; nothing enforces append-only |
 
-**Indexes** optimized for frontend blotter queries: active orders (partial index), executions by order and time, audit log with GIN index on JSONB.
+**Indexes:** active orders (a partial index), executions by order and time, and the audit log's JSONB detail (GIN). The frontend doesn't query Postgres: it gets everything from the server over WebSocket.
 
 ### An `oms-pgdata` volume from before #151
 
