@@ -10,7 +10,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 
 ### Core Engine
 - **ACID Transactions:** Full transaction support with operation-level rollback on failure
-- **State Machine:** <!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> order states and <!-- DOC_CHECK:transition_count -->49<!-- /DOC_CHECK --> transitions, managed via Boost Meta State Machine (MSM)
+- **State Machine:** <!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> order states and <!-- DOC_CHECK:transition_count -->50<!-- /DOC_CHECK --> transitions, managed via Boost Meta State Machine (MSM)
 - **Order Matching:** Price-time priority matching engine with per-instrument order books
 - **Stop Orders:** `STOP` and `STOPLIMIT` orders wait in a per-instrument stop book until a trade reaches their stop price, then trade as market or limit orders
 - **Deferred Event Chaining:** A decision queues the events that follow from it, run in the same transaction or the next: a trade's fills, a sweep's next match, the release of the held stops a trade reaches, and the engine's cancel of what an order that never rests couldn't trade
