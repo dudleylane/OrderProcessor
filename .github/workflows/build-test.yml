@@ -93,7 +93,8 @@ jobs:
       - name: Build QuickFIX at the image's ref (cached)
         # FIX ON builds against the QuickFIX the server image ships: QUICKFIX_REF in
         # docker/Dockerfile.oms-server, built by scripts/build-quickfix.sh under the runner's home and
-        # rebuilt only when the ref or the compiler changes (#178). CMake searches the
+        # rebuilt when the ref, the compiler or that script changes (#178): the key ends with a hash of
+        # the script, which had changed nothing until the ref or compiler did (#562). CMake searches the
         # CMAKE_PREFIX_PATH environment variable before /usr/local, so the QuickFIX the runner host
         # has installed, which changes outside this repository, isn't used.
         if: matrix.fix == 'ON'
@@ -101,7 +102,8 @@ jobs:
         run: |
           REF="$(sed -n 's/^ARG QUICKFIX_REF=//p' docker/Dockerfile.oms-server | tr -d '\r')"
           [ -n "$REF" ] || { echo "::error::docker/Dockerfile.oms-server pins no QUICKFIX_REF (#178)"; exit 1; }
-          PREFIX="$HOME/.cache/orderprocessor/quickfix-$REF-gcc$(g++ -dumpfullversion)"
+          RECIPE_KEY=$(sha256sum scripts/build-quickfix.sh | cut -c1-12)
+          PREFIX="$HOME/.cache/orderprocessor/quickfix-$REF-gcc$(g++ -dumpfullversion)-$RECIPE_KEY"
           # Another runner's FIX ON job may find the cache cold at the same time (#736): under the lock, the second
           # waits for the first, and finds it built
           mkdir -p "$(dirname "$PREFIX")"

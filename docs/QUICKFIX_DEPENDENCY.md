@@ -31,8 +31,9 @@ the library and its SSL dependencies from one installation.
 
 ## Installed files
 
-`PREFIX` is `/usr/local` in the image, and `~/.cache/orderprocessor/quickfix-REF-gccVERSION` in CI
-(the runner's home, kept between jobs and rebuilt only when the ref or the compiler changes).
+`PREFIX` is `/usr/local` in the image, and `~/.cache/orderprocessor/quickfix-REF-gccVERSION-KEY` in
+CI (the runner's home, kept between jobs and rebuilt when the ref, the compiler or the build script
+changes: KEY is the first 12 hex digits of `scripts/build-quickfix.sh`'s SHA-256, #562).
 
 | Property | Value |
 |----------|-------|
@@ -114,7 +115,8 @@ needs no root, and leaves the host's `/usr/local` alone:
 
 ```bash
 REF=$(sed -n 's/^ARG QUICKFIX_REF=//p' docker/Dockerfile.oms-server | tr -d '\r')
-PREFIX=~/.cache/orderprocessor/quickfix-$REF-gcc$(g++ -dumpfullversion)
+KEY=$(sha256sum scripts/build-quickfix.sh | cut -c1-12)
+PREFIX=~/.cache/orderprocessor/quickfix-$REF-gcc$(g++ -dumpfullversion)-$KEY
 [ -f "$PREFIX/quickfix-ref" ] || scripts/build-quickfix.sh "$REF" "$PREFIX"
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_FIX=ON -DCMAKE_PREFIX_PATH="$PREFIX"
 ```
