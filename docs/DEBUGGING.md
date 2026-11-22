@@ -1,26 +1,42 @@
 # Debugging, Profiling & Production Tracing
 
-Reference material extracted from `CLAUDE.md` to keep that file under the size threshold Claude Code applies on every turn. Use this when actively debugging, profiling, or tracing — not on every change.
+Recipes for debugging, profiling and tracing the engine and the server. Use this when actively debugging, profiling, or tracing — not on every change. Each recipe names the build it needs: a Release build (`build/`, as the pre-push hook configures it) or a sanitizer build (below).
 
 ## Tooling
 
 ### Sanitizer Builds
 
-```bash
-# ASan + UBSan (memory errors, buffer overflows, undefined behavior)
-cmake .. -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+As CI's sanitizer jobs build them (`.github/workflows/sanitizers.yml`), from the repository's root:
 
-# TSan (data race detection — cannot combine with ASan)
-cmake .. -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer"
+```bash
+# ASan + UBSan (memory errors, buffer overflows, undefined behavior). GCC's undefined group leaves out
+# float-cast-overflow, the check that found #16's client-controlled narrowing, so it is named (#589).
+cmake -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_BENCHMARKS=ON -DBUILD_FUZZ=ON \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined,float-cast-overflow -fno-omit-frame-pointer -g" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined,float-cast-overflow" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined,float-cast-overflow"
+cmake --build build-asan
+ASAN_OPTIONS="abort_on_error=1:halt_on_error=1:detect_leaks=1" UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1" \
+  ctest --test-dir build-asan --output-on-failure -j1
+
+# TSan (data race detection — cannot combine with ASan). It needs a oneTBB built with -fsanitize=thread: the system's
+# isn't instrumented, so TSan can't see the scheduler's hand-overs inside libtbb and reports every one as a race
+# (hundreds of reports, none real). The workflow's "Build TSan-instrumented oneTBB" step builds it, at the tag that
+# matches tbb-devel, under ~/.cache/orderprocessor/; point CMAKE_PREFIX_PATH at that prefix.
+cmake -B build-tsan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_BENCHMARKS=OFF -DCMAKE_PREFIX_PATH=<instrumented oneTBB> \
+  -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread"
+cmake --build build-tsan
+ldd build-tsan/orderProcessorTest | grep libtbb   # must show libtbb_debug.so.12 from the instrumented prefix
+TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1" ctest --test-dir build-tsan --output-on-failure -j1
 ```
 
 ### perf Profiling
 
 ```bash
-# Record hot-path execution (requires perf_event_paranoid <= 1)
-perf record -g ./build/orderProcessorBench --benchmark_filter="EventProcessing"
+# Record hot-path execution (requires perf_event_paranoid <= 1). A Release build omits the frame pointer
+# (-fomit-frame-pointer), so unwind with DWARF: plain -g follows frame pointers, and its call graphs stop short.
+perf record --call-graph dwarf ./build/orderProcessorBench --benchmark_filter="BM_Process"
 
 # Analyze call graph
 perf report --sort=dso,symbol
@@ -29,7 +45,7 @@ perf report --sort=dso,symbol
 perf stat -e cache-references,cache-misses,L1-dcache-load-misses,branch-misses,instructions ./build/orderProcessorBench
 
 # Flamegraph workflow
-perf record -F 99 -g --call-graph dwarf ./build/orderProcessorBench --benchmark_filter="EventProcessing" -- sleep 10
+perf record -F 99 --call-graph dwarf ./build/orderProcessorBench --benchmark_filter="BM_Process"
 perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
 ```
 
@@ -63,11 +79,12 @@ clang-tidy -p build src/Processor.cpp \
 ### Codegen Verification
 
 ```bash
+# A Release build's objects hold LTO bytecode, not machine code, so read the linked binary, not liborderEngine.a
 # Verify _mm_pause() emits PAUSE instruction in CAS loops
-objdump -d build/liborderEngine.a | grep -A5 pause
+objdump -d build/orderProcessorBench | grep -A5 pause
 
 # Check for unexpected heap allocations (operator new calls in hot path)
-objdump -d build/liborderEngine.a | grep -B5 'operator new'
+objdump -d build/orderProcessorBench | grep -B5 'operator new'
 
 # Verify LTO inlining worked
 nm build/orderProcessorBench | grep -c 'TransactionScopePool'
@@ -93,19 +110,20 @@ LD_LIBRARY_PATH=$GCC15/lib64 UBSAN_OPTIONS=print_stacktrace=1 \
   ./build-fuzz/test/fuzz/fuzzClientMessage -max_total_time=600 -max_len=8192 -timeout=10 \
   -artifact_prefix=/tmp/fuzz-artifacts/ /tmp/fuzz-work test/fuzz/corpus/client_message
 
-# One-shot replay of the seed corpus (any compiler; under GCC the target links a standalone driver)
+# One-shot replay of the seed corpus (any compiler; under GCC the target links a standalone driver, and
+# float-cast-overflow is named, since GCC's undefined group leaves it out, #589)
 cmake -B build-fuzz-gcc -G Ninja -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_APP=OFF -DBUILD_FUZZ=ON \
-  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
-  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined,float-cast-overflow -fno-omit-frame-pointer -g" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined,float-cast-overflow"
 cmake --build build-fuzz-gcc --target fuzzClientMessage
 ctest --test-dir build-fuzz-gcc -R FuzzCorpus --output-on-failure
 ```
 
 - Pass a scratch directory first and the tracked seed directory second: libFuzzer writes every new unit into the first directory, and `test/fuzz/corpus/` must stay as committed.
-- Clang's `-fsanitize=undefined` includes `float-cast-overflow`; GCC's does not, so only a Clang replay catches an unchecked float-to-integer conversion. The seeds `negative_and_huge_numbers.json` and `orderid_beyond_u64.json` found one in the parser (#16). Since f584255 they parse to a rejection under both compilers, and they stay in the corpus as its regression inputs.
+- Clang's `-fsanitize=undefined` includes `float-cast-overflow`; GCC's does not, so the GCC recipes here and CI's ASan job name it (#589), and a GCC replay catches an unchecked float-to-integer conversion too. The seeds `negative_and_huge_numbers.json` and `orderid_beyond_u64.json` found one in the parser (#16). Since f584255 they parse to a rejection under both compilers, and they stay in the corpus as its regression inputs.
 - To add a seed, drop a file into `test/fuzz/corpus/client_message/`; the ctest entry picks it up on reconfigure. Crashes land under `-artifact_prefix`; commit a minimised reproducer to the corpus together with the fix.
-- Contract under test: `parseClientMessage()` returns for every input and never throws. `WsSession::handleMessage()` calls it from a Beast read handler with no try/catch, so anything escaping would take the server down; the harness turns an escaping exception into an abort.
+- Contract under test: `parseClientMessage()` returns for every input and never throws. `WsSession::handleMessage()` calls it from a Beast read handler, which since #36 catches what escapes, logs it and goes on; the harness turns an escaping exception into an abort, so the parser's contract stays checked.
 
 ### cppcheck
 
@@ -154,18 +172,18 @@ coredumpctl dump <pid> -o core.dump       # Export core file
 
 ### Build for Debuggable Crash Dumps
 
-Production builds use `-O3`. For crash-debuggable builds, retain optimizations with full debug info:
+Production builds use `-O3`. For crash-debuggable builds, retain optimizations with full debug info. Use the build type `None`, not `RelWithDebInfo`: for `Release` and `RelWithDebInfo` the project adds `-O3`, `-flto` and `-fomit-frame-pointer` after `CMAKE_CXX_FLAGS` on the compile line, and CMake adds `-O2 -g`, so those win and the recipe's flags do nothing. With `None` the compile line carries the recipe's flags and the project's warnings alone:
 
 ```bash
 cmake -B build-crash -G Ninja \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DCMAKE_CXX_FLAGS="-O2 -g3 -fno-omit-frame-pointer -fno-inline-small-functions"
+  -DCMAKE_BUILD_TYPE=None \
+  -DCMAKE_CXX_FLAGS="-O2 -g3 -DNDEBUG -fno-omit-frame-pointer -fno-inline-small-functions"
 ```
 
 - `-g3` provides full debug info including macro definitions
 - `-fno-omit-frame-pointer` ensures complete stack traces
 - `-fno-inline-small-functions` keeps function names visible in backtraces
-- Keep `-O2` (not `-O0`) to reproduce optimization-dependent crashes
+- Keep `-O2` (not `-O0`) to reproduce optimization-dependent crashes, and `-DNDEBUG` to compile what a Release build compiles
 
 ### GDB Post-Mortem Workflow
 
@@ -203,13 +221,16 @@ gdb ./build/orderProcessorServer /var/crash/core.orderProcessorServer.12345.1710
 valgrind --tool=memcheck --track-origins=yes --leak-check=full \
   --show-leak-kinds=all ./build/orderProcessorTest
 
-# ASan with core dump on error (instead of just aborting)
+# ASan with core dump on error (instead of just aborting): the sanitizer build's binary, not the Release one, which has
+# no ASan and ignores ASAN_OPTIONS
 ASAN_OPTIONS="abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1" \
-  ./build/orderProcessorTest
+  ./build-asan/orderProcessorTest
 
-# Detect use-after-free in pool allocators — enable quarantine
+# A larger quarantine keeps freed memory poisoned longer, so a use long after its free is caught. It covers only what
+# free and delete return: the transaction scope pool, NodePool and the scopes' arenas reuse memory without telling ASan,
+# so a use after a slot, node or arena block goes back to its pool reads live memory unreported (#586)
 ASAN_OPTIONS="quarantine_size_mb=256:abort_on_error=1" \
-  ./build/orderProcessorTest
+  ./build-asan/orderProcessorTest
 
 # GDB watchpoint on corrupted address (when you know WHAT is getting corrupted)
 (gdb) watch *(uint64_t*)0x7ffff7001234    # Break when this address changes
@@ -235,10 +256,15 @@ ASAN_OPTIONS="quarantine_size_mb=256:abort_on_error=1" \
 
 Insert printf-style output at any location without recompilation — the direct replacement for adding print statements:
 
+It needs a build with debug info, such as build-crash above or a sanitizer build: a Release build has none, so `evnt`
+can't be read. Name a function rather than a line: lines move with every change to the file (#572 found these recipes
+pointing at a class declaration and a brace). An order's id is an `IdT`, a struct of the number and a date: print its
+`id_` where it has one.
+
 ```bash
-# Trace Processor event handling
-(gdb) dprintf src/Processor.cpp:87, "onEvent: orderId=%lu status=%d\n", evnt.order_->orderId_, evnt.order_->status_
-(gdb) dprintf src/Processor.cpp:110, "process_event complete, state persisted\n"
+# Trace Processor event handling: each new order as the processor takes it, before it is stored, so its orderId_ is
+# still 0 here and its price and quantity are what tell orders apart
+(gdb) dprintf 'COP::Proc::Processor::onEvent(std::string const&, COP::Queues::OrderEvent const&)', "onEvent: price=%f qty=%u status=%d\n", evnt.order_->price_, evnt.order_->orderQty_, evnt.order_->status_
 
 # Output to file (avoid console overhead)
 (gdb) set dprintf-style call
@@ -246,10 +272,10 @@ Insert printf-style output at any location without recompilation — the direct 
 (gdb) set dprintf-channel stderr
 
 # Breakpoint commands for complex logic (conditional logging, counters)
-(gdb) break src/Processor.cpp:87
+(gdb) break 'COP::Proc::Processor::onEvent(std::string const&, COP::Queues::OrderEvent const&)'
 (gdb) commands
 > silent
-> printf "onEvent: orderId=%lu\n", evnt.order_->orderId_
+> printf "onEvent: price=%f\n", evnt.order_->price_
 > continue
 > end
 
