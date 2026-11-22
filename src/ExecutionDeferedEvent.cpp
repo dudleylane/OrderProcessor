@@ -161,10 +161,10 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
     assert(nullptr != cnxt.orderMatch_);
     cnxt.orderMatch_->afterTrade(baseOrder_, baseBefore, lastPrint, cnxt);
 
-    // The last trade names every release pending on the instrument, not only this trade's (#518): a sweep decides all its
-    // trades before any release they queue runs, and another order's booking, enqueued before those releases, runs
-    // before them and can trade first. A release is pending only for a held stop, so an instrument that holds none takes
-    // no lock.
+    // The last trade names every release pending on the instrument, not only this trade's (#518): a sweep decides all
+    // its trades before any release they queue runs, and another order's booking, enqueued before those releases, runs
+    // before them and can trade first. A release is pending only for a held stop, so an instrument that holds none
+    // takes no lock.
     const SourceIdT instrument = baseOrder_->instrument_.getId();
     if ((nullptr != lastTrade) && cnxt.orderBook_->holdsStops(instrument)) [[unlikely]]
     {

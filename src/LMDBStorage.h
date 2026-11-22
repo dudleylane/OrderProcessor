@@ -53,8 +53,8 @@ public:
     /// ERASE_BATCH versions to a transaction, where erase(id, version) takes one each (#597)
     void eraseVersions(const std::vector<std::pair<IdT, u32>> &versions) override;
     Newest loadNewest(const IdT &id, std::vector<char> *buf) override;
-    /// A thread's group (#163): between beginGroup() and commitGroup(), update() works out each record's new version and
-    /// holds it, and commitGroup() writes them all in one transaction. The versions update() returns are the ones
+    /// A thread's group (#163): between beginGroup() and commitGroup(), update() works out each record's new version
+    /// and holds it, and commitGroup() writes them all in one transaction. The versions update() returns are the ones
     /// written. A record may be updated once in a group: a transaction's scope persists a record once (#632).
     void beginGroup() override;
     void commitGroup() override;

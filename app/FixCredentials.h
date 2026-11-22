@@ -56,8 +56,8 @@ public:
     /// Whether a counterparty may trade the account
     static bool mayTrade(const FixCounterparty &counterparty, std::string_view account);
 
-    /// A password's stored form: "pbkdf2-sha256$<iterations>$<salt>$<key>", salt and key in hex, with PBKDF2-HMAC-SHA256
-    /// over a random 16-byte salt and a 32-byte key
+    /// A password's stored form: "pbkdf2-sha256$<iterations>$<salt>$<key>", salt and key in hex, with
+    /// PBKDF2-HMAC-SHA256 over a random 16-byte salt and a 32-byte key
     static std::string hashPassword(std::string_view password, unsigned iterations = DEFAULT_ITERATIONS);
     /// The same with a given salt, which tests use for a known answer
     static std::string hashPassword(std::string_view password, unsigned iterations, std::string_view salt);

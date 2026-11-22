@@ -38,7 +38,8 @@ namespace
 {
 
 /// The messages a flooding client sends at once. The IO thread then reads most of them from what it has already
-/// received, so the work around each message is nearly all it does, and a check made after each costs the largest share.
+/// received, so the work around each message is nearly all it does, and a check made after each costs the largest
+/// share.
 const u32 BURST = 64;
 
 /// A cancel of an order number no order has: the lightest message that reaches the engine's queue (the parse, a lookup
@@ -190,10 +191,10 @@ private:
 
 } // namespace
 
-/// The IO thread's work for each message a flooding client sends: a WebSocket session's read of a burst of cancels, each
-/// read from the socket or Beast's buffer, parsed, handed to the engine's queue, and followed by the next read. The span
-/// is one burst's (manual time): the client's writes come before it, and the queue is emptied after it. Nothing timed a
-/// session's read until #519, which checks the engine's work in flight before each next read.
+/// The IO thread's work for each message a flooding client sends: a WebSocket session's read of a burst of cancels,
+/// each read from the socket or Beast's buffer, parsed, handed to the engine's queue, and followed by the next read.
+/// The span is one burst's (manual time): the client's writes come before it, and the queue is emptied after it.
+/// Nothing timed a session's read until #519, which checks the engine's work in flight before each next read.
 static void BM_WsSessionReadFlood(benchmark::State &state)
 {
     ServedClient served;

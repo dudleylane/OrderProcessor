@@ -42,7 +42,8 @@ public:
     virtual IdT save(const char *buf, size_t size) = 0;
     virtual void save(const IdT &id, const char *buf, size_t size) = 0;
     /// saves new version of the record and return version. LMDBStorage also erases every version older than the newest
-    /// one it finds, which leaves two: that one and the new one (#148). FileStorage, which is deprecated, keeps them all.
+    /// one it finds, which leaves two: that one and the new one (#148). FileStorage, which is deprecated, keeps them
+    /// all.
     virtual u32 update(const IdT &id, const char *buf, size_t size) = 0;
     /// saves new version of the record and erase existing version.
     /// return 0 if replaced version not exists, returns version otherwise
@@ -52,7 +53,8 @@ public:
     /// erases all versions of record from file
     virtual void erase(const IdT &id) = 0;
     /// Erases each version given, in as few transactions as the storage can (#597): a start that drops closed orders
-    /// erases every version of each at once, and a transaction each is an fsync each. This default erases them one by one.
+    /// erases every version of each at once, and a transaction each is an fsync each. This default erases them one by
+    /// one.
     virtual void eraseVersions(const std::vector<std::pair<IdT, u32>> &versions)
     {
         for (const auto &[id, version] : versions)
@@ -76,9 +78,9 @@ public:
         return Newest::Unknown;
     }
 
-    /// A group of updates written as one (#163): the updates a thread makes between beginGroup() and commitGroup() reach
-    /// the file together, in one transaction, or none of them do. A storage that can't group writes each update at once,
-    /// and these do nothing.
+    /// A group of updates written as one (#163): the updates a thread makes between beginGroup() and commitGroup()
+    /// reach the file together, in one transaction, or none of them do. A storage that can't group writes each update
+    /// at once, and these do nothing.
     virtual void beginGroup() {}
     virtual void commitGroup() {}
     virtual void abortGroup() noexcept {}

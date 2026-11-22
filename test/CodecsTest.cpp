@@ -454,7 +454,8 @@ TEST_F(OrderCodecTest, BothEncodersWriteTheSameRecord)
 }
 
 // A record is written with what the decision it persists left the order with (#411): a fill's transaction can run after
-// a later fill of the order was applied, and the fill's record must not count it. Both encoders write the figures given.
+// a later fill of the order was applied, and the fill's record must not count it. Both encoders write the figures
+// given.
 TEST_F(OrderCodecTest, AnOrderIsWrittenWithTheFiguresGiven)
 {
     SourceIdT instrId = addInstrument("instrument");

@@ -290,10 +290,10 @@ void WsSession::handleMessage(const std::string &msgStr)
     {
         auto &no = msg.newOrder;
 
-        // A side, type, time in force, currency or capacity that is missing, or isn't one of the protocol's values, parses
-        // to INVALID (ClientMessageParser). No such order can be valid (OrderEntry::isValid). Stored to be rejected, it
-        // reached every client with "INVALID" in its fields, a value none of their types has (#166). Refuse it before
-        // anything is stored.
+        // A side, type, time in force, currency or capacity that is missing, or isn't one of the protocol's values,
+        // parses to INVALID (ClientMessageParser). No such order can be valid (OrderEntry::isValid). Stored to be
+        // rejected, it reached every client with "INVALID" in its fields, a value none of their types has (#166).
+        // Refuse it before anything is stored.
         const char *unknown = nullptr;
         if (INVALID_SIDE == no.side)
         {
@@ -416,8 +416,8 @@ void WsSession::handleMessage(const std::string &msgStr)
         auto &so = msg.swapOrder;
 
         // As for new_order (#166): a side, currency or capacity that is missing, or a side, time in force, currency or
-        // capacity that isn't one of the protocol's values, parses to INVALID. Refuse it before anything is stored. A swap
-        // that gives no time in force is GTC (ClientMessageParser).
+        // capacity that isn't one of the protocol's values, parses to INVALID. Refuse it before anything is stored. A
+        // swap that gives no time in force is GTC (ClientMessageParser).
         const char *unknown = nullptr;
         if (INVALID_SIDE == so.side)
         {
@@ -589,8 +589,8 @@ void WsSession::handleMessage(const std::string &msgStr)
             send(serializeError("Replace refused: stopPx is only for a STOP or STOPLIMIT order"));
             return;
         }
-        // A GTD replacement expires at its expireTime, the original's or a new one ahead of it, and only a GTD order has
-        // one (#240)
+        // A GTD replacement expires at its expireTime, the original's or a new one ahead of it, and only a GTD order
+        // has one (#240)
         const TimeInForce tif = ro.hasTif ? ro.tif : replacement->tif_;
         const char *expiryRefusal = nullptr;
         if (GTD_TIF == tif)
@@ -675,8 +675,8 @@ void WsSession::send(std::shared_ptr<const std::string> msg)
     {
         return;
     }
-    // A client that doesn't read made the server keep everything sent to it, without limit (#159). The limit counts what
-    // waits after the client's initial state (#512), and a message is taken whatever its size when nothing does.
+    // A client that doesn't read made the server keep everything sent to it, without limit (#159). The limit counts
+    // what waits after the client's initial state (#512), and a message is taken whatever its size when nothing does.
     if ((writeQueue_.size() > initialMessages_) && (queuedBytes_ + msg->size() > limits_.maxQueuedBytes))
     {
         drop(msg->size());
@@ -747,8 +747,8 @@ OrderEntry *WsSession::findOrder(u64 number, const std::string &clOrdId, bool *a
 {
     *answered = false;
     // Another identity's order is one this session can't name (#225): as if there were none, so the client learns
-    // nothing of it, and a cancel of it reaches the engine as an unknown order. Its account never changes, so it is read
-    // without the order's lock.
+    // nothing of it, and a cancel of it reaches the engine as an unknown order. Its account never changes, so it is
+    // read without the order's lock.
     const auto visible = [this](OrderEntry *order)
     {
         return ((nullptr != order) && maySee(order->account_.getId())) ? order : nullptr;

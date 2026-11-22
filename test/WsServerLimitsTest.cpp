@@ -386,10 +386,10 @@ TEST_F(WsServerLimitsTest, AnOrderSnapshotLargerThanTheLimitIsSentWhole)
     // The state a client gets as it connects was counted against the limit, and queued behind its first message, whose
     // write can't complete while the rest is queued: so an order snapshot larger than the limit dropped every client as
     // it connected, for good once the store had grown past it (#512). The limit counts what waits after that state now.
-    // Here it is 1 MiB. A client that reads connects to 5,000 orders, a snapshot of about 2.3 MB, and gets it whole. One
-    // that doesn't read connects to 10,000, about 4.6 MB, with a receive buffer of 4 KiB: the kernel then holds under
-    // 2 MB of it on loopback, so the rest still waits when the broadcasts come. Building a snapshot takes seconds under
-    // the sanitizers, on the server's one IO thread, so the waits for it are long.
+    // Here it is 1 MiB. A client that reads connects to 5,000 orders, a snapshot of about 2.3 MB, and gets it whole.
+    // One that doesn't read connects to 10,000, about 4.6 MB, with a receive buffer of 4 KiB: the kernel then holds
+    // under 2 MB of it on loopback, so the rest still waits when the broadcasts come. Building a snapshot takes seconds
+    // under the sanitizers, on the server's one IO thread, so the waits for it are long.
     App::WsLimits limits;
     limits.maxQueuedBytes = 1 << 20;
     storeOrders(1, 5000);
@@ -412,8 +412,8 @@ TEST_F(WsServerLimitsTest, AnOrderSnapshotLargerThanTheLimitIsSentWhole)
     ASSERT_TRUE(readUntil(reader, "error", 60s).has_value()) << "the client that reads isn't answered";
 
     // 8 MiB of broadcasts in bursts of eight messages of 64 KiB, each burst read before the next. The client that reads
-    // gets eight times the limit, but never has more than 512 KiB waiting, though a burst queues eight messages; the one
-    // that doesn't is dropped once 1 MiB waits behind its snapshot.
+    // gets eight times the limit, but never has more than 512 KiB waiting, though a burst queues eight messages; the
+    // one that doesn't is dropped once 1 MiB waits behind its snapshot.
     const std::string payload = R"({"type":"test","pad":")" + std::string(64 * 1024, 'x') + R"("})";
     const int bursts = 16;
     const int burst = 8;
@@ -545,8 +545,9 @@ TEST_F(WsServerLimitsTest, AcceptingGoesOnAfterTheProcessRunsOutOfDescriptors)
 TEST_F(WsServerLimitsTest, AFloodingClientIsReadOnlyWhileTheWorkInFlightIsUnderTheBound)
 {
     // A client could send faster than the engine decides and LMDB commits, and the server read it all into the engine's
-    // memory, without limit (#519). Here the bound is 50, and nothing takes the queue's events but the test: the session
-    // stops reading once 50 wait, give or take a millisecond's reads, and reads the rest as the test takes them.
+    // memory, without limit (#519). Here the bound is 50, and nothing takes the queue's events but the test: the
+    // session stops reading once 50 wait, give or take a millisecond's reads, and reads the rest as the test takes
+    // them.
     engineGauge_ = std::make_unique<App::EngineInFlightGauge>(&inQueues_, &noTransactions_, 50); // none pending
     start(App::WsLimits(), engineGauge_.get());
     Client flooder;

@@ -160,8 +160,8 @@ SourceIdT addInstrument(const std::string &name)
 }
 
 /// Stops the transaction manager when the test ends, on a failed assertion's early return too: ~TransactionMgr asserts
-/// it was stopped. Declared after the manager and before the TaskManager, it runs once the TaskManager and its tasks are
-/// gone (#301).
+/// it was stopped. Declared after the manager and before the TaskManager, it runs once the TaskManager and its tasks
+/// are gone (#301).
 class StopWhenDone
 {
 public:
@@ -511,8 +511,8 @@ TEST_F(IntegrationTest, AnOrderForNothingIsRejectedAndTradesNothing)
     inQueues.push("test", OrderEvent(buyOrd.release()));
     ASSERT_TRUE(manager.waitUntilTransactionsFinished(60));
 
-    // Rejected, as the engine rejects any order it can't accept: stored as such, with a REJECT report. The sell is as it
-    // was.
+    // Rejected, as the engine rejects any order it can't accept: stored as such, with a REJECT report. The sell is as
+    // it was.
     OrderEntry *buyOrder = OrderStorage::instance()->locateByClOrderId(buyClOrdId);
     ASSERT_NE(nullptr, buyOrder);
     EXPECT_EQ(REJECTED_ORDSTATUS, buyOrder->status_);

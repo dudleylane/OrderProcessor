@@ -19,8 +19,8 @@ struct ReferenceData
     std::vector<ClearingEntry> clearingFirms;
 };
 
-/// Reads reference data from a JSON object that gives any of "instruments", "accounts" and "clearingFirms", each an array
-/// of entries named as instrument_list and account_list name their fields:
+/// Reads reference data from a JSON object that gives any of "instruments", "accounts" and "clearingFirms", each an
+/// array of entries named as instrument_list and account_list name their fields:
 ///
 ///     { "instruments": [ { "symbol": "AAPL", "securityId": "US0378331005", "securityIdSource": "ISIN" } ],
 ///       "accounts": [ { "account": "TRADING-1", "firm": "Apex Capital", "type": "PRINCIPAL" } ],
@@ -31,9 +31,9 @@ struct ReferenceData
 /// none, as seedData's test set's equities have, and a currency on one that isn't an FX pair is refused.
 ///
 /// Every entry is checked before anything is returned: each field is a string, each entry passes the checks its
-/// isValid() makes, all but the id's, each symbol, account and clearing firm is given once, and a key it doesn't know is
-/// refused, since a misspelt one would drop its field without a word. Anything wrong returns nullopt with the reason in
-/// *error, naming the entry.
+/// isValid() makes, all but the id's, each symbol, account and clearing firm is given once, and a key it doesn't know
+/// is refused, since a misspelt one would drop its field without a word. Anything wrong returns nullopt with the reason
+/// in *error, naming the entry.
 std::optional<ReferenceData> parseReferenceData(const std::string &text, std::string *error);
 
 /// Reads the file at path with parseReferenceData(). A file it can't read is refused too, and *error names the file.

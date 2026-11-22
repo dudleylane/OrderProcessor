@@ -32,8 +32,8 @@ inline constexpr std::size_t MAX_CLIENT_MESSAGE_BYTES = 64 * 1024;
 inline constexpr std::size_t DEFAULT_MAX_IN_FLIGHT = 10'000;
 
 /// What WebSocket clients may hold of the server (#159). The defaults bound what slow clients can make the server keep:
-/// 256 x 16 MiB, at most, and less when they wait on the same broadcasts, which share one copy. Each also holds the state
-/// it got as it connected, its order snapshot included, until it has read it (#512).
+/// 256 x 16 MiB, at most, and less when they wait on the same broadcasts, which share one copy. Each also holds the
+/// state it got as it connected, its order snapshot included, until it has read it (#512).
 struct WsLimits
 {
     /// Clients connected at once. One more is closed as soon as it is accepted.

@@ -181,8 +181,8 @@ FIX::MessageStore *FixCarryingStore::inner() const
 
 std::optional<std::string> FixCarryingStore::restamped(const std::string &message, FIX::SEQNUM seq)
 {
-    // 8=<BeginString>|9=<BodyLength>|<the header's other fields><the body's>|10=<CheckSum>|, where BodyLength counts the
-    // bytes after its own field up to 10=, and CheckSum is the sum of every byte before 10=, modulo 256
+    // 8=<BeginString>|9=<BodyLength>|<the header's other fields><the body's>|10=<CheckSum>|, where BodyLength counts
+    // the bytes after its own field up to 10=, and CheckSum is the sum of every byte before 10=, modulo 256
     const std::size_t lengthField = message.find("\0019=");
     const std::size_t checkSumField = message.rfind("\00110=");
     if ((std::string::npos == lengthField) || (std::string::npos == checkSumField) || (checkSumField <= lengthField))

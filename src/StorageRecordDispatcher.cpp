@@ -78,8 +78,9 @@ void expectFormat(const char *record, u32 formatVersion, u32 newestReadable)
 /// The id limit record's key (#81). The generators never issue id 0, and the only record an earlier build keyed with
 /// id 0 is the empty execution list at (0,0), so (0,1) belongs to no other record.
 const IdT ID_LIMIT_RECORD_ID(0, 1);
-/// The last-trade record's layout (#237): the instrument's id, the price, a double, and the trade's id. An id is its u64
-/// number, then its u32 date. Since format version 1 (#518) a u32 count follows, then each pending release's stop id.
+/// The last-trade record's layout (#237): the instrument's id, the price, a double, and the trade's id. An id is its
+/// u64 number, then its u32 date. Since format version 1 (#518) a u32 count follows, then each pending release's stop
+/// id.
 const size_t RECORD_ID_SIZE = sizeof(u64) + sizeof(u32);
 const size_t LAST_TRADE_RECORD_SIZE = sizeof(u32) + 2 * RECORD_ID_SIZE + sizeof(PriceT);
 void appendId(string *buffer, const IdT &id)
@@ -94,16 +95,16 @@ const char *readId(const char *p, IdT *id)
     memcpy(&id->date_, p, sizeof(id->date_));
     return p + sizeof(id->date_);
 }
-/// Its key: the instrument's number, with date 2. Reference data is keyed with dates 0 and 1, and an order with the Unix
-/// second its id was drawn in, so no other record has it. The instrument's own key must not be used: a new version prunes
-/// every older version of its key (#148), and the instrument's record would go.
+/// Its key: the instrument's number, with date 2. Reference data is keyed with dates 0 and 1, and an order with the
+/// Unix second its id was drawn in, so no other record has it. The instrument's own key must not be used: a new version
+/// prunes every older version of its key (#148), and the instrument's record would go.
 const u32 LAST_TRADE_KEY_DATE = 2;
 IdT lastTradeKey(const SourceIdT &instrument)
 {
     return IdT(instrument.id_, LAST_TRADE_KEY_DATE);
 }
-/// An order that will never trade again (#597): filled, canceled, rejected, expired, or replaced by another. In any other
-/// status it is open, held, suspended, done for the day or still pending, and may.
+/// An order that will never trade again (#597): filled, canceled, rejected, expired, or replaced by another. In any
+/// other status it is open, held, suspended, done for the day or still pending, and may.
 bool closedForGood(OrderStatus status)
 {
     switch (status)
@@ -341,9 +342,10 @@ void StorageRecordDispatcher::finishLoad()
             Codec::OrderCodec::decode(it->first, it->second.formatVersion_, record.data(), record.size(), &carried));
         assert(nullptr != orderStorage_);
         // A closed order of a business day before the kept ones isn't restored, and every version of its record is
-        // erased once the loop ends (#597). Its day is the one its day figures are for (#244), which a fill in a later day
-        // and each day's restatement move on, so a closed order's is the day it closed. A record from before format 4
-        // has none, and its creation's time stands for it: a time compares with a day's start as the day it is in does.
+        // erased once the loop ends (#597). Its day is the one its day figures are for (#244), which a fill in a later
+        // day and each day's restatement move on, so a closed order's is the day it closed. A record from before format
+        // 4 has none, and its creation's time stands for it: a time compares with a day's start as the day it is in
+        // does.
         const DateTimeT day = (0 != order->dayStart_) ? order->dayStart_ : order->creationTime_;
         if ((0 != dropClosedBefore_) && closedForGood(order->status_) && (day < dropClosedBefore_))
         {
@@ -439,9 +441,9 @@ void StorageRecordDispatcher::finishLoad()
         fileStorage_->eraseVersions(droppedVersions);
     }
 
-    // The held stops whose releases a crash lost (#237). A trade's release is a transaction of its own, after the trade's,
-    // so a crash between the two leaves a stop held that the trade reached. Only a stop that was held when the trade was
-    // made: one that arrived after it waits for the next trade, as it would have.
+    // The held stops whose releases a crash lost (#237). A trade's release is a transaction of its own, after the
+    // trade's, so a crash between the two leaves a stop held that the trade reached. Only a stop that was held when the
+    // trade was made: one that arrived after it waits for the next trade, as it would have.
     stopsReached_.clear();
     if (nullptr != orderBook_)
     {
@@ -605,9 +607,9 @@ void StorageRecordDispatcher::erase(const IdT &orderId, u32 version)
 #ifdef BUILD_PG
     if (pgWriter_)
     {
-        // Postgres follows LMDB back (#151): to the newest version a rollback left, or to no row when it left none. save()
-        // had mirrored the erased version already. This runs inside a rollback, whose remaining steps an exception would
-        // skip, so it never throws.
+        // Postgres follows LMDB back (#151): to the newest version a rollback left, or to no row when it left none.
+        // save() had mirrored the erased version already. This runs inside a rollback, whose remaining steps an
+        // exception would skip, so it never throws.
         try
         {
             std::vector<char> record;

@@ -100,8 +100,8 @@ void addUnbooking(const OrderEntry &order, Scope *transaction)
 
 /// Whether a reject was handed the copy of the order that its event's receive had already stored: a receive that throws
 /// after storing the order. A new market order with nothing to trade with was refused that way (#68) until #436, which
-/// refuses it before it is stored. The machine then passes the stored copy, not the incoming order, and the reject keeps
-/// it rather than storing the order a second time.
+/// refuses it before it is stored. The machine then passes the stored copy, not the incoming order, and the reject
+/// keeps it rather than storing the order a second time.
 bool alreadyStored(const OrderEntry *order, const OrderEntry *received, OrderDataStorage *storage)
 {
     if ((nullptr == order) || (order == received))
@@ -164,8 +164,8 @@ const char *OrderStatePersistence::restore(const char *buf, size_t size)
     ++p;
     memcpy(&stateZone2Id_, p, sizeof(stateZone2Id_));
     p += sizeof(stateZone2Id_);
-    // MSM indexes its state table by these ids without checking them, so an id that isn't a state of this build would be
-    // undefined behaviour the first time the order is processed (#150)
+    // MSM indexes its state table by these ids without checking them, so an id that isn't a state of this build would
+    // be undefined behaviour the first time the order is processed (#150)
     if ((stateZone1Id_ < 0) || (ORDER_STATE_COUNT <= stateZone1Id_) || (stateZone2Id_ < 0) ||
         (ORDER_STATE_COUNT <= stateZone2Id_))
     {

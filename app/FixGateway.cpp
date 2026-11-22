@@ -110,9 +110,9 @@ OrderFigures figuresOf(const OrderEntry &order)
     oneapi::tbb::spin_rw_mutex::scoped_lock lock(order.entryMutex_, false);
     return OrderFigures(order);
 }
-/// A quantity field (QTY) holding qty, written as the whole number it is (#384, #396): the bytes QuickFIX writes for the
-/// double its constructor takes. That conversion, to 15 significant digits, falls back to double-conversion's bignum
-/// arithmetic for every whole number, about 2,000 instructions a field more than this.
+/// A quantity field (QTY) holding qty, written as the whole number it is (#384, #396): the bytes QuickFIX writes for
+/// the double its constructor takes. That conversion, to 15 significant digits, falls back to double-conversion's
+/// bignum arithmetic for every whole number, about 2,000 instructions a field more than this.
 template <typename QtyField> QtyField quantity(QuantityT qty)
 {
     QtyField field;
@@ -606,8 +606,8 @@ private:
 void FixGateway::onCreate(const FIX::SessionID &sid)
 {
     aux::ExchLogger::instance()->note("FIX session created: " + sid.toString());
-    // Known from now on, logged on or not (#160). The map used to hold a session only while it was logged on, so a report
-    // for its order was dropped while the client was away, and a ResendRequest couldn't get it back.
+    // Known from now on, logged on or not (#160). The map used to hold a session only while it was logged on, so a
+    // report for its order was dropped while the client was away, and a ResendRequest couldn't get it back.
     if (FixCarryingStoreFactory *stores = stores_.load())
     {
         // QuickFIX has made the session's store already, and registers the session before it calls this. The store asks
@@ -657,7 +657,8 @@ void FixGateway::waitForInFlight() const
     // messages wait in its TCP window, as a WebSocket client's do while its session doesn't read (#519). Unlike that
     // read, the wait ends at inFlightWait_: the engine writes a session's reports on its own threads, blocking, so a
     // counterparty that sends and reads on one thread, blocked writing to a session that doesn't read, reads none of
-    // them, and the engine's thread writing one, blocked in turn, could keep the work in flight over the bound for good.
+    // them, and the engine's thread writing one, blocked in turn, could keep the work in flight over the bound for
+    // good.
     const auto deadline = std::chrono::steady_clock::now() + inFlightWait_;
     do
     {
@@ -689,8 +690,8 @@ void FixGateway::toApp(FIX::Message & /*msg*/, const FIX::SessionID & /*sid*/) {
 
 void FixGateway::fromAdmin(const FIX::Message &msg, const FIX::SessionID &sid)
 {
-    // QuickFIX calls this with a Logon before it accepts it, and refuses the Logon if this throws RejectLogon: it answers
-    // with a Logout carrying the text, and disconnects (#147). Before #147 nothing was checked here.
+    // QuickFIX calls this with a Logon before it accepts it, and refuses the Logon if this throws RejectLogon: it
+    // answers with a Logout carrying the text, and disconnects (#147). Before #147 nothing was checked here.
     const FIX::Header &header = msg.getHeader();
     if (!header.isSetField(FIX::FIELD::MsgType) || (FIX::MsgType_Logon != header.getField(FIX::FIELD::MsgType)))
     {
@@ -1031,9 +1032,9 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
         refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION, "Order refused: " + priceRefusal("Price (44)", ordTypeVal));
         return;
     }
-    // A stop order's stop price, StopPx (99) (#223): the engine holds a stop order until a trade reaches it, and refuses
-    // one without a stop price above 0, so the gateway reads it, and refuses a stop order without one first, as it does a
-    // Price (44) no order trades at (#145)
+    // A stop order's stop price, StopPx (99) (#223): the engine holds a stop order until a trade reaches it, and
+    // refuses one without a stop price above 0, so the gateway reads it, and refuses a stop order without one first, as
+    // it does a Price (44) no order trades at (#145)
     double stopPxVal = 0.0;
     if ((STOP_ORDERTYPE == ordTypeVal) || (STOPLIMIT_ORDERTYPE == ordTypeVal))
     {
@@ -1524,9 +1525,9 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
         replacement->price_ = price.getValue();
     }
 
-    // StopPx (99) moves a stop order's stop (#238), checked as a new stop order's is (#223). The type is the original's,
-    // which a replace doesn't change. Whether the stop was already reached is the engine's to decide: a release can run
-    // before the replace does.
+    // StopPx (99) moves a stop order's stop (#238), checked as a new stop order's is (#223). The type is the
+    // original's, which a replace doesn't change. Whether the stop was already reached is the engine's to decide: a
+    // release can run before the replace does.
     FIX::StopPx stopPx;
     if (msg.isSet(stopPx))
     {
@@ -1653,7 +1654,8 @@ FIX50SP2::ExecutionReport FixGateway::answerOrderStatus(const FIX50SP2::OrderSta
     const bool byOrderId = msg.getFieldIfSet(orderId);
     if (!byClOrdId && !byOrderId)
     {
-        // FIX 5.0 SP2 requires neither, and the gateway needs one: answered as fromApp() answers a missing field (380=5)
+        // FIX 5.0 SP2 requires neither, and the gateway needs one: answered as fromApp() answers a missing field
+        // (380=5)
         throw FIX::FieldNotFound(FIX::FIELD::ClOrdID);
     }
 
@@ -2162,12 +2164,12 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
 
 void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std::string &source)
 {
-    // The refusal answers the order or replacement for a request waiting for it (#380), once it's out, as a report does.
-    // evnt names the ClOrdID as it is stored, under the session's key.
+    // The refusal answers the order or replacement for a request waiting for it (#380), once it's out, as a report
+    // does. evnt names the ClOrdID as it is stored, under the session's key.
     const AnsweredOnExit answer(*this, evnt.clOrderId_);
-    // A refused replacement is remembered before the refusal goes out and the requests waiting for it wake, logged on or
-    // not: a cancel or replace that names it is decided against its original (#398). A refused new order's ClOrdID, if
-    // a refused replacement had it, names no order now. Not for a ClOrdID in use, which names another order, nor for
+    // A refused replacement is remembered before the refusal goes out and the requests waiting for it wake, logged on
+    // or not: a cancel or replace that names it is decided against its original (#398). A refused new order's ClOrdID,
+    // if a refused replacement had it, names no order now. Not for a ClOrdID in use, which names another order, nor for
     // another source's: every refusal comes here.
     if (!evnt.duplicateClOrderId_ && source.starts_with(FIX_SOURCE_PREFIX))
     {
@@ -2432,8 +2434,9 @@ void FixGateway::sendCancelReject(const Queues::CancelRejectEvent &evnt, const s
 
 void FixGateway::sendBusinessReject(const IdT &refOrderId, const std::string &reason)
 {
-    // To the session of the order it names, and to nobody else. One that named no order went to every session logged on,
-    // so each got a refusal of an order it never sent (#189). The gateway answers its own refusals with refuseOrder().
+    // To the session of the order it names, and to nobody else. One that named no order went to every session logged
+    // on, so each got a refusal of an order it never sent (#189). The gateway answers its own refusals with
+    // refuseOrder().
     if (!refOrderId.isValid())
     {
         aux::ExchLogger::instance()->warn("FixGateway: a business reject that names no order is not sent: " + reason);
@@ -2638,8 +2641,8 @@ std::optional<std::string> FixGateway::expiryRefusal(const FIX::FieldMap &msg, T
     {
         return std::string("ExpireTime (126) has passed");
     }
-    // A UTCTimestamp goes to 9999, and the engine's expiry thread can't wait past the system clock's last millisecond: a
-    // later time overflowed its wait, and the thread spun holding its lock (#511)
+    // A UTCTimestamp goes to 9999, and the engine's expiry thread can't wait past the system clock's last millisecond:
+    // a later time overflowed its wait, and the thread spun holding its lock (#511)
     if (Proc::ExpiryScheduler::LATEST_TIME < when)
     {
         return std::string("ExpireTime (126) is past 22620411-23:47:16.854, the latest the server can wait until");

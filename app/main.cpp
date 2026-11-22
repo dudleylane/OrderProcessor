@@ -208,8 +208,8 @@ int main(int argc, char *argv[])
     aux::ExchLogger::instance()->setWarnOn(true);
     aux::ExchLogger::instance()->setErrorOn(true);
     // The logger starts with every level on. Notes say what the server does as a whole, or that something was refused:
-    // none is written for an order's normal path (#584). Debug lines are those, and about six per transaction, formatted
-    // inside the transaction manager's lock, so they are off unless --debug asks for them (#76).
+    // none is written for an order's normal path (#584). Debug lines are those, and about six per transaction,
+    // formatted inside the transaction manager's lock, so they are off unless --debug asks for them (#76).
     aux::ExchLogger::instance()->setDebugOn(cfg.debug);
 
     Store::WideDataStorage::create();
@@ -248,8 +248,9 @@ int main(int argc, char *argv[])
         }
     }
 
-    // 2-5. Load the data directory: its reference data, then its orders into a book. Continue the ids past every one issued
-    // before, find the defaults that orders need, and make the dispatcher the storages' saver (app/ServerData.cpp, #165).
+    // 2-5. Load the data directory: its reference data, then its orders into a book. Continue the ids past every one
+    // issued before, find the defaults that orders need, and make the dispatcher the storages' saver
+    // (app/ServerData.cpp, #165).
     App::ServerData data =
         App::loadServerData(cfg.dataDir, static_cast<size_t>(cfg.lmdbMapMb) << 20, ID_RESERVATION_BLOCK,
                             cfg.clearingFirm, cfg.defaultAccount, cfg.keepClosedDays, aux::currentDateTime());
@@ -407,11 +408,11 @@ int main(int argc, char *argv[])
                                           std::to_string(matched) + " of them before taking orders");
     }
 
-    // 9c. A crash after a trade's transaction committed, and before the release of a held stop it reached did, leaves the
-    // stop held, and only a trade releases one (#237). The trade's transaction persisted its instrument's last trade,
-    // which names the releases pending then (#518), and the load found the stops among them still held. Release them
-    // now, after the orders above, whose lost trades came before the lost releases, and before any client can send an
-    // order.
+    // 9c. A crash after a trade's transaction committed, and before the release of a held stop it reached did, leaves
+    // the stop held, and only a trade releases one (#237). The trade's transaction persisted its instrument's last
+    // trade, which names the releases pending then (#518), and the load found the stops among them still held. Release
+    // them now, after the orders above, whose lost trades came before the lost releases, and before any client can send
+    // an order.
     const std::vector<OrderEntry *> &stopsReached = dispatcher->stopsReached();
     if (!stopsReached.empty())
     {

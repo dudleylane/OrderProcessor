@@ -34,10 +34,10 @@ const std::chrono::time_zone *dayZone()
 /// The source the processor sees the timers' events from
 const char *const TIMER_SOURCE = "ExpiryScheduler";
 
-/// Held for every lookup in the zone database. libstdc++'s time_zone fills in its transitions on first use, under a lock
-/// of its own made of atomics inside libstdc++.so (GCC 14's tzdb.cc, RulesCounter), which ThreadSanitizer cannot see.
-/// Two threads asking about a day for the first time at once were reported as a race, and TSan gates CI. This mutex is
-/// one TSan sees, and with the per-thread day below it is taken once a day per thread.
+/// Held for every lookup in the zone database. libstdc++'s time_zone fills in its transitions on first use, under a
+/// lock of its own made of atomics inside libstdc++.so (GCC 14's tzdb.cc, RulesCounter), which ThreadSanitizer cannot
+/// see. Two threads asking about a day for the first time at once were reported as a race, and TSan gates CI. This
+/// mutex is one TSan sees, and with the per-thread day below it is taken once a day per thread.
 std::mutex zoneLock;
 
 /// A business day, from one day end to the next: [start, end)

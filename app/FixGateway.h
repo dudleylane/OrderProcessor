@@ -68,9 +68,9 @@ public:
                Store::OrderDataStorage *orderStorage, SourceIdT defaultClearingId = SourceIdT(),
                SourceIdT defaultAccountId = SourceIdT(), std::chrono::milliseconds answerWait = DEFAULT_ANSWER_WAIT);
 
-    /// Who may log on, and what each counterparty may trade (#147), which the gateway checks from now on: set it before the
-    /// acceptor starts. Throws std::runtime_error if it lists an account the data directory doesn't have. Without it, as
-    /// in tests, every Logon of FIX 5.0 SP2 is accepted and an order trades the account it names.
+    /// Who may log on, and what each counterparty may trade (#147), which the gateway checks from now on: set it before
+    /// the acceptor starts. Throws std::runtime_error if it lists an account the data directory doesn't have. Without
+    /// it, as in tests, every Logon of FIX 5.0 SP2 is accepted and an order trades the account it names.
     void setCredentials(const FixCredentials *credentials);
 
     /// The stores of the sessions QuickFIX makes from now on, to each of which onCreate hands its session, so that the
@@ -104,12 +104,13 @@ public:
 
     /// The ExecutionReport answering an OrderStatusRequest (35=H) from sid (#383), as EP284's section G answers one:
     /// ExecType Order Status (150=I), ExecID 0, and the state of the order the request names among the session's, by
-    /// ClOrdID (11), OrderID (37), or both, which must name the same order. Another session's order is unknown, as for a
-    /// cancel (#71). An unknown order gets OrdStatus Rejected (39=8) with OrdRejReason 5 (G.1.a). One the session sent
-    /// that the engine hasn't acknowledged yet is Pending New (39=A, G.1.c), and a replacement not yet acknowledged is
-    /// its original, Pending Replace (39=E). A replaced order is answered with the order that replaced it, naming the
-    /// one requested in OrigClOrdID (41), as G.1.c does. OrdStatusReqID (790) is echoed. Throws FIX::FieldNotFound for a
-    /// request that names no order by either field. Public so that tests can check it without a session.
+    /// ClOrdID (11), OrderID (37), or both, which must name the same order. Another session's order is unknown, as for
+    /// a cancel (#71). An unknown order gets OrdStatus Rejected (39=8) with OrdRejReason 5 (G.1.a). One the session
+    /// sent that the engine hasn't acknowledged yet is Pending New (39=A, G.1.c), and a replacement not yet
+    /// acknowledged is its original, Pending Replace (39=E). A replaced order is answered with the order that replaced
+    /// it, naming the one requested in OrigClOrdID (41), as G.1.c does. OrdStatusReqID (790) is echoed. Throws
+    /// FIX::FieldNotFound for a request that names no order by either field. Public so that tests can check it without
+    /// a session.
     FIX50SP2::ExecutionReport answerOrderStatus(const FIX50SP2::OrderStatusRequest &msg, const FIX::SessionID &sid);
 
     // Outbound — called by FixOutQueues
@@ -186,8 +187,8 @@ private:
         bool multileg = false;  // a NewOrderMultileg's, whose Pending New is the multileg security's (442=3, #529)
     };
     /// The order a request from source names by ClOrdID, as locateSessionOrder() finds it, and, in *pending, what the
-    /// gateway keeps of it while the engine hasn't answered it, without waiting (#383). Looked for, its record read, and
-    /// looked for again: stored since the first look, it is found by the second.
+    /// gateway keeps of it while the engine hasn't answered it, without waiting (#383). Looked for, its record read,
+    /// and looked for again: stored since the first look, it is found by the second.
     OrderEntry *locateReceivedOrder(const std::string &source, const std::string &clOrdId,
                                     std::optional<Unanswered> *pending) const;
     /// The order the session sent with the ClOrdID stored under key, as the engine's own duplicate check finds one
@@ -218,9 +219,9 @@ private:
     /// The order the gateway learned replaced the one whose ClOrdID is stored under key, whichever order that was, or
     /// nothing when none did, or its report isn't out yet (#383)
     OrderEntry *linkedReplacement(std::string_view key) const;
-    /// The order that replaced original, whose ClOrdID is stored under key, as linkedReplacement() finds it. The link is
-    /// kept by the replaced order's ClOrdID, which a start that drops closed orders frees for a new order (#597), so it
-    /// may name the replacement of an order dropped with that ClOrdID, which isn't one of original.
+    /// The order that replaced original, whose ClOrdID is stored under key, as linkedReplacement() finds it. The link
+    /// is kept by the replaced order's ClOrdID, which a start that drops closed orders frees for a new order (#597), so
+    /// it may name the replacement of an order dropped with that ClOrdID, which isn't one of original.
     OrderEntry *replacementOf(std::string_view key, const IdT &original) const;
     /// How many replacements the gateway knows of, which no chain of them can be longer than (#383)
     size_t knownReplacements() const;
@@ -241,13 +242,13 @@ private:
     /// names it is decided from now on against the order it was to replace, origClOrdId (#398). Both ClOrdIDs as the
     /// client sent them.
     void learnRefusal(const std::string &source, const std::string &clOrdId, const std::string &origClOrdId);
-    /// A new order the session source sent as clOrdId was refused, by the engine or by the gateway: a ClOrdID names what
-    /// the session used it for last, so one a refused replacement had names no order now (#398)
+    /// A new order the session source sent as clOrdId was refused, by the engine or by the gateway: a ClOrdID names
+    /// what the session used it for last, so one a refused replacement had names no order now (#398)
     void forgetRefusal(const std::string &source, const std::string &clOrdId);
     /// The order a cancel or replace from source is decided against when it names, as *clOrdId, a replacement that was
     /// refused: the order that replacement was to replace, "the last non rejected ClOrdID", as EP284's D.2.c decides
-    /// one (#398). *clOrdId is then that order's ClOrdID, which the request's answers name in OrigClOrdID (41). Nothing,
-    /// and *clOrdId as it was, for a ClOrdID of no refused replacement.
+    /// one (#398). *clOrdId is then that order's ClOrdID, which the request's answers name in OrigClOrdID (41).
+    /// Nothing, and *clOrdId as it was, for a ClOrdID of no refused replacement.
     OrderEntry *locateRefusedOriginal(const std::string &source, std::string *clOrdId) const;
     /// The answer to a status request for an order the engine has stored, read under its lock (#383). requested is the
     /// ClOrdID the request named, or empty; pending, what the gateway keeps of the order while the engine hasn't
@@ -330,18 +331,18 @@ public:
     static OrderType toOrdType(char fixOrdType);
     static TimeInForce toTif(char fixTif);
     static Currency toCurrency(const std::string &fixCcy);
-    /// OrderQty (38) as the engine's quantity: a whole number from 1 to the largest QuantityT, or nothing. QuickFIX hands
-    /// a QTY field over as a double with no range check, and converting a double outside QuantityT's range is undefined
-    /// behaviour (#145, as #16 was in the JSON parser).
+    /// OrderQty (38) as the engine's quantity: a whole number from 1 to the largest QuantityT, or nothing. QuickFIX
+    /// hands a QTY field over as a double with no range check, and converting a double outside QuantityT's range is
+    /// undefined behaviour (#145, as #16 was in the JSON parser).
     static std::optional<QuantityT> toQuantity(double orderQty);
     /// Whether an order of ordType can trade at price, a Price (44) or a LegPrice (566): finite, and above zero unless
     /// the order is a market order, which trades at no price of its own. QuickFIX accepts any number of digits in a
     /// PRICE field, and 310 of them convert to infinity (#145).
     static bool isTradablePrice(double price, OrderType ordType);
-    /// A LocalMktDate (YYYYMMDD), as the engine keeps a settlement date: milliseconds since the epoch at midnight UTC of
-    /// that day, as the frontend sends one (#198). Nothing for anything else: not 8 digits, no such day, or before 1970.
-    /// The gateway used to read these fields with std::stoull, as milliseconds: "20261015" was 5.6 hours into 1970, "-5"
-    /// wrapped to 18446744073709551611, and a non-number threw after the order was half stored (#190).
+    /// A LocalMktDate (YYYYMMDD), as the engine keeps a settlement date: milliseconds since the epoch at midnight UTC
+    /// of that day, as the frontend sends one (#198). Nothing for anything else: not 8 digits, no such day, or a day
+    /// before 1970. The gateway used to read these fields with std::stoull, as milliseconds: "20261015" was 5.6 hours
+    /// into 1970, "-5" wrapped to 18446744073709551611, and a non-number threw after the order was half stored (#190).
     static std::optional<DateTimeT> fromLocalMktDate(std::string_view text);
     /// The LocalMktDate of a settlement date the engine keeps: its day in UTC (#198)
     static std::string toLocalMktDate(DateTimeT date);
@@ -409,9 +410,9 @@ public:
     /// (#380): 102=99, OrderID NONE, OrdStatus A (Pending New), the request's ClOrdIDs, and why in Text (58)
     static FIX50SP2::OrderCancelReject buildUnansweredOrderReject(char responseTo, const std::string &clOrdId,
                                                                   const std::string &origClOrdId);
-    /// The OrderCancelReject (35=9) refusing a cancel request (#73): 434=1, CxlRejReason from the engine's reason (0 too
-    /// late, 1 unknown order, 3 a replace pending, 99 other), the order's OrdStatus (8 when the order is unknown), and
-    /// why in Text (58), with clOrdId in ClOrdID (11) and origClOrdId in OrigClOrdID (41).
+    /// The OrderCancelReject (35=9) refusing a cancel request (#73): 434=1, CxlRejReason from the engine's reason (0
+    /// too late, 1 unknown order, 3 a replace pending, 99 other), the order's OrdStatus (8 when the order is unknown),
+    /// and why in Text (58), with clOrdId in ClOrdID (11) and origClOrdId in OrigClOrdID (41).
     static FIX50SP2::OrderCancelReject buildCancelReject(const Queues::CancelRejectEvent &evnt,
                                                          const std::string &orderId, const std::string &clOrdId,
                                                          const std::string &origClOrdId);

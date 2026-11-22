@@ -202,8 +202,8 @@ protected:
         return msg;
     }
 
-    /// An FX swap built as NewOrderMultileg_FxSwap_PushesToQueue builds it; it names no account. Its legs settle on these
-    /// LocalMktDates (#198).
+    /// An FX swap built as NewOrderMultileg_FxSwap_PushesToQueue builds it; it names no account. Its legs settle on
+    /// these LocalMktDates (#198).
     FIX50SP2::NewOrderMultileg makeFxSwap(const std::string &clOrdId, const std::string &nearDate = "20261015",
                                           const std::string &farDate = "20261115")
     {
@@ -263,9 +263,9 @@ protected:
         return msg;
     }
 
-    /// Hands the gateway the engine's refusal of sid's replacement clOrdId of the order origClOrdId, or of its new order
-    /// clOrdId when origClOrdId is empty, as the engine names them, under the session's key (#398), with the original's
-    /// status as the engine saw it, origStatus, when it gives one
+    /// Hands the gateway the engine's refusal of sid's replacement clOrdId of the order origClOrdId, or of its new
+    /// order clOrdId when origClOrdId is empty, as the engine names them, under the session's key (#398), with the
+    /// original's status as the engine saw it, origStatus, when it gives one
     void engineRefuses(const FIX::SessionID &sid, const std::string &clOrdId, const std::string &origClOrdId = "",
                        OrderStatus origStatus = INVALID_ORDSTATUS)
     {
@@ -965,8 +965,8 @@ protected:
 
 TEST_F(FixGatewayStringsTest, NewOrdersAndAReplaceWriteNoStringRecords)
 {
-    // Each FIX order's ClOrdID, source and destination, and a replace's new ClOrdID, were written to storage as they came
-    // in, a commit each; the order's record carries them now (#192)
+    // Each FIX order's ClOrdID, source and destination, and a replace's new ClOrdID, were written to storage as they
+    // came in, a commit each; the order's record carries them now (#192)
     ASSERT_NE(nullptr, saveOrderOf(TEST_SID, "ORD-STR"));
     EXPECT_CALL(saver_, save(testing::An<const RawDataEntry &>())).Times(0);
     EXPECT_CALL(saver_, save(testing::_, testing::An<const StringT &>())).Times(0);
@@ -1012,7 +1012,8 @@ TEST_F(FixGatewayStringsTest, NewOrdersAndAReplaceWriteNoStringRecords)
 
 TEST_F(FixGatewayInboundTest, NewOrderSingle_StopOrdersCarryTheirStopPx)
 {
-    // A stop order's StopPx (99) is its stop price (#223), for a STOP and for a STOP_LIMIT, whose Price (44) is its limit
+    // A stop order's StopPx (99) is its stop price (#223), for a STOP and for a STOP_LIMIT, whose Price (44) is its
+    // limit
     std::vector<OrderEntry *> captured;
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
         .Times(2)
@@ -1043,8 +1044,9 @@ TEST_F(FixGatewayInboundTest, NewOrderSingle_StopOrdersCarryTheirStopPx)
 
 TEST_F(FixGatewayInboundTest, NewOrderSingle_StopOrderWithoutAStopPxNoOrderTradesAt_IsNotQueued)
 {
-    // The gateway never read StopPx before #223's pick, so a FIX stop order reached the engine without a stop price, which
-    // it now refuses. The gateway refuses it first, to its sender, as it does a Price (44) no order trades at (#145).
+    // The gateway never read StopPx before #223's pick, so a FIX stop order reached the engine without a stop price,
+    // which it now refuses. The gateway refuses it first, to its sender, as it does a Price (44) no order trades at
+    // (#145).
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
     auto none = makeNewOrderSingle("STP-NONE", "aaa", FIX::Side_SELL, FIX::OrdType_STOP, 0.0, 100);
     none.removeField(FIX::FIELD::Price);
@@ -1287,8 +1289,8 @@ FIX50SP2::OrderCancelReplaceRequest makeLimitReplace(const std::string &origClOr
 
 TEST_F(FixGatewayInboundTest, NewOrderSingle_AGtdOrderCarriesItsExpireTime)
 {
-    // TimeInForce GTD (59=6) expires at ExpireTime (126) (#240). The gateway never read it, and the engine refuses a GTD
-    // order without an expiry, so every FIX GTD order was rejected.
+    // TimeInForce GTD (59=6) expires at ExpireTime (126) (#240). The gateway never read it, and the engine refuses a
+    // GTD order without an expiry, so every FIX GTD order was rejected.
     OrderEntry *captured = nullptr;
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
         .WillOnce(Invoke(
@@ -1309,8 +1311,8 @@ TEST_F(FixGatewayInboundTest, NewOrderSingle_AGtdOrderCarriesItsExpireTime)
 
 TEST_F(FixGatewayInboundTest, NewOrderSingle_AnExpireTimeTheRulesRefuse_IsNotQueued)
 {
-    // As on WebSocket (#240): a GTD order without ExpireTime, with ExpireDate (432) alone, or with one that has passed, and
-    // an ExpireTime on an order that isn't GTD. Each is refused to its sender before anything is stored.
+    // As on WebSocket (#240): a GTD order without ExpireTime, with ExpireDate (432) alone, or with one that has passed,
+    // and an ExpireTime on an order that isn't GTD. Each is refused to its sender before anything is stored.
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
     const char gtd = FIX::TimeInForce_GOOD_TILL_DATE;
     gateway_->onMessage(makeNewOrderSingle("GTD-NONE", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.25, 100, gtd),
@@ -1443,8 +1445,8 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_AChangeOfOrderType_IsNotQueued)
 TEST_F(FixGatewayInboundTest, ReplaceRequest_ASessionsNewestRefusedReplacementsAreRemembered)
 {
     // A replace that names a refused replacement is decided against the order it was to replace (#398), for each
-    // session's newest REFUSALS_KEPT refusals: one more forgets the session's oldest, which is then an unknown order, as
-    // before #398. Another session's refusals forget none of this session's.
+    // session's newest REFUSALS_KEPT refusals: one more forgets the session's oldest, which is then an unknown order,
+    // as before #398. Another session's refusals forget none of this session's.
     OrderEntry *x = saveOrderOf(TEST_SID, "ORD-X");
     ASSERT_NE(nullptr, x);
     // Remembered, though there is no session to send the refusals to
@@ -1539,10 +1541,10 @@ TEST_F(FixGatewayInboundTest, ReplaceRequest_ARefusalForAClOrdIdInUseTakesNoPlac
 TEST(FixSessionTimeTest, ASessionsDayEndsAt1700NewYork)
 {
     // config/fix.cfg's sessions roll where the engine's business day ends, 17:00 New York (#240, ruled 2026-10-16), and
-    // rolled at 00:00 UTC (#160). QuickFIX reads StartTime and EndTime in local time (UseLocalTime), which the server keeps
-    // New York's; the start must come after the end, as a session whose times are equal rolls at local midnight. The
-    // range is the one QuickFIX's SessionFactory makes from them.
-    // UTC first, whatever the machine's zone is (this one's is New York's): the server's function must set the zone
+    // rolled at 00:00 UTC (#160). QuickFIX reads StartTime and EndTime in local time (UseLocalTime), which the server
+    // keeps New York's; the start must come after the end, as a session whose times are equal rolls at local midnight.
+    // The range is the one QuickFIX's SessionFactory makes from them. UTC first, whatever the machine's zone is (this
+    // one's is New York's): the server's function must set the zone
     ::setenv("TZ", "UTC", 1);
     ::tzset();
     App::useBusinessDayLocalTime();
@@ -1862,8 +1864,8 @@ std::string workingIndicatorOf(const ExecutionEntry &exec, const OrderEntry &ord
 TEST_F(FixGatewayInboundTest, ExecutionReport_WorkingIndicatorSaysWhetherANewOrderIsInTheBook)
 {
     // EP284's E.1.f (#387): a New order held off the book, a stop or stop limit whose stop hasn't been reached, is
-    // acknowledged with WorkingIndicator (636) N, and so restated at a business day's start; its release (150=L) says Y.
-    // A New order booked at once says Y, which E.1.f's state diagram takes as it takes no 636. A report of any other
+    // acknowledged with WorkingIndicator (636) N, and so restated at a business day's start; its release (150=L) says
+    // Y. A New order booked at once says Y, which E.1.f's state diagram takes as it takes no 636. A report of any other
     // status has none.
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
@@ -1899,9 +1901,9 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_WorkingIndicatorSaysWhetherANewOrd
 
 TEST_F(FixGatewayInboundTest, ExecutionReport_AReplacementsWorkingIndicatorFollowsWhatItIs)
 {
-    // A replace is acknowledged with the replacement's report (150=5), New if nothing has filled, which says whether the
-    // replacement is in the book (#387). A held stop's replacement that is a stop order too is held (N); one that is a
-    // limit order is booked at once (Y); a released stop's replacement that is a stop order stays released (Y), as
+    // A replace is acknowledged with the replacement's report (150=5), New if nothing has filled, which says whether
+    // the replacement is in the book (#387). A held stop's replacement that is a stop order too is held (N); one that
+    // is a limit order is booked at once (Y); a released stop's replacement that is a stop order stays released (Y), as
     // Processor::process(onReplace) carries stopTriggered_ over to a stop replacement alone (#223).
     auto replacement = createCorrectOrder(instrumentId1_);
     assignClOrderId(replacement.get());
@@ -2147,8 +2149,8 @@ TEST_F(FixGatewayInboundTest, ExecutionReport_EveryQuantityIsTheBytesQuickFixWri
 
 TEST_F(FixGatewayInboundTest, ExecutionReport_TradeCarriesItsTradeDate)
 {
-    // TradeDate (75), a LocalMktDate: the business day the trade counts in, YYYYMMDD, as the engine keeps it (#258). The
-    // gateway sent none, and the engine's own was 1 for every trade.
+    // TradeDate (75), a LocalMktDate: the business day the trade counts in, YYYYMMDD, as the engine keeps it (#258).
+    // The gateway sent none, and the engine's own was 1 for every trade.
     auto order = createCorrectOrder(instrumentId1_);
     assignClOrderId(order.get());
     auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
@@ -2889,8 +2891,8 @@ protected:
         }
         settings_ = settings;
         sid_ = FIX::SessionID(settings.getString(FIX::BEGINSTRING), settings.getString(FIX::SENDERCOMPID), "CLIENT_A");
-        // A request that waits for its order is ended by the order's answer, then, never by the minute's timeout, unless
-        // a test makes it short (#380)
+        // A request that waits for its order is ended by the order's answer, then, never by the minute's timeout,
+        // unless a test makes it short (#380)
         makeSession(std::chrono::seconds(60));
     }
 
@@ -3287,8 +3289,8 @@ TEST_F(FixtSessionTest, EveryKindOfExecutionReportIsTaken)
 TEST_F(FixtSessionTest, AReplacementAmendedToWhatItsOriginalFilledIsReportedFilled)
 {
     // EP284's C.3.b and C.3.c: a replace to a quantity at or below what the order has filled cancels the rest of it
-    // (#381). The replacement's report is Replaced (150=5) and Filled (39=2), with OrderQty amended to CumQty, which can
-    // be above the one asked for, and LeavesQty 0. Here C.3.c's: 70 asked for, 80 filled.
+    // (#381). The replacement's report is Replaced (150=5) and Filled (39=2), with OrderQty amended to CumQty, which
+    // can be above the one asked for, and LeavesQty 0. Here C.3.c's: 70 asked for, 80 filled.
     ASSERT_NO_FATAL_FAILURE(logOn());
     OrderEntry *order = saveOrderOf(sid_, "ORD-2");
     const std::string origKey = FixGateway::sessionClOrdId(FixGateway::makeSourceString(sid_), "ORD-1");
@@ -3424,8 +3426,8 @@ TEST_F(FixtSessionTest, AReportGivesWhatItsOwnFillLeftTheOrder)
 TEST_F(FixtSessionTest, ARestatementGivesWhatItLeftTheOrder)
 {
     // A restatement's transaction names the order alone, so a booking on the instrument can fill the order before the
-    // restatement's report goes out (#441). The report gives what the restatement left, from the figures the engine gave
-    // it: the day it begins, with nothing done in it yet, and none of the fill that counts in that day.
+    // restatement's report goes out (#441). The report gives what the restatement left, from the figures the engine
+    // gave it: the day it begins, with nothing done in it yet, and none of the fill that counts in that day.
     ASSERT_NO_FATAL_FAILURE(logOn());
     OrderEntry *order = saveOrderOf(sid_, "ORD-1");
     order->tif_ = GTC_TIF; // it traded 20 at 10 on an earlier day, and is restated as a new day begins
@@ -3667,7 +3669,8 @@ TEST_F(FixtSessionTest, AMinQtyOtherThanZeroIsRefusedOnEveryOrderMessage)
 
 TEST_F(FixtSessionTest, AMinQtyOfZeroIsTaken)
 {
-    // 110=0 asks for no minimum, so the order, the swap and the replace each reach the engine, unanswered by the gateway
+    // 110=0 asks for no minimum, so the order, the swap and the replace each reach the engine, unanswered by the
+    // gateway
     // (#516)
     ASSERT_NO_FATAL_FAILURE(logOn());
     std::vector<std::unique_ptr<OrderEntry>> pushed; // never reach an engine
@@ -4145,10 +4148,10 @@ TEST_F(FixtSessionTest, ARefusedReplaceOfAnOrderWhoseFirstReportIsntOutGivesItPe
 TEST_F(FixtSessionTest, AReplaceTheEngineRefusesGivesItsOriginalAsTheEngineSawIt)
 {
     // The engine's refusal of a replace carries the original's status as the engine saw it when it refused (#74), which
-    // can be ahead of the original's last report: here a fill of 40 decided whose report isn't out. The OrderCancelReject
-    // gives the engine's, Partially Filled, where a refusal without it gives the last report's, New (#404, the test
-    // above): it is the status the reject describes the original from (#385). An original the gateway can't find is
-    // given with the engine's status too, and OrderID NONE.
+    // can be ahead of the original's last report: here a fill of 40 decided whose report isn't out. The
+    // OrderCancelReject gives the engine's, Partially Filled, where a refusal without it gives the last report's, New
+    // (#404, the test above): it is the status the reject describes the original from (#385). An original the gateway
+    // can't find is given with the engine's status too, and OrderID NONE.
     ASSERT_NO_FATAL_FAILURE(logOn());
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
     OrderEntry *x = saveOrderOf(sid_, "ORD-X");
@@ -4178,10 +4181,10 @@ TEST_F(FixtSessionTest, ACancelOrReplaceOfAReplacedOrderIsRejectedWithTheOrderWo
 {
     // After Replace (Y,X), a cancel or replace that names X is too late (102=0): X is closed, its quantity moved to Y
     // (#74). Its OrderCancelReject gives the order working in X's place, Y, in OrderID (37) and OrdStatus (39), as a
-    // status request for X is answered with Y (EP284's G.1.c), as ruled (2026-10-26). Before #385 it gave X's own, 39=4,
-    // which a client reads as the order canceled. OrigClOrdID (41) still names X, which the request named. Until Y's
-    // acknowledgement is out the replace is pending for the client: X, Pending Replace (39=E). So for each refusal: the
-    // engine's of a cancel and of a replace, and the gateway's own of a replace whose ClOrdID is in use (#403).
+    // status request for X is answered with Y (EP284's G.1.c), as ruled (2026-10-26). Before #385 it gave X's own,
+    // 39=4, which a client reads as the order canceled. OrigClOrdID (41) still names X, which the request named. Until
+    // Y's acknowledgement is out the replace is pending for the client: X, Pending Replace (39=E). So for each refusal:
+    // the engine's of a cancel and of a replace, and the gateway's own of a replace whose ClOrdID is in use (#403).
     ASSERT_NO_FATAL_FAILURE(logOn());
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
     OrderEntry *x = saveOrderOf(sid_, "ORD-X");
@@ -4313,10 +4316,11 @@ void expectDuplicateReject(const FIX::Message &reject, const std::string &clOrdI
 
 TEST_F(FixtSessionTest, ANewOrderThatRepeatsAClOrdIdStillOnItsWayIsRefusedAsPendingNew)
 {
-    // A new order that repeats the ClOrdID of one the engine hasn't acknowledged is refused at once as a duplicate, with
-    // the first order's status, Pending New (39=A) with its OrderQty, and no OrderID until the engine stores it (#382).
-    // It never reaches the engine, where it was refused as a duplicate or, stored first, refused the first order. A
-    // status request is answered with the first order meanwhile (#383), then New once its acknowledgement is out.
+    // A new order that repeats the ClOrdID of one the engine hasn't acknowledged is refused at once as a duplicate,
+    // with the first order's status, Pending New (39=A) with its OrderQty, and no OrderID until the engine stores it
+    // (#382). It never reaches the engine, where it was refused as a duplicate or, stored first, refused the first
+    // order. A status request is answered with the first order meanwhile (#383), then New once its acknowledgement is
+    // out.
     ASSERT_NO_FATAL_FAILURE(logOn());
     std::unique_ptr<OrderEntry> pushed; // never reaches an engine
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
@@ -4493,8 +4497,8 @@ TEST_F(FixtSessionTest, AClOrdIdADroppedOrderFreedNamesTheNewOrderAlone)
 {
     // A start that drops closed orders frees their ClOrdIDs for new orders (#597), while the link the gateway learned
     // from a kept replacement still names the dropped order's. A new order of that ClOrdID, replaced, with its
-    // replacement's acknowledgement not out yet, is Pending Replace for the client, in a status answer and in a cancel's
-    // reject alike: never the dropped order's replacement, which has nothing to do with it.
+    // replacement's acknowledgement not out yet, is Pending Replace for the client, in a status answer and in a
+    // cancel's reject alike: never the dropped order's replacement, which has nothing to do with it.
     OrderEntry *y = saveOrderOf(sid_, "ORD-Y");
     const std::string source = FixGateway::makeSourceString(sid_);
     const std::string droppedKey = FixGateway::sessionClOrdId(source, "ORD-X");
@@ -4764,10 +4768,11 @@ TEST_F(FixtSessionTest, TheEnginesRefusalOfADuplicateCarriesTheStateOfTheOrderTh
 
 TEST_F(FixtSessionTest, AReplaceWhoseClOrdIdIsInUseIsRefusedBeforeTheEngine)
 {
-    // Replace (Y,X) with a Y the session already uses, for an order stored or still on its way, or X's own, is refused at
-    // once with an OrderCancelReject, 434=2 and CxlRejReason 102=6, describing X, as the engine refuses it (#403). It
-    // never reaches the engine. Left to the engine, the replacement held Y in the record until that refusal, and a
-    // status request for Y was answered with X, Pending Replace (39=E): here each is answered with the order that has Y.
+    // Replace (Y,X) with a Y the session already uses, for an order stored or still on its way, or X's own, is refused
+    // at once with an OrderCancelReject, 434=2 and CxlRejReason 102=6, describing X, as the engine refuses it (#403).
+    // It never reaches the engine. Left to the engine, the replacement held Y in the record until that refusal, and a
+    // status request for Y was answered with X, Pending Replace (39=E): here each is answered with the order that has
+    // Y.
     ASSERT_NO_FATAL_FAILURE(logOn());
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
     std::unique_ptr<OrderEntry> pushed; // never reaches an engine
@@ -4946,10 +4951,10 @@ TEST_F(FixtSessionTest, ARefusalForAClOrdIdInUseIsNotRemembered)
 
 TEST_F(FixtSessionTest, ARefusedReplacementsClOrdIdNamesWhatItWasLastSentFor)
 {
-    // A ClOrdID names what the session sent it for last (#398). A refused replacement's, sent again for a new order that
-    // is refused too, by the gateway or by the engine, names no order: a request that names it is answered as unknown
-    // (102=1), not decided against the order the replace was for. Sent again for another replace that is refused, it
-    // names the order that replace was for.
+    // A ClOrdID names what the session sent it for last (#398). A refused replacement's, sent again for a new order
+    // that is refused too, by the gateway or by the engine, names no order: a request that names it is answered as
+    // unknown (102=1), not decided against the order the replace was for. Sent again for another replace that is
+    // refused, it names the order that replace was for.
     ASSERT_NO_FATAL_FAILURE(logOn());
     OrderEntry *x = saveOrderOf(sid_, "ORD-X");
     setState(x, PARTFILL_ORDSTATUS, 100, 40, 60);
@@ -5071,9 +5076,9 @@ TEST_F(FixtSessionTest, AHeldStopSaysItIsNotWorkingUntilItsRelease)
 
 TEST_F(FixtSessionTest, TheGatewayHandsEachStoreItsSession)
 {
-    // The server's store tells a report its client was sent from one it wasn't, which it keeps for the next session day,
-    // by asking the session whether the client is logged on: the gateway hands it the session as QuickFIX makes it, and
-    // until then every report would count as unsent (#513)
+    // The server's store tells a report its client was sent from one it wasn't, which it keeps for the next session
+    // day, by asking the session whether the client is logged on: the gateway hands it the session as QuickFIX makes
+    // it, and until then every report would count as unsent (#513)
     FixCarryingStore *store = stores_->storeOf(sid_);
     ASSERT_NE(nullptr, store);
     auto report = [](const std::string &execId)

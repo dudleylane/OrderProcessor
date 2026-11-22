@@ -661,8 +661,8 @@ TEST_F(FxSwapTest, AnOutrightFoksCheckPassesOverASwap)
 TEST_F(FxSwapTest, AFokSwapsCheckPassesOverWhatItsSweepPassesOver)
 {
     // Ahead of the sell swap that fills the FOK buy swap, with a better near price, one order the swap's sweep passes
-    // over: an outright sell, a sell swap of other dates, or a sell swap of the buy's dates whose far price doesn't cross
-    // (the buyer of the near leg sells the far one, here at 1.0872, which this swap buys at 1.0860)
+    // over: an outright sell, a sell swap of other dates, or a sell swap of the buy's dates whose far price doesn't
+    // cross (the buyer of the near leg sells the far one, here at 1.0872, which this swap buys at 1.0860)
     OrderEntry *fills = createAndSaveSwapOrder(SELL_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
     fills->status_ = NEW_ORDSTATUS;
     orderBook_->add(*fills);

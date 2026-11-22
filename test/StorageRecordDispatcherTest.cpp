@@ -1694,10 +1694,10 @@ TEST_F(StorageRecordDispatcherTest, OrderRecordsAreSkippedWithoutOrderStorage)
 // =============================================================================
 //
 // Records as the dispatcher and its codecs wrote them before #149 changed anything: the 4-byte record type, then the
-// codec's fields, in x86-64 byte order (little-endian, an 8-byte size_t), as the format has always been. The tests above
-// encode and decode with the same build, so a layout change passes them and then misreads, or fails to load, every data
-// directory already written. These keep today's bytes: the build must still write them, and still read every field
-// back from them.
+// codec's fields, in x86-64 byte order (little-endian, an 8-byte size_t), as the format has always been. The tests
+// above encode and decode with the same build, so a layout change passes them and then misreads, or fails to load,
+// every data directory already written. These keep today's bytes: the build must still write them, and still read every
+// field back from them.
 //
 // To change a format on purpose, give the codec a new FORMAT_VERSION, keep reading the old one, and add golden records
 // for the new one beside these. Run the suite with GOLDEN_PRINT=1 to print what the build writes.
@@ -2267,8 +2267,8 @@ const std::vector<std::pair<IdT, const char *>> &goldenLoadedRecords()
 
 TEST_F(StorageRecordDispatcherTest, ALastTradeRecordLongerThanItsFieldsOrKeyedForAnotherInstrumentIsRefused)
 {
-    // The record names its instrument, and its key must be that instrument's (#237): a record under another key would be
-    // pruned with the wrong record's versions (#148). Version 0 is 36 bytes, and version 1 as long as its count of
+    // The record names its instrument, and its key must be that instrument's (#237): a record under another key would
+    // be pruned with the wrong record's versions (#148). Version 0 is 36 bytes, and version 1 as long as its count of
     // pending releases says (#518).
     restoreGoldenInstrument();
     dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
@@ -2421,9 +2421,9 @@ TEST_F(StorageRecordDispatcherTest, ARecordInANewerFormatIsRejected)
 // Golden swap record (#149, FX)
 // =============================================================================
 //
-// A swap's record is an order's, then '.', its far price, '.', and its far settlement date (#144). Version 0's bytes are
-// what this branch's codec wrote before #149, which changes no byte of it: the record still starts with its type alone.
-// Since #172 the order's fields end with its execution instructions, before the far leg (format version 1).
+// A swap's record is an order's, then '.', its far price, '.', and its far settlement date (#144). Version 0's bytes
+// are what this branch's codec wrote before #149, which changes no byte of it: the record still starts with its type
+// alone. Since #172 the order's fields end with its execution instructions, before the far leg (format version 1).
 
 namespace
 {
@@ -2625,9 +2625,9 @@ void loadOrderRecord(StorageRecordDispatcher &dispatcher, const OrderEntry &orde
 
 TEST_F(StorageRecordDispatcherTest, RestoredOrdersThatCrossAnEarlierOneAreLeftToMatch)
 {
-    // Each restored order is checked against the orders that arrived before it (#207). X rests. Y crosses X. W crosses Y,
-    // which waits to be matched: matched first, Y rests, and W then trades with it at Y's price, as it did. Booked now,
-    // W would rest, and Y would trade with it at W's. Z crosses nothing. Only X and Z are booked.
+    // Each restored order is checked against the orders that arrived before it (#207). X rests. Y crosses X. W crosses
+    // Y, which waits to be matched: matched first, Y rests, and W then trades with it at Y's price, as it did. Booked
+    // now, W would rest, and Y would trade with it at W's. Z crosses nothing. Only X and Z are booked.
     const SourceIdT instrument = test::addInstrument("UNCROSS");
     OrderBookImpl book;
     OrderBookImpl::InstrumentsT instruments;
@@ -2655,9 +2655,10 @@ TEST_F(StorageRecordDispatcherTest, RestoredOrdersThatCrossAnEarlierOneAreLeftTo
 
 TEST_F(StorageRecordDispatcherTest, RestoredSwapsAreLeftToMatchOnlyForAnOrderTheyTradeWith)
 {
-    // The restore asks the matcher (#207), so it follows the swap rules: a swap trades only with a swap of the same dates,
-    // on both legs, and an outright order passes over a swap (#212). S1 rests. S2 trades with it on both legs. O, an
-    // outright buy, crosses S1's near price but doesn't trade with a swap. S3 has other dates. Only S2 waits to be matched.
+    // The restore asks the matcher (#207), so it follows the swap rules: a swap trades only with a swap of the same
+    // dates, on both legs, and an outright order passes over a swap (#212). S1 rests. S2 trades with it on both legs.
+    // O, an outright buy, crosses S1's near price but doesn't trade with a swap. S3 has other dates. Only S2 waits to
+    // be matched.
     const SourceIdT instrument = test::addInstrument("UNCROSSFX");
     OrderBookImpl book;
     OrderBookImpl::InstrumentsT instruments;
@@ -2695,9 +2696,9 @@ TEST_F(StorageRecordDispatcherTest, ARestoreReleasesTheStopsTheLastTradeNamesOrI
     // Four held sell stops on the golden instrument. The last trade, at 101.25 when id 4242 was drawn, reaches those at
     // 102. From version 0 of its record (#237), the restore releases those it reaches that arrived before it, 4240 and
     // 4241. Version 1 (#518) names the releases pending, and the restore releases those, in its order and whatever its
-    // price: 4241, then 4239, at 101, which an earlier trade reached. It doesn't release 4240, which the stop book didn't
-    // hold when the trade was decided. Every stop to release is marked pending again, for the records the server's own
-    // matching writes before the releases run.
+    // price: 4241, then 4239, at 101, which an earlier trade reached. It doesn't release 4240, which the stop book
+    // didn't hold when the trade was decided. Every stop to release is marked pending again, for the records the
+    // server's own matching writes before the releases run.
     restoreGoldenInstrument();
     const struct
     {
@@ -2755,13 +2756,13 @@ TEST_F(StorageRecordDispatcherTest, ARestoreReleasesTheStopsTheLastTradeNamesOrI
 
 TEST_F(StorageRecordDispatcherTest, OnlyAWorkingOrderIsBookedOrLeftToMatch)
 {
-    // A live book holds only orders that are NEW or PARTFILL with quantity left, and a restore must book exactly those. It
-    // booked every status but a list of terminal ones, SUSPENDED included, though suspending takes an order out of the
-    // book (#215). A market order is never booked: an open one is left to match (#207). PENDINGNEW is never set and
+    // A live book holds only orders that are NEW or PARTFILL with quantity left, and a restore must book exactly those.
+    // It booked every status but a list of terminal ones, SUSPENDED included, though suspending takes an order out of
+    // the book (#215). A market order is never booked: an open one is left to match (#207). PENDINGNEW is never set and
     // INVALID never on an order, and RECEIVEDNEW is an order before acceptance, so none of the three should come back.
     // On this branch a swap is booked as a limit order is.
-    // A working stop order whose stop hasn't been reached is held, in the stop book; once released, a STOP is matched as
-    // a market order and a STOPLIMIT booked as a limit order (#223).
+    // A working stop order whose stop hasn't been reached is held, in the stop book; once released, a STOP is matched
+    // as a market order and a STOPLIMIT booked as a limit order (#223).
     enum Outcome
     {
         NEITHER,

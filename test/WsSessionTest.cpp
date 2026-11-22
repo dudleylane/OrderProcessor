@@ -538,8 +538,8 @@ TEST_F(WsSessionTest, AnOrderAndAReplaceWriteNoStringRecords)
 
 TEST_F(WsSessionTest, ASwapWritesNoStringRecords)
 {
-    // On this branch new_swap_order builds orders too, and wrote its ClOrdID, source and destination as new_order did; the
-    // swap's record carries them now (#192)
+    // On this branch new_swap_order builds orders too, and wrote its ClOrdID, source and destination as new_order did;
+    // the swap's record carries them now (#192)
     EXPECT_CALL(saver_, save(testing::An<const RawDataEntry &>())).Times(0);
     EXPECT_CALL(saver_, save(testing::_, testing::An<const StringT &>())).Times(0);
     WideDataStorage::instance()->bindStorage(&saver_);
@@ -788,9 +788,9 @@ TEST_F(WsSessionTest, ReplaceWithAStopPxOfAnOrderThatIsntAStopOrderIsRefused)
 
 TEST_F(WsSessionTest, OrderWithAFieldTheServerDoesNotKnowIsRefusedBeforeAnythingIsStored)
 {
-    // An order whose side, type, time in force, currency or capacity was missing or unknown parsed to INVALID, went to the
-    // engine, and was stored to be rejected: from then on every client got it with "INVALID" in that field, a value none
-    // of their types has (#166). It must be refused at once, with nothing queued.
+    // An order whose side, type, time in force, currency or capacity was missing or unknown parsed to INVALID, went to
+    // the engine, and was stored to be rejected: from then on every client got it with "INVALID" in that field, a value
+    // none of their types has (#166). It must be refused at once, with nothing queued.
     const std::string order = R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
                               R"("price":150.25,"orderQty":100,"tif":"DAY","currency":"USD","capacity":"AGENCY"}})";
     struct Field
@@ -826,8 +826,8 @@ TEST_F(WsSessionTest, OrderWithAFieldTheServerDoesNotKnowIsRefusedBeforeAnything
 TEST_F(WsSessionTest, SwapOrderWithAFieldTheServerDoesNotKnowIsRefusedBeforeAnythingIsStored)
 {
     // As for new_order (#166): a swap whose side, currency or capacity was missing, or whose side, time in force,
-    // currency or capacity was unknown, parsed to INVALID and was stored to be rejected. It must be refused at once, with
-    // nothing queued. A swap that gives no time in force is GTC (ClientMessageParser), so that one is accepted.
+    // currency or capacity was unknown, parsed to INVALID and was stored to be rejected. It must be refused at once,
+    // with nothing queued. A swap that gives no time in force is GTC (ClientMessageParser), so that one is accepted.
     const std::string swap = R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,)"
                              R"("farPrice":1.087,"settlDate":1000,"farSettlDate":2000,"orderQty":1000000,"tif":"GTC",)"
                              R"("currency":"USD","capacity":"AGENCY"}})";

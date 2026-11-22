@@ -159,8 +159,9 @@ int main(int argc, char *argv[])
     auto dispatcher = std::make_unique<Store::StorageRecordDispatcher>();
     dispatcher->init(Store::WideDataStorage::instance(), nullptr, lmdbStorage.get(), nullptr);
 
-    // WideDataStorage goes first, while the dispatcher it is bound to still exists: it never calls its saver while being
-    // destroyed, and a bound storage cannot be unbound, since bindStorage() binds once and asserts against nullptr (#41).
+    // WideDataStorage goes first, while the dispatcher it is bound to still exists: it never calls its saver while
+    // being destroyed, and a bound storage cannot be unbound, since bindStorage() binds once and asserts against
+    // nullptr (#41).
     const auto cleanup = [&]()
     {
         IdTGenerator::destroy();

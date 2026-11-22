@@ -263,10 +263,11 @@ public:
     /// instrument's stop book. Persisted (OrderCodec format version 2).
     bool stopTriggered_ = false;
     /// A trade reached the held stop's stop price and queued its release (OrderMatcher::afterTrade(), #517), which may
-    /// not have run yet. Set as the release is claimed, under the order's write lock, and cleared with stopTriggered_ if
-    /// the release rolls back. A replace decided before the release runs decides the order as a released one: the
+    /// not have run yet. Set as the release is claimed, under the order's write lock, and cleared with stopTriggered_
+    /// if the release rolls back. A replace decided before the release runs decides the order as a released one: the
     /// release would find it replaced and release nothing. In the two bytes of padding before stopPx_, so the order's
-    /// size doesn't change. Not persisted: a restart releases by the instrument's last trade (#237). A copy starts clear.
+    /// size doesn't change. Not persisted: a restart releases by the instrument's last trade (#237). A copy starts
+    /// clear.
     bool stopReached_ = false;
 
     // --- Warm fields (accessed during processing) ---
@@ -459,9 +460,9 @@ public:
     virtual void removeStop(const OrderEntry &order) = 0;
     /// Whether the instrument holds a stop: a trade asks this first, and an instrument that holds none takes no lock
     virtual bool holdsStops(const SourceIdT &instrument) const = 0;
-    /// The held stops a trade at lastPx in the instrument reaches, in the order they are to be released: buy stops whose
-    /// stop price is at or below lastPx, from the lowest, then sell stops at or above it, from the highest, each price's
-    /// in arrival order. They stay held: the release takes them out.
+    /// The held stops a trade at lastPx in the instrument reaches, in the order they are to be released: buy stops
+    /// whose stop price is at or below lastPx, from the lowest, then sell stops at or above it, from the highest, each
+    /// price's in arrival order. They stay held: the release takes them out.
     virtual void triggeredStops(const SourceIdT &instrument, PriceT lastPx, OrdersT *result) const = 0;
     /// The held stops whose releases are pending (#518): a trade reached each and queued its release, which hasn't run.
     /// The instrument's last trade names them, so that a restart releases what the running server would have, and

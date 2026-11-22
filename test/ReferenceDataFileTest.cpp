@@ -259,7 +259,8 @@ TEST(ReferenceDataFileTest, RefusesACurrencyOnAnInstrumentThatIsntAnFxPair)
     EXPECT_EQ(refused, refusal(R"({ "instruments": [ { "symbol": "AAPL", "securityId": "US0378331005",
                                     "securityIdSource": "ISIN", "baseCurrency": "USD" } ] })"));
     EXPECT_EQ(refused, refusal(R"({ "instruments": [ { "symbol": "AAPL", "securityId": "US0378331005",
-                                    "securityIdSource": "ISIN", "instrumentType": "EQUITY", "termCurrency": "USD" } ] })"));
+                                    "securityIdSource": "ISIN", "instrumentType": "EQUITY",)"
+                               R"( "termCurrency": "USD" } ] })"));
 }
 
 TEST(ReferenceDataFileTest, ReadsAFileAndNamesOneItRefuses)

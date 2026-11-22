@@ -95,8 +95,8 @@ json execToJson(const ExecutionEntry *exec)
         j["execLegType"] = (exec->execLegType_ == NEAR_LEG) ? "NEAR" : "FAR";
     }
 
-    // The extra fields follow the report's class, not type_: an order cancel is a plain ExecutionEntry with type CANCEL,
-    // and a rejected replace is a RejectExecEntry with type REPLACE (#56)
+    // The extra fields follow the report's class, not type_: an order cancel is a plain ExecutionEntry with type
+    // CANCEL, and a rejected replace is a RejectExecEntry with type REPLACE (#56)
     if (auto *trade = dynamic_cast<const TradeExecEntry *>(exec))
     {
         j["lastQty"] = trade->lastQty_;

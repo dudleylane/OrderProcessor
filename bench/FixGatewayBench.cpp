@@ -338,9 +338,9 @@ BENCHMARK(BM_FixEnumToCurrency);
 // =============================================================================
 
 /// The gateway's handling of a new order, onMessage() alone, timed by hand. Each order is then answered, untimed, as
-/// the engine answers every order: here by its refusal, since none is stored, which the gateway takes with no session to
-/// send it to. An order never answered stays in the gateway's record of the orders it has sent (#380), which grew by a
-/// key an iteration, where production's holds only the orders on their way (#400).
+/// the engine answers every order: here by its refusal, since none is stored, which the gateway takes with no session
+/// to send it to. An order never answered stays in the gateway's record of the orders it has sent (#380), which grew by
+/// a key an iteration, where production's holds only the orders on their way (#400).
 static void BM_FixNewOrderSingleTranslation(benchmark::State &state)
 {
     FixBenchSetup setup;
@@ -367,10 +367,10 @@ static void BM_FixNewOrderSingleTranslation(benchmark::State &state)
 }
 BENCHMARK(BM_FixNewOrderSingleTranslation)->UseManualTime();
 
-/// The gateway's handling of an FX swap, a NewOrderMultileg, timed and answered as BM_FixNewOrderSingleTranslation times
-/// and answers a NewOrderSingle. Every swap a counterparty sends enters here, and nothing timed it until #516, which
-/// checks one more field in it. Each swap must reach the engine's queue, or the benchmark fails: a refusal times another
-/// path.
+/// The gateway's handling of an FX swap, a NewOrderMultileg, timed and answered as BM_FixNewOrderSingleTranslation
+/// times and answers a NewOrderSingle. Every swap a counterparty sends enters here, and nothing timed it until #516,
+/// which checks one more field in it. Each swap must reach the engine's queue, or the benchmark fails: a refusal times
+/// another path.
 static void BM_FixNewOrderMultilegTranslation(benchmark::State &state)
 {
     FixBenchSetup setup;
@@ -456,8 +456,8 @@ TradeExecEntry benchTrade(const OrderEntry &order, ExecLegType leg)
 }
 
 /// The engine's queue, as far as the gateway sees it: it keeps the new order it is handed until take(), which the
-/// benchmark stores as the engine's event worker would, and frees a replacement, as the engine's queue frees what it has
-/// dispatched
+/// benchmark stores as the engine's event worker would, and frees a replacement, as the engine's queue frees what it
+/// has dispatched
 class KeepingInQueues final : public Queues::InQueues
 {
 public:
@@ -485,8 +485,8 @@ private:
 };
 
 /// The directory BenchSession reads fix.cfg and its dictionaries from: OP_BENCH_CONFIG_DIR when it is set and not
-/// empty, as benchmark-regression.sh sets it to the copy saved with a baseline (#415), and otherwise config/ in the tree
-/// this binary was built from (#395). Nothing else in the benchmarks reads a source tree.
+/// empty, as benchmark-regression.sh sets it to the copy saved with a baseline (#415), and otherwise config/ in the
+/// tree this binary was built from (#395). Nothing else in the benchmarks reads a source tree.
 std::filesystem::path benchConfigDir()
 {
     const char *dir = std::getenv("OP_BENCH_CONFIG_DIR");
@@ -766,9 +766,10 @@ BENCHMARK(BM_FixSendExecutionReportStored);
 
 /// A new order through the gateway to the engine's queue, then its acknowledgement through FixOutQueues to the session:
 /// what the session's thread and the transaction worker do for each order, without the engine's work between them. Each
-/// order has a ClOrdID of its own, as a session's orders do, and is stored, untimed, as the engine's event worker stores
-/// one, so that its acknowledgement finds it; onMessage() and the push are timed by hand. Every order had CLORD-001, a
-/// stored order's ClOrdID, so each was a duplicate the engine refuses, acknowledged with the stored order's report (#402).
+/// order has a ClOrdID of its own, as a session's orders do, and is stored, untimed, as the engine's event worker
+/// stores one, so that its acknowledgement finds it; onMessage() and the push are timed by hand. Every order had
+/// CLORD-001, a stored order's ClOrdID, so each was a duplicate the engine refuses, acknowledged with the stored
+/// order's report (#402).
 static void BM_FixOrderAndAcknowledgement(benchmark::State &state)
 {
     FixBenchSetup setup;
@@ -1017,8 +1018,8 @@ BENCHMARK(BM_FixCancelRequest);
 /// A replace request for the session's working order, at a new price, through onMessage() to the engine's queue: the
 /// gateway finds the order, clones it under its read lock (#74), checks the request's fields, refuses a ClOrdID in use
 /// (#403), stores the request's ClOrdID, and hands the engine the replacement, which it keeps as unanswered until the
-/// engine answers it (#380). Each request has a ClOrdID of its own, as a session's do, and is built untimed; onMessage()
-/// is timed by hand. Each is then answered, untimed, by the engine's refusal through FixOutQueues, as
+/// engine answers it (#380). Each request has a ClOrdID of its own, as a session's do, and is built untimed;
+/// onMessage() is timed by hand. Each is then answered, untimed, by the engine's refusal through FixOutQueues, as
 /// BM_FixNewOrderSingleTranslation answers its orders, so that none is left unanswered: the order stays as it was
 /// stored, and every iteration replaces it.
 static void BM_FixReplaceRequest(benchmark::State &state)
@@ -1062,8 +1063,8 @@ BENCHMARK(BM_FixReplaceRequest)->UseManualTime();
 
 /// The engine's refusal of a replacement, from the transaction worker through FixOutQueues to the session: the gateway
 /// answers the replacement's request (#380), remembers the replacement as refused (#398), finds the order it was to
-/// replace, and sends the session an OrderCancelReject (35=9) for its replace request, with that order's OrderID and the
-/// status the engine refused it in (#74). Each replacement is first sent, untimed, through onMessage(), as
+/// replace, and sends the session an OrderCancelReject (35=9) for its replace request, with that order's OrderID and
+/// the status the engine refused it in (#74). Each replacement is first sent, untimed, through onMessage(), as
 /// BM_FixReplaceRequest times it, so that each refusal answers a request the gateway handed on; the push is timed by
 /// hand.
 static void BM_FixReplaceRefusal(benchmark::State &state)
@@ -1121,9 +1122,9 @@ BENCHMARK(BM_FixReplaceRefusal)->UseManualTime();
 
 /// A cancel request for an order the session never sent, refused by the gateway itself: it finds no order under the
 /// session's key (#71), none on its way to the engine (#380) and no refused replacement by that ClOrdID (#398), and
-/// sends the session an OrderCancelReject (35=9) for an unknown order, quoting the request's ClOrdIDs (#73). The gateway
-/// logs each at Error, which the benchmarks can't turn off, so the time includes making the log line and handing it to
-/// spdlog's thread, which writes it to exchange.log.
+/// sends the session an OrderCancelReject (35=9) for an unknown order, quoting the request's ClOrdIDs (#73). The
+/// gateway logs each at Error, which the benchmarks can't turn off, so the time includes making the log line and
+/// handing it to spdlog's thread, which writes it to exchange.log.
 static void BM_FixCancelOfUnknownOrder(benchmark::State &state)
 {
     FixBenchSetup setup;
@@ -1301,10 +1302,10 @@ static void BM_FixEngineCancelRejectOfReplacedOrder(benchmark::State &state)
 }
 BENCHMARK(BM_FixEngineCancelRejectOfReplacedOrder);
 
-/// A status request (35=H) for the session's working order, by its ClOrdID, answered on the session's thread (#383): the
-/// gateway finds the order under the session's key, reads what it has, and sends an ExecutionReport of ExecType Order
-/// Status (150=I) with the request's OrdStatusReqID (790). A status request only reads, so every iteration sends the
-/// same one.
+/// A status request (35=H) for the session's working order, by its ClOrdID, answered on the session's thread (#383):
+/// the gateway finds the order under the session's key, reads what it has, and sends an ExecutionReport of ExecType
+/// Order Status (150=I) with the request's OrdStatusReqID (790). A status request only reads, so every iteration sends
+/// the same one.
 static void BM_FixOrderStatusRequest(benchmark::State &state)
 {
     FixBenchSetup setup;
@@ -1355,8 +1356,8 @@ BENCHMARK(BM_FixOrderStatusRequest);
 
 /// A new order that repeats the ClOrdID of the session's working order, refused before the engine sees it (#382): the
 /// gateway finds the order the ClOrdID names, reads what it has, and sends the session an ExecutionReport refusing the
-/// new one as a duplicate (150=8, 103=6), with the status of the order that has the ClOrdID (EP284's F.1.a). The gateway
-/// keeps nothing of an order it refuses, so every iteration sends the same one.
+/// new one as a duplicate (150=8, 103=6), with the status of the order that has the ClOrdID (EP284's F.1.a). The
+/// gateway keeps nothing of an order it refuses, so every iteration sends the same one.
 static void BM_FixRepeatedClOrdId(benchmark::State &state)
 {
     FixBenchSetup setup;
