@@ -74,6 +74,8 @@ public:
 private:
     /// Reader-writer lock for read-heavy reference data access
     /// Allows concurrent reads, exclusive writes
+    /// Last in the lock order (#636; docs/ARCHITECTURE.md section 6.2): taken under an order's lock or
+    /// OrderDataStorage::orderRwLock_, and nothing is locked under it: the adds persist once it is released.
     mutable oneapi::tbb::spin_rw_mutex rwLock_;
 
     /// Cache-aligned to prevent false sharing with rwLock_

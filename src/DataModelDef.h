@@ -212,9 +212,10 @@ public:
     ~OrderParams();
 
     // --- Hot path fields (first cache lines) ---
-    /// Per-order mutex protecting all fields after locateByOrderId().
-    /// Deadlock convention: when locking two orders simultaneously,
-    /// always lock the order with the smaller orderId_ first.
+    /// Per-order mutex protecting all fields after locateByOrderId(). The lock order (#636; docs/ARCHITECTURE.md
+    /// section 6.2): two orders by ascending orderId_; an order's before a store's (OrderDataStorage::orderRwLock_,
+    /// WideParamsDataStorage::rwLock_), never a store's and then an order another thread can reach; and, outside an
+    /// instrument's chain, never with one of the book's locks (OrderBookImpl), which inside it may come either side.
     mutable oneapi::tbb::spin_rw_mutex entryMutex_;
 
     IdT orderId_;

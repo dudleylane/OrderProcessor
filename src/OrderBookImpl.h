@@ -79,6 +79,10 @@ private:
     typedef std::multimap<PriceT, IdT, PriceTDescend> OrdersByPriceDescT;
     struct OrdersGroup
     {
+        /// Each side's lock, and the stop book's below. The lock order (#636; docs/ARCHITECTURE.md section 6.2):
+        /// inside the instrument's chain a book lock and an order's come either way round (the matcher reads a
+        /// contra under its side's lock; a fill's decision takes its order out of the book under the order's write
+        /// lock), since the chain runs them one at a time. Outside it, never hold one with an order's lock (#525).
         mutable oneapi::tbb::mutex buyLock_;
         OrdersByPriceDescT buyOrder_;
 

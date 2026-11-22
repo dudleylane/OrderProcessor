@@ -161,6 +161,9 @@ public:
 private:
     /// Reader-writer lock for order maps (dual-map inserts require atomicity)
     /// Allows concurrent reads, exclusive writes
+    /// The lock order (#636; docs/ARCHITECTURE.md section 6.2): after an order's lock, never before one another thread
+    /// can reach (save() locks a new order's clone under it, before publishing it), and before
+    /// WideParamsDataStorage::rwLock_, which save() takes for the ClOrdID's string.
     mutable oneapi::tbb::spin_rw_mutex orderRwLock_;
 
     /// Each map's nodes in a pool of its own, so that they lie together rather than among the orders, whose size moved
