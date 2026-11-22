@@ -43,9 +43,11 @@ valgrind --tool=cachegrind ./build/orderProcessorBench --benchmark_filter="Pool"
 valgrind --tool=callgrind ./build/orderProcessorBench --benchmark_filter="Pool"
 
 # Instructions per iteration in each per-order benchmark's timed span, under callgrind at N and 2N iterations,
-# and with two binaries the second's less the first's: the instruction count CLAUDE.md's layout check reads (#503)
+# and with two binaries the second's less the first's: the instruction count the layout check reads (#503)
 ./scripts/loop-instructions.sh before/orderProcessorBench build/orderProcessorBench
 ```
+
+Under valgrind, glibc's allocator doesn't behave as it does natively: callgrind's counts can include heap trimming (`systrim`, `sbrk`) that a native run doesn't do. Measuring #486, master's restatement benchmark ran `systrim` 1.44 times and `sbrk` 1.43 times an iteration under callgrind, about 200 instructions an iteration of the change's apparent cost, while natively (`strace -c` at N = 100,000 and 2N) `brk` ran equally often under both harnesses (#619). So split a span's delta by function (callgrind toggled on `EngineFixture::timeEvent`, `--inclusive=no`), and check an allocator delta natively, with `strace -c` or `perf stat`'s page faults, before reading it as a cost.
 
 ### clang-tidy
 

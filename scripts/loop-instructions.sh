@@ -27,6 +27,13 @@
 # every build since #503 does. The 18 BM_Process* at N = 2000 take about two minutes a
 # binary under callgrind.
 #
+# Under valgrind, glibc's allocator doesn't behave as it does natively: the counts can include heap trimming (systrim,
+# sbrk) that a native run doesn't do. Measuring #486, master's restatement benchmark ran systrim 1.44 times and sbrk 1.43
+# times an iteration under callgrind, about 200 instructions an iteration of the change's apparent cost, while natively
+# (strace -c at N = 100,000 and 2N) brk ran equally often under both harnesses (#619). So split a span's delta by
+# function (callgrind_annotate --inclusive=no on the timeEvent() calls) and check an allocator delta natively, with
+# strace -c or perf stat's page faults, before reading it as a cost.
+#
 # Exit codes: 0 = every count made, 2 = usage or setup error, or a run or a count failed
 
 set -euo pipefail
