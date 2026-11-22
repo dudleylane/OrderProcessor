@@ -1168,6 +1168,13 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
                     "Order refused: a NewOrderMultileg must be an FX swap, OrdType (40) G");
         return;
     }
+    // A swap is reported by leg (#529): one that asks for the swap's own reports, 563=0, or for both, 1, is refused
+    // rather than sent what it didn't ask for (#701)
+    if (const std::optional<std::string> refusal = reportTypeRefusal(msg))
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC, "Order refused: " + *refusal);
+        return;
+    }
 
     FIX::Symbol rootSymbol;
     std::string symStr;
@@ -1196,6 +1203,13 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
     for (int i = 1; i <= 2; ++i)
     {
         msg.getGroup(i, legGroup);
+
+        // An uneven swap is refused, before anything is stored: the engine trades both legs at OrderQty (#698)
+        if (const std::optional<std::string> refusal = legQuantityRefusal(legGroup, orderQty.getValue()))
+        {
+            refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC, "Order refused: " + *refusal);
+            return;
+        }
 
         FIX::LegSymbol lsym;
         if (legGroup.isSet(lsym))
@@ -2671,6 +2685,59 @@ std::optional<std::string> FixGateway::minQtyRefusal(const FIX::FieldMap &msg)
         // Not a number: refused too, which a session's own check of the field's type does first
     }
     return std::string("MinQty (110) must be 0 or left out: the server doesn't enforce a minimum quantity");
+}
+
+std::optional<std::string> FixGateway::legQuantityRefusal(const FIX::FieldMap &leg, double orderQty)
+{
+    // As numbers, so that 100 and 100.00 are one quantity. A value that isn't a number is refused too, which a
+    // session's own check of the field's type does first.
+    const auto differs = [&leg](int field, double expected)
+    {
+        if (!leg.isSetField(field))
+        {
+            return false;
+        }
+        try
+        {
+            return expected != FIX::DoubleConvertor::convert(leg.getField(field));
+        }
+        catch (const FIX::FieldConvertError &)
+        {
+            return true;
+        }
+    };
+    if (differs(FIX::FIELD::LegOrderQty, orderQty) || differs(FIX::FIELD::LegQty, orderQty))
+    {
+        return std::string("a leg's LegOrderQty (685) and LegQty (687) must be OrderQty (38) or left out: the server "
+                           "trades both legs of a swap at OrderQty");
+    }
+    if (differs(FIX::FIELD::LegRatioQty, 1.0))
+    {
+        return std::string("a leg's LegRatioQty (623) must be 1 or left out: the server trades both legs of a swap at "
+                           "OrderQty");
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> FixGateway::reportTypeRefusal(const FIX::FieldMap &msg)
+{
+    if (!msg.isSetField(FIX::FIELD::MultiLegRptTypeReq))
+    {
+        return std::nullopt;
+    }
+    try
+    {
+        if (FIX::MultiLegRptTypeReq_REPORT_BY_INSTRUMENT_LEGS_ONLY ==
+            FIX::IntConvertor::convert(msg.getField(FIX::FIELD::MultiLegRptTypeReq)))
+        {
+            return std::nullopt;
+        }
+    }
+    catch (const FIX::FieldConvertError &)
+    {
+        // Not a number: refused too, which a session's own check of the field's type does first
+    }
+    return std::string("MultiLegRptTypeReq (563) must be 2 or left out: the server reports a swap by its legs");
 }
 
 FIX::UtcTimeStamp FixGateway::toUtcTimeStamp(DateTimeT when)
