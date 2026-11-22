@@ -135,4 +135,17 @@ status=$?
 check "EQUITY for an instrument stored with no type: exit status" "$status" 1
 check "... names it" "$(grep -cx 'seedData: instrument ACME is stored with securityId US0000000001, securityIdSource ISIN, type none, and the file gives securityId US0000000001, securityIdSource ISIN, type EQUITY' <<<"$out")" 1
 
+# 9. With the log on standard output, as the server image sends it (EXCHANGE_LOG=-), the report follows the whole log
+# (#719). The logger's async worker wrote each line when it got to it, so one could land inside a report line, and the
+# lines the cleanup logs always came after the report
+out="$(EXCHANGE_LOG=- "$SEED" --data-dir "$WORK/logged" --file "$WORK/reference.json" 2>&1)"
+status=$?
+check "the log on standard output: exit status" "$status" 0
+first_report=$(grep -n -m1 '^  Added' <<<"$out" | cut -d: -f1)
+last_log=$(grep -n -E '^[0-9]{8}-[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}: \[' <<<"$out" | tail -1 | cut -d: -f1)
+check "... logs at all" "$([[ -n "$last_log" ]] && echo yes || echo no)" yes
+check "... every log line comes before the report" "$(( ${last_log:-0} < ${first_report:-0} ))" 1
+check "... and the report ends whole" "$(tail -1 <<<"$out")" \
+    "Seeded 2 instruments, 2 accounts and 1 clearing firms into $WORK/logged from $WORK/reference.json"
+
 (( failures == 0 )) || exit 1
