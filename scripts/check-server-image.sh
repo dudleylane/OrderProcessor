@@ -104,7 +104,7 @@ cleanup() {
         step "the server's output"
         podman logs "$NAME" 2>&1 | tail -n 50 || true
     fi
-    podman rm -f -t 0 "$NAME" >/dev/null 2>&1 || true
+    podman rm -f -v -t 0 "$NAME" >/dev/null 2>&1 || true
     podman volume rm -f "$NAME" >/dev/null 2>&1 || true
     podman rmi -f "$IMAGE" >/dev/null 2>&1 || true
     rm -rf "${WORK:?}"
