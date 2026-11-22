@@ -14,7 +14,11 @@
 #include <cassert>
 #include <stdexcept>
 #include <boost/core/demangle.hpp>
+#include <boost/mpl/at.hpp>
 #include <boost/mpl/size.hpp>
+#include <boost/msm/row_tags.hpp>
+#include <type_traits>
+#include <utility>
 #include "StateMachine.h"
 #include "DataModelDef.h"
 #include "Logger.h"
@@ -62,6 +66,39 @@ static_assert(isZone2StateId(stateId<NoCnlReplace>) && isZone2StateId(stateId<Go
               "the second region's states");
 static_assert(boost::mpl::size<boost::msm::back::generate_state_set<OrderState::stt>::type>::value == ORDER_STATE_COUNT,
               "a new state needs its id pinned above and a name in state_names");
+
+// A guard that refuses throws nothing: MSM tries the state's other rows for the event, and an event every row's guard
+// refused returns unhandled, with no call to no_transition(), so exception_caught() never counts or logs it, and the
+// request it carried goes unanswered (#432). MSM tries a state's rows last-declared first, so each guarded row needs an
+// unguarded row for its source state and event declared before it, which MSM tries last. The table is walked here, and
+// a guarded row added without one fails to compile (#634).
+template <std::size_t I> using RowAt = typename boost::mpl::at_c<OrderState_::transition_table, I>::type;
+template <typename Row>
+constexpr bool guardedRow =
+    std::is_same_v<typename Row::row_type_tag, row_tag> || std::is_same_v<typename Row::row_type_tag, g_row_tag> ||
+    std::is_same_v<typename Row::row_type_tag, irow_tag> || std::is_same_v<typename Row::row_type_tag, g_irow_tag>;
+template <std::size_t I, std::size_t J> constexpr bool unguardedBefore()
+{
+    if constexpr (J >= I)
+    {
+        return false;
+    }
+    else
+    {
+        return !guardedRow<RowAt<J>> && std::is_same_v<typename RowAt<J>::Source, typename RowAt<I>::Source> &&
+               std::is_same_v<typename RowAt<J>::Evt, typename RowAt<I>::Evt>;
+    }
+}
+template <std::size_t I, std::size_t... J> constexpr bool hasUnguardedBefore(std::index_sequence<J...>)
+{
+    return (unguardedBefore<I, J>() || ...);
+}
+template <std::size_t... I> constexpr bool everyGuardedRowHasOne(std::index_sequence<I...> rows)
+{
+    return ((!guardedRow<RowAt<I>> || hasUnguardedBefore<I>(rows)) && ...);
+}
+static_assert(everyGuardedRowHasOne(std::make_index_sequence<boost::mpl::size<OrderState_::transition_table>::value>{}),
+              "a guarded row needs an unguarded row for its source state and event declared before it (#432, #634)");
 
 // What exception_caught() has swallowed (#432): refused by design, and failed
 std::atomic<uint64_t> swallowedRefused{ 0 };
