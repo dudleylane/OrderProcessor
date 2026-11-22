@@ -144,8 +144,9 @@ Server options:
 | `--bind` | `0.0.0.0` | Address to listen on: an IP address, such as `127.0.0.1` for this host only (#146) |
 | `--ws-token-file` | none | A file whose first line is the access token a WebSocket client must offer (#146). `OMS_WS_TOKEN` gives it too, but not both |
 | `--allowed-origin` | any | An Origin a browser page may connect from; repeat it for more. `OMS_ALLOWED_ORIGINS` adds a comma-separated list (#146) |
-| `--ws-credentials` | none | A file of identities, each with a token of its own and the accounts it may see and trade (#225); instead of the shared token, not beside it. See below |
+| `--ws-credentials` | none | A file of identities, each with a token of its own and the accounts it may see and trade (#225); instead of the shared token, not beside it. `OMS_WS_CREDENTIALS` gives the file too, but not both (#643). See below |
 | `--hash-ws-token` | | Reads a token from standard input, prints the hash `--ws-credentials` needs for it, and exits |
+| `--require-ws-auth` | | Refuses to start, with exit 2, without an access token or identities, where a server would run open (#643). Compose's command gives it |
 | `--pg-connection` | none | The Postgres to mirror to, a libpq connection string (#151). `OMS_PG_CONNECTION` gives it too, but not both: prefer it, since every user on the host can see a flag in the process list. Needs `BUILD_PG=ON` |
 | `--data-dir` | `./data` | LMDB persistence directory |
 | `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs. For now N runs N-1 at once (#711) |
@@ -159,7 +160,7 @@ Server options:
 | `--max-session-queue-mb` | <!-- DOC_CHECK:ws_max_session_queue_mb -->16<!-- /DOC_CHECK --> | What may wait to be sent to one client, in MiB, after the state it gets as it connects, which isn't counted: its order snapshot alone can be larger (#512). A client that doesn't read is dropped once more waits, and gets the current state again when it reconnects |
 | `--max-in-flight` | <!-- DOC_CHECK:max_in_flight -->10000<!-- /DOC_CHECK --> | The engine's work in flight, the events not yet decided and the transactions not yet run, at which the WebSocket sessions stop reading their clients' messages until it is back under (#519). What a client sends meanwhile waits in its TCP window, and nothing it sent is refused |
 
-Without `--ws-token-file` or `OMS_WS_TOKEN`, any client that reaches the server may connect, and the server warns once at startup (#146). A token has at least <!-- DOC_CHECK:ws_min_token_length -->16<!-- /DOC_CHECK --> letters, digits, `.`, `_` or `-` (`openssl rand -hex 32` makes one); see [Connecting](#connecting) for how a client offers it. A token file with nothing on its first line, or `OMS_WS_TOKEN` set but empty, is refused rather than taken as no token.
+Without `--ws-token-file` or `OMS_WS_TOKEN`, or identities, any client that reaches the server may connect, and the server warns once at startup (#146); given `--require-ws-auth`, it refuses to start instead (#643). A token has at least <!-- DOC_CHECK:ws_min_token_length -->16<!-- /DOC_CHECK --> letters, digits, `.`, `_` or `-` (`openssl rand -hex 32` makes one); see [Connecting](#connecting) for how a client offers it. A token file with nothing on its first line, or `OMS_WS_TOKEN` set but empty, is refused rather than taken as no token.
 
 Everyone with the shared token sees every account's orders and may trade, cancel and replace on any of them. To give clients less, give the server `--ws-credentials FILE` instead (#225). Each line names an identity, its token's hash, and the accounts it may see and trade:
 

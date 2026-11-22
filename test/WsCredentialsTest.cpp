@@ -184,13 +184,13 @@ TEST(WsCredentialsTest, CredentialsComeFromTheirFileAndNeverBesideASharedToken)
     args.wsCredentialsFile = path;
     WsAuth auth;
     std::string error;
-    ASSERT_TRUE(resolveWsAuth(args, nullptr, nullptr, &auth, &error)) << error;
+    ASSERT_TRUE(resolveWsAuth(args, nullptr, nullptr, nullptr, &auth, &error)) << error;
     ASSERT_NE(nullptr, auth.credentials);
     EXPECT_TRUE(auth.token.empty());
     EXPECT_NE(nullptr, auth.credentials->find(TOKEN_A));
 
     // Each identity's token, or one that everybody shares: not both
-    EXPECT_FALSE(resolveWsAuth(args, TOKEN_B.c_str(), nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(args, TOKEN_B.c_str(), nullptr, nullptr, &auth, &error));
     EXPECT_NE(std::string::npos, error.find("can't both be given")) << error;
 
     // A file that names nobody would let nobody in: a mistake, said at startup
@@ -198,13 +198,50 @@ TEST(WsCredentialsTest, CredentialsComeFromTheirFileAndNeverBesideASharedToken)
         std::ofstream file(path);
         file << "# nobody yet\n";
     }
-    EXPECT_FALSE(resolveWsAuth(args, nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(args, nullptr, nullptr, nullptr, &auth, &error));
     EXPECT_NE(std::string::npos, error.find("names no identity")) << error;
 
     ServerArgs missing;
     missing.wsCredentialsFile = path + ".absent";
-    EXPECT_FALSE(resolveWsAuth(missing, nullptr, nullptr, &auth, &error));
+    EXPECT_FALSE(resolveWsAuth(missing, nullptr, nullptr, nullptr, &auth, &error));
     EXPECT_NE(std::string::npos, error.find("can't read the WebSocket credentials file")) << error;
+    std::remove(path.c_str());
+}
+
+TEST(WsCredentialsTest, CredentialsComeFromTheFlagOrTheEnvironmentButNotBoth)
+{
+    // Compose hands the server its identities through OMS_WS_CREDENTIALS, as it hands it the token through
+    // OMS_WS_TOKEN, so that a deployment with identities runs the tracked compose file as it is (#643)
+    const std::string path = test::uniqueTestPath("ws_credentials_env");
+    {
+        std::ofstream file(path);
+        file << line("desk-a", TOKEN_A, "TRADING-1");
+    }
+    WsAuth auth;
+    std::string error;
+    const ServerArgs none;
+    ASSERT_TRUE(resolveWsAuth(none, nullptr, path.c_str(), nullptr, &auth, &error)) << error;
+    ASSERT_NE(nullptr, auth.credentials);
+    EXPECT_TRUE(auth.token.empty());
+    EXPECT_NE(nullptr, auth.credentials->find(TOKEN_A));
+
+    ServerArgs flag;
+    flag.wsCredentialsFile = path;
+    EXPECT_FALSE(resolveWsAuth(flag, nullptr, path.c_str(), nullptr, &auth, &error));
+    EXPECT_NE(std::string::npos, error.find("given twice")) << error;
+
+    // Set, but empty: a value that failed to render, refused rather than taken for none
+    EXPECT_FALSE(resolveWsAuth(none, nullptr, "", nullptr, &auth, &error));
+    EXPECT_NE(std::string::npos, error.find("OMS_WS_CREDENTIALS is set, but empty")) << error;
+
+    // Never beside a shared token, whichever way each comes
+    EXPECT_FALSE(resolveWsAuth(none, TOKEN_B.c_str(), path.c_str(), nullptr, &auth, &error));
+    EXPECT_NE(std::string::npos, error.find("can't both be given")) << error;
+
+    // Identities satisfy --require-ws-auth, as a token does
+    ServerArgs required;
+    required.requireWsAuth = true;
+    EXPECT_TRUE(resolveWsAuth(required, nullptr, path.c_str(), nullptr, &auth, &error)) << error;
     std::remove(path.c_str());
 }
 
