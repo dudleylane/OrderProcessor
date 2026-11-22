@@ -1188,7 +1188,8 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
     // addGroup() sets up the count implicitly and isSet() can throw on
     // partial/invalid count fields.
     size_t legCount = msg.groupCount(FIX::FIELD::NoLegs);
-    if (legCount < 2)
+    // Exactly two: the loop below reads two, and a third leg was taken unread (#550)
+    if (2 != legCount)
     {
         refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC,
                     "Order refused: an FX swap needs 2 legs, not " + std::to_string(legCount));
@@ -1198,6 +1199,7 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
     double nearPrice = 0.0, farPrice = 0.0;
     DateTimeT nearSettlDate = 0, farSettlDate = 0;
     std::string legSymbol;
+    std::string legSymbols[2]; // each leg's LegSymbol (600), empty where it gives none
 
     FIX50SP2::NewOrderMultileg::NoLegs legGroup;
     for (int i = 1; i <= 2; ++i)
@@ -1215,6 +1217,7 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
         if (legGroup.isSet(lsym))
         {
             legGroup.get(lsym);
+            legSymbols[i - 1] = lsym.getString();
             if (legSymbol.empty())
             {
                 legSymbol = lsym.getString();
@@ -1267,6 +1270,17 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
     if (symStr.empty())
     {
         symStr = legSymbol;
+    }
+    // Both legs trade the swap's one instrument: a leg that named another was traded as if it named this one (#550)
+    for (const std::string &leg : legSymbols)
+    {
+        if (!leg.empty() && (leg != symStr))
+        {
+            refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC,
+                        "Order refused: LegSymbol (600) " + leg + " isn't the swap's symbol, " + symStr +
+                            ": both legs trade one instrument");
+            return;
+        }
     }
 
     SourceIdT instrId = wideData_->findInstrumentBySymbol(symStr);
