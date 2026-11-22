@@ -607,6 +607,16 @@ protected:
 // Basic Task Manager Tests
 // =============================================================================
 
+TEST_F(TaskManagerTest, TheProcessorFiguresAreCountsNotIndices)
+{
+    // metrics_update sends these, and the dashboard shows busy as total less available (#762)
+    std::unique_ptr<TaskManager> manager = createTaskManager(2, 3);
+    EXPECT_EQ(2, manager->totalEventProcessors());
+    EXPECT_EQ(2, manager->availableEventProcessors());
+    EXPECT_EQ(3, manager->totalTransactProcessors());
+    EXPECT_EQ(3, manager->availableTransactProcessors());
+}
+
 TEST_F(TaskManagerTest, CreateWithSingleProcessor)
 {
     auto manager = createTaskManager(1, 1);
