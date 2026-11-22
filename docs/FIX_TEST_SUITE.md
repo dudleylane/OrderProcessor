@@ -294,6 +294,17 @@ Tests for FX Swap data model, matching, validation, and codec support.
 | `SwapCodecRoundTrip` | Encode/decode preserves farPrice + farSettlDate (v1) |
 | `LegacyCodecCompat_V0DefaultsSwapFields` | v0 orders decode with swap defaults (0.0, 0) |
 | `NonSwapOrderUnchanged_LimitMatch` | Regular LIMIT matching still works (regression) |
+| `SwapValidation_BothLegPricesMustBeAboveZero` | Near price 0 → rejected, as the far one is (#188); a NaN on either leg too |
+| `LimitOrderDoesNotMatchASwap` | An outright limit order with only a swap opposite trades nothing: no outright takes a swap's near leg |
+| `LimitOrderPassesOverASwapToTheOutrightOrderBehindIt` | A swap at the best price is passed over, and the outright sell behind it trades, at its own price |
+| `MarketOrderDoesNotMatchASwap` | A market order with only a swap opposite finds nothing, and is canceled |
+| `AnOutrightFoksCheckPassesOverASwap` | An outright FOK's check passes over the swap at the best price and fills from the outright behind it |
+| `AFokSwapsCheckPassesOverWhatItsSweepPassesOver` | A FOK swap's check passes over what its sweep would: an outright, a swap of other dates, a far price that doesn't cross (#491) |
+| `ASwapThatIsntWorkingDoesntEndTheSearch` | A suspended swap with the best near price is passed by, and the working swap behind it found (#432) |
+| `OnlyAWorkingSwapIsTradedWith` | The swap search, and the FOK check, take only a NEW or PARTFILL swap, whatever it has left (#432) |
+| `ARestingSwapWritesNoNote` | A resting swap's line is debug, not a note (#584) |
+| `SwapCodecReadsTheFarLegWhateverTheVersion` | Every format version carries the far leg, read by content, so a swap written once keeps it (#144, #172) |
+| `SwapRecordCutAfterTheFarPriceIsRejected` | A record that ends right after the far price is refused without reading past its end (#144) |
 
 ## 10. FixRotatingLogTest — Bounded FIX Logs
 
