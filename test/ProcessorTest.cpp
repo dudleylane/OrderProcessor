@@ -1034,6 +1034,44 @@ TEST_F(ProcessorTest, StateChangeWaitsForTheTransactionThatBooksTheOrder)
     EXPECT_FALSE(marks[1]) << "the expiry was enqueued before the transaction that books the order";
 }
 
+TEST_F(ProcessorTest, ALegacyReplaceEventWaitsForTheTransactionThatBooksTheOrder)
+{
+    // The legacy replace's ProcessEvent finds an order and enqueues a transaction about it, as a cancel does, so it
+    // waits for the order's booking too (#83, #580). Nothing has produced one since #74, but the rule is the handler's.
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    COP::Store::PublishGuard guard;
+    OrderEntry *stored = OrderStorage::instance()->save(*order, IdTGenerator::instance(), &guard);
+    ASSERT_NE(nullptr, stored);
+    guard.release();
+    // A stored order has its state machine's states; this one was stored directly, so give it a booked order's, New and
+    // NoCnlReplace: the handler runs the state machine on them as soon as it has waited
+    OrdState::OrderStatePersistence states;
+    states.orderData_ = stored;
+    states.stateZone1Id_ = 2;
+    states.stateZone2Id_ = 8;
+    stored->setStateMachinePersistance(states);
+
+    transMgr_->proc_ = nullptr;
+    std::vector<bool> marks;
+    transMgr_->onAdd_ = [&]()
+    {
+        marks.push_back(stored->bookingPending_.load());
+    };
+    std::thread creator(
+        [&guard]()
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            guard.bookingEnqueued();
+        });
+    inQueues_->push("test", ProcessEvent(ProcessEvent::ON_REPLACE_RECEVIED, stored->orderId_));
+    processor_->process();
+    creator.join();
+    transMgr_->onAdd_ = nullptr;
+
+    ASSERT_EQ(1u, marks.size());
+    EXPECT_FALSE(marks.front()) << "the legacy replace was enqueued before the transaction that books the order";
+}
+
 // =============================================================================
 // A market order with nothing to trade with (#68)
 // =============================================================================
