@@ -74,6 +74,11 @@ jobs:
                \( -name '*.h' -o -name '*.cpp' \) -print0 \
             | xargs -0 clang-format-22 --dry-run -Werror
 
+      - name: Verify every line is within the column limit
+        # clang-format leaves a long comment as it is (ReflowComments is off), so the limit is checked here (#615)
+        shell: bash
+        run: scripts/line-length.sh
+
   lint:
     name: shellcheck, actionlint, hadolint
     # scripts/lint.sh (#174): each linter from its official image, pinned by
