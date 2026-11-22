@@ -19,7 +19,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 ### Low-Latency Infrastructure
 - **Memory Tiers:** 5-tier memory hierarchy — stack, arena (<!-- DOC_CHECK:arena_size -->2048<!-- /DOC_CHECK -->-byte bump), CAS pool (<!-- DOC_CHECK:pool_size -->1024<!-- /DOC_CHECK --> slots), TBB scalable allocator, heap fallback. A transaction takes its `TransactionScope` out of the pool for good, and the slot allocates another: one heap allocation per transaction, counted as `poolAllocations` (#515)
 - **Lock-Free Pool:** TransactionScopePool with exponential backoff CAS and cache miss tracking
-- **CPU Affinity:** Thread-to-core pinning, for the main thread (`--cpu-affinity`) and the TaskManager's workers. `CpuAffinity` can also set SCHED_FIFO priority, but nothing calls it
+- **CPU Affinity:** Thread-to-core pinning, for the main thread (`--cpu-affinity`) and the TaskManager's workers
 - **False-Sharing Prevention:** `CacheAlignedAtomic<T>` (`alignas(64)`) on all shared atomics
 - **Branch Prediction:** `[[likely]]`, `[[unlikely]]`, `[[assume]]` (C++23) throughout hot path
 
