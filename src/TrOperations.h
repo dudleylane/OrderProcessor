@@ -139,10 +139,22 @@ private:
     OrderStatus status_;
 };
 
-class AddToOrderBookTrOperation final : public Operation
+/// An operation that reads or changes its order's instrument's book or stop book, or decides something that does: a
+/// booking, a removal, a match, a cancel, a replace, a state change, a stop's release. TransactionMgr runs two
+/// transactions in order only when they name a common object, so each of these names the order's instrument as well as
+/// the order, and every transaction on the instrument's book runs after the one before it: a FOK order's check and its
+/// sweep see one book (#209, #240). The constructor names the instrument itself, from the order, so an operation can't
+/// leave it out or name another; derive an operation that reaches the book from this, not from Operation (#637).
+class BookOperation : public Operation
+{
+protected:
+    BookOperation(OperationType type, const OrderEntry &order);
+};
+
+class AddToOrderBookTrOperation final : public BookOperation
 {
 public:
-    AddToOrderBookTrOperation(const OrderEntry &order, const IdT &instrId);
+    explicit AddToOrderBookTrOperation(const OrderEntry &order);
     ~AddToOrderBookTrOperation();
 
     void execute(const Context &cnxt) override;
@@ -222,10 +234,10 @@ private:
     bool written_ = false;
 };
 
-class RemoveFromOrderBookTrOperation final : public Operation
+class RemoveFromOrderBookTrOperation final : public BookOperation
 {
 public:
-    RemoveFromOrderBookTrOperation(const OrderEntry &order, const IdT &instrId);
+    explicit RemoveFromOrderBookTrOperation(const OrderEntry &order);
     ~RemoveFromOrderBookTrOperation();
 
     void execute(const Context &cnxt) override;
@@ -239,10 +251,10 @@ private:
 };
 
 /// Holds a stop or stop limit order in its instrument's stop book until a trade reaches its stop price (#223)
-class AddToStopBookTrOperation final : public Operation
+class AddToStopBookTrOperation final : public BookOperation
 {
 public:
-    AddToStopBookTrOperation(const OrderEntry &order, const IdT &instrId);
+    explicit AddToStopBookTrOperation(const OrderEntry &order);
 
     void execute(const Context &cnxt) override;
     void rollback(const Context &cnxt) override;
@@ -252,10 +264,10 @@ private:
 };
 
 /// Takes a held stop order out of its instrument's stop book: it was cancelled, replaced or otherwise finished (#223)
-class RemoveFromStopBookTrOperation final : public Operation
+class RemoveFromStopBookTrOperation final : public BookOperation
 {
 public:
-    RemoveFromStopBookTrOperation(const OrderEntry &order, const IdT &instrId);
+    explicit RemoveFromStopBookTrOperation(const OrderEntry &order);
 
     void execute(const Context &cnxt) override;
     void rollback(const Context &cnxt) override;
@@ -270,7 +282,7 @@ private:
 /// STOP as a market order and a STOPLIMIT as a limit order, which is then booked with what is left. Two trades can
 /// both reach a stop before its release runs; the second release finds it released and does nothing. A release that
 /// releases the order takes the order's figures as it does, which its persist and its report carry (#411, #627).
-class ReleaseStopTrOperation final : public Operation
+class ReleaseStopTrOperation final : public BookOperation
 {
 public:
     explicit ReleaseStopTrOperation(OrderEntry *order);
@@ -400,7 +412,7 @@ private:
 /// Hands a client's replace to the processor as a deferred event, so it is decided after every transaction before it on
 /// the original or its instrument has run, together with the fills those caused (#74). It owns the replacement until
 /// then.
-class ReplaceOrderTrOperation final : public Operation
+class ReplaceOrderTrOperation final : public BookOperation
 {
 public:
     ReplaceOrderTrOperation(OrderEntry *original, std::unique_ptr<OrderEntry> replacement,
@@ -435,7 +447,7 @@ private:
 
 /// Hands a client's cancel to the processor as a deferred event, so it is decided after every transaction before it on
 /// the order or its instrument has run, together with the fills those caused (#73).
-class CancelOrderTrOperation final : public Operation
+class CancelOrderTrOperation final : public BookOperation
 {
 public:
     CancelOrderTrOperation(OrderEntry *order, const std::string &requester,
@@ -454,7 +466,7 @@ private:
 
 /// Hands a state change of the order to the processor as a deferred event, so it is decided after every transaction
 /// before it on the order or its instrument has run, together with the fills those caused, as a cancel is (#73, #96).
-class ChangeOrderStateTrOperation final : public Operation
+class ChangeOrderStateTrOperation final : public BookOperation
 {
 public:
     ChangeOrderStateTrOperation(OrderEntry *order, Proc::OrderStateChange change);
@@ -469,7 +481,7 @@ private:
     size_t eventCountBefore_;
 };
 
-class MatchOrderTrOperation final : public Operation
+class MatchOrderTrOperation final : public BookOperation
 {
 public:
     MatchOrderTrOperation(OrderEntry *order);
