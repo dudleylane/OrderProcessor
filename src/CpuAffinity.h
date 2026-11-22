@@ -14,7 +14,7 @@
 
 #include <pthread.h>
 #include <sched.h>
-#include <unistd.h> // For sysconf, nice
+#include <unistd.h> // For sysconf
 #include <cstring>
 #include <stdexcept>
 #include <vector>
@@ -133,29 +133,6 @@ public:
 
         int result = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
         return result == 0;
-    }
-
-    /**
-     * Set thread scheduling priority to real-time FIFO.
-     * Requires CAP_SYS_NICE or root privileges.
-     * @param priority Priority level (1-99, higher = more priority)
-     * @return true on success, false on failure
-     */
-    static bool setRealtimePriority(int priority = 50) noexcept
-    {
-        struct sched_param param;
-        param.sched_priority = priority;
-        return pthread_setschedparam(pthread_self(), SCHED_FIFO, &param) == 0;
-    }
-
-    /**
-     * Set thread nice value for higher priority.
-     * @param niceValue Nice value (-20 to 19, lower = higher priority)
-     * @return true on success, false on failure
-     */
-    static bool setNiceValue(int niceValue) noexcept
-    {
-        return nice(niceValue) != -1;
     }
 };
 
