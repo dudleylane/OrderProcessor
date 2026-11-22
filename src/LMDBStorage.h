@@ -123,6 +123,10 @@ private:
     /// Runs body(txn), which returns an LMDB result, in a write transaction and commits it. A write that finds the map
     /// full doubles the map and runs again (#148).
     template <typename Body> void write(const char *context, Body &&body);
+    /// Runs body(txn) in a read transaction, under txnLock_ as every transaction is (#148), and aborts it, whatever
+    /// body returns or throws; returns what body returns. Every read goes through here, as every write goes through
+    /// write() (#631): only write(), read() and load() begin a transaction, as LMDBStorageSourceTest checks.
+    template <typename Body> auto read(const char *context, Body &&body) const;
     /// doubles the map; txnLock_ held, and no transaction open
     void grow(const char *context);
     /// records the map's size and use for mapSize() and mapUsed()
