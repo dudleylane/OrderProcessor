@@ -1,7 +1,9 @@
 ================================================================================
 DEPRECATED: This file is retained for historical reference only.
 See README.md for current build instructions and project documentation.
-The project has been migrated from Windows/MSVC to Linux/GCC with C++23.
+The project has been migrated from Windows/MSVC to Linux/GCC with C++23. The Visual
+Studio solution and projects named below are gone: they named files that no longer
+exist, and CMake builds the project (#577).
 ================================================================================
 
 /**
