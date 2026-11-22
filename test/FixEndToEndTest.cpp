@@ -40,7 +40,6 @@
 #include "Processor.h"
 #include "TaskManager.h"
 #include "Logger.h"
-#include "SubscrManager.h"
 
 #include "TestAux.h"
 
@@ -302,7 +301,6 @@ protected:
     void SetUp() override
     {
         WideDataStorage::create();
-        SubscrMgr::SubscriptionMgr::create();
         IdTGenerator::create();
         OrderStorage::create();
 
@@ -386,7 +384,6 @@ protected:
 
         OrderStorage::destroy();
         IdTGenerator::destroy();
-        SubscrMgr::SubscriptionMgr::destroy();
         WideDataStorage::destroy();
         TaskManager::destroy();
     }

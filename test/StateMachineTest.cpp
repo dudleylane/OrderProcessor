@@ -22,7 +22,6 @@
 #include "StateMachineHelper.h"
 #include "TestAux.h"
 #include "DataModelDef.h"
-#include "SubscrManager.h"
 #include "IdTGenerator.h"
 #include "TransactionScope.h"
 #include "OrderStorage.h"
@@ -31,7 +30,6 @@
 using namespace COP;
 using namespace COP::Store;
 using namespace COP::OrdState;
-using namespace COP::SubscrMgr;
 using namespace COP::ACID;
 using test::DummyOrderSaver;
 using test::TestTransactionContext;
@@ -191,7 +189,6 @@ protected:
     {
         // Note: ExchLogger is created globally by TestMain.cpp
         WideDataStorage::create();
-        SubscriptionMgr::create();
         IdTGenerator::create();
         OrderStorage::create();
         clOrderIdCounter = 0;
@@ -201,7 +198,6 @@ protected:
     {
         OrderStorage::destroy();
         IdTGenerator::destroy();
-        SubscriptionMgr::destroy();
         WideDataStorage::destroy();
         // Note: ExchLogger is destroyed globally by TestMain.cpp
     }

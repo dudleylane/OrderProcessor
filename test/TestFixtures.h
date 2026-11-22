@@ -18,7 +18,6 @@
 #include "IdTGenerator.h"
 #include "OrderStorage.h"
 #include "OrderBookImpl.h"
-#include "SubscrManager.h"
 #include "TestAux.h"
 
 namespace test
@@ -74,29 +73,6 @@ protected:
 };
 
 // =============================================================================
-// Subscription Fixture - Includes SubscriptionMgr singleton
-// =============================================================================
-
-/**
- * Fixture that includes SubscriptionMgr for event subscription tests.
- */
-class SubscriptionFixture : public OrderStorageFixture
-{
-protected:
-    void SetUp() override
-    {
-        OrderStorageFixture::SetUp();
-        COP::SubscrMgr::SubscriptionMgr::create();
-    }
-
-    void TearDown() override
-    {
-        COP::SubscrMgr::SubscriptionMgr::destroy();
-        OrderStorageFixture::TearDown();
-    }
-};
-
-// =============================================================================
 // Order Book Fixture - Includes OrderBook with instruments
 // =============================================================================
 
@@ -143,12 +119,12 @@ protected:
  * Full fixture for processor/integration tests.
  * Includes all singletons and order book infrastructure.
  */
-class ProcessorFixture : public SubscriptionFixture
+class ProcessorFixture : public OrderStorageFixture
 {
 protected:
     void SetUp() override
     {
-        SubscriptionFixture::SetUp();
+        OrderStorageFixture::SetUp();
 
         instrumentId1_ = test::addInstrument("aaa");
         instrumentId2_ = test::addInstrument("bbb");
@@ -163,7 +139,7 @@ protected:
     void TearDown() override
     {
         orderBook_.reset();
-        SubscriptionFixture::TearDown();
+        OrderStorageFixture::TearDown();
     }
 
 protected:

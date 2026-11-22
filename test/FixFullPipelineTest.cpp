@@ -36,7 +36,6 @@
 #include "Processor.h"
 #include "TaskManager.h"
 #include "Logger.h"
-#include "SubscrManager.h"
 #include "OrderCodec.h"
 
 #include "TestAux.h"
@@ -135,7 +134,6 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
     // =========================================================================
 
     WideDataStorage::create();
-    SubscrMgr::SubscriptionMgr::create();
     IdTGenerator::create();
     OrderStorage::create();
 
@@ -228,7 +226,6 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
 
                     OrderStorage::destroy();
                     IdTGenerator::destroy();
-                    SubscrMgr::SubscriptionMgr::destroy();
                     WideDataStorage::destroy();
                     TaskManager::destroy();
                 } };
