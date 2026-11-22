@@ -118,6 +118,65 @@ TEST_F(ServerDataTest, AnEmptyDirectoryLoadsWithNothingToContinueFrom)
     EXPECT_TRUE(data.dispatcher->ordersToMatch().empty());
 }
 
+TEST_F(ServerDataTest, ADirectoryWithReferenceDataButNotTheServersDefaultsRefusesTheStart)
+{
+    // A mistyped --clearing-firm on a seeded directory started a server that refused every order, with a warning the
+    // only sign; an identity whose account the directory lacks refused the start (#225). Now a directory that holds
+    // reference data must hold the clearing firm, and the default account unless --ws-credentials makes it unused
+    // (#640). The fixture's names are the ones test::createCorrectOrder() stores; these are others.
+    {
+        LMDBStorage lmdb(MAP_SIZE);
+        StorageRecordDispatcher writer;
+        writer.init(WideDataStorage::instance(), nullptr, &lmdb, OrderStorage::instance());
+        lmdb.load(dir_, &writer);
+        WideDataStorage::instance()->bindStorage(&writer);
+        test::addInstrument("DEFAULTS");
+        test::addAccount("DESK", "DeskFirm", PRINCIPAL_ACCOUNTTYPE);
+        test::addClearing("HOUSE");
+    }
+    auto refusal = [&](const std::string &clearingFirm, const std::string &account, bool accountUsed)
+    {
+        restart();
+        try
+        {
+            App::loadServerData(dir_, MAP_SIZE, ID_BLOCK, clearingFirm, account, 0, 0, accountUsed);
+        }
+        catch (const std::runtime_error &e)
+        {
+            return std::string(e.what());
+        }
+        return std::string();
+    };
+    EXPECT_EQ("", refusal("HOUSE", "DESK", true)) << "both there";
+    EXPECT_NE(std::string::npos, refusal("HOUSF", "DESK", true).find("--clearing-firm HOUSF is not in"));
+    EXPECT_NE(std::string::npos, refusal("HOUSF", "DESK", false).find("--clearing-firm HOUSF is not in"))
+        << "every order needs the clearing firm, with identities too";
+    EXPECT_NE(std::string::npos, refusal("HOUSE", "DESX", true).find("--default-account DESX is not in"));
+    EXPECT_EQ("", refusal("HOUSE", "DESX", false)) << "under --ws-credentials the default account is unused";
+}
+
+TEST_F(ServerDataTest, AnEmptyDirectoryStartsWithoutTheServersDefaults)
+{
+    // As compose's first start does, before seedData seeds the volume (#161): a warning, and no refusal (#640)
+    test::CapturedLog log;
+    {
+        const App::ServerData data = load();
+        EXPECT_FALSE(data.defaultClearingId.isValid());
+        EXPECT_FALSE(data.defaultAccountId.isValid());
+    }
+    const std::vector<std::string> lines = log.lines();
+    const auto logged = [&](const std::string &text)
+    {
+        return std::any_of(lines.begin(), lines.end(),
+                           [&](const std::string &line)
+                           {
+                               return std::string::npos != line.find(text);
+                           });
+    };
+    EXPECT_TRUE(logged("--clearing-firm CLRFirm is not in"));
+    EXPECT_TRUE(logged("--default-account ACT is not in"));
+}
+
 TEST_F(ServerDataTest, IdsContinuePastTheBlockTheLastStartReserved)
 {
     // A start reserves a block of ids, saving a limit past them before issuing any (#81). After a crash, which never
