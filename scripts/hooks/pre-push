@@ -118,7 +118,26 @@ if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
     cmake -S "$ROOT" -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON -DBUILD_APP=ON -DBUILD_PG=OFF -DWARNINGS_AS_ERRORS=ON \
         -DBUILD_FIX=ON \
-        || refuse "configure failed"
+        || refuse "configure failed; if $BUILD_DIR is left with a CMakeCache.txt, the next push configures it again"
+fi
+# A directory configured from another tree, such as another worktree, would build and test that tree, and pass the push
+# of this one (#560)
+home="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$BUILD_DIR/CMakeCache.txt")"
+if [[ -z "$home" || "$(realpath -m -- "$home")" != "$(realpath -m -- "$ROOT")" ]]; then
+    refuse "$BUILD_DIR was configured from ${home:-a tree its CMakeCache.txt does not name}, not from $ROOT, so it would build and test that tree. Point BUILD_DIR at a build of this one."
+fi
+# A configure that failed leaves a cache with every option set and no build file, so the checks below passed it and the
+# test count blamed BUILD_TESTS (#613): configure it again, from what the cache holds
+generator="$(sed -n 's/^CMAKE_GENERATOR:INTERNAL=//p' "$BUILD_DIR/CMakeCache.txt")"
+case "$generator" in
+    Ninja*) build_file=build.ninja ;;
+    *Makefiles) build_file=Makefile ;;
+    *) build_file="" ;;
+esac
+if [[ -n "$build_file" && ! -f "$BUILD_DIR/$build_file" ]]; then
+    echo "pre-push: $BUILD_DIR has a CMakeCache.txt but no $build_file, so its configure never finished; configuring again"
+    cmake -S "$ROOT" -B "$BUILD_DIR" \
+        || refuse "configure failed again; delete $BUILD_DIR, and the next push configures it from scratch"
 fi
 if ! grep -q '^CMAKE_BUILD_TYPE:STRING=Release$' "$BUILD_DIR/CMakeCache.txt"; then
     refuse "$BUILD_DIR is not a Release build; CI tests Release. Point BUILD_DIR at one."
