@@ -35,6 +35,11 @@ static std::atomic<int> g_nextWorkerCore{ 0 };
 /// Whether this thread is running one of a TaskManager's tasks, which decides how submit() starts the next (#364)
 static thread_local bool g_inTask = false;
 
+/// Whether this thread has been pinned to a core (#536): one flag for both kinds of task. Each task body had a flag of
+/// its own, so a worker that ran both took a core for each, ended up on the second, and cores ran out faster than
+/// workers, leaving two on one core.
+static thread_local bool g_pinned = false;
+
 namespace
 {
 /// Marks this thread as in a task for the task body's extent
@@ -234,6 +239,16 @@ template <typename F> void TaskManager::submit(F &&task)
     }
 }
 
+void TaskManager::pinThisWorker() const
+{
+    if ((cpuAffinityStart_ >= 0) && !g_pinned)
+    {
+        const int core = g_nextWorkerCore.fetch_add(1, std::memory_order_relaxed) % CpuAffinity::getAvailableCores();
+        CpuAffinity::pinThreadToCore(core);
+        g_pinned = true;
+    }
+}
+
 void TaskManager::addTask(const TransactionId & /*id*/)
 {
     onReadyToExecute();
@@ -267,18 +282,7 @@ void TaskManager::onReadyToExecute()
         [this, id, tr, proc]()
         {
             InTask inTask;
-            // Pin this TBB worker thread to a dedicated core (once per thread)
-            if (cpuAffinityStart_ >= 0)
-            {
-                static thread_local bool pinned = false;
-                if (!pinned)
-                {
-                    int core =
-                        g_nextWorkerCore.fetch_add(1, std::memory_order_relaxed) % CpuAffinity::getAvailableCores();
-                    CpuAffinity::pinThreadToCore(core);
-                    pinned = true;
-                }
-            }
+            pinThisWorker();
 
             assert(nullptr != tr);
             assert(nullptr != proc);
@@ -341,18 +345,7 @@ void TaskManager::onNewEvent()
         [this, proc]()
         {
             InTask inTask;
-            // Pin this TBB worker thread to a dedicated core (once per thread)
-            if (cpuAffinityStart_ >= 0)
-            {
-                static thread_local bool pinned = false;
-                if (!pinned)
-                {
-                    int core =
-                        g_nextWorkerCore.fetch_add(1, std::memory_order_relaxed) % CpuAffinity::getAvailableCores();
-                    CpuAffinity::pinThreadToCore(core);
-                    pinned = true;
-                }
-            }
+            pinThisWorker();
 
             assert(nullptr != proc);
             // A throw out of this task would cancel taskGroup_, so that no later task ran, and would keep this
