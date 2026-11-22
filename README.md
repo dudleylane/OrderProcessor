@@ -244,7 +244,7 @@ cd build && ctest --output-on-failure
 
 ### Local pre-push gate
 
-A tracked hook runs the build, `ctest -j1 --timeout 300`, and the clang-format check before every push, and refuses the push if any fails. Its ctest runs under a 4G memory cap, as CI's test steps do (`scripts/memory-cap.sh`, #607): a test that runs away is killed at the cap and named, and the rest run. The cap is a systemd user scope's, so the hook needs systemd's user manager. It builds the working tree, so it also refuses a push unless the working tree is the commit pushed: `HEAD`, with nothing changed or untracked. Its build directory must be a Release one configured as CI configures it (`BUILD_TESTS`, `BUILD_BENCHMARKS` and `BUILD_APP` on). Enable it once per clone:
+A tracked hook runs the build, `ctest -j1 --timeout 300`, the clang-format check and the line-length check before every push, and refuses the push if any fails. Its ctest runs under a 4G memory cap, as CI's test steps do (`scripts/memory-cap.sh`, #607): a test that runs away is killed at the cap and named, and the rest run. The cap is a systemd user scope's, so the hook needs systemd's user manager. ctest counts a skipped test as a pass, so the hook refuses a run in which one skipped, as CI's test steps do, but for the Postgres tests in a `BUILD_PG=ON` directory with no `PG_CONNECTION_STRING` (`scripts/ctest-skips.sh`, #563, #635). It builds the working tree, so it also refuses a push unless the working tree is the commit pushed: `HEAD`, with nothing changed or untracked. Its build directory must be a Release one configured from this tree (#560), as CI configures it (`BUILD_TESTS`, `BUILD_BENCHMARKS`, `BUILD_APP` and `WARNINGS_AS_ERRORS` on; #571). A directory whose first configure failed, leaving a cache and no build file, is configured again (#613). Enable it once per clone:
 
 ```bash
 git config core.hooksPath scripts/hooks
@@ -272,12 +272,15 @@ Export to JSON for comparison:
 `scripts/benchmark-regression.sh` compares the benchmark binary from before a change with the one after it, on the same machine. Nothing is committed: a comparison only means something on the machine that made it.
 
 ```bash
-# Before the change: build, then save the benchmark binary as the baseline
+# Before the change: build a Release tree of the script's own (build-benchmark/), and save its benchmark binary as the
+# baseline
 ./scripts/benchmark-regression.sh --update-baseline
 
-# Make your change, rebuild, then compare the two binaries
-./scripts/benchmark-regression.sh --no-build --pinned 2-5 --filter 'Pool|StateMachine'
+# Make your change, then build that tree again and compare the two binaries
+./scripts/benchmark-regression.sh --pinned 2-5 --filter 'Pool|StateMachine'
 ```
+
+Without `--no-build` the script deletes and builds its `--build-dir`, by default `build-benchmark/`, a directory of its own, with tests and the app off, and with the FIX gateway on where the tree has `BUILD_FIX`; it refuses to delete a directory it didn't make (#588). To time a build of your own instead, such as the `build/` the pre-push hook configures, give `--no-build` both times: `--update-baseline --no-build` before the change, and `--no-build` after it, having rebuilt that directory. Keep to one way for both binaries, so that both are built alike.
 
 The two binaries run in alternating rounds, and the order flips every round, so drift between runs (clock frequency, temperature, other load) falls on both alike. Each benchmark is judged by the median, over rounds, of its after/before ratio: by real time for benchmarks that ask for it (`/real_time`) or time themselves by hand (`/manual_time`), by CPU time otherwise. The report lists every benchmark that moved more than the threshold, with the number of rounds in which it was slower and its range across rounds. The script exits 1 if a benchmark got slower by more than the threshold, 2 if one failed to run or anything else went wrong, and 3 if the machine was too busy to judge.
 
