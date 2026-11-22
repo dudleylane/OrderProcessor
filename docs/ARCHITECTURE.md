@@ -1,7 +1,7 @@
 # OrderProcessor Architecture Document
 
-**Version:** 1.0
-**Date:** January 2026
+**Status:** describes the code in the tree it ships in. First written in January 2026; each section names the issues
+that changed it since (#573 brought the stale ones up to date).
 **System:** OrderProcessor - High-Performance Concurrent Order Processing Library
 
 ---
@@ -52,8 +52,8 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 | CAS Backoff | `_mm_pause()` with exponential backoff | Reduces contention on CAS loops |
 | Devirtualization | `final` classes | Enables compiler inlining of virtual calls |
 | CPU Pinning | `CpuAffinity` utilities | Reduces context switches and cache pollution |
-| Huge Pages | `HugePages` utilities | Reduces TLB misses for large allocations |
-| NUMA Allocation | `NumaAllocator` with STL-compatible `NumaNodeAllocator<T>` | Reduces cross-socket memory traffic |
+| Huge Pages | `HugePages` utilities | `TransactionScopePool` can put its slot headers in 2 MB pages; the server builds its pools in the default mode, so it uses none (#603) |
+| NUMA Allocation | `NumaAllocator` with STL-compatible `NumaNodeAllocator<T>` | `TransactionScopePool` can bind its slots to the local node; the server doesn't ask it to (#603) |
 
 ---
 
@@ -83,13 +83,13 @@ OrderProcessor is a high-performance, concurrent order processing library writte
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         QUEUE LAYER                                          │
-│  ┌─────────────────────────────────┐    ┌─────────────────────────────────┐ │
-│  │       IncomingQueues            │    │        OutgoingQueues           │ │
-│  │  ┌─────┬─────┬─────┬─────┐     │    │  ┌─────────────────────────┐    │ │
-│  │  │Order│Cncl │Rplc │Timer│     │    │  │ ExecReport │ CnclReject │    │ │
-│  │  │Queue│Queue│Queue│Queue│     │    │  │   Queue    │   Queue    │    │ │
-│  │  └─────┴─────┴─────┴─────┘     │    │  └─────────────────────────┘    │ │
-│  └─────────────────────────────────┘    └─────────────────────────────────┘ │
+│  IncomingQueues: one tbb::concurrent_queue of a std::variant of the six      │
+│  event types (order, cancel, replace, state change, process, timer),         │
+│  dispatched with std::visit to the Processor's onEvent overloads.            │
+│                                                                              │
+│  OutQueues: where the engine's reports go. The server's is WsOutQueues       │
+│  (app/), which writes each as JSON to the sessions that may see it;          │
+│  OutgoingQueues, which keeps every report, is the tests' and benchmarks'.    │
 └──────────────────────────────┬──────────────────────────────────────────────┘
                                │
                                ▼
@@ -128,16 +128,15 @@ OrderProcessor is a high-performance, concurrent order processing library writte
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                     PERSISTENCE LAYER                                        │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │                    FileStorage                                        │   │
-│  │  ┌────────────────────────────────────────────────────────────────┐  │   │
-│  │  │  StorageRecordDispatcher (Codec Router)                        │  │   │
-│  │  │  ┌──────────┬──────────┬──────────┬──────────┬──────────────┐  │  │   │
-│  │  │  │Instrument│ Account  │ Clearing │   Order  │  Execution   │  │  │   │
-│  │  │  │  Codec   │  Codec   │  Codec   │   Codec  │    Codec     │  │  │   │
-│  │  │  └──────────┴──────────┴──────────┴──────────┴──────────────┘  │  │   │
-│  │  └────────────────────────────────────────────────────────────────┘  │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
+│  LMDBStorage: versioned records, written as each transaction commits         │
+│  (#20; fsync per commit, a trade's persists as one commit, #163)             │
+│                                                                              │
+│  StorageRecordDispatcher, the codec router, by record type:                  │
+│    Instrument, String, Account, Clearing, RawData (each a codec)             │
+│    Order (OrderCodec), IdLimit (#81), LastTrade (#237, #518)                 │
+│    Execution reports aren't persisted (#582): none is written                │
+│                                                                              │
+│  FileStorage, the file-based store before LMDB, is legacy: unused (#581)     │
 └─────────────────────────────────────────────────────────────────────────────┘
                                │
                                ▼
@@ -169,9 +168,9 @@ COP (Concurrent Order Processor)
 ├── ACID        → Transaction management (TransactionManager, Transaction, Scope, TransactionScopePool)
 ├── OrdState    → Order state machine (OrderState_, OrderStatePersistence)
 ├── Store       → Storage and persistence (OrderDataStorage)
-├── SubscrMgr   → Subscription management (SubscrManager, OrderFilter, EntryFilter)
-├── SL          → Subscription layer (SubscriptionLayerImpl)
-├── EventMgr    → Event management (EventManager, EventDispatcher)
+├── SubscrMgr   → Subscription management (SubscrManager, OrderFilter, EntryFilter): compiled in, unused by the server (#581)
+├── SL          → Subscription layer (SubscriptionLayerImpl): compiled in, unused by the server (#581)
+├── EventMgr    → Event management (EventManager, EventDispatcher): compiled in, unused by the server (#581)
 ├── PG          → PostgreSQL write-behind (PGWriteBehind, PGRequestBuilder) [optional]
 ├── App         → WebSocket server + FIX gateway (WsServer, FixGateway, MultiOutQueues) [optional]
 ├── Tasks       → Task scheduling (TaskManager, oneTBB integration)
@@ -226,7 +225,7 @@ COP (Concurrent Order Processor)
 |-----------|-----------|-------------|
 | `ProcessorTest.cpp` | `ProcessorTest.*` | Event pipeline validation |
 | `IntegrationTest.cpp` | `IntegrationTest.*` | End-to-end integration |
-| `EventProcessingBench.cpp` | `BM_EventProcessing*` | Throughput benchmarking |
+| `EventProcessingBench.cpp` | `BM_QueuePush*Event`, `BM_QueuePopEvents`, `BM_OutQueuePush*` | The queues' push and pop; no `Processor` (`BM_Process*` in `ProcessorBench.cpp` times the pipeline) |
 
 ---
 
@@ -244,33 +243,28 @@ COP (Concurrent Order Processor)
 │   • InQueuesContainer - Queue management                        │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │              Queue Organization by Source                │    │
-│  │                                                          │    │
-│  │   Source A          Source B          Source C          │    │
-│  │  ┌────────┐        ┌────────┐        ┌────────┐        │    │
-│  │  │Orders  │        │Orders  │        │Orders  │        │    │
-│  │  ├────────┤        ├────────┤        ├────────┤        │    │
-│  │  │Cancels │        │Cancels │        │Cancels │        │    │
-│  │  ├────────┤        ├────────┤        ├────────┤        │    │
-│  │  │Replaces│        │Replaces│        │Replaces│        │    │
-│  │  ├────────┤        ├────────┤        ├────────┤        │    │
-│  │  │States  │        │States  │        │States  │        │    │
-│  │  ├────────┤        ├────────┤        ├────────┤        │    │
-│  │  │Timers  │        │Timers  │        │Timers  │        │    │
-│  │  └────────┘        └────────┘        └────────┘        │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│  One queue for every source and every event type: a              │
+│  oneapi::tbb::concurrent_queue of QueuedEvent, each the          │
+│  pushing source's name and a std::variant of the six event       │
+│  types below. pop() hands the front event to the attached        │
+│  InQueueProcessor, dispatched by std::visit to its onEvent       │
+│  overload (the Processor). size() reads an atomic counter.       │
 │                                                                  │
-│  Thread Safety: std::atomic<InQueueProcessor*> + tbb::mutex     │
+│  Thread Safety: the queue is lock-free (MPMC); the attached      │
+│  processor and observer are std::atomic; a spin_mutex guards     │
+│  only the one event top() peeked at.                             │
 │                                                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │ Event Types Supported:                                           │
 │   • OrderEvent         - New order submission                   │
 │   • OrderCancelEvent   - Order cancellation request             │
 │   • OrderReplaceEvent  - Order modification request             │
-│   • OrderChangeStateEvent - State change notification           │
-│   • ProcessEvent       - Process control message                │
-│   • TimerEvent         - Time-based event                       │
+│   • OrderChangeStateEvent - suspend, resume, finish: nothing     │
+│       in src/ or app/ makes one (#580)                           │
+│   • ProcessEvent       - the legacy replace's, which nothing     │
+│       has driven since #74 (#580)                                │
+│   • TimerEvent         - expiry, day end and restatement,        │
+│       from ExpiryScheduler and restore (#240, #244)              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -293,26 +287,21 @@ COP (Concurrent Order Processor)
 │ Implements: OutQueues                                            │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │            Outbound Event Routing                        │    │
-│  │                                                          │    │
-│  │   Target A          Target B          Target C          │    │
-│  │  ┌────────────┐    ┌────────────┐    ┌────────────┐    │    │
-│  │  │ExecReports │    │ExecReports │    │ExecReports │    │    │
-│  │  ├────────────┤    ├────────────┤    ├────────────┤    │    │
-│  │  │CnclRejects │    │CnclRejects │    │CnclRejects │    │    │
-│  │  ├────────────┤    ├────────────┤    ├────────────┤    │    │
-│  │  │BizRejects  │    │BizRejects  │    │BizRejects  │    │    │
-│  │  └────────────┘    └────────────┘    └────────────┘    │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│  OutQueues is where the engine's reports go. The server's is     │
+│  WsOutQueues (app/), which writes each report as JSON to the     │
+│  sessions that may see it. OutgoingQueues, the one in src/,      │
+│  keeps every report, with its target, in one lock-free           │
+│  oneapi::tbb::concurrent_queue of a std::variant: the tests and  │
+│  the queue benchmarks use it, the server doesn't. It ignores a   │
+│  refusal of an order the engine never stored (#623).             │
 │                                                                  │
-│  Thread Safety: oneapi::tbb::mutex per queue                    │
+│  Thread Safety: the queue is lock-free; no mutex                 │
 │                                                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │ Event Types Produced:                                            │
 │   • ExecReportEvent    - Execution report (fill, ack, etc.)    │
 │   • CancelRejectEvent  - Cancel request rejection              │
-│   • BusinessRejectEvent - Business rule rejection              │
+│   • BusinessRejectEvent - nothing makes one (#603)               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -369,7 +358,8 @@ COP (Concurrent Order Processor)
 │   pendingReleases    → those pending, named by the last trade   │
 ├─────────────────────────────────────────────────────────────────┤
 │ Data Structure:                                                  │
-│   std::multimap<Price, OrderEntry*, PriceComparator>            │
+│   std::multimap<PriceT, IdT, PriceTAscend/PriceTDescend>: ids,  │
+│     each order found through the store                          │
 │   • Buy side: Greater-than comparator (best price first)        │
 │   • Sell side: Less-than comparator (best price first)          │
 │   • Stop book: buy stops by stop price, lowest first, sell      │
@@ -480,7 +470,7 @@ The matcher has no minimum quantity. An order's `minQty_` is stored, persisted a
 
 ### 3.6 FIX Gateway (Optional, `BUILD_FIX=ON`)
 
-**Location:** `app/FixGateway.h`, `app/FixGateway.cpp`, `app/FixOutQueues.cpp`, `app/MultiOutQueues.cpp`, `app/FixStores.h/cpp`
+**Location:** `app/FixGateway.h/cpp`, `app/FixOutQueues.h/cpp`, `app/MultiOutQueues.h/cpp`, `app/FixServer.h/cpp`, `app/FixStores.h/cpp`, `app/FixCredentials.h/cpp`, `app/FixTls.h`, `app/FixRotatingLog.h/cpp`
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -496,12 +486,16 @@ The matcher has no minimum quantity. An order's `minQty_` is stored, persisted a
 │  │    OrderCancelRequest (35=F) → OrderCancelEvent       │       │
 │  │    OrderCancelReplaceRequest (35=G) → OrderReplaceEvent│      │
 │  │    OrderStatusRequest (35=H) → answered here (#383)   │       │
+│  │    NewOrderMultileg (35=AB) → OrderEvent, an FX swap  │       │
+│  │      (#527: a NewOrderSingle swap is refused)         │       │
 │  │                    ↓                                   │       │
 │  │           IncomingQueues::push()                       │       │
 │  │                                                       │       │
 │  │  OUTBOUND:                                            │       │
 │  │    ExecutionEntry → FIX50SP2::ExecutionReport (35=8)  │       │
 │  │    CancelReject   → FIX50SP2::OrderCancelReject (35=9)│       │
+│  │    The gateway's own BusinessMessageReject (35=j),    │       │
+│  │      not QuickFIX's, which carries 1137 (#377)        │       │
 │  │                    ↓                                   │       │
 │  │           Session::sendToTarget()                      │       │
 │  └──────────────────────────────────────────────────────┘       │
@@ -521,9 +515,11 @@ The matcher has no minimum quantity. An order's `minQty_` is stored, persisted a
 │  Session Routing:                                                │
 │    source_ = "FIX:SENDER->TARGET" on each order                │
 │    sessionMap_ maps source string → FIX::SessionID              │
-│    Populated on onLogon(), cleared on onLogout()                │
+│    Filled in onCreate(), so a session is known while its client │
+│    is away (#160); loggedOn_ follows onLogon() and onLogout()   │
 │                                                                  │
-│  Threading: ThreadedSocketAcceptor (thread-per-session)         │
+│  Threading: ThreadedSocketAcceptor (thread-per-session), or     │
+│    ThreadedSSLSocketAcceptor with --fix-tls-cert/-key (#228)    │
 │    FixGateway is thread-safe:                                    │
 │      • IncomingQueues::push() — lock-free tbb::concurrent_queue │
 │      • WideDataStorage reads — spin_rw_mutex (shared)           │
@@ -601,7 +597,7 @@ The matcher has no minimum quantity. An order's `minQty_` is stored, persisted a
 │   • Create OrderEntry                                                    │
 │   • Add to OrderDataStorage, locked until initialised (#13), and marked  │
 │     until its transaction is enqueued (#83)                              │
-│   • Transition: INITIAL → RCVD_NEW → NEW                                 │
+│   • Transition: RCVD_NEW → NEW (the machine starts in Rcvd_New)          │
 └──────────────────────────────────────────────────────────────────────────┘
        │
        ▼
@@ -1001,10 +997,8 @@ An order keeps FIX's day figures for the business day that began at its `dayStar
                               │                    ZONE 1 (Primary States)                   │
                               └─────────────────────────────────────────────────────────────┘
 
-                                                    ┌──────────┐
-                                                    │ INITIAL  │
-                                                    └────┬─────┘
-                                                         │ onOrderReceived
+                                       start: initial_state, Rcvd_New and NoCnlReplace
+                                                         │
                                                          ▼
                                                     ┌──────────┐
                                           ┌─────────│ RCVD_NEW │─────────┐
@@ -1069,32 +1063,33 @@ An order keeps FIX's day figures for the business day that began at its `dayStar
 
 ### 5.2 State Transition Table
 
+The machine starts in Rcvd_New in zone 1 and NoCnlReplace in zone 2 (`initial_state`, `src/StateMachine.h`): there is no INITIAL state. Rows marked *tests only* are reached by nothing outside the tests: no client message or timer raises their events, so they are latent features (#580).
+
 | From State | Event | To State | Action |
 |------------|-------|----------|--------|
-| INITIAL | onOrderReceived | RCVD_NEW | Create OrderEntry |
 | RCVD_NEW | onOrderReceived | NEW | Add to book, send ACK |
 | RCVD_NEW | onOrderReceived (refused) | REJECTED | An order `isValid()` refuses, or a market order with nothing to trade with: stored and reported, with no exception raised (#436) |
-| RCVD_NEW | onExternalOrderReject | REJECTED | Send REJECT |
-| RCVD_NEW | onRplOrderReceived | PEND_REPLACE | Queue replace (not driven since #74) |
+| RCVD_NEW | onExternalOrderReject | REJECTED | Send REJECT (*tests only*) |
+| RCVD_NEW | onRplOrderReceived | PEND_REPLACE | Queue replace (*tests only*: the legacy replace, not driven since #74) |
 | RCVD_NEW | onReplace | NEW | An accepted replacement: into the book, matched (#74) |
 | RCVD_NEW | onReplace (original had fills) | PARTFILL | The same, carrying the original's fills (#74) |
 | NEW | onTradeExecution (partial) | PARTFILL | Create TRADE report |
 | NEW | onTradeExecution (full) | FILLED | Create TRADE report, remove from book |
-| NEW | onOrderRejected | REJECTED | Send REJECT |
+| NEW | onOrderRejected | REJECTED | Send REJECT (*tests only*) |
 | NEW | onExpired | EXPIRED | Remove from book |
-| NEW | onFinished | DONEFORDAY | End of session |
-| NEW | onSuspended | SUSPENDED | Halt trading |
+| NEW | onFinished | DONEFORDAY | End of session (*tests only*) |
+| NEW | onSuspended | SUSPENDED | Halt trading (*tests only*) |
 | PARTFILL | onTradeExecution (partial) | PARTFILL | Create TRADE report |
 | PARTFILL | onTradeExecution (full) | FILLED | Create TRADE report, remove from book |
-| PARTFILL | onTradeCrctCncl | NEW/PARTFILL | Trade correction |
+| PARTFILL | onTradeCrctCncl | NEW/PARTFILL | Trade correction (*tests only*) |
 | PARTFILL | onExpired | EXPIRED | Partial fill expiration |
-| FILLED | onTradeCrctCncl | PARTFILL/NEW | Trade bust |
-| NO_CNL_REPLACE | onCancelReceived | GOING_CANCEL | Begin cancel |
+| FILLED | onTradeCrctCncl | PARTFILL/NEW | Trade bust (*tests only*) |
+| NO_CNL_REPLACE | onCancelReceived | GOING_CANCEL | Begin cancel (*tests only*: a client's cancel is decided at once, below, #73) |
 | NO_CNL_REPLACE | onReplaceReceived | GOING_REPLACE | Begin replace (not driven since #74) |
 | NO_CNL_REPLACE | onExecReplace | CNCL_REPLACED | The original of an accepted replace: out of the book, leaves 0 (#74) |
 | NO_CNL_REPLACE | onExecCancel | CNCL_REPLACED | Client cancel, decided at once: remove from book, leaves 0 (#73) |
 | GOING_CANCEL | onExecCancel | CNCL_REPLACED | Remove from book (an order an older server left pending) |
-| GOING_CANCEL | onCancelRejected | NO_CNL_REPLACE | Cancel failed |
+| GOING_CANCEL | onCancelRejected | NO_CNL_REPLACE | Cancel failed (*tests only*) |
 | GOING_REPLACE | onExecReplace | CNCL_REPLACED | Update order (not driven since #74) |
 | GOING_REPLACE | onReplaceRejected | NO_CNL_REPLACE | Replace failed (not driven since #74) |
 
@@ -1175,14 +1170,15 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 │   │  │ sellLock_ [M]  │     │ sellLock_ [M]  │     │ sellLock_ [M]  │  │   │
 │   │  └────────────────┘     └────────────────┘     └────────────────┘  │   │
 │   │                                                                      │   │
-│   │   [M] = tbb::mutex (allows concurrent buy/sell on same instrument)  │   │
+│   │   [M] = tbb::mutex per side; stopLock_ [M] guards the stop book     │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
 │   │                      OrderDataStorage                                │   │
 │   │                                                                      │   │
-│   │   orderLock_ [M]  ─── protects order maps                           │   │
-│   │   execLock_  [M]  ─── protects execution maps                       │   │
+│   │   orderRwLock_ [RW] ─── the order maps and the executions map       │   │
+│   │   (readers share it; a change takes it for write, #467)             │   │
+│   │   Each OrderEntry has its own entryMutex_ [RW], for its figures     │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 
@@ -1254,11 +1250,22 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 
 2. Lock Ordering
    ┌───────────────────────────────────────────────────────────────────────┐
-   │   Always acquire in order:                                            │
-   │     1. OrderBook locks (buy before sell)                             │
-   │     2. OrderStorage locks (order before execution)                   │
-   │     3. Queue locks (input before output)                             │
-   │     4. FileStorage locks                                             │
+   │   What every site keeps to (#573, #636):                              │
+   │   • Two orders' own locks (entryMutex_): by ascending order id.       │
+   │   • An order's lock before a store's (orderRwLock_, WideData-         │
+   │     Storage's rwLock_), never a store's and then an order's: a        │
+   │     replace holds its original's write lock while it stores the       │
+   │     replacement, so a reader outside a transaction reads each order   │
+   │     only after it has released the store's (#404).                    │
+   │   • A book side's lock (buyLock_, sellLock_, stopLock_) and an        │
+   │     order's: inside an instrument's chain both orders occur. The      │
+   │     matcher reads a contra order under its side's lock, and a         │
+   │     fill's decision holds the order's write lock while processFill    │
+   │     takes it out of the book; the chain runs them one at a time.      │
+   │     Outside the chain, never hold a book lock and an order's at       │
+   │     once (#525).                                                      │
+   │   • LMDBStorage's txnLock_: alone, around one LMDB transaction.       │
+   │   • The incoming queue takes no lock to push or pop.                  │
    └───────────────────────────────────────────────────────────────────────┘
 
 3. Lock-Free Where Possible
@@ -1298,28 +1305,24 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
 │   │                    Operation Collection                              │   │
 │   │                                                                      │   │
-│   │   Stage 1 (Sub-Transaction)                                         │   │
-│   │   ┌─────────────────────────────────────────────────────────────┐   │   │
-│   │   │ Op1: CreateExecReportTrOperation (NEW ack)                  │   │   │
-│   │   │ Op2: AddToOrderBookTrOperation                              │   │   │
-│   │   └─────────────────────────────────────────────────────────────┘   │   │
-│   │                                                                      │   │
-│   │   Stage 2 (Sub-Transaction)                                         │   │
-│   │   ┌─────────────────────────────────────────────────────────────┐   │   │
-│   │   │ Op3: MatchOrderTrOperation                                  │   │   │
-│   │   │ Op4: CreateTradeExecReportTrOperation                       │   │   │
-│   │   └─────────────────────────────────────────────────────────────┘   │   │
+│   │   One ordered list of operations, with no stages:                    │   │
+│   │   ┌───────────────────────────────────────────────────────────┐      │   │
+│   │   │ the persists first: PersistOrderTrOperation and the last  │      │   │
+│   │   │ trade's, put first by addOperationFirst() (#28, #237),    │      │   │
+│   │   │ then the rest in the order the decision added them: the   │      │   │
+│   │   │ book's, the reports' (which publish), the events enqueued │      │   │
+│   │   └───────────────────────────────────────────────────────────┘      │   │
 │   │                                                                      │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │   executeTransaction()                                                       │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │  for each stage:                                                     │   │
-│   │    for each operation:                                               │   │
-│   │      if operation.execute() fails:                                  │   │
-│   │        rollback all operations in this stage                        │   │
-│   │        return failure                                                │   │
-│   │    mark stage complete                                               │   │
+│   │  two or more leading persists: one LMDB commit for them all,         │   │
+│   │    before the first operation that publishes (#163)                  │   │
+│   │  for each operation, in order: execute()                             │   │
+│   │  if one throws (#514): log it at error level, count it               │   │
+│   │    (failedCount()), and roll back from it to the first,              │   │
+│   │    each rollback on its own, so one that throws stops none           │   │
 │   │  return success                                                      │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -1357,15 +1360,18 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ ATOMICITY                                                                    │
 │                                                                              │
-│   Implementation: TransactionScope with staged rollback                     │
+│   Implementation: TransactionScope, one list of operations, no stages        │
 │                                                                              │
 │   execute()     ─► Success ─► Commit all operations                        │
 │        │                                                                     │
-│        └─► Failure ─► Rollback operations in reverse order                  │
+│        └─► Failure ─► Rollback from the operation that failed to the first   │
 │                                                                              │
 │   Each operation implements:                                                 │
 │     • execute()  - Perform the change                                       │
-│     • rollback() - Undo the change                                          │
+│     • rollback() - Undo the change: a report's rollback is empty (§7.4)      │
+│   A decision is applied in memory, under the order's write lock, before      │
+│   its transaction runs: a rollback undoes the operations, not the            │
+│   decision (#514, #659).                                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -1390,32 +1396,33 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 │   │    • If T1 touches Order A → T2 waits for T1                      │    │
 │   │    • If T3 only touches Order C → T3 runs parallel to T2          │    │
 │   │                                                                    │    │
-│   │  Effect: Serializable isolation for overlapping transactions      │    │
+│   │  Effect: transactions that share an object run in order. Not      │    │
+│   │  serializable: decisions are applied before their transactions    │    │
+│   │  run, and a fill's transaction names its orders and the last      │    │
+│   │  trade, not the instrument, so the next booking can fill the      │    │
+│   │  same order first (#411). Each record and report carries the      │    │
+│   │  figures its decision took, so neither depends on the order.      │    │
 │   └───────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ DURABILITY                                                                   │
 │                                                                              │
-│   Implementation: FileStorage with versioned records                        │
+│   Implementation: LMDBStorage (#20), records keyed by {id, version}          │
 │                                                                              │
-│   ┌───────────────────────────────────────────────────────────────────┐    │
-│   │  Record Format:                                                    │    │
-│   │                                                                    │    │
-│   │  <S[size].[valid].[id:16bytes].[version]...[body]...E>           │    │
-│   │                                                                    │    │
-│   │  • [size]    - 4 bytes, record length                             │    │
-│   │  • [valid]   - 1 byte, record validity flag                       │    │
-│   │  • [id]      - 16 bytes, unique identifier                        │    │
-│   │  • [version] - 4 bytes, record version for updates                │    │
-│   │  • [body]    - Variable, serialized data                          │    │
-│   └───────────────────────────────────────────────────────────────────┘    │
+│   • A record is its type in a word's low 16 bits and its codec's             │
+│     FORMAT_VERSION in the high 16 (#149), then the codec's bytes.            │
+│   • A transaction's persists are written as it commits, each version         │
+│     a new key; a trade's orders in one commit (#163). fsync per              │
+│     commit, by ruling: about 2 ms a write.                                   │
+│   • Each update erases every version older than the newest it finds,         │
+│     so an order keeps two (#148); a rollback erases its own version.         │
+│   • Execution reports aren't persisted (#582).                               │
 │                                                                              │
-│   Recovery Process:                                                          │
-│     1. Load file                                                            │
-│     2. Parse records via StorageRecordDispatcher                            │
-│     3. Decode via appropriate Codec                                         │
-│     4. Restore OrderDataStorage and OrderBook                               │
+│   Recovery: LMDB is read twice (reference data, then the orders,             │
+│   into the book), each record through StorageRecordDispatcher and            │
+│   its codec, keeping each order's newest version (App::                      │
+│   loadServerData(), app/ServerData.cpp; #165, #207).                         │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1481,20 +1488,20 @@ So after a failure, memory, disk and clients can disagree. #659 holds the struct
 │   ┌───────────────────────────────────────────────────────────────────────┐ │
 │   │                     Order Maps                                         │ │
 │   │                                                                        │ │
-│   │   byId_: map<IdT, OrderEntry*>                                        │ │
+│   │   ordersById_: PooledMap<IdT, OrderEntry*> (NodePool nodes, #467)     │ │
 │   │   ┌────────┬────────────────────────────────────────────────────────┐ │ │
 │   │   │ ID 001 │ ─► OrderEntry { symbol: AAPL, qty: 100, price: 150.5 } │ │ │
 │   │   │ ID 002 │ ─► OrderEntry { symbol: MSFT, qty: 200, price: 280.0 } │ │ │
 │   │   │ ID 003 │ ─► OrderEntry { symbol: AAPL, qty: 50,  price: 151.0 } │ │ │
 │   │   └────────┴────────────────────────────────────────────────────────┘ │ │
 │   │                                                                        │ │
-│   │   byClOrdId_: map<RawDataEntry, OrderEntry*>                          │ │
+│   │   ordersByClId_: PooledMap<RawDataEntry, OrderEntry*>                 │ │
 │   │   ┌──────────────┬──────────────────────────────────────────────────┐ │ │
 │   │   │ "CLIENT-001" │ ─► OrderEntry (ID 001)                           │ │ │
 │   │   │ "CLIENT-002" │ ─► OrderEntry (ID 002)                           │ │ │
 │   │   └──────────────┴──────────────────────────────────────────────────┘ │ │
 │   │                                                                        │ │
-│   │   Locks: orderLock_ (tbb::mutex), execLock_ (tbb::mutex)             │ │
+│   │   Lock: orderRwLock_ (spin_rw_mutex), the executions map's too       │ │
 │   └───────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
 
@@ -1513,30 +1520,17 @@ So after a failure, memory, disk and clients can disagree. #659 holds the struct
 │   │          ▲                                 ▲                          │ │
 │   │    Best Bid                          Best Ask                         │ │
 │   │                                                                        │ │
-│   │   Data Structure: std::multimap<Price, OrderEntry*, Comparator>       │ │
+│   │   Data Structure: std::multimap<PriceT, IdT, Comparator>              │ │
 │   └───────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ LAYER 3: File Persistence (FileStorage)                                      │
+│ LAYER 3: File Persistence (FileStorage), legacy                              │
 │                                                                              │
-│   ┌───────────────────────────────────────────────────────────────────────┐ │
-│   │                     File Format                                        │ │
-│   │                                                                        │ │
-│   │   ┌──────────────────────────────────────────────────────────────┐   │ │
-│   │   │ Record 1: <S0042.1.ORDER001........v001.[OrderCodec data]E>  │   │ │
-│   │   ├──────────────────────────────────────────────────────────────┤   │ │
-│   │   │ Record 2: <S0038.1.INSTR001........v001.[InstrCodec data]E>  │   │ │
-│   │   ├──────────────────────────────────────────────────────────────┤   │ │
-│   │   │ Record 3: <S0045.1.EXEC0001........v001.[ExecCodec data]E>   │   │ │
-│   │   ├──────────────────────────────────────────────────────────────┤   │ │
-│   │   │ Record 4: <S0042.1.ORDER001........v002.[Updated data]E>     │   │ │
-│   │   │                                        ▲                      │   │ │
-│   │   │                                Version 2 (update)             │   │ │
-│   │   └──────────────────────────────────────────────────────────────┘   │ │
-│   │                                                                        │ │
-│   │   Metadata Index: Tracks latest record offset per ID                  │ │
-│   └───────────────────────────────────────────────────────────────────────┘ │
+│   The file-based store LMDB replaced. FileStorage is still compiled into     │
+│   the engine, and only its own tests use it: the server persists to LMDB     │
+│   (#20, #581). FileStorageDef.h stays live: it declares FileSaver and        │
+│   FileStorageObserver, which LMDBStorage and the dispatcher implement.       │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -1557,7 +1551,9 @@ So after a failure, memory, disk and clients can disagree. #659 holds the struct
 │   │     • An order keeps its newest version and the one                   │ │
 │   │       before it; update() erases older ones (#148)                    │ │
 │   │                                                                        │ │
-│   │   API: put(key, value), get(key), del(key), iterate()                │ │
+│   │   API (FileSaver): save, update, replace, erase(id, version),        │ │
+│   │   eraseVersions (#597), the group's begin/commit/abort (#163),       │ │
+│   │   load(observer); every transaction under txnLock_ (#148)            │ │
 │   └───────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -1617,7 +1613,10 @@ dropped. Dropping orders while the server runs is #722.
 │        │                                                                     │
 │        ├─── EXECUTION_RECORDTYPE ───► none written; skipped on load         │
 │        │                                                                     │
-│        └─── IDLIMIT_RECORDTYPE ─────► (id limit, #81) ──► restoredIdLimit   │
+│        ├─── IDLIMIT_RECORDTYPE ─────► (id limit, #81) ──► restoredIdLimit   │
+│        │                                                                    │
+│        └─── LASTTRADE_RECORDTYPE ───► (#237, #518) ──► the instrument's     │
+│                                         last trade and pending releases     │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 
