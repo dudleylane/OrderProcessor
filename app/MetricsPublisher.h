@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <chrono>
+#include <vector>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 
@@ -37,7 +38,7 @@ class MetricsPublisher : public std::enable_shared_from_this<MetricsPublisher>
 public:
     MetricsPublisher(boost::asio::io_context &ioc, SessionManager *sessionMgr, Tasks::TaskManager *taskMgr,
                      Queues::InQueuesContainer *inQueues, const ACID::TransactionManager *transactMgr,
-                     Store::OrderDataStorage *orderStorage, const ACID::TransactionScopePool *scopePool,
+                     Store::OrderDataStorage *orderStorage, std::vector<const ACID::TransactionScopePool *> scopePools,
                      const Store::LMDBStorage *storage,
                      std::chrono::milliseconds interval = std::chrono::milliseconds{ 1000 });
 
@@ -57,7 +58,8 @@ private:
     Queues::InQueuesContainer *inQueues_;
     const ACID::TransactionManager *transactMgr_;
     Store::OrderDataStorage *orderStorage_;
-    const ACID::TransactionScopePool *scopePool_;
+    /// Every processor's scope pool, whose figures the metrics sum (#542)
+    std::vector<const ACID::TransactionScopePool *> scopePools_;
     const Store::LMDBStorage *storage_;
 };
 

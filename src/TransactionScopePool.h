@@ -15,6 +15,7 @@
 #include <atomic>
 #include <memory>
 #include <cassert>
+#include <vector>
 
 // Portable spin-wait hint: reduces power consumption and avoids
 // memory-order pipeline stalls during CAS retry loops.
@@ -200,6 +201,30 @@ private:
     TransactionScopePool(const TransactionScopePool &) = delete;
     TransactionScopePool &operator=(const TransactionScopePool &) = delete;
 };
+
+/// The figures of several pools together (#542). Every processor, event and transaction alike, has a pool of its own,
+/// and the metrics gave the first event processor's alone. Slots, misses and allocations are summed.
+struct PoolFigures
+{
+    size_t poolSize = 0;
+    size_t cacheMisses = 0;
+    size_t allocations = 0;
+};
+
+inline PoolFigures sumPoolFigures(const std::vector<const TransactionScopePool *> &pools)
+{
+    PoolFigures sum;
+    for (const TransactionScopePool *pool : pools)
+    {
+        if (nullptr != pool)
+        {
+            sum.poolSize += pool->poolSize();
+            sum.cacheMisses += pool->cacheMisses();
+            sum.allocations += pool->allocations();
+        }
+    }
+    return sum;
+}
 
 /**
  * RAII wrapper for TransactionScope acquired from a pool.
