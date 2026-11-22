@@ -333,6 +333,10 @@ void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt
     {
         throw std::runtime_error("Processor::onEvent(ProcessEvent): unable to locate order!");
     }
+    // Enqueued before the transaction that books the order, this one would be decided first, as the cancel's and the
+    // replace's would (#83). The legacy replace's events come only from EnqueueOrderEventTrOperation, which nothing has
+    // driven since #74, but a handler that finds an order and enqueues a transaction about it waits all the same (#580)
+    ord->waitUntilBookingEnqueued();
 
     // write lock on the order for state machine processing
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
