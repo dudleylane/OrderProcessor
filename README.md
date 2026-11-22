@@ -212,8 +212,8 @@ Server options:
 | `--fix-credentials` | *(none)* | The FIX counterparties: who may log on, with which password, to trade which accounts (#147). Each gets a session |
 | `--hash-fix-password` | | Read a password from standard input, print its hash for `--fix-credentials`, and exit |
 | `--fix-tls-cert`, `--fix-tls-key` | *(none)* | Serve FIX over TLS only, with this certificate (PEM, followed by any intermediate ones) and its key (PEM, not encrypted); both or neither, and only with `--fix-cfg` (#228). Without them FIX is plain TCP, and the server warns |
-| `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order; must exist in the data directory |
-| `--default-account` | `TRADING-1` | Account for an order that names none; must exist in the data directory |
+| `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order. A data directory that holds reference data must have it, or the server doesn't start (exit 1, #640); an empty one starts, for `seedData` to seed |
+| `--default-account` | `TRADING-1` | Account for an order that names none. A data directory that holds reference data must have it, as the clearing firm, but under `--ws-credentials`, where such an order trades its identity's first account and this one isn't used |
 | `--debug` | off | Debug logging: about six lines per transaction, written inside the transaction manager's lock, and each order's own (#584) |
 | `--lmdb-map-mb` | 256 | LMDB's starting map, in MiB. A write that finds the map full doubles it, and logs a warning |
 | `--keep-closed-days` | 0 | As the server starts, drops each closed order (filled, canceled, rejected, expired or replaced) whose business day isn't one of the last N, the current one counted: it isn't restored, and its records are deleted (#597). A business day runs from 17:00 New York to 17:00, so with 1 a restart at 17:01 drops the day that ended a minute before. 0 keeps every order. Postgres keeps a dropped order's row, so give it with `--pg-connection`: without Postgres a dropped order is gone, fills and all, since nothing else records them (#582). A running server drops nothing until its next start (#722) |

@@ -14,6 +14,8 @@
 #include <cassert>
 #include <chrono>
 #include <format>
+#include <stdexcept>
+#include <string>
 
 #include "Logger.h"
 #include "WideDataStorage.h"
@@ -40,7 +42,7 @@ DateTimeT App::keptDaysStart(DateTimeT now, u32 days)
 
 App::ServerData App::loadServerData(const std::string &dataDir, size_t lmdbMapSize, u64 idBlock,
                                     const std::string &clearingFirm, const std::string &defaultAccount,
-                                    u32 keepClosedDays, DateTimeT now)
+                                    u32 keepClosedDays, DateTimeT now, bool defaultAccountUsed)
 {
     ServerData data;
 
@@ -105,19 +107,39 @@ App::ServerData App::loadServerData(const std::string &dataDir, size_t lmdbMapSi
     aux::ExchLogger::instance()->note("Order numbers continue after " + std::to_string(data.lastOrderNumber) +
                                       "; ids continue after " + std::to_string(data.lastIssued));
 
-    // Resolve the defaults that WebSocket and FIX orders need (#34). Without them the server still starts, as it does
-    // on an unseeded directory, but refuses the orders that need them. seedData provides both.
+    // Resolve the defaults that WebSocket and FIX orders need (#34): the clearing firm, which every order clears
+    // through, and the default account, for a WebSocket order that names none without an identity (a FIX order with
+    // no account trades its counterparty's first, #147). A directory with reference data that lacks one is a mistake
+    // to say at once, as an identity whose account it lacks is (#225): a mistyped --clearing-firm started a server
+    // that refused every order, with only a warning (#640). An empty directory starts, its sessions refusing the orders
+    // until seedData seeds it and the server restarts, as compose's entrypoint does (#161).
+    bool hasReferenceData = false;
+    const auto found = [&hasReferenceData](const auto &, const auto &)
+    {
+        hasReferenceData = true;
+    };
+    Store::WideDataStorage::instance()->forEachInstrument(found);
+    Store::WideDataStorage::instance()->forEachAccount(found);
+    Store::WideDataStorage::instance()->forEachClearing(found);
+    const auto missing = [&](const std::string &what, const std::string &consequence)
+    {
+        if (hasReferenceData)
+        {
+            throw std::runtime_error(what + " is not in " + dataDir + ", which holds reference data, so " +
+                                     consequence + " (#640)");
+        }
+        aux::ExchLogger::instance()->warn(what + " is not in " + dataDir + ", which is empty; " + consequence +
+                                          " until it is seeded and the server restarted");
+    };
     data.defaultClearingId = Store::WideDataStorage::instance()->findClearingByFirm(clearingFirm);
     if (!data.defaultClearingId.isValid())
     {
-        aux::ExchLogger::instance()->warn("Clearing firm '" + clearingFirm + "' is not in " + dataDir +
-                                          "; orders will be refused until it is seeded and the server restarted");
+        missing("--clearing-firm " + clearingFirm, "every order would be refused");
     }
     data.defaultAccountId = Store::WideDataStorage::instance()->findAccountByName(defaultAccount);
-    if (!data.defaultAccountId.isValid())
+    if (!data.defaultAccountId.isValid() && defaultAccountUsed)
     {
-        aux::ExchLogger::instance()->warn("Default account '" + defaultAccount + "' is not in " + dataDir +
-                                          "; orders that name no account will be refused");
+        missing("--default-account " + defaultAccount, "every order that names no account would be refused");
     }
 
     // Bind dispatcher as saver for WideDataStorage
