@@ -693,13 +693,15 @@ void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope 
     }
     if (OrderStateChange::DAY_END == change)
     {
-        if (live && (DAY_TIF == order->tif_))
+        if ((live || (DFD_ORDSTATUS == status)) && (DAY_TIF == order->tif_))
         {
-            change = OrderStateChange::EXPIRE; // a DAY order ends with its day
+            // A DAY order ends with its day, done for it or not: done for the day, it was started on its next day here,
+            // and outlived its day (#535)
+            change = OrderStateChange::EXPIRE;
         }
         else if (DFD_ORDSTATUS != status)
         {
-            return; // the day's end expires a DAY order, and starts a done-for-day one's next day; nothing else
+            return; // the day's end expires a DAY order, and starts another done-for-day one's next day; nothing else
         }
     }
 

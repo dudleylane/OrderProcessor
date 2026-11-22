@@ -130,7 +130,7 @@ public:
     // ToDo: add execCorrect, when qty not changed Fill->Fill for example
     // ToDo: add administrative switch to any state
     // clang-format off
-	struct transition_table : mpl::vector49<
+	struct transition_table : mpl::vector50<
 		//    Start                Event           Next           Action				Guard
 		//	  +-------------+------------------+-------------+------------+----------------------+
 		// create OrderEntry from received event and generate id
@@ -245,6 +245,9 @@ public:
 		a_row< DoneForDay,   onTradeCrctCncl,	DoneForDay,   &os::correctedWithoutRestore       >,
 		// create ExecReport Suspended
 		a_row< DoneForDay,   onSuspended,		Suspended,    &os::suspended	                 >,
+		// A DAY order ends with its day, done for it or not (#535)
+		// create ExecReport Expired
+		a_row< DoneForDay,   onExpired,			Expired,	  &os::expire						 >,
 
 		// NB: called if notexecuted(onNewDay) returns false
 		// add to OrderBook

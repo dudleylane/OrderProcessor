@@ -26,7 +26,7 @@ that changed it since (#573 brought the stale ones up to date).
 OrderProcessor is a high-performance, concurrent order processing library written in C++23. It provides:
 
 - **ACID-compliant** transaction processing
-- **State machine-based** order lifecycle management (<!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> states, <!-- DOC_CHECK:transition_count -->49<!-- /DOC_CHECK --> transitions)
+- **State machine-based** order lifecycle management (<!-- DOC_CHECK:order_state_count -->13<!-- /DOC_CHECK --> states, <!-- DOC_CHECK:transition_count -->50<!-- /DOC_CHECK --> transitions)
 - **Order matching** against an in-memory order book with price-time priority
 - **Lock-free** and fine-grained locking for maximum throughput
 - **File-based persistence** with versioned records
@@ -1076,6 +1076,7 @@ The machine starts in Rcvd_New in zone 1 and NoCnlReplace in zone 2 (`initial_st
 | NEW | onExpired | EXPIRED | Remove from book |
 | NEW | onFinished | DONEFORDAY | End of session (*tests only*) |
 | NEW | onSuspended | SUSPENDED | Halt trading (*tests only*) |
+| DONEFORDAY | onExpired | EXPIRED | A DAY order done for the day, at its day's end (#535; *tests only*, as done for day is) |
 | PARTFILL | onTradeExecution (partial) | PARTFILL | Create TRADE report |
 | PARTFILL | onTradeExecution (full) | FILLED | Create TRADE report, remove from book |
 | PARTFILL | onTradeCrctCncl | NEW/PARTFILL | Trade correction (*tests only*) |
