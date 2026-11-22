@@ -1,7 +1,21 @@
+# What the images' build context leaves out. Each Dockerfile copies only what it names (the server image: CMakeLists.txt,
+# src/ and app/; the frontend image: src/oms-frontend/ and its nginx files), but the context is sent whole, so this
+# keeps it small and keeps secrets out of it in case a Dockerfile ever copies more (#565). Patterns match from the root;
+# **/ matches at any depth.
+.git
 src/oms-frontend/node_modules
 src/oms-frontend/dist
 src/oms-frontend/.vite
-build
-*.o
-*.a
-.git
+# Build trees at the root (build, build-asan, build-benchmark, ...), which run to gigabytes, and objects and archives
+# anywhere
+build*
+**/*.o
+**/*.a
+# Runtime data, logs and benchmark baselines
+data
+**/exchange.log
+benchmark_baseline*
+# Secrets: the stack's environment (the WebSocket token, the Postgres password), its TLS key, and the identities
+docker/.env
+docker/certs
+docker/ws-credentials
