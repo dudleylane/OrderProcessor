@@ -16,6 +16,7 @@
 #include <memory>
 #include <cassert>
 #include <vector>
+#include <sanitizer/asan_interface.h> // no-ops without ASan (#586)
 
 // Portable spin-wait hint: reduces power consumption and avoids
 // memory-order pipeline stalls during CAS retry loops.
@@ -75,6 +76,8 @@ public:
         {
             pool_[i].scope = new TransactionScope();
             pool_[i].inUse.store(false, std::memory_order_relaxed);
+            // A scope waiting in its slot is poisoned, so ASan reports a use of one given back (#586)
+            ASAN_POISON_MEMORY_REGION(pool_[i].scope, sizeof(TransactionScope));
         }
     }
 
@@ -82,6 +85,10 @@ public:
     {
         for (size_t i = 0; i < poolSize_; ++i)
         {
+            if (nullptr != pool_[i].scope)
+            {
+                ASAN_UNPOISON_MEMORY_REGION(pool_[i].scope, sizeof(TransactionScope));
+            }
             delete pool_[i].scope;
         }
         delete[] pool_;
@@ -113,7 +120,8 @@ public:
                 }
                 else
                 {
-                    pool_[idx].scope->reset();
+                    ASAN_UNPOISON_MEMORY_REGION(pool_[idx].scope, sizeof(TransactionScope));
+                    pool_[idx].scope->reset(); // which poisons the arena again, its blocks free
                 }
                 outIndex = idx;
                 return pool_[idx].scope;
@@ -142,6 +150,10 @@ public:
     void releaseByIndex(size_t index)
     {
         assert(index < poolSize_);
+        // A detached slot is never given back: its scope left with its transaction, and the slot may be another's
+        assert(nullptr != pool_[index].scope);
+        // Before the store that frees the slot: once it is free, another thread may take the scope and unpoison it
+        ASAN_POISON_MEMORY_REGION(pool_[index].scope, sizeof(TransactionScope));
         pool_[index].inUse.store(false, std::memory_order_release);
     }
 

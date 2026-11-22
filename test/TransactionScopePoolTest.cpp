@@ -343,3 +343,32 @@ TEST_F(TransactionScopePoolTest, ConcurrentAcquireRelease)
 }
 
 } // namespace
+
+// Only an ASan build can see the poison (#586): elsewhere the macros do nothing, and these tests aren't compiled,
+// rather than skipped, which ctest would count as passes
+#if defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/asan_interface.h>
+
+TEST_F(TransactionScopePoolTest, AScopeGivenBackIsPoisonedUnderASan)
+{
+    TransactionScopePool pool(2);
+    size_t index = TransactionScopePool::INVALID_INDEX;
+    TransactionScope *scope = pool.acquire(index);
+    ASSERT_NE(TransactionScopePool::INVALID_INDEX, index);
+    // Its first member, outside the arena, which stays poisoned where nothing is allocated
+    EXPECT_EQ(nullptr, __asan_region_is_poisoned(scope, 8));
+
+    pool.releaseByIndex(index);
+    EXPECT_TRUE(__asan_address_is_poisoned(scope)) << "a scope given back can be used unreported";
+
+    // Taken again, it is usable: acquire() unpoisons it before reset()
+    for (int i = 0; i < 2; ++i)
+    {
+        size_t next = TransactionScopePool::INVALID_INDEX;
+        TransactionScope *taken = pool.acquire(next);
+        EXPECT_FALSE(__asan_address_is_poisoned(taken));
+        EXPECT_FALSE(taken->isFromArena(nullptr));
+        pool.releaseByIndex(next);
+    }
+}
+#endif

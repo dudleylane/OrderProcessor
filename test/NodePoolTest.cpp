@@ -210,3 +210,30 @@ TEST(NodePoolTest, ATemporaryMadeFromAMapsAllocatorSharesItsPool)
 }
 
 } // namespace
+
+// Only an ASan build can see the poison (#586): elsewhere the macros do nothing, and these tests aren't compiled,
+// rather than skipped, which ctest would count as passes
+#if defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/asan_interface.h>
+
+TEST(NodePoolTest, ABlockNotInUseIsPoisonedUnderASan)
+{
+    NodePool pool;
+    auto *first = static_cast<long *>(pool.allocate(sizeof(long), alignof(long)));
+    auto *second = static_cast<long *>(pool.allocate(sizeof(long), alignof(long)));
+    EXPECT_EQ(nullptr, __asan_region_is_poisoned(first, sizeof(long)));
+    // The chunk's blocks not yet handed out are poisoned too
+    EXPECT_TRUE(__asan_address_is_poisoned(reinterpret_cast<char *>(second) + pool.blockSize()));
+
+    *first = 7;
+    pool.deallocate(first);
+    EXPECT_TRUE(__asan_address_is_poisoned(first)) << "a freed node can be read unreported";
+    EXPECT_EQ(nullptr, __asan_region_is_poisoned(second, sizeof(long)));
+
+    auto *again = static_cast<long *>(pool.allocate(sizeof(long), alignof(long)));
+    EXPECT_EQ(first, again) << "the freed block is the next handed out";
+    EXPECT_EQ(nullptr, __asan_region_is_poisoned(again, sizeof(long)));
+    pool.deallocate(again);
+    pool.deallocate(second);
+}
+#endif
