@@ -209,7 +209,7 @@ Server options:
 | `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs. For now N runs N-1 at once (#711) |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
 | `--fix-cfg` | *(none)* | Path to QuickFIX settings file (enables FIX gateway); needs `--fix-credentials` |
-| `--fix-credentials` | *(none)* | The FIX counterparties: who may log on, with which password, to trade which accounts (#147). Each gets a session |
+| `--fix-credentials` | *(none)* | The FIX counterparties: who may log on, with which password, to trade which accounts (#147). Each gets a session. Only with `--fix-cfg`: alone it's a usage error, exit 2 (#555) |
 | `--hash-fix-password` | | Read a password from standard input, print its hash for `--fix-credentials`, and exit |
 | `--fix-tls-cert`, `--fix-tls-key` | *(none)* | Serve FIX over TLS only, with this certificate (PEM, followed by any intermediate ones) and its key (PEM, not encrypted); both or neither, and only with `--fix-cfg` (#228). Without them FIX is plain TCP, and the server warns |
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order. A data directory that holds reference data must have it, or the server doesn't start (exit 1, #640); an empty one starts, for `seedData` to seed |

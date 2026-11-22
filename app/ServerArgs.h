@@ -348,6 +348,13 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
         *error = "--fix-tls-cert and --fix-tls-key need --fix-cfg: they serve FIX over TLS (#228)";
         return std::nullopt;
     }
+    // The credentials say who may log on to the gateway --fix-cfg starts. Alone, the server ran with FIX off and said
+    // nothing of it, though its operator plainly meant it to run (#555)
+    if (!parsed.hashFixPassword && !parsed.fixCredentials.empty() && parsed.fixCfg.empty())
+    {
+        *error = "--fix-credentials needs --fix-cfg: it says who may log on to the FIX gateway --fix-cfg starts (#555)";
+        return std::nullopt;
+    }
     return parsed;
 }
 
