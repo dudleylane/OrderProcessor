@@ -23,8 +23,11 @@ services:
     # Limits, to tune for the host (#158)
     mem_limit: 1g
     pids_limit: 256
+    # Over TCP, as the server connects (#763): on a new volume the image first runs a server that listens on its socket
+    # alone, runs init-db's scripts against it and stops it. Asked over the socket, that one made oms-db healthy, and
+    # the server's first connections were refused while the real one started.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oms} -d ${POSTGRES_DB:-oms}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-oms} -d ${POSTGRES_DB:-oms}"]
       interval: 5s
       timeout: 3s
       retries: 10
