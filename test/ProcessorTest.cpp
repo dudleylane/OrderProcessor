@@ -4435,10 +4435,11 @@ TEST_F(ProcessorTest, AnOrderDoneForTheDayHasNoLeavesUntilANewDayOrAResumeGivesT
     // Done for the day, an order trades no more, so its LeavesQty is 0, as a closed order's is (#386). The next day, or
     // a resume, books it again with what it hasn't filled, and it is NEW or PARTFILL by its fills, as its leaves no
     // longer tell.
+    // GTC, since a DAY order done for the day expires at its day's end (#535): see the next case
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
-    OrderEntry *part = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    OrderEntry *part = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), GTC_TIF));
     engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 40), IOC_TIF));
-    OrderEntry *none = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 9.0, 50));
+    OrderEntry *none = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 9.0, 50), GTC_TIF));
     ASSERT_EQ(PARTFILL_ORDSTATUS, part->status_);
     ASSERT_EQ(NEW_ORDSTATUS, none->status_);
 
@@ -4451,7 +4452,7 @@ TEST_F(ProcessorTest, AnOrderDoneForTheDayHasNoLeavesUntilANewDayOrAResumeGivesT
     }
     EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "an order done for the day is in the book";
 
-    // The day's end that expires a working DAY order begins the next day of one done for the day
+    // The day's end that expires a DAY order begins the next day of another order done for the day
     engine.request(TimerEvent(part->orderId_, TimerEvent::DAY_END));
     EXPECT_EQ(PARTFILL_ORDSTATUS, part->status_);
     EXPECT_EQ(40u, part->cumQty_);
@@ -4468,6 +4469,26 @@ TEST_F(ProcessorTest, AnOrderDoneForTheDayHasNoLeavesUntilANewDayOrAResumeGivesT
     ASSERT_EQ(2u, book.bids.size());
     EXPECT_EQ(60u, book.bids[0].totalQty);
     EXPECT_EQ(50u, book.bids[1].totalQty);
+}
+
+TEST_F(ProcessorTest, ADayOrderDoneForTheDayExpiresAtItsDaysEnd)
+{
+    // A DAY order ends with its day, done for it or not. Done for the day, it wasn't live, so its day's end started its
+    // next day, and it outlived its day (#535).
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *day = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    ASSERT_EQ(DAY_TIF, day->tif_);
+    engine.request(OrderChangeStateEvent(day->orderId_, OrderChangeStateEvent::FINISH));
+    ASSERT_EQ(DFD_ORDSTATUS, day->status_);
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    engine.request(TimerEvent(day->orderId_, TimerEvent::DAY_END));
+    EXPECT_EQ(failed, OrdState::OrderState::failedCount()) << "the state machine had no row for the expiry";
+    EXPECT_EQ(EXPIRED_ORDSTATUS, day->status_);
+    EXPECT_EQ(0u, day->leavesQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, DFD_EXECTYPE, EXPIRED_EXECTYPE }),
+              engine.reports_.reportTypesOf(day->orderId_));
+    EXPECT_FALSE(orderBook_->getTop(instrId1_, BUY_SIDE).isValid()) << "the expired order is in the book";
 }
 
 TEST_F(ProcessorTest, AReplacementHasATimerOfItsOwnAndTheOriginalsFindsItReplaced)
