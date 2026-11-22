@@ -32,6 +32,7 @@ namespace App
 {
 
 class SessionManager;
+struct SystemMetrics;
 
 class MetricsPublisher : public std::enable_shared_from_this<MetricsPublisher>
 {
@@ -44,6 +45,9 @@ public:
 
     void start();
     void stop();
+    /// What a metrics_update carries, each figure read from its source now, without sending it: what the timer
+    /// broadcasts once a second, and what a test checks field by field (#660)
+    SystemMetrics collect() const;
 
 private:
     void onTimer(boost::system::error_code ec);

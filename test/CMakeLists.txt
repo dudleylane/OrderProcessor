@@ -96,6 +96,9 @@ target_sources(orderProcessorTest
         ${CMAKE_SOURCE_DIR}/app/WsServer.cpp
         ${CMAKE_SOURCE_DIR}/app/SessionManager.cpp
         ${CMAKE_SOURCE_DIR}/app/JsonSerializer.cpp
+        # What metrics_update carries, each figure from its source (#660)
+        MetricsPublisherTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/MetricsPublisher.cpp
 )
 
 # The repository the tests read files from, such as the docs DocConsistencyTest checks: test::sourceRoot(). They looked
