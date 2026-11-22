@@ -31,6 +31,22 @@ ldd build-tsan/orderProcessorTest | grep libtbb   # must show libtbb_debug.so.12
 TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1" ctest --test-dir build-tsan --output-on-failure -j1
 ```
 
+**What TSan doesn't see (#608).** A clean TSan run says nothing about these:
+
+- **Standalone fences.** TSan can't model `std::atomic_thread_fence`, and GCC warns (`-Wtsan`) at each one it
+  compiles. Every TSan build here gives 18 such warnings. All of them are Boost.Asio's `std_fenced_block`, from its
+  constructor and destructor, in each translation unit that includes Asio: `app/` and the tests that include it. Asio
+  fences handler invocation. A handler another thread posts to the server's io_context, as `WsOutQueues` posts from
+  the TBB workers, is also queued under the scheduler's mutex, which TSan does see. Nothing in `src/` relies on a
+  standalone fence. The warnings are why the TSan job builds without `-Werror` (#559, #608); a new one names its
+  include chain.
+- **Uninstrumented libraries.** TSan sees a library's memory accesses only if it was built with `-fsanitize=thread`.
+  oneTBB is (above), and the system's other libraries (spdlog, LMDB, Boost's compiled parts, libstdc++'s own `.so`)
+  aren't. TSan intercepts their pthread calls and atomics, but a race inside one of them, or between it and this
+  code through memory it hands out, goes unreported. libstdc++'s time zone database is the case already met: its
+  first lookups race under a lock TSan can't see, which is why every zone lookup holds `ExpiryScheduler`'s
+  `zoneLock` (#244).
+
 ### perf Profiling
 
 ```bash
