@@ -60,12 +60,16 @@ DateTimeT keptDaysStart(DateTimeT now, u32 days);
 /// - with keepClosedDays above 0, each closed order whose business day isn't one of the last keepClosedDays as of now
 ///   dropped: not restored, and its records erased (#597);
 /// - the id counter continued past every id issued before (#58, #81), with idBlock ids reserved ahead;
-/// - the clearing firm and default account that orders need, if the directory has them (#34);
+/// - the clearing firm and default account that orders need (#34). A directory that holds reference data and lacks
+///   either refuses the start: every order would be refused, or every order that names no account (#640). Under
+///   --ws-credentials, defaultAccountUsed false, an order with no account trades its identity's first, so the default
+///   account isn't needed (#225). An empty directory starts, as before, for seedData to seed (#161);
 /// - the dispatcher made the saver of the wide data and order storages.
 /// It needs the singletons app/main.cpp creates first. It throws what a load throws, such as for a directory LMDB can't
 /// open or a record this build can't read (#149, #150), and app/main.cpp then exits with the reason (#203).
 ServerData loadServerData(const std::string &dataDir, size_t lmdbMapSize, u64 idBlock, const std::string &clearingFirm,
-                          const std::string &defaultAccount, u32 keepClosedDays = 0, DateTimeT now = 0);
+                          const std::string &defaultAccount, u32 keepClosedDays = 0, DateTimeT now = 0,
+                          bool defaultAccountUsed = true);
 
 /// Sets the timers of the restored orders that are live: a DAY or GTD order's expiry (#240), and the restatement of
 /// one that outlives its business day (#244). One whose time passed while the server was down fires as soon as the
