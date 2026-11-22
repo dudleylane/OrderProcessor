@@ -687,6 +687,79 @@ TEST_F(LMDBStorageTest, TheMapGrowsWhileSeveralThreadsWrite)
 // Groups (#163): several updates in one transaction
 // =============================================================================
 
+namespace
+{
+// Each record a directory holds, as "<id>/<version>=<data>", sorted: LMDB's own order is its keys' bytes'
+std::vector<std::string> recordsIn(const std::string &dir)
+{
+    TestLMDBObserver observer;
+    LMDBStorage storage(dir, &observer);
+    std::vector<std::string> records;
+    for (size_t i = 0; i < observer.records_.size(); ++i)
+    {
+        records.push_back(std::to_string(observer.ids_[i].id_) + "/" + std::to_string(observer.versions_[i]) + "=" +
+                          observer.records_[i]);
+    }
+    std::sort(records.begin(), records.end());
+    return records;
+}
+} // namespace
+
+TEST_F(LMDBStorageTest, ARecordAtItsLastVersionIsRenumberedAsItIsWritten)
+{
+    // An instrument's last trade takes a version with every trade, and the version, a u32, wrapped to 0 after 2^32 of
+    // them, so restore kept the last one written before the wrap (#539). At its last version a record is renumbered by
+    // the write instead: the newest becomes 0, and the new one 1. Here the last version is 2.
+    const IdT trade(7, 2);
+    {
+        TestLMDBObserver observer;
+        LMDBStorage storage(LMDBStorage::DEFAULT_MAP_SIZE, 2);
+        storage.load(testDir_, &observer);
+        EXPECT_EQ(0u, storage.update(trade, "t0", 2));
+        EXPECT_EQ(1u, storage.update(trade, "t1", 2));
+        EXPECT_EQ(2u, storage.update(trade, "t2", 2));
+        EXPECT_EQ(1u, storage.update(trade, "t3", 2)) << "past the last version";
+        EXPECT_FALSE(storage.isExists(trade, 2));
+    }
+    EXPECT_EQ((std::vector<std::string>{ "7/0=t2", "7/1=t3" }), recordsIn(testDir_));
+
+    // A rollback erases the version it wrote, and finds the one before it, renumbered 0
+    {
+        TestLMDBObserver observer;
+        LMDBStorage storage(LMDBStorage::DEFAULT_MAP_SIZE, 2);
+        storage.load(testDir_, &observer);
+        storage.erase(trade, 1);
+        EXPECT_EQ(1u, storage.update(trade, "t3b", 3));
+        EXPECT_EQ(2u, storage.update(trade, "t4", 2));
+    }
+    EXPECT_EQ((std::vector<std::string>{ "7/1=t3b", "7/2=t4" }), recordsIn(testDir_));
+
+    EXPECT_THROW(LMDBStorage(LMDBStorage::DEFAULT_MAP_SIZE, 0), std::invalid_argument);
+}
+
+TEST_F(LMDBStorageTest, AGroupRenumbersARecordAtItsLastVersionAsUpdateDoes)
+{
+    // A trade's persists, its instrument's last trade among them, commit as one group (#163), which works each version
+    // out as it stages it: at the last version it must stage the version the renumbering write gives (#539), or the
+    // commit refuses the group
+    const IdT trade(9, 2);
+    const IdT order(1, 1);
+    {
+        TestLMDBObserver observer;
+        LMDBStorage storage(LMDBStorage::DEFAULT_MAP_SIZE, 1);
+        storage.load(testDir_, &observer);
+        ASSERT_EQ(0u, storage.update(trade, "t0", 2));
+        ASSERT_EQ(1u, storage.update(trade, "t1", 2));
+        ASSERT_EQ(0u, storage.update(order, "o0", 2));
+
+        storage.beginGroup();
+        EXPECT_EQ(1u, storage.update(trade, "t2", 2));
+        EXPECT_EQ(1u, storage.update(order, "o1", 2));
+        EXPECT_NO_THROW(storage.commitGroup());
+    }
+    EXPECT_EQ((std::vector<std::string>{ "1/0=o0", "1/1=o1", "9/0=t1", "9/1=t2" }), recordsIn(testDir_));
+}
+
 TEST_F(LMDBStorageTest, AGroupWritesItsUpdatesInOneTransaction)
 {
     // A trade's two orders were committed one after the other, so a crash between the commits left half a trade (#163)
