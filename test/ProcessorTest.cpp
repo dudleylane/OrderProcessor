@@ -950,6 +950,35 @@ TEST_F(ProcessorTest, AnOrderIsPersistedOncePerTransaction)
     EXPECT_EQ((std::vector<std::string>{ "persist", "persist" }), sequence);
 }
 
+TEST_F(ProcessorTest, ADecisionThatClosesAnOrderAndLeavesItsLeavesIsRefusedInDebug)
+{
+    // A closed order has no leaves, whatever closed it (#386), and each closing action zeroes them itself. Every
+    // decision persists through persistOrder(), which in a Debug build, as CI's sanitizer jobs are, refuses one that
+    // closed the order and left its leaves, so a new closing action that forgets fails there (#626). A Release build
+    // persists the order as it is. The death test re-runs this test alone, since the fixture's threads make a fork
+    // unsafe.
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    order->orderId_ = IdT(1001, 1);
+    order->cumQty_ = 60;
+    order->leavesQty_ = 40;
+    for (OrderStatus closed : { FILLED_ORDSTATUS, CANCELED_ORDSTATUS, REJECTED_ORDSTATUS, EXPIRED_ORDSTATUS,
+                                REPLACED_ORDSTATUS, DFD_ORDSTATUS })
+    {
+        order->status_ = closed;
+        TransactionScope scope;
+        EXPECT_DEBUG_DEATH(Processor::persistOrder(&scope, *order), "holdsNoLeaves") << "status " << closed;
+    }
+    // Open, or suspended, which keeps its leaves until it is resumed: persisted
+    for (OrderStatus open : { NEW_ORDSTATUS, PARTFILL_ORDSTATUS, SUSPENDED_ORDSTATUS, PENDINGREPLACE_ORDSTATUS })
+    {
+        order->status_ = open;
+        TransactionScope scope;
+        Processor::persistOrder(&scope, *order);
+        EXPECT_EQ(1u, scope.operationCount()) << "status " << open;
+    }
+}
+
 TEST_F(ProcessorTest, AnOrderIsWrittenWithWhatItsTransactionsLastDecisionLeft)
 {
     // A record has what the decisions its transaction made left the order with, captured as each is made (#411): the
