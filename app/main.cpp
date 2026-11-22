@@ -480,6 +480,16 @@ int main(int argc, char *argv[])
     if (fixServer)
     {
         fixServer->start(&inFlight);
+        // --bind holds the WebSocket server alone: the pinned QuickFIX has no setting that holds an acceptor to one
+        // address, so FIX listens on every interface whatever --bind says, and an operator who asked for one address
+        // is told so (#641)
+        if (!boost::asio::ip::make_address(cfg.bindAddress).is_unspecified())
+        {
+            aux::ExchLogger::instance()->warn(
+                "--bind " + cfg.bindAddress +
+                " holds only the WebSocket server: FIX listens on every interface, port " + fixServer->acceptPorts() +
+                ", which only a firewall or the container's port mapping restricts (#641)");
+        }
     }
 #endif
 
