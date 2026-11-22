@@ -344,6 +344,10 @@ TEST(ServerArgsTest, TheFixGatewaysSettingsNeedAFixBuild)
               "trade any account (#147)",
               error);
     EXPECT_TRUE(parse({ "--hash-fix-password", "--fix-cfg", "config/fix.cfg" }, &error)) << error;
+    // The credentials without the gateway they're for: the server ran with FIX off and said nothing (#555)
+    EXPECT_FALSE(parse({ "--fix-credentials", "fix-credentials" }, &error));
+    EXPECT_EQ("--fix-credentials needs --fix-cfg: it says who may log on to the FIX gateway --fix-cfg starts (#555)",
+              error);
     // FIX over TLS (#228): a certificate and its key, both or neither, and only with the gateway
     const std::vector<std::string> fix = { "--fix-cfg", "config/fix.cfg", "--fix-credentials", "fix-credentials" };
     std::vector<std::string> withTls = fix;
