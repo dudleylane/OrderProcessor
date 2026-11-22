@@ -179,6 +179,13 @@ chmod 0640 "$WORK/certs/tls.key"
 chmod 0644 "$WORK/certs/tls.crt"
 sed -i -e "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$TOKEN/" -e "s|^OMS_ALLOWED_ORIGINS=.*|OMS_ALLOWED_ORIGINS=$ORIGIN|" \
     -e "s/^OMS_PUBLIC_HOST=.*/OMS_PUBLIC_HOST=localhost:3000/" "$WORK/env"
+# A password with a quote, a backslash and a double quote, which the server's connection string couldn't carry until
+# #642, when the password went to libpq on its own: the rows the server mirrors, checked below, prove it got it whole.
+# Written by printf, since sed would read its backslash.
+DB_PASSWORD="pa'ss\\wo\"rd-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+grep -v '^POSTGRES_PASSWORD=' "$WORK/env" > "$WORK/env.tmp"
+printf 'POSTGRES_PASSWORD=%s\n' "$DB_PASSWORD" >> "$WORK/env.tmp"
+mv "$WORK/env.tmp" "$WORK/env"
 # Resets only the ports PUBLISHED names, which the step below checks are all there are: podman-compose 1.5.0 fails on a
 # !reset of a key the file doesn't have, which the Compose specification allows. Upstream: containers/podman-compose#1209
 # (override and reset handle only a few hardcoded parts of the schema; open on 2026-11-22, when 1.6.0 was the latest
