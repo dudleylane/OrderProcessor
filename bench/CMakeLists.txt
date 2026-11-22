@@ -5,7 +5,6 @@ target_sources(orderProcessorBench
         OrderMatchingBench.cpp
         StateMachineBench.cpp
         TransactionScopePoolBench.cpp
-        NumaAllocatorBench.cpp
         OrderParamsLayoutBench.cpp
         SessionManagerBench.cpp
         ClientMessageParserBench.cpp

@@ -38,7 +38,6 @@
 #include "MetricsPublisher.h"
 #include "InFlightGauge.h"
 #include "CpuAffinity.h"
-#include "HugePages.h"
 #include "ServerDefaults.h"
 #include "ServerArgs.h"
 #include "ServerData.h"
@@ -231,21 +230,6 @@ int main(int argc, char *argv[])
         {
             aux::ExchLogger::instance()->warn(std::string("Failed to pin main thread to core ") +
                                               std::to_string(cfg.cpuAffinityStart));
-        }
-    }
-
-    // 1c. Log HugePages availability
-    if (cfg.hugePages)
-    {
-        if (HugePages::isAvailable())
-        {
-            aux::ExchLogger::instance()->note(std::string("Huge pages enabled (") +
-                                              std::to_string(HugePages::getFreeCount()) + " free)");
-        }
-        else
-        {
-            aux::ExchLogger::instance()->warn("Huge pages requested but not available on this system");
-            cfg.hugePages = false;
         }
     }
 

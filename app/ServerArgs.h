@@ -29,8 +29,7 @@ struct ServerArgs
     std::string bindAddress = "0.0.0.0"; // the address the server listens on (#146)
     std::string dataDir = "./data";
     int workers = 0;
-    int cpuAffinityStart = -1; // -1 = disabled, >= 0 = pin starting from this core
-    bool hugePages = false;
+    int cpuAffinityStart = -1;    // -1 = disabled, >= 0 = pin starting from this core
     std::string fixCfg;           // QuickFIX's settings file (empty: no FIX gateway)
     std::string fixCredentials;   // who may log on to FIX, and what each may trade (#147); --fix-cfg needs it
     std::string fixTlsCert;       // the certificate FIX serves TLS with (#228); with fixTlsKey, or neither
@@ -72,7 +71,6 @@ inline std::string serverUsage()
            "  --workers N               TBB worker threads, and as many event and transaction processor pairs\n"
            "                            (default 0: TBB's default, and 2 pairs)\n"
            "  --cpu-affinity CORE       pin the main thread to CORE (default -1: no pinning)\n"
-           "  --huge-pages              report whether huge pages are available\n"
 #ifdef BUILD_FIX
            "  --fix-cfg FILE            QuickFIX's settings file, which starts the FIX gateway (default: none)\n"
            "  --fix-credentials FILE    who may log on to FIX, and the accounts each may trade; --fix-cfg needs it\n"
@@ -154,11 +152,6 @@ inline std::optional<ServerArgs> parseServerArgs(const std::vector<std::string> 
         if (("--help" == arg) || ("-h" == arg))
         {
             parsed.help = true;
-            continue;
-        }
-        if ("--huge-pages" == arg)
-        {
-            parsed.hugePages = true;
             continue;
         }
         if ("--debug" == arg)
