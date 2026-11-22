@@ -66,7 +66,10 @@ services:
     # Seeds the data volume if it has no instrument yet, then runs the server (#161). A server with nothing seeded refused
     # every order. --if-empty leaves a volume with instruments alone, since what seedData adds is test data; it does seed
     # one a server ran on before it was seeded, which has an LMDB file but no instrument. Not a one-shot service:
-    # podman-compose makes a dependency a container that must be running when the server starts.
+    # podman-compose makes a dependency a container that must be running when the server starts, where the Compose
+    # specification's service_completed_successfully waits for it to finish. Upstream: containers/podman-compose#1590 and
+    # #1467 (open on 2026-11-22, when 1.6.0 was the latest release; the runner host has 1.5.0). Check them whenever
+    # podman-compose is upgraded there (#620).
     entrypoint: ["sh", "-c", "seedData --if-empty --data-dir /data && exec orderProcessorServer \"$$@\"", "oms-server"]
     # The image's CMD, repeated: an entrypoint set here clears it. On this branch that includes the FIX gateway's config
     # and its credentials (#147), without which the server refuses --fix-cfg and exits 2. Then --keep-closed-days 1
