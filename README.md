@@ -201,7 +201,7 @@ Server options:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--port` | 8080 | WebSocket listen port |
-| `--bind` | `0.0.0.0` | The WebSocket server's address: an IP address, such as `127.0.0.1` for this host only (#146). The FIX acceptor listens where `--fix-cfg`'s settings say: `SocketAcceptPort`, on every interface unless `SocketAcceptAddress` is set |
+| `--bind` | `0.0.0.0` | The WebSocket server's address: an IP address, such as `127.0.0.1` for this host only (#146). The FIX acceptor listens on `--fix-cfg`'s `SocketAcceptPort`, on every interface, whatever `--bind` says: the pinned QuickFIX has no setting that holds an acceptor to one address (`SocketAcceptAddress`, which this row named, doesn't exist), so a firewall or the container's port mapping is the place to restrict it (#641) |
 | `--ws-token-file` | none | A file whose first line is the access token a WebSocket client must offer (#146). `OMS_WS_TOKEN` gives it too, but not both |
 | `--allowed-origin` | any | An Origin a browser page may connect from; repeat it for more. `OMS_ALLOWED_ORIGINS` adds a comma-separated list (#146) |
 | `--ws-credentials` | none | A file of identities, each with a token of its own and the accounts it may see and trade (#225); instead of the shared token, not beside it. See below |
