@@ -15,6 +15,8 @@
 #include <utility> // For std::swap
 #include <cstdint>
 #include <cstring> // For ::memcpy
+// The poisoning macros, which do nothing without ASan (#586)
+#include <sanitizer/asan_interface.h>
 #include "TransactionScope.h"
 #include "TrOperations.h"
 #include "OrderStorage.h"
@@ -136,7 +138,11 @@ void Operation::operator delete(void *ptr, size_t /*size*/) noexcept
     ::operator delete(ptr);
 }
 
-TransactionScope::TransactionScope(void) : arenaOffset_(0) {}
+TransactionScope::TransactionScope(void) : arenaOffset_(0)
+{
+    // What arenaAllocate() hasn't handed out is poisoned, so ASan reports a use of an arena block after reset() (#586)
+    ASAN_POISON_MEMORY_REGION(arenaBuffer_, ARENA_SIZE);
+}
 
 TransactionScope::~TransactionScope(void)
 {
@@ -144,6 +150,8 @@ TransactionScope::~TransactionScope(void)
     {
         destroyOperation(operations_[pos]);
     }
+    // A scope on the stack would leave its poison behind for the next frame there
+    ASAN_UNPOISON_MEMORY_REGION(arenaBuffer_, ARENA_SIZE);
 }
 
 void TransactionScope::reset()
@@ -155,8 +163,9 @@ void TransactionScope::reset()
     }
     operations_.clear();
 
-    // Reset the arena bump pointer
+    // Reset the arena bump pointer, and poison the arena again: its blocks are free (#586)
     arenaOffset_ = 0;
+    ASAN_POISON_MEMORY_REGION(arenaBuffer_, ARENA_SIZE);
 
     // Clear stage boundaries, preserving vector capacity
     stageBoundaries_.clear();
@@ -178,6 +187,7 @@ void *TransactionScope::arenaAllocate(size_t size, size_t align) noexcept
     }
     void *ptr = arenaBuffer_ + arenaOffset_ + padding;
     arenaOffset_ = newOffset;
+    ASAN_UNPOISON_MEMORY_REGION(ptr, size);
     return ptr;
 }
 
@@ -214,11 +224,16 @@ void TransactionScope::swap(TransactionScope &other) noexcept
     stageBoundaries_.swap(other.stageBoundaries_);
     std::swap(id_, other.id_);
     std::swap(arenaOffset_, other.arenaOffset_);
-    // Swap arena buffers so operations still point to valid memory
+    // Swap arena buffers so operations still point to valid memory: whole, so unpoisoned first, then each poisoned
+    // past what its operations take (#586)
+    ASAN_UNPOISON_MEMORY_REGION(arenaBuffer_, ARENA_SIZE);
+    ASAN_UNPOISON_MEMORY_REGION(other.arenaBuffer_, ARENA_SIZE);
     char tmpBuf[ARENA_SIZE];
     ::memcpy(tmpBuf, arenaBuffer_, ARENA_SIZE);
     ::memcpy(arenaBuffer_, other.arenaBuffer_, ARENA_SIZE);
     ::memcpy(other.arenaBuffer_, tmpBuf, ARENA_SIZE);
+    ASAN_POISON_MEMORY_REGION(arenaBuffer_ + arenaOffset_, ARENA_SIZE - arenaOffset_);
+    ASAN_POISON_MEMORY_REGION(other.arenaBuffer_ + other.arenaOffset_, ARENA_SIZE - other.arenaOffset_);
 }
 
 const TransactionId &TransactionScope::transactionId() const
