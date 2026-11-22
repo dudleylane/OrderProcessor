@@ -5,13 +5,15 @@ FROM quay.io/centos/centos:stream10 AS builder
 
 # Packages aren't pinned to versions (hadolint's DL3041): the image takes CentOS Stream 10's current ones on every
 # build, as the image check's --pull=newer intends (#135), so it gets their fixes. A pin would freeze them.
-# hadolint ignore=DL3041
+# The builder's RUNs keep dnf's cache, without the `dnf clean all` hadolint's DL3040 asks for, so that each later RUN
+# uses the metadata this one fetched, EPEL's included, where each had fetched it again (#618): every fetch is another
+# chance to meet a mirror mid-sync or a stale metalink (#291, #388). Only the runtime stage below ships, and it cleans.
+# hadolint ignore=DL3040,DL3041
 RUN dnf install -y epel-release 'dnf-command(config-manager)' \
     && dnf config-manager --set-enabled crb \
     && dnf install -y \
         cmake gcc-toolset-15-gcc-c++ git \
-        tbb-devel spdlog-devel boost-devel lmdb-devel numactl-devel openssl-devel \
-    && dnf clean all
+        tbb-devel spdlog-devel boost-devel lmdb-devel numactl-devel openssl-devel
 
 # The engine needs GCC 15 (C++23's <flat_map>, among others), and the system gcc-c++ is GCC 14,
 # so build with gcc-toolset-15, as CI and the pre-push hook do (#132).
@@ -25,8 +27,9 @@ ARG JOBS=
 # libpqxx, PostgreSQL's C++ client, for the Postgres write-behind (#151). Neither CentOS nor EPEL packages it, so it is
 # built from its source at a release: the one CI's host has, from PostgreSQL's own repository (PGDG).
 ARG LIBPQXX_REF=8.0.2
-# hadolint ignore=DL3041
-RUN dnf install -y libpq-devel && dnf clean all \
+# With the metadata the first RUN fetched, as above (#618)
+# hadolint ignore=DL3040,DL3041
+RUN dnf install -y libpq-devel \
     && git clone --depth 1 --branch "$LIBPQXX_REF" https://github.com/jtv/libpqxx.git /tmp/libpqxx \
     && cmake -S /tmp/libpqxx -B /tmp/libpqxx/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
         -DSKIP_BUILD_TEST=ON -DBUILD_DOC=OFF -DCMAKE_INSTALL_PREFIX=/usr/local \
