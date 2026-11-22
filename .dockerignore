@@ -21,3 +21,4 @@ docker/.env
 docker/certs
 docker/ws-credentials
 docker/fix-credentials
+docker/ws-identities

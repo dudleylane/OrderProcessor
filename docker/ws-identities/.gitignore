@@ -1,0 +1,4 @@
+# The identities' files hold token hashes and accounts (#643): kept out of the repository, and out of the images'
+# context by the root's .dockerignore. The directory is tracked so that compose's mount always has a source.
+*
+!.gitignore

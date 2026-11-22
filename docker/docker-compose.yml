@@ -83,27 +83,35 @@ services:
     # specification's service_completed_successfully waits for it to finish. Upstream: containers/podman-compose#1590 and
     # #1467 (open on 2026-11-22, when 1.6.0 was the latest release; the runner host has 1.5.0). Check them whenever
     # podman-compose is upgraded there (#620).
-    entrypoint: ["sh", "-c", "seedData --if-empty --data-dir /data && exec orderProcessorServer \"$$@\"", "oms-server"]
-    # The image's CMD, repeated: an entrypoint set here clears it. On this branch that includes the FIX gateway's config
-    # and its credentials (#147), without which the server refuses --fix-cfg and exits 2. Then --keep-closed-days 1
-    # (#597): Postgres keeps every order here, so each start drops the closed orders of the business days before
-    # its own.
+    # Before both, the access token or the identities' file, whichever .env leaves empty, is unset: compose passes an
+    # unset variable as an empty one, which the server refuses (#643).
+    entrypoint: ["sh", "-c", "[ -n \"$${OMS_WS_TOKEN:-}\" ] || unset OMS_WS_TOKEN; [ -n \"$${OMS_WS_CREDENTIALS:-}\" ] || unset OMS_WS_CREDENTIALS; seedData --if-empty --data-dir /data && exec orderProcessorServer \"$$@\"", "oms-server"]
+    # The image's CMD, repeated, since an entrypoint set here clears it. On this branch that includes the FIX gateway's
+    # config and its credentials (#147), without which the server refuses --fix-cfg and exits 2, and the certificate
+    # FIX serves TLS with (#228). Then --keep-closed-days 1 (#597): Postgres keeps every order here, so each start
+    # drops the closed orders of the business days before its own; and --require-ws-auth (#643): with neither a token
+    # nor identities the server refuses to start, where it would run open. Compose can require only one variable of
+    # the two, so that refusal is the server's, at its start, not compose's: the stack comes up, `docker compose ps`
+    # shows oms-server restarting with exit code 2, and `docker compose logs oms-server` says why.
     command: ["--port", "8080", "--data-dir", "/data", "--fix-cfg", "/etc/orderprocessor/fix.cfg",
               "--fix-credentials", "/etc/orderprocessor/fix-credentials",
               "--fix-tls-cert", "/etc/orderprocessor/tls/tls.crt", "--fix-tls-key", "/etc/orderprocessor/tls/tls.key",
-              "--keep-closed-days", "1"]
+              "--keep-closed-days", "1", "--require-ws-auth"]
     restart: unless-stopped
     # A small init runs as PID 1 and starts the server (#203). As PID 1 itself, the server ignored SIGTERM until its
     # handler was set, after the data directory's restore, and an abort became a SIGSEGV.
     init: true
     # No WebSocket port on the host (#146): WebSocket clients reach the server through the frontend's /ws. A client must
-    # offer this access token, which the app asks for; set it in .env (`openssl rand -hex 32` makes one), or compose
-    # refuses to start. A browser page must also come from one of OMS_ALLOWED_ORIGINS, comma-separated, when it's set.
-    # FIX clients connect to the acceptor's 5001, which stays published.
+    # offer the access token, which the app asks for (`openssl rand -hex 32` makes one), or, with identities instead,
+    # its own identity's token (#225, #643): set one of OMS_WS_TOKEN and OMS_WS_CREDENTIALS in .env, the second a file
+    # in ./ws-identities, named as the server sees it, /etc/oms/ws-identities/<file>. A browser page must also come
+    # from one of OMS_ALLOWED_ORIGINS, comma-separated, when it's set. FIX clients connect to the acceptor's 5001,
+    # which stays published.
     ports:
       - "5001:5001"
     environment:
-      OMS_WS_TOKEN: "${OMS_WS_TOKEN:?set OMS_WS_TOKEN in docker/.env, as docker/README.md says}"
+      OMS_WS_TOKEN: "${OMS_WS_TOKEN:-}"
+      OMS_WS_CREDENTIALS: "${OMS_WS_CREDENTIALS:-}"
       OMS_ALLOWED_ORIGINS: "${OMS_ALLOWED_ORIGINS:-}"
       # The Postgres the server mirrors its reference data and orders to, behind LMDB (#151), as oms_server, a role that
       # may read and write the rows it mirrors and nothing else, where it connected as the superuser (#568). The
@@ -133,6 +141,9 @@ services:
       # The certificate and key FIX serves TLS with (#228): the stack's, the ones nginx serves (#226). The server runs as
       # oms, which is in group 0 as nginx is, so the same key, readable by group 0, serves both.
       - ./certs:/etc/orderprocessor/tls:ro,z
+      # The identities' files (#643): the directory is tracked, with its contents ignored, so the mount has a source
+      # whether or not a deployment uses identities
+      - ./ws-identities:/etc/oms/ws-identities:ro,z
     # The server logs to standard output (EXCHANGE_LOG=- in its image, #156); keep at most 3 files of 10 MB
     logging:
       driver: json-file
