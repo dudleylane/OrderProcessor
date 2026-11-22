@@ -169,11 +169,12 @@ class Server:
     TLS (#228). On leaving, it stops the server, shows the end of its log if a check failed, and removes the
     directory."""
 
-    def __init__(self, server, seed, cfg, spec, counterparties, tls=None, settings=None):
+    def __init__(self, server, seed, cfg, spec, counterparties, tls=None, settings=None, extra=None):
         self.server, self.seed, self.cfg, self.spec = server, seed, cfg, spec
         self.counterparties = counterparties
         self.tls = tls
         self.settings = settings
+        self.extra = extra or []  # more of the server's arguments, ahead of --fix-credentials
         self.work = tempfile.mkdtemp(prefix='fix-server-')
         self.env = dict(os.environ, EXCHANGE_LOG=os.path.join(self.work, 'exchange.log'))
         self.data = os.path.join(self.work, 'data')
@@ -188,8 +189,8 @@ class Server:
         self.fix_port = free_port()
         tls = ['--fix-tls-cert', self.tls[0], '--fix-tls-key', self.tls[1]] if self.tls else []
         return [self.server, '--port', str(free_port()), '--data-dir', self.data,
-                '--fix-cfg', write_cfg(self.cfg, self.work, self.fix_port, self.spec, self.settings)] + tls + [
-                '--fix-credentials', write_credentials(self.work, self.counterparties)]
+                '--fix-cfg', write_cfg(self.cfg, self.work, self.fix_port, self.spec, self.settings)] + tls + \
+            self.extra + ['--fix-credentials', write_credentials(self.work, self.counterparties)]
 
     def __enter__(self):
         self.seed_data()

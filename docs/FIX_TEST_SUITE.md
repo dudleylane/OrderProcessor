@@ -404,7 +404,8 @@ Runs `orderProcessorServer` with a certificate made for the run, and checks, on 
 - a client that checks the certificate logs on over TLS 1.2 or 1.3, and its order is acknowledged;
 - a plain TCP client gets no answer, and the server closes the connection;
 - with the settings' own `SSLProtocol` at TLS 1.3 only, a TLS 1.2 client fails the handshake and a TLS 1.3 one logs on;
-- without the flags FIX runs over plain TCP, and the server warns so, once (#228).
+- without the flags FIX runs over plain TCP, and the server warns so, once (#228);
+- with `--bind 127.0.0.1` the server warns, once, that FIX listens on every interface, naming its port, and without `--bind` it doesn't (#641).
 
 ---
 

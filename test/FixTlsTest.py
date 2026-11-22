@@ -10,7 +10,8 @@ clear. With a certificate made for the run (it needs the openssl command):
   4. The settings' own SSLProtocol holds: with TLS 1.3 only, a client limited to TLS 1.2 fails the handshake, and one
      allowed TLS 1.3 logs on. (A TLS 1.1 client says nothing here: this host's crypto policy refuses TLS 1.1 at both
      ends, whatever the server sets. FixTlsTest.cpp checks the protocols the server sets by default.)
-  5. Without the flags FIX runs over plain TCP, and the server says so, once.
+  5. Without the flags FIX runs over plain TCP, and the server says so, once. With --bind 127.0.0.1 it also says, once,
+     that FIX still listens on every interface, on its port, and without --bind it doesn't (#641).
 
 usage: FixTlsTest.py <orderProcessorServer> <seedData> <config/fix.cfg> <config/spec>
 """
@@ -29,6 +30,9 @@ from fix_client import Client, Server, expect, now, problems  # noqa: E402
 COUNTERPARTIES = [('CLIENT_A', 'client_a', 'password-a', 'CLIENT-A')]
 # The plain-TCP warning, as the server logs it: at Warn level, which also writes it to the log at once
 PLAIN_WARNING = re.compile(r': \[Warn\]\[\d+\] FIX runs over plain TCP')
+# --bind's, when it names one address: it holds the WebSocket server alone (#641)
+BIND_WARNING = re.compile(r': \[Warn\]\[\d+\] --bind (\S+) holds only the WebSocket server: FIX listens on every '
+                          r'interface, port (\d+)')
 
 
 def make_certificate(work):
@@ -110,6 +114,7 @@ def tls_only(args, cert, key):
         expect(plain.closed_by_server(), 'and the server closes its connection')
         plain.close()
         expect(not PLAIN_WARNING.search(running.log()), 'the server serving TLS doesn\'t warn about plain TCP')
+        expect(not BIND_WARNING.search(running.log()), 'nor, without --bind, about where FIX listens')
 
 
 def settings_protocols(args, cert, key):
@@ -125,11 +130,14 @@ def settings_protocols(args, cert, key):
 
 
 def plain_warns(args):
-    with Server(*args, COUNTERPARTIES) as running:
+    with Server(*args, COUNTERPARTIES, extra=['--bind', '127.0.0.1']) as running:
         client = logs_on(running.fix_port, None, 'without the TLS flags, over plain TCP')
         client.close()
         warnings = len(PLAIN_WARNING.findall(running.log()))
         expect(warnings == 1, f'and the server warns, at Warn level, that FIX runs over plain TCP, once ({warnings})')
+        bound = BIND_WARNING.findall(running.log())
+        expect(bound == [('127.0.0.1', str(running.fix_port))],
+               f'and, with --bind 127.0.0.1, that FIX listens on every interface, on its port, once ({bound})')
 
 
 def main():

@@ -168,17 +168,41 @@ void FixServer::start(InFlightGauge *inFlight)
     }
     impl_->gateway->setInFlightGauge(inFlight);
     impl_->acceptor->start();
+    const std::string where = "on every interface, port " + acceptPorts() + " (#641)";
     if (!impl_->tlsCertificate.empty())
     {
-        aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSSLSocketAcceptor): TLS only, " +
+        aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSSLSocketAcceptor), " + where + ": TLS only, " +
                                           impl_->settings->get().getString(FIX::SSL_PROTOCOL) + ", with " +
                                           impl_->tlsCertificate + " (#228)");
         return;
     }
-    aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSocketAcceptor)");
+    aux::ExchLogger::instance()->note("FIX gateway started (ThreadedSocketAcceptor), " + where);
     aux::ExchLogger::instance()->warn("FIX runs over plain TCP: a counterparty's Logon password, and every order and "
                                       "report, cross the network in the clear. --fix-tls-cert and --fix-tls-key "
                                       "serve TLS (#228)");
+}
+
+std::string FixServer::acceptPorts() const
+{
+    if (!impl_->settings)
+    {
+        return std::string();
+    }
+    std::set<int> ports; // [DEFAULT] gives every session the same one, config/fix.cfg's
+    for (const FIX::SessionID &sid : impl_->settings->getSessions())
+    {
+        const FIX::Dictionary &session = impl_->settings->get(sid);
+        if (session.has(FIX::SOCKET_ACCEPT_PORT))
+        {
+            ports.insert(session.getInt(FIX::SOCKET_ACCEPT_PORT));
+        }
+    }
+    std::string joined;
+    for (const int port : ports)
+    {
+        joined += (joined.empty() ? "" : ", ") + std::to_string(port);
+    }
+    return joined;
 }
 
 void FixServer::stop()

@@ -75,6 +75,10 @@ public:
     /// if the acceptor can't listen.
     void start(InFlightGauge *inFlight = nullptr);
 
+    /// The ports the acceptor listens on, each session's SocketAcceptPort, joined with ", ": on every interface, since
+    /// the pinned QuickFIX has no setting that holds an acceptor to one address (#641). Empty before createSessions().
+    std::string acceptPorts() const;
+
     /// Stop the FIX acceptor gracefully.
     void stop();
 
