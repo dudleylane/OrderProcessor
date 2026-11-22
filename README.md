@@ -237,7 +237,7 @@ desk-a      sha256$0f2c...<64 lowercase hex digits>                             
 
 An option the server doesn't know, an option without its value, or a number outside the option's range is a usage error: the server prints why and its usage on standard error, and exits with status 2 (#173). `--help` prints the usage.
 
-The log goes to `exchange.log` in the working directory. The environment variable `EXCHANGE_LOG` sends it elsewhere: a file's path, or `-` for standard output, which the Docker image uses, so `docker compose logs` shows it.
+The log goes to `exchange.log` in the working directory. The environment variable `EXCHANGE_LOG` sends it elsewhere: a file's path, or `-` for standard output, which the Docker image uses, so `docker compose logs` shows it. A log file rotates (#569): by default at 256 MiB, keeping the five before it, `exchange.1.log` the newest to `exchange.5.log`, so the oldest are deleted. `EXCHANGE_LOG_MAX_MB` sets the size, 0 for one file that grows without bound as before, and `EXCHANGE_LOG_FILES` how many to keep, 1 to 1000. A value that isn't a whole number in range takes the default, and the log says so as it starts.
 
 ### Docker Compose (Full Stack)
 
