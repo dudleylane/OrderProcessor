@@ -21,7 +21,9 @@ struct OrderEntry;
 namespace OrdStateImpl
 {
 
-void processReceive(OrderEntry **orderData, OrdState::onOrderReceived const &evnt);
+/// Stores and books a new order. Returns false, storing nothing, for a ClOrdID already in use, which only the store can
+/// decide, with the reason in *refusal (#605); throws for anything else that refuses it.
+bool processReceive(OrderEntry **orderData, OrdState::onOrderReceived const &evnt, const char **refusal);
 bool processRefused(OrdState::onOrderReceived const &evnt);
 void processReject(OrderEntry **orderData, OrdState::onOrderReceived const &evnt);
 void processReceive(OrderEntry **orderData, OrdState::onRplOrderReceived const &evnt);

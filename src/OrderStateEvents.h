@@ -191,6 +191,8 @@ struct onRecvOrderRejected : public OrderStateEvent
 
     OrderEntry *order_;
     std::string reason_;
+    /// The receive found the order's ClOrdID in use: the reject doesn't try to store the order again (#605)
+    bool clOrdIdInUse_ = false;
 };
 
 struct onReplaceRejected : public OrderStateEvent
