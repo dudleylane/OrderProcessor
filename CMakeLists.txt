@@ -228,6 +228,12 @@ if(BUILD_TESTS)
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/LineEndingsTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/line-endings.sh)
     set_tests_properties(LineEndingsAreChecked PROPERTIES SKIP_RETURN_CODE 77)
+
+    # The check CI's test steps and the pre-push hook run after ctest, which counts a skipped test as a pass (#563, #635):
+    # a skip fails it unless it's expected, against ctest's own output
+    add_test(NAME CtestSkipsAreRefused
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/CtestSkipsTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/ctest-skips.sh)
 endif()
 
 if(BUILD_BENCHMARKS)
