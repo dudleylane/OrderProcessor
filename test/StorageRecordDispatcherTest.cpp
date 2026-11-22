@@ -340,8 +340,8 @@ OrderEntry *createTestOrder()
     val->orderId_ = IdT(4444, 4445);
     val->origOrderId_ = IdT(5555, 5556);
     val->stateMachinePersistance_.orderData_ = val;
-    val->stateMachinePersistance_.stateZone1Id_ = 6;
-    val->stateMachinePersistance_.stateZone2Id_ = 7;
+    val->stateMachinePersistance_.stateZone1Id_ = 6; // DoneForDay
+    val->stateMachinePersistance_.stateZone2Id_ = 8; // NoCnlReplace: a state of each region (#600)
 
     return val;
 }
@@ -616,6 +616,53 @@ TEST_F(StorageRecordDispatcherTest, LoadOrderRecord)
     ASSERT_NE(nullptr, orderBook_->orders_.at(0));
     EXPECT_TRUE(orderBook_->orders_.at(0)->compare(*val));
     EXPECT_NE(nullptr, orderStorage_->locateByOrderId(id));
+}
+
+TEST_F(StorageRecordDispatcherTest, AnOrderWhoseStatesArentOneOfEachRegionIsRefused)
+{
+    // An order's record holds one state per region of the state machine. A pair MSM never produces, a zone-1 state in
+    // zone 2 or the reverse, would have the order's next event do whatever that pair's rows do, so the pass that
+    // restores orders for trading refuses it, and the server doesn't start (#600). One of each restores.
+    struct Pair
+    {
+        int zone1;
+        int zone2;
+        bool restores;
+    };
+    const std::vector<Pair> pairs = { { 2, 8, true },  { 12, 11, true }, { 2, 2, false },
+                                      { 8, 8, false }, { 9, 3, false },  { 12, 12, false } };
+    u64 number = 2000;
+    for (const Pair &pair : pairs)
+    {
+        dispatcher_ = std::make_unique<StorageRecordDispatcher>();
+        dispatcher_->init(restore_.get(), orderBook_.get(), saver_.get(), orderStorage_.get());
+        dispatcher_->startLoad();
+        std::unique_ptr<OrderEntry> val(createTestOrder());
+        val->orderId_ = IdT(++number, 6789);
+        test::assignClOrderId(val.get()); // each its own, since the orders restored stay in the store
+        val->status_ = NEW_ORDSTATUS;
+        val->stateMachinePersistance_.stateZone1Id_ = pair.zone1;
+        val->stateMachinePersistance_.stateZone2Id_ = pair.zone2;
+        std::string buf = createRecordTypePrefix(StorageRecordDispatcher::ORDER_RECORDTYPE);
+        IdT id;
+        u32 version = 0;
+        OrderCodec::encode(*val, &buf, &id, &version);
+        dispatcher_->onRecordLoaded(id, version, buf.c_str(), buf.size());
+        if (pair.restores)
+        {
+            EXPECT_NO_THROW(dispatcher_->finishLoad()) << pair.zone1 << ":" << pair.zone2;
+            continue;
+        }
+        try
+        {
+            dispatcher_->finishLoad();
+            ADD_FAILURE() << "an order with states " << pair.zone1 << ":" << pair.zone2 << " was restored";
+        }
+        catch (const std::runtime_error &ex)
+        {
+            EXPECT_NE(std::string::npos, std::string(ex.what()).find("aren't a state of each region")) << ex.what();
+        }
+    }
 }
 
 TEST_F(StorageRecordDispatcherTest, LoadTerminalOrderIsRestoredButNotBooked)
@@ -1016,8 +1063,8 @@ OrderEntry *pgTestOrder(u64 orderNumber)
     order->orderQty_ = 100;
     order->leavesQty_ = 100;
     order->stateMachinePersistance_.orderData_ = order;
-    order->stateMachinePersistance_.stateZone1Id_ = 6;
-    order->stateMachinePersistance_.stateZone2Id_ = 7;
+    order->stateMachinePersistance_.stateZone1Id_ = 6; // DoneForDay
+    order->stateMachinePersistance_.stateZone2Id_ = 8; // NoCnlReplace: a state of each region (#600)
     return order;
 }
 } // namespace

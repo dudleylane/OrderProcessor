@@ -49,6 +49,17 @@ static_assert(stateId<GoingCancel> == 9, "GoingCancel's id is persisted");
 static_assert(stateId<GoingReplace> == 10, "GoingReplace's id is persisted");
 static_assert(stateId<CnclReplaced> == 11, "CnclReplaced's id is persisted");
 static_assert(stateId<Rejected> == 12, "Rejected's id is persisted");
+// Each region's states, as restore checks a record's pair against them (#600): the first region is the one
+// initial_state starts at Rcvd_New, the second the one it starts at NoCnlReplace
+static_assert(isZone1StateId(stateId<Rcvd_New>) && isZone1StateId(stateId<Pend_Replace>) &&
+                  isZone1StateId(stateId<New>) && isZone1StateId(stateId<PartFill>) &&
+                  isZone1StateId(stateId<Filled>) && isZone1StateId(stateId<Expired>) &&
+                  isZone1StateId(stateId<DoneForDay>) && isZone1StateId(stateId<Suspended>) &&
+                  isZone1StateId(stateId<Rejected>),
+              "the first region's states");
+static_assert(isZone2StateId(stateId<NoCnlReplace>) && isZone2StateId(stateId<GoingCancel>) &&
+                  isZone2StateId(stateId<GoingReplace>) && isZone2StateId(stateId<CnclReplaced>),
+              "the second region's states");
 static_assert(boost::mpl::size<boost::msm::back::generate_state_set<OrderState::stt>::type>::value == ORDER_STATE_COUNT,
               "a new state needs its id pinned above and a name in state_names");
 
