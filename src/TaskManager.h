@@ -58,7 +58,8 @@ public:
     /// method waits until all incoming events and transactions finished processing: every processor back in its pool,
     /// the incoming queues empty, and no transaction left in the transaction manager (#263)
     /// returns false, if events and transactions not finished during waitIntervalSeconds
-    /// waitIntervalSeconds = -1, means infinite; 0 checks once and returns at once
+    /// waitIntervalSeconds = -1, means infinite; 0 checks once and returns at once. A wait checks every 10 ms, and
+    /// returns at the first check that finds the work done (#587)
     bool waitUntilTransactionsFinished(int waitIntervalSeconds) const;
 
     bool finishTransaction(const ACID::TransactionId &id, ACID::Transaction *tr, ACID::TransactionProcessor *proc);
@@ -138,6 +139,8 @@ private:
     void taskFailed(const char *kind, const char *what);
     /// Starts a task of this manager's: spawned from inside one of its tasks, enqueued from any other thread (#364)
     template <typename F> void submit(F &&task);
+    /// Every processor back in its pool, nothing queued, and no transaction left in the manager (#263)
+    bool allWorkDone() const;
     /// Pins the calling worker to the next core, once per thread, when the manager was given a first core (#536)
     void pinThisWorker() const;
 

@@ -10,7 +10,9 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <iostream>
 
 #include <oneapi/tbb/task_arena.h>
@@ -184,38 +186,38 @@ void TaskManager::destroy()
 
 bool TaskManager::waitUntilTransactionsFinished(int waitIntervalSeconds) const
 {
-    int interval = waitIntervalSeconds;
-    bool onceSucceed = false;
-    do
+    // One check that finds the work done is enough (#587). Until #263 an idle pool could be a finished transaction's
+    // task between handing its processor back and removing the transaction, and a second check a second later stood in
+    // for the transactions that removal releases; since #263 the check counts the transactions still in the manager.
+    // A wait polls every 10 ms until the work is done or its seconds have passed, so it ends within 10 ms of the work,
+    // where it took at least two seconds.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(std::max(0, waitIntervalSeconds));
+    for (;;)
     {
-        bool finished = false;
+        if (allWorkDone())
         {
-            // An idle pool is not enough. A task hands its processor back before it removes its transaction, whose
-            // removal releases the transactions ordered after it, so for that moment the pool is idle with work left
-            // (#263); the transaction is still in the manager until then. The manager's lock is taken under these two,
-            // as onReadyToExecute() takes it under transactLock_, and the manager calls no observer while holding it.
-            oneapi::tbb::mutex::scoped_lock lock(transactLock_);
-            oneapi::tbb::mutex::scoped_lock lock2(eventLock_);
-            finished = (lastAvailableTransactProcessor_.load() == totalAvailableTransactProcessor_.load()) &&
-                       (lastAvailableEvntProcessor_.load() == totalAvailableEvntProcessor_.load()) &&
-                       (0 == inQueues_->size()) && (0 == transactMgr_->pendingTransactions());
+            return true;
         }
-        if (finished && !onceSucceed && (0 != waitIntervalSeconds))
+        const bool timedOut = (-1 != waitIntervalSeconds) && (std::chrono::steady_clock::now() >= deadline);
+        if ((0 == waitIntervalSeconds) || timedOut)
         {
-            finished = false;
-            onceSucceed = true;
+            return false;
         }
-        if ((finished) || (0 == waitIntervalSeconds))
-        {
-            return finished;
-        }
-        WaitInterval(1000);
-        if (-1 != waitIntervalSeconds)
-        {
-            --interval;
-        }
-    } while (0 <= interval);
-    return false;
+        WaitInterval(10);
+    }
+}
+
+bool TaskManager::allWorkDone() const
+{
+    // An idle pool is not enough. A task hands its processor back before it removes its transaction, whose removal
+    // releases the transactions ordered after it, so for that moment the pool is idle with work left (#263); the
+    // transaction is still in the manager until then. The manager's lock is taken under these two, as
+    // onReadyToExecute() takes it under transactLock_, and the manager calls no observer while holding it.
+    oneapi::tbb::mutex::scoped_lock lock(transactLock_);
+    oneapi::tbb::mutex::scoped_lock lock2(eventLock_);
+    return (lastAvailableTransactProcessor_.load() == totalAvailableTransactProcessor_.load()) &&
+           (lastAvailableEvntProcessor_.load() == totalAvailableEvntProcessor_.load()) && (0 == inQueues_->size()) &&
+           (0 == transactMgr_->pendingTransactions());
 }
 
 // A spawn (task_group::run) waits for a worker to steal it, and oneTBB doesn't promise to wake one: its arena.h says
