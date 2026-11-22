@@ -179,24 +179,24 @@ chmod 0640 "$WORK/certs/tls.key"
 chmod 0644 "$WORK/certs/tls.crt"
 sed -i -e "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$TOKEN/" -e "s|^OMS_ALLOWED_ORIGINS=.*|OMS_ALLOWED_ORIGINS=$ORIGIN|" \
     -e "s/^OMS_PUBLIC_HOST=.*/OMS_PUBLIC_HOST=localhost:3000/" "$WORK/env"
-# A password with a quote, a backslash and a double quote, which the server's connection string couldn't carry until
-# #642, when the password went to libpq on its own: the rows the server mirrors, checked below, prove it got it whole.
-# Written by printf, since sed would read its backslash.
-DB_PASSWORD="pa'ss\\wo\"rd-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-grep -v '^POSTGRES_PASSWORD=' "$WORK/env" > "$WORK/env.tmp"
-printf 'POSTGRES_PASSWORD=%s\n' "$DB_PASSWORD" >> "$WORK/env.tmp"
+# This run's passwords, which .env.example leaves empty (#568). The server's role's holds a quote, a backslash and a
+# double quote, which the server's connection string couldn't carry until #642, when the password went to libpq on its
+# own: the rows the server mirrors, checked below, prove it got it whole. Written by printf, since sed would read its
+# backslash.
+SERVER_PASSWORD="pa'ss\\wo\"rd-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+grep -vE '^(POSTGRES_PASSWORD|OMS_DB_SERVER_PASSWORD)=' "$WORK/env" > "$WORK/env.tmp"
+printf 'POSTGRES_PASSWORD=%s\nOMS_DB_SERVER_PASSWORD=%s\n' "$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
+    "$SERVER_PASSWORD" >> "$WORK/env.tmp"
 mv "$WORK/env.tmp" "$WORK/env"
 # Resets only the ports PUBLISHED names, which the step below checks are all there are: podman-compose 1.5.0 fails on a
 # !reset of a key the file doesn't have, which the Compose specification allows. Upstream: containers/podman-compose#1209
 # (override and reset handle only a few hardcoded parts of the schema; open on 2026-11-22, when 1.6.0 was the latest
 # release). Check it whenever podman-compose is upgraded on the runner host (#620).
 cat > "$WORK/override.yml" <<EOF
-# check-compose-stack.sh's changes to docker/docker-compose.yml: no host ports, .env.example for oms-db, and this run's
-# certificate for nginx
+# check-compose-stack.sh's changes to docker/docker-compose.yml: no host ports, this run's certificate for nginx, and
+# its FIX credentials and certificate for the server. oms-db takes its variables from compose's own, this run's env
+# file, since #568.
 services:
-  oms-db:
-    env_file: !override
-      - $WORK/env
   oms-server:
     ports: !reset []
     volumes: !override
@@ -227,9 +227,21 @@ published="$(podman-compose -p "$NAME" -f docker/docker-compose.yml --env-file "
     || fail "docker-compose.yml publishes '${published//$'\n'/, }', not only '${PUBLISHED[*]}'"
 echo "published: ${published//$'\n'/, }"
 if podman-compose -p "$NAME" -f docker/docker-compose.yml --env-file docker/.env.example config >/dev/null 2>&1; then
-    fail "compose accepts docker/.env.example, which sets no OMS_WS_TOKEN: its server would let anyone in"
+    fail "compose accepts docker/.env.example as it is, which sets no access token and no passwords"
 fi
-echo "compose refuses docker/.env.example as it is: it sets no OMS_WS_TOKEN"
+echo "compose refuses docker/.env.example as it is"
+# Each required setting refused on its own (#568): .env.example leaves four empty, so its refusal alone no longer shows
+# that any one of them is required. Each is blanked in turn from this run's settings, whose others are all set.
+for variable in OMS_WS_TOKEN OMS_PUBLIC_HOST POSTGRES_PASSWORD OMS_DB_SERVER_PASSWORD; do
+    sed "s/^$variable=.*/$variable=/" "$WORK/env" > "$WORK/env.blank"
+    if podman-compose -p "$NAME" -f docker/docker-compose.yml --env-file "$WORK/env.blank" config \
+        > "$WORK/blank.log" 2>&1; then
+        fail "compose accepts settings without $variable"
+    fi
+    grep -q "$variable" "$WORK/blank.log" || fail "compose refused settings without $variable without naming it: $(tail -n 2 "$WORK/blank.log")"
+done
+rm -f "$WORK/env.blank" "$WORK/blank.log"
+echo "compose refuses settings without any one of OMS_WS_TOKEN, OMS_PUBLIC_HOST, POSTGRES_PASSWORD and OMS_DB_SERVER_PASSWORD"
 
 if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
     chcon -R --reference=docker docker/init-db || fail "couldn't give docker/init-db its directory's SELinux label"
@@ -407,6 +419,14 @@ done
 instruments="$(psql_value "SELECT count(*) FROM instruments")" || fail "psql failed"
 (( instruments > 0 )) || fail "Postgres has no instrument: the server didn't mirror its seeded reference data"
 echo "orders: AAPL 150.25 is NEW; instruments: $instruments"
+# The server mirrored those as oms_server, a role that may read and write the rows it mirrors and nothing else (#568):
+# it can't make a table, nor truncate one it may only delete rows from
+for statement in "CREATE TABLE oms_role_probe (i int)" "TRUNCATE orders"; do
+    if podman exec "$db" psql -U oms_server -d "$DB_NAME" -Atc "$statement" >/dev/null 2>&1; then
+        fail "oms_server may run '$statement': the server's role has more than it needs"
+    fi
+done
+echo "oms_server, the server's role, can't create a table or truncate orders"
 
 step "stop the stack"
 "${COMPOSE[@]}" stop >/dev/null 2>&1 || fail "compose stop failed"

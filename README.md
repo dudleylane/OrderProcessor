@@ -246,8 +246,11 @@ The log goes to `exchange.log` in the working directory. The environment variabl
 
 ```bash
 cd docker
-cp .env.example .env        # Set PostgreSQL credentials
+cp .env.example .env        # Its required settings are empty: compose refuses it until each is set
 sed -i "s/^OMS_WS_TOKEN=.*/OMS_WS_TOKEN=$(openssl rand -hex 32)/" .env   # The access token (#146)
+sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 32)/" .env   # Postgres's superuser (#568)
+sed -i "s/^OMS_DB_SERVER_PASSWORD=.*/OMS_DB_SERVER_PASSWORD=$(openssl rand -hex 32)/" .env   # The server's role (#568)
+sed -i "s/^OMS_PUBLIC_HOST=.*/OMS_PUBLIC_HOST=localhost:3000/" .env   # Where browsers reach the app (#564)
 mkdir -p certs && openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN=localhost" \
     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -keyout certs/tls.key -out certs/tls.crt \
     && chmod 0640 certs/tls.key   # A self-signed TLS certificate (#226)
