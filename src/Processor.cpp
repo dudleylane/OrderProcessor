@@ -1023,15 +1023,88 @@ void Processor::matchRestored(OrderEntry *order)
         throw std::runtime_error("Processor::matchRestored: order " + std::to_string(order->orderId_.id_) +
                                  " could not be matched or booked!");
     }
-    // The fills, and a market order's cancel when nothing is left to trade with, as process() applies them
+    // The fills, and a market order's cancel when nothing is left to trade with, as process() applies them, and then
+    // the releases of the held stops they reach
+    processRestoredDeferedEvent();
+}
+
+void Processor::processRestoredDeferedEvent()
+{
+    // Production drains a trade's events inside the trade's transaction, which holds the instrument, so a release the
+    // trade queues runs only once the whole sweep is decided. Here nothing holds the instrument: a release enqueued at
+    // once could match its stop on a transaction worker while this thread decides the sweep's next match on the same
+    // book (#533). So the releases wait until the drain is done, and are enqueued then, in the order they were queued.
+    // If the drain throws they are enqueued too, since their stops are already claimed, reached and marked pending
+    // (#517, #518).
+    std::vector<std::unique_ptr<DeferedEventBase>> releases;
+    auto enqueueAfterFailure = [this, &releases](const char *failure)
+    {
+        clearDeferedEvents(); // the partial chain's events, and its claims
+        for (std::unique_ptr<DeferedEventBase> &release : releases)
+        {
+            const char *why = "an exception that isn't a std::exception";
+            try
+            {
+                onEvent(release.get());
+                continue;
+            }
+            catch (const std::exception &failed)
+            {
+                why = failed.what();
+            }
+            catch (...)
+            {
+            }
+            aux::ExchLogger::instance()->error(
+                std::string("Processor::matchRestored: a stop's release couldn't be enqueued after the match "
+                            "failed (") +
+                failure + "): " + why + ". A restart releases it, since its stop stays pending (#518)");
+        }
+    };
     try
     {
-        processDeferedEvent();
+        while (!threadState().events.empty())
+        {
+            DeferedEventsT tmp;
+            swap(tmp, threadState().events);
+            try
+            {
+                for (DeferedEventsT::iterator it = tmp.begin(); it != tmp.end(); ++it)
+                {
+                    std::unique_ptr<DeferedEventBase> evnt(*it);
+                    *it = nullptr;
+                    if (nullptr != dynamic_cast<ReleaseStopDeferedEvent *>(evnt.get()))
+                    {
+                        releases.push_back(std::move(evnt));
+                        continue;
+                    }
+                    onEvent(evnt.get());
+                }
+            }
+            catch (...)
+            {
+                for (DeferedEventsT::iterator it = tmp.begin(); it != tmp.end(); ++it)
+                {
+                    delete *it;
+                }
+                throw;
+            }
+        }
+    }
+    catch (const std::exception &e)
+    {
+        enqueueAfterFailure(e.what());
+        throw;
     }
     catch (...)
     {
-        clearDeferedEvents();
+        enqueueAfterFailure("an exception that isn't a std::exception");
         throw;
+    }
+    threadState().stopReleases.clear(); // the chain is done: its releases are enqueued next (#223)
+    for (std::unique_ptr<DeferedEventBase> &release : releases)
+    {
+        onEvent(release.get());
     }
 }
 
