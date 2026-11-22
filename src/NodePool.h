@@ -22,6 +22,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <sanitizer/asan_interface.h> // no-ops without ASan (#586)
 
 namespace COP
 {
@@ -36,7 +37,9 @@ namespace COP
  *
  * The first allocation sets the block size. A freed block goes on a free list and is the next one handed out; the
  * chunks go back only when the pool is destroyed, so a pool must outlive the map that uses it: declare it first.
- * AddressSanitizer sees a chunk as one allocation, so it can't catch a node used after the map freed it.
+ * AddressSanitizer sees a chunk as one allocation, so each block not in use, freed or never yet handed out, is
+ * poisoned, and a node used after the map freed it is reported as a use after poison (#586). The macros do nothing
+ * without ASan.
  *
  * Not synchronised: every allocation and deallocation must run under the lock that guards changes to the map, as the
  * stores' write locks do. A copy of the map allocates from the same pool, so it runs under that lock too. That is a
@@ -54,6 +57,7 @@ public:
     {
         for (const Chunk &chunk : chunks_)
         {
+            ASAN_UNPOISON_MEMORY_REGION(chunk.begin_, static_cast<std::size_t>(chunk.end_ - chunk.begin_));
             ::operator delete(chunk.begin_, std::align_val_t(blockAlign_));
         }
     }
@@ -78,6 +82,7 @@ public:
         if (nullptr != free_)
         {
             FreeBlock *block = free_;
+            ASAN_UNPOISON_MEMORY_REGION(block, blockSize_);
             free_ = block->next_;
             return block;
         }
@@ -87,6 +92,7 @@ public:
         }
         char *block = next_;
         next_ += blockSize_;
+        ASAN_UNPOISON_MEMORY_REGION(block, blockSize_);
         return block;
     }
 
@@ -94,6 +100,7 @@ public:
     {
         assert(nullptr != block);
         free_ = ::new (block) FreeBlock{ free_ };
+        ASAN_POISON_MEMORY_REGION(block, blockSize_); // the link too: allocate() unpoisons the block before reading it
     }
 
     std::size_t blockSize() const noexcept
@@ -132,6 +139,7 @@ private:
         chunks_.reserve(chunks_.size() + 1); // so that once the chunk is allocated, nothing can throw and leak it
         char *chunk = static_cast<char *>(::operator new(bytes, std::align_val_t(blockAlign_)));
         chunks_.push_back(Chunk{ chunk, chunk + bytes });
+        ASAN_POISON_MEMORY_REGION(chunk, bytes); // each block is unpoisoned as it is handed out
         next_ = chunk;
         end_ = chunk + bytes;
         nextChunkBlocks_ = std::min(nextChunkBlocks_ * 2, maxChunkBlocks_);
