@@ -170,6 +170,8 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ExecutionReport_ASwapsOtherReportsAreTheMultilegSecuritys` | A swap's New, Cancel, Replace, Expired, Restated and Rejected reports, its status once stored, and its Pending New before the engine stores it carry MultiLegReportingType (442) 3, the multileg security's; an outright order's carry no 442 (#529) |
 | `NewOrderMultileg_NonSwapOrdType_Rejected` | Non-FXSWAP OrdType in multileg → no push; refused to the sender, 103=11 (#189) |
 | `NewOrderMultileg_TooFewLegs_Rejected` | Single leg multileg → no push; refused to the sender, 103=11 (#189) |
+| `NewOrderMultileg_ThreeLegs_Rejected` | A swap with a third leg is refused, OrdRejReason 11, and not queued: only two legs were read, so a third was taken unread (#550) |
+| `NewOrderMultileg_ALegOnAnotherSymbol_Rejected` | A swap whose near or far leg's LegSymbol (600) isn't the swap's symbol is refused, OrdRejReason 11, and not queued: it traded as if the leg named the swap's (#550) |
 | `NewOrderMultileg_OrderQtyTheEngineCannotHold_IsNotQueued` | The same quantities on an FX swap → refused, nothing pushed (#145) |
 | `NewOrderMultileg_LegPriceNoOrderTradesAt_IsNotQueued` | Either leg's LegPrice (566) no order trades at → refused, nothing pushed (#145) |
 | `SessionMapPopulatedOnLogon` | `onLogon()` makes the session known |
