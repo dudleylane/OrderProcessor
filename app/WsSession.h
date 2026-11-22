@@ -14,6 +14,7 @@
 
 #include "TypesDef.h"
 #include "ServerDefaults.h"
+#include "LogThrottle.h"
 #include "WsAuth.h"
 
 namespace COP
@@ -102,7 +103,13 @@ private:
     /// Beast's timeouts while the session reads, with limits_.idleTimeout
     boost::beast::websocket::stream_base::timeout readingTimeouts() const;
     void onRead(boost::beast::error_code ec, std::size_t bytesTransferred);
+    /// Closes the session of a client that sent a binary frame, with 1003, unsupported data: the protocol is text JSON
+    /// (#547). It sends nothing more, and reads on, discarding, until the client answers the close.
+    void refuseBinary();
     void handleMessage(const std::string &msg);
+    /// Logs an exception contained at the session's boundary (#36), at most once a period, with the client's bytes
+    /// escaped (#547): the rest are counted, and the next line logged says how many it left out
+    void logContained(const char *where, const std::string &request, const char *what);
     /// The order a client names: by its ClOrdID when it gives one, or else by its number (#58). Null when no order has
     /// it. Also null, with answered set and an error already sent, when the number is ambiguous or the two disagree.
     OrderEntry *findOrder(u64 number, const std::string &clOrdId, bool *answered);
@@ -161,6 +168,10 @@ private:
     /// sends nothing more, and a wait for the work in flight to drain, in place of a read, ends when it next looks
     /// (#519).
     bool dropped_ = false;
+    /// Set once the session closes for a binary frame (#547): it reads on, discarding, until the close is answered
+    bool closing_ = false;
+    /// Contained exceptions logged, at most one a second (#547)
+    LogThrottle containedLog_{ std::chrono::seconds(1) };
 };
 
 } // namespace App
