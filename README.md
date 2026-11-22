@@ -471,10 +471,11 @@ persisted and reported (#457). It takes ~4.0 µs.
 ~5.2 µs. This branch's `BM_ProcessSwapFokFill` does the same with swaps: a FOK buy swap the book fills at once, its
 check, then the swap trade, which reports a near and a far leg for each side (#491). It takes ~6.1 µs.
 
-`BM_ProcessDuplicateClOrdId` drives a real `Processor` through a new order whose ClOrdID is already in use: storing it
-fails, so the state machine queues the reject and throws to stop the order's move to New, and the engine tells the
-sender directly, storing nothing. Three exceptions are raised, where since #436 the engine's other refusals of a new
-order raise none (#432). It takes ~8.4 µs, about 3.2 times an invalid order's reject.
+`BM_ProcessDuplicateClOrdId` drives a real `Processor` through a new order whose ClOrdID is already in use: the store
+refuses it, so the state machine queues the reject and throws to stop the order's move to New, and the engine tells the
+sender directly, storing nothing. Since #605 that throw is the one exception raised, where there were three; since
+#436 the engine's other refusals of a new order raise none (#432). Before #605 it took ~8.4 µs, about 3.2 times an
+invalid order's reject.
 
 `BM_ProcessSweep` drives a real `Processor` through a buy that sweeps four resting sells at one price: four trades,
 each with its deferred execution events and book removal, and the three matches between them that continue the sweep

@@ -181,7 +181,7 @@ bool OrderStatePersistence::compare(const OrderStatePersistence &val) const
     return (stateZone1Id_ == val.stateZone1Id_) && (stateZone2Id_ == val.stateZone2Id_);
 }
 
-void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderReceived const &evnt)
+bool OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderReceived const &evnt, const char **refusal)
 {
     assert(nullptr != orderData);
     assert(nullptr == *orderData);
@@ -192,7 +192,13 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
     // generate id for the order
     assert(nullptr != evnt.generator_);
     assert(nullptr != evnt.orderStorage_);
-    *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
+    OrderEntry *stored =
+        evnt.orderStorage_->saveUnlessClOrdIdInUse(**orderData, evnt.generator_, evnt.publishGuard_, refusal);
+    if (nullptr == stored) [[unlikely]]
+    {
+        return false;
+    }
+    *orderData = stored;
     (*orderData)->status_ = NEW_ORDSTATUS;
 
     // FX Swap: validate far-leg fields are set (isValid already checked, but assert here)
@@ -205,6 +211,7 @@ void OrdStateImpl::processReceive(OrderEntry **orderData, OrdState::onOrderRecei
     // A stop order is held until a trade reaches its stop (#223); a market order is matched once, and anything else is
     // matched, then booked with what is left
     addBooking(*orderData, evnt.transaction_);
+    return true;
 }
 
 bool OrdStateImpl::processRefused(OrdState::onOrderReceived const &evnt)
@@ -291,15 +298,20 @@ void OrdStateImpl::processReject(OrderEntry **orderData, OrdState::onRecvOrderRe
     {
         *orderData = evnt.order_;
     }
-    // generate id for the order
-    assert(nullptr != evnt.generator_);
-    assert(nullptr != evnt.orderStorage_);
-    try
+    // A ClOrdID already in use refused the order at its receive, and would refuse this store too, with an exception:
+    // the reject reports the order unstored instead (#605)
+    if (!evnt.clOrdIdInUse_)
     {
-        *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
-    }
-    catch (const std::exception &) //save could fails if ClOrderId already exists, just continue reject it
-    {
+        // generate id for the order
+        assert(nullptr != evnt.generator_);
+        assert(nullptr != evnt.orderStorage_);
+        try
+        {
+            *orderData = evnt.orderStorage_->save(**orderData, evnt.generator_, evnt.publishGuard_);
+        }
+        catch (const std::exception &) // what else the store refuses: the order is rejected unstored
+        {
+        }
     }
     // A rejected order is closed, and a closed order's LeavesQty is 0, whatever closed it (#386, #427): whether the
     // reject stores it, as here, or its receive stored it before it threw (above)
