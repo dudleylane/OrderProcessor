@@ -37,6 +37,22 @@ if(NOT LTO_JOBS STREQUAL "auto" AND NOT LTO_JOBS MATCHES "^[1-9][0-9]*$")
     message(FATAL_ERROR "LTO_JOBS is '${LTO_JOBS}', not auto or a positive number (#738)")
 endif()
 
+# The engine needs GCC 15's libstdc++ (C++23's <flat_map>, which src/NLinkedTree.h includes), and el10's system GCC is
+# 14, which takes -std=c++23 but has no <flat_map>. Without this a build with it configured, then failed at the first
+# file that includes NLinkedTree.h, with an error that didn't name the cause (#614). The fuzz-only build compiles no
+# engine code, and Clang builds it with GCC 15's headers (docs/DEBUGGING.md), so it isn't checked.
+if(BUILD_APP OR BUILD_TESTS OR BUILD_BENCHMARKS)
+    include(CheckIncludeFileCXX)
+    check_include_file_cxx(flat_map OP_HAVE_FLAT_MAP)
+    if(NOT OP_HAVE_FLAT_MAP)
+        message(FATAL_ERROR
+            "${CMAKE_CXX_COMPILER} (${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}) has no <flat_map>, which "
+            "the engine needs (src/NLinkedTree.h). Build with GCC 15, gcc-toolset-15, as CI and the pre-push hook do: "
+            "export CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++, and "
+            "configure a new build directory (#614)")
+    endif()
+endif()
+
 # Warnings for this project's own targets, which the FetchContent dependencies don't get: -Wall -Wextra, and -Werror with
 # WARNINGS_AS_ERRORS (#167)
 function(op_warnings target)
