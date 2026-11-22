@@ -133,21 +133,23 @@ public:
     {
         return finishedTr_.load(std::memory_order_relaxed);
     }
+    /// Counts, not indices (#762): each figure is its stack's top index, -1 for an empty stack, plus one.
+    /// metrics_update sent the indices, so the dashboard gave two idle processors as 0/1 and two busy ones as 2/1.
     int availableEventProcessors() const noexcept
     {
-        return lastAvailableEvntProcessor_.load(std::memory_order_relaxed);
+        return lastAvailableEvntProcessor_.load(std::memory_order_relaxed) + 1;
     }
     int totalEventProcessors() const noexcept
     {
-        return totalAvailableEvntProcessor_.load(std::memory_order_relaxed);
+        return totalAvailableEvntProcessor_.load(std::memory_order_relaxed) + 1;
     }
     int availableTransactProcessors() const noexcept
     {
-        return lastAvailableTransactProcessor_.load(std::memory_order_relaxed);
+        return lastAvailableTransactProcessor_.load(std::memory_order_relaxed) + 1;
     }
     int totalTransactProcessors() const noexcept
     {
-        return totalAvailableTransactProcessor_.load(std::memory_order_relaxed);
+        return totalAvailableTransactProcessor_.load(std::memory_order_relaxed) + 1;
     }
     /// Tasks whose exception was logged and contained, rather than stopping this manager (#57)
     u64 tasksFailed() const noexcept
