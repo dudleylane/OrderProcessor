@@ -169,10 +169,14 @@ TaskManager::~TaskManager(void) noexcept
 
 void TaskManager::init(int workerAmount)
 {
+    // oneTBB's max_allowed_parallelism counts a thread that joins the work as well as its workers, and no thread that
+    // hands work to this manager ever joins: the IO thread, FX's gateway, the expiry scheduler and restore enqueue and
+    // return (#364). So it asks for one more than the workers it means. Given N, it ran N-1 at once, one at both 1 and
+    // 2 (#711).
     if (workerAmount > 0)
     {
         scheduler_ = std::make_unique<oneapi::tbb::global_control>(oneapi::tbb::global_control::max_allowed_parallelism,
-                                                                   workerAmount);
+                                                                   workerAmount + 1);
     }
     aux::ExchLogger::instance()->note("TaskManager initialized.");
 }

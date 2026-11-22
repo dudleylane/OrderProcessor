@@ -72,6 +72,8 @@ public:
     /// of the overridden ExecTaskManager destructor.
     ~TaskManager(void) noexcept;
 
+    /// Runs workerAmount workers at once, as --workers says, up to one fewer than the CPUs the process may use, where
+    /// oneTBB's default arena stops; 0 leaves oneTBB at that default (#711)
     static void init(int workerAmount = 0);
     static void destroy();
 

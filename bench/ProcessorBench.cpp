@@ -1046,15 +1046,15 @@ BENCHMARK(BM_ProcessDuplicateClOrdId)->UseManualTime();
 // End-to-end throughput through TaskManager's worker pool
 // =============================================================================
 
-/// Pushes a batch of new orders into the queues and waits for the pool to finish them. The argument
-/// is the number of event and transaction processors, so the numbers show how throughput scales.
+/// Pushes a batch of new orders into the queues and waits for the pool to finish them. The argument is the number of
+/// event and transaction processors, and of the workers TaskManager::init() runs, up to one fewer than the CPUs the
+/// process may use (#711), so the numbers show how throughput scales.
 ///
-/// Completion is polled with waitUntilTransactionsFinished(0), which returns the condition without
-/// blocking. The blocking form cannot be used for timing: it insists on seeing "finished" twice with
-/// a one-second sleep in between, so it has a two-second floor whatever the work costs.
+/// Completion is polled with waitUntilTransactionsFinished(0), which returns the condition without blocking. The
+/// blocking form polls every 10 ms (#587), too coarse to time a batch with.
 ///
-/// The argument starts at 2 because TaskManager::init(n) caps TBB parallelism at n, and this thread
-/// is polling rather than running tasks, so a single-worker configuration never drains.
+/// The argument starts at 2, as README's rows do. One worker drains a batch too: since #364 a task that this thread,
+/// outside the pool, starts is enqueued, so it gets a worker.
 static void BM_TaskManagerThroughput(benchmark::State &state)
 {
     // oneTBB sizes its pool from the CPUs the process may use. On one CPU it has no worker, and this

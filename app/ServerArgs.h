@@ -63,8 +63,8 @@ inline std::string serverUsage()
            "  --port N                  WebSocket port, 0 to 65535 (default 8080; 0: one the system picks)\n"
            "  --bind ADDRESS            the IP address to listen on (default 0.0.0.0, every interface)\n"
            "  --data-dir DIR            LMDB data directory (default ./data)\n"
-           "  --workers N               TBB worker threads, and as many event and transaction processor pairs\n"
-           "                            (default 0: TBB's default, and 2 pairs)\n"
+           "  --workers N               N workers, and as many event and transaction processor pairs, up to one\n"
+           "                            fewer workers than the CPUs (default 0: that many, and 2 pairs)\n"
            "  --cpu-affinity CORE       pin the main thread to CORE (default -1: no pinning)\n"
            "  --clearing-firm FIRM      the clearing firm on every order (default " +
            std::string(DEFAULT_CLEARING_FIRM) +

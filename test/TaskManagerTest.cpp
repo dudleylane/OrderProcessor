@@ -23,6 +23,8 @@
 #include <string>
 #include <vector>
 #include <oneapi/tbb/info.h>
+#include <oneapi/tbb/task_arena.h>
+#include <oneapi/tbb/task_group.h>
 
 #include "TestFixtures.h"
 #include "TestAux.h"
@@ -615,6 +617,56 @@ TEST_F(TaskManagerTest, TheProcessorFiguresAreCountsNotIndices)
     EXPECT_EQ(2, manager->availableEventProcessors());
     EXPECT_EQ(3, manager->totalTransactProcessors());
     EXPECT_EQ(3, manager->availableTransactProcessors());
+}
+
+TEST(TaskManagerWorkersTest, InitNRunsNWorkersAtOnce)
+{
+    // --workers N means N workers (#711). oneTBB's limit counts a thread that joins the work, and no thread that hands
+    // work to the manager ever joins, so init(N) ran N-1 at once: one at both 1 and 2. Tasks enqueued by a thread that
+    // only polls, as the manager's are, each wait until N are running, or 10 s, and then a moment more, in which an
+    // N+1th would start if the pool let it. On a host with fewer CPUs, oneTBB's default arena runs one fewer than it
+    // has, whatever the limit, and one on a single CPU, since an enqueued task always gets a worker (#364).
+    using namespace std::chrono;
+    for (int n : { 1, 2, 3 })
+    {
+        const int expected = std::max(1, std::min(n, oneapi::tbb::info::default_concurrency() - 1));
+        TaskManager::init(n);
+        std::atomic<int> running{ 0 };
+        std::atomic<int> most{ 0 };
+        std::atomic<int> done{ 0 };
+        const int tasks = n + 1;
+        oneapi::tbb::task_group group;
+        for (int i = 0; i < tasks; ++i)
+        {
+            oneapi::tbb::this_task_arena::enqueue(group.defer(
+                [&]
+                {
+                    const int now = running.fetch_add(1) + 1;
+                    int seen = most.load();
+                    while ((now > seen) && !most.compare_exchange_weak(seen, now))
+                    {
+                    }
+                    const auto deadline = steady_clock::now() + seconds(10);
+                    while ((running.load() < expected) && (steady_clock::now() < deadline))
+                    {
+                        std::this_thread::sleep_for(milliseconds(1));
+                    }
+                    std::this_thread::sleep_for(milliseconds(50));
+                    running.fetch_sub(1);
+                    done.fetch_add(1);
+                }));
+        }
+        // Polled, not waited for: a wait() joins the work, which no thread of the server's does
+        const auto deadline = steady_clock::now() + seconds(60);
+        while ((done.load() < tasks) && (steady_clock::now() < deadline))
+        {
+            std::this_thread::sleep_for(milliseconds(1));
+        }
+        ASSERT_EQ(tasks, done.load()) << n << " workers: the tasks didn't finish";
+        group.wait();
+        TaskManager::destroy();
+        EXPECT_EQ(expected, most.load()) << "init(" << n << ")";
+    }
 }
 
 TEST_F(TaskManagerTest, CreateWithSingleProcessor)
@@ -2126,8 +2178,8 @@ TEST_F(TaskManagerTest, AWorkerThatRunsBothKindsOfTaskIsPinnedOnce)
 {
     // With a first core given (--cpu-affinity), each worker pins itself to the next core the first time it runs a task.
     // The event task and the transaction task each kept a flag of their own, so a worker that ran both took a core for
-    // each and stayed on the second, and the cores ran out faster than the workers (#536). A limit of 2 runs one worker
-    // (#711), which runs both: the order's event task, and the transaction its event adds.
+    // each and stayed on the second, and the cores ran out faster than the workers (#536). One worker, which init(1)
+    // runs since #711, runs both: the order's event task, and the transaction its event adds.
     const int cores = CpuAffinity::getAvailableCores();
     ASSERT_LE(2, cores) << "the first and the second core must differ for this to tell them apart";
     std::vector<int> pinnedTo;
@@ -2142,7 +2194,7 @@ TEST_F(TaskManagerTest, AWorkerThatRunsBothKindsOfTaskIsPinnedOnce)
     trProc->init(*procParams_);
     params.transactProcessors_.push_back(new AffinityRecordingProcessor(std::move(trProc), &pinnedTo));
     auto manager = std::make_unique<TaskManager>(params);
-    manager->init(2);
+    manager->init(1);
 
     pushOrder(BUY_SIDE, 10.0, 100, "buyer");
     ASSERT_TRUE(waitUntilIdle(*manager));

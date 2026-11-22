@@ -152,7 +152,7 @@ Server options:
 | `--require-ws-auth` | | Refuses to start, with exit 2, without an access token or identities, where a server would run open (#643). Compose's command gives it |
 | `--pg-connection` | none | The Postgres to mirror to, a libpq connection string (#151). `OMS_PG_CONNECTION` gives it too, but not both: prefer it, since every user on the host can see a flag in the process list. Needs `BUILD_PG=ON` |
 | `--data-dir` | `./data` | LMDB persistence directory |
-| `--workers` | 0 | TBB worker threads, and as many event and transaction processor pairs. 0 leaves TBB at its default, a thread per core, and runs 2 pairs. For now N runs N-1 at once (#711) |
+| `--workers` | 0 | Worker threads, and as many event and transaction processor pairs. N runs N workers at once, up to one fewer than the CPUs the server may use, where oneTBB's default arena stops (#711). 0 leaves oneTBB at that default, and runs 2 pairs. Before #711, N ran N-1 at once (one at 2): a server started with `--workers N` then runs one more worker now, so pass N-1 (at least 1) to keep what it ran. The default, compose's command and the image's CMD set no `--workers`, so they run as before |
 | `--cpu-affinity` | -1 | Pin main thread starting from this core (-1 = disabled) |
 | `--clearing-firm` | `HOUSE-CLEARING` | Clearing firm put on every order. A data directory that holds reference data must have it, or the server doesn't start (exit 1, #640); an empty one starts, for `seedData` to seed |
 | `--default-account` | `TRADING-1` | Account for an order that names none. A data directory that holds reference data must have it, as the clearing firm, but under `--ws-credentials`, where such an order trades its identity's first account and this one isn't used |
@@ -400,7 +400,9 @@ booking's and the trade's two) take about 2.0 µs to encode (`BM_ProcessNewOrder
 JSON.
 
 `BM_TaskManagerThroughput` takes the processor count as its argument: ~196K orders/sec at 2, ~198K at 4
-and ~209K at 8. #76's ~205K, ~265K and ~270K timed something else: a batch could end once the pool looked
+and ~209K at 8. These rows, and `BM_TaskManagerTrades`' below, predate #711: their 2, 4 and 8 processors ran one,
+three and three workers at once, pinned to four CPUs. Since #711 N processors run N workers, up to three on four
+CPUs, so 2 runs two, and a comparison across #711 compares two pools. #76's ~205K, ~265K and ~270K timed something else: a batch could end once the pool looked
 idle, with transactions still to run. Since #263 (3dad39e) a batch ends when its transactions are done, which
 made the benchmark 31% slower at 4 and at 8 processors and 2.5% slower at 2, with the engine's hot path
 unchanged (#429). The rest of the difference is the engine's work and the build variance above.
@@ -411,9 +413,10 @@ In one instrument every booking, match and fill relates to the same instrument: 
 orders/sec at 2, 4 and 8 processors, against ~147K, ~132K and ~131K over 8 instruments: neither more processors
 nor more instruments raised it.
 
-**What limits the pool (#583).** The processor count goes to oneTBB as `max_allowed_parallelism`, which counts a
-thread that joins the work, and the thread pushing these orders never does. So pinned to four CPUs, 2 runs one
-worker at a time, and 4 and 8 both run three (#711). From one worker to three, an order takes the same instructions
+**What limits the pool (#583).** Until #711 the processor count went to oneTBB as `max_allowed_parallelism`, which
+counts a thread that joins the work, and the thread pushing these orders never does: pinned to four CPUs, 2 ran one
+worker at a time, and 4 and 8 both ran three. The manager now asks for one more, so 2 runs two, and 4 and 8 still
+run three, the most oneTBB's default arena runs on four CPUs. From one worker to three, an order takes the same instructions
 in about twice the cycles. The workers wait mostly on `TransactionMgr::lock_`, which each transaction takes four
 times, and under which the transaction tree's sorted vectors move the pending entries at each removal (#712), and
 then on `OrderDataStorage::save()`, which clones the order under the store's write lock (#713). That's the pool's
