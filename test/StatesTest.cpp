@@ -265,11 +265,16 @@ TEST_F(StatesTest, RcvdNew2Rejected_OnOrderReceived_DuplicateClOrdId)
     // refused, not as a failure (#432)
     const uint64_t refused = OrderState::refusedCount();
     const uint64_t failed = OrderState::failedCount();
+    const IdT before = IdTGenerator::instance()->getId();
     p.processEvent(recvevnt);
+    const IdT after = IdTGenerator::instance()->getId();
     p.checkStates("Rejected", "NoCnlReplace");
     EXPECT_EQ(refused + 1, OrderState::refusedCount());
     EXPECT_EQ(failed, OrderState::failedCount());
     EXPECT_FALSE(recvevnt.order_->orderId_.isValid());
+    // The receive's store draws an id before it finds the ClOrdID in use, and the reject doesn't try to store the order
+    // again, which drew another and threw (#605)
+    EXPECT_EQ(before.id_ + 2, after.id_);
     EXPECT_EQ(1u, trCntxt.op_.size());
     EXPECT_TRUE(trCntxt.isOperationEnqueued(CREATE_REJECT_EXECREPORT_TROPERATION));
 }

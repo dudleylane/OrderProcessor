@@ -1026,9 +1026,10 @@ static void BM_ProcessDuplicateClOrdId(benchmark::State &state)
     }
 
     // One such order per iteration, made as the fixture's first order was made, so that refused()'s checks pass it:
-    // only the store refuses it. receive() queues the reject and throws to stop the transition to New, the reject's own
-    // store refuses it again, and Processor reports it to its sender, with the transaction's scope unused: three
-    // exceptions raised, where since #436 every other refusal of a new order raises none (#432)
+    // only the store refuses it, without an exception (#605). receive() queues the reject, which doesn't store the
+    // order again, and throws to stop the transition to New, and Processor reports it to its sender, with the
+    // transaction's scope unused: one exception raised, where there were three, and since #436 every other refusal of
+    // a new order raises none (#432)
     for (auto _ : state)
     {
         engine.timeEvent(state, OrderEvent(engine.duplicateOf(stored)));
