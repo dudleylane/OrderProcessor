@@ -50,9 +50,11 @@
 #include <vector>
 
 #include <boost/mpl/size.hpp>
+#include <nlohmann/json.hpp>
 
 #include "DataModelDef.h"
 #include "ExpiryScheduler.h"
+#include "JsonSerializer.h"
 #include "ServerDefaults.h"
 #include "StateMachine.h"
 #include "StateMachineDef.h"
@@ -225,6 +227,14 @@ TEST_F(DocConsistencyTest, OrderStateCount)
 TEST_F(DocConsistencyTest, TransitionCount)
 {
     expectDocEq("transition_count", boost::mpl::size<COP::OrdState::OrderState::stt>::value);
+}
+
+// The fields metrics_update carries (#571): README's feature list said 17 when the message had 19, and the count
+// drifted with each metric added. Counted from the message the server sends, so a field added or dropped counts too.
+TEST_F(DocConsistencyTest, MetricsFieldCount)
+{
+    const nlohmann::json metrics = nlohmann::json::parse(COP::App::serializeMetricsUpdate(COP::App::SystemMetrics{}));
+    expectDocEq("metrics_field_count", metrics.at("data").size());
 }
 
 TEST_F(DocConsistencyTest, PoolSize)
