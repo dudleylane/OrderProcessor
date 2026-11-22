@@ -33,7 +33,7 @@ A high-performance, concurrent order processing engine written in C++23 with a R
 - **Position Summary:** Net positions per account and instrument, from each order's filled quantity and average price, with each side's average price
 
 ### Monitoring Dashboard
-- **Real-Time Metrics:** MetricsPublisher broadcasts 17 system metrics at 1/sec over WebSocket
+- **Real-Time Metrics:** MetricsPublisher broadcasts the server's metrics once a second over WebSocket (`metrics_update`, whose fields [Key Data Types](#key-data-types) lists)
 - **Dashboard Tab:** Event/transaction throughput charts, the work in flight (queue depth and pending transactions), processor utilization bars
 - **Memory Admin Tab:** TransactionScopePool health indicator, cache miss rate trending, arena details
 - **Alert System:** Client-side rule engine with configurable thresholds, severity levels, localStorage persistence
@@ -459,7 +459,7 @@ For the queue, order book, state machine, arena, pool, NUMA and field-layout mic
 | Component | Description |
 |-----------|-------------|
 | **Processor** | Central event handler and coordinator |
-| **OrderStateMachine** | Boost MSM-based order lifecycle (14 states, 47+ transitions) |
+| **OrderStateMachine** | Boost MSM-based order lifecycle: the states and transitions [Core Engine](#core-engine) counts |
 | **OrderMatcher** | Price-time priority matching engine |
 | **OrderBook** | Price-sorted buy/sell order sides per instrument, and its held stop orders |
 | **TransactionManager** | ACID transaction coordination with dependency tree |
@@ -553,7 +553,7 @@ Every order clears through the server's clearing firm (`--clearing-firm`), and a
 
 **ExecutionReport** — Base fields: `execId`, `orderId`, `type`, `orderStatus`, `market`, `transactTime`. Type-specific fields: `lastQty`/`lastPx`, `currency` and `tradeDate` (trade, and correct), `rejectReason` (reject, and a rejected replace), `origOrderId` (replace/correct), `execRefId` (trade cancel/correct). An order cancel carries only the base fields. A report with `orderId` 0 is for an order the server refused without storing it, such as one whose ClOrdID is already in use; `rejectReason` says why. `tradeDate` is the business day the trade counts in, as a number YYYYMMDD, FIX's TradeDate (#258): the date the day ends on, 17:00 New York, so a trade after 17:00 has the next day's date.
 
-**SystemMetrics** — 22 fields: event/transaction counters (created/processed/finished), `transactionsFailed` (transactions that failed and were rolled back since the server started, each also logged at error level, #514; the UI raises a CRITICAL alert when it rises), processor availability, `queueDepth` and `pendingTransactions` (the events waiting to be decided and the transactions not yet run: the work in flight `--max-in-flight` bounds, #519), `poolSize`, `poolCacheMisses` (acquires that found every slot in use) and `poolAllocations` (the scopes the pool allocated: one per transaction, and one per miss, #515), all three the first event processor's pool's (#542), `poolArenaSize`, `activeSessions`, `activeOrders`, `storageMapSize` and `storageMapUsed` (LMDB's map and how much of it is in use, in bytes), `timestamp`.
+**SystemMetrics** — <!-- DOC_CHECK:metrics_field_count -->22<!-- /DOC_CHECK --> fields: event/transaction counters (created/processed/finished), `transactionsFailed` (transactions that failed and were rolled back since the server started, each also logged at error level, #514; the UI raises a CRITICAL alert when it rises), processor availability, `queueDepth` and `pendingTransactions` (the events waiting to be decided and the transactions not yet run: the work in flight `--max-in-flight` bounds, #519), `poolSize`, `poolCacheMisses` (acquires that found every slot in use) and `poolAllocations` (the scopes the pool allocated: one per transaction, and one per miss, #515), all three the first event processor's pool's (#542), `poolArenaSize`, `activeSessions`, `activeOrders`, `storageMapSize` and `storageMapUsed` (LMDB's map and how much of it is in use, in bytes), `timestamp`.
 
 **Enums** — `Side` (BUY, SELL, BUY_MINUS, SELL_PLUS, SELL_SHORT, CROSS; the engine trades only BUY and SELL, and rejects an order on any of the other four, #510), `OrderType` (MARKET, LIMIT, STOP, STOPLIMIT), `TimeInForce` (DAY, GTD, GTC, FOK, IOC, OPG, ATCLOSE; the engine rejects an order with OPG or ATCLOSE, #601), `OrderStatus` (<!-- DOC_CHECK:order_status_count -->12<!-- /DOC_CHECK --> statuses), `ExecType` (<!-- DOC_CHECK:exec_type_count -->14<!-- /DOC_CHECK --> types), `Currency` (USD, EUR), `Capacity` (<!-- DOC_CHECK:capacity_count -->6<!-- /DOC_CHECK --> types).
 
