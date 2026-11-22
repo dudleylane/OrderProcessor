@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# lint.sh: lint the shell scripts, the workflows and the Dockerfiles (#174).
+# lint.sh: lint the shell scripts, the workflows and the Dockerfiles (#174), and check the
+# tracked files' line endings (#639).
 #
 # Each linter runs from its official image, pinned by digest, so what checks the code
 # changes only when someone changes a digest here:
 #   - shellcheck, over every tracked shell script;
 #   - actionlint, over the workflows, which also runs shellcheck on their run: blocks;
 #   - hadolint, over the Dockerfiles.
+# The line endings are checked natively, by scripts/line-endings.sh, which says what the
+# rule is.
 # The containers get a copy of the tracked files, read-only, with no network and no
 # capabilities, so the checkout is neither relabelled nor reachable from them.
 #
@@ -72,6 +75,14 @@ lint "$ACTIONLINT" -config-file .github/actionlint.yaml "${workflows[@]}"
 mapfile -t dockerfiles < <(git ls-files 'docker/Dockerfile.*')
 echo "=== hadolint: ${#dockerfiles[@]} Dockerfiles"
 lint "$HADOLINT" hadolint --no-color "${dockerfiles[@]}"
+
+echo "=== line endings"
+"$ROOT/scripts/line-endings.sh" "$ROOT"
+case $? in
+    0) ;;
+    1) failed=1 ;;
+    *) setup=1 ;;
+esac
 
 if (( setup )); then
     exit 2

@@ -205,6 +205,13 @@ if(BUILD_TESTS)
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/BenchmarkBusyStartTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/benchmark-regression.sh)
     set_tests_properties(BenchmarkBusyStartIsInconclusive PROPERTIES SKIP_RETURN_CODE 77)
+
+    # The tracked files' line endings (#639): C++ and CMake files CRLF, scripts, .github/ and README LF, nothing mixed,
+    # as committed, against a made-up repository. It needs git, as the script does: without it the test is skipped.
+    add_test(NAME LineEndingsAreChecked
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/LineEndingsTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/line-endings.sh)
+    set_tests_properties(LineEndingsAreChecked PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 if(BUILD_BENCHMARKS)
