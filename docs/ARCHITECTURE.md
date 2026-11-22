@@ -52,8 +52,6 @@ OrderProcessor is a high-performance, concurrent order processing library writte
 | CAS Backoff | `_mm_pause()` with exponential backoff | Reduces contention on CAS loops |
 | Devirtualization | `final` classes | Enables compiler inlining of virtual calls |
 | CPU Pinning | `CpuAffinity` utilities | Reduces context switches and cache pollution |
-| Huge Pages | `HugePages` utilities | `TransactionScopePool` can put its slot headers in 2 MB pages; the server builds its pools in the default mode, so it uses none (#603) |
-| NUMA Allocation | `NumaAllocator` with STL-compatible `NumaNodeAllocator<T>` | `TransactionScopePool` can bind its slots to the local node; the server doesn't ask it to (#603) |
 
 ---
 
@@ -1149,7 +1147,6 @@ A failure stops nothing else: the caller goes on as if the event had been handle
    ┌───────────────────────────────────────────────────────────────────────┐
    │   • Atomic processor attachment                                       │
    │   • Atomic counter updates                                           │
-   │   • NumaAllocator: NUMA-local memory binding via mbind()             │
    └───────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1161,8 +1158,7 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 | `TaskManagerTest.cpp` | `TaskManagerTest.*` | Task parallelism |
 | `TransactionScopePoolTest.cpp` | `TransactionScopePoolTest.*` | Lock-free object pool |
 | `CacheAlignedAtomicTest.cpp` | `CacheAlignedAtomicTest.*` | Cache-aligned atomics |
-| `CpuAffinityHugePagesTest.cpp` | `CpuAffinityHugePagesTest.*` | CPU pinning, huge pages |
-| `NumaAllocatorTest.cpp` | `NumaAllocatorTest.*` | NUMA-aware allocation |
+| `CpuAffinityTest.cpp` | `CpuAffinityTest.*`, `ScopedCpuAffinityTest.*` | CPU pinning |
 | `NodePoolTest.cpp` | `NodePoolTest.*` | A map's nodes in a pool of their own (#467) |
 
 ---
@@ -1556,7 +1552,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | **Transactions** | `TransactionMgrTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `NLinkTreeTest.cpp` | - |
 | **Concurrency** | `TaskManagerTest.cpp` | `ProcessorBench.cpp` (`BM_TaskManagerThroughput`, `BM_TaskManagerTrades`) |
 | **Storage** | `LMDBStorageTest.cpp`, `OrderStorageTest.cpp`, `WideDataStorageTest.cpp` | - |
-| **Low-Latency** | `CacheAlignedAtomicTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `NodePoolTest.cpp`, `NumaAllocatorTest.cpp`, `TransactionScopePoolTest.cpp` | `TransactionScopePoolBench.cpp`, `NumaAllocatorBench.cpp`, `OrderParamsLayoutBench.cpp` |
+| **Low-Latency** | `CacheAlignedAtomicTest.cpp`, `CpuAffinityTest.cpp`, `NodePoolTest.cpp`, `TransactionScopePoolTest.cpp` | `TransactionScopePoolBench.cpp`, `OrderParamsLayoutBench.cpp` |
 | **Server (`app/`)** | `ClientMessageParserTest.cpp`, `JsonSerializerTest.cpp`, `WsSessionTest.cpp`, `WsServerLimitsTest.cpp`, `InFlightGaugeTest.cpp`, `WsAuthTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `SeedDataArgsTest.cpp`, `ReferenceDataFileTest.cpp`; the ctest scripts `ServerThatCannotStartExits`, `SeedDataIfEmptySeedsOnlyADirectoryWithoutInstruments` and `SeedDataLoadsAFile` (`SeedDataFileTest.sh`: the reference data `seedData --file` loads, #585), and `SeedDataRunsCleanly`; with `BUILD_FUZZ=ON`, `test/fuzz/` | `SessionManagerBench.cpp`, `ClientMessageParserBench.cpp`, `WsSessionBench.cpp` |
 | **PostgreSQL** | `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`; with `BUILD_PG=ON`, `PGWriteBehindTest.cpp`, whose integration cases need `PG_CONNECTION_STRING` | - |
 | **CI runner** | the ctest script `JobStartedHookDecides` (`JobStartedHookTest.sh`): the job-started hook's verdicts, a fork's pull request and anything Dependabot sent refused (#143, #168); the ctest script `CiTestedTreeDecides` (`CiTestedTreeTest.sh`): when the push of a merge may skip the jobs its pull request's run passed (#314); the ctest script `MemoryCapStopsARunaway` (`MemoryCapTest.sh`): the memory cap CI's builds and test steps and the pre-push hook's ctest run under kills a runaway at the cap and names it, lets the rest of the run go on, passes a status through, and refuses before running anything when it can't make the cap (#607); with `MEMORY_CAP_SLICE` its scope goes in that slice, which must have a limit and no swap, and a kill at the slice's limit is named as the slice's (#740); the ctest script `CiBuildsRunCapped` (`CiBuildsCappedTest.sh`): every build in the workflows runs under the cap (#740); the ctest script `CiNamesKeepRunnersApart` (`CiNamesTest.sh`): the runners' jobs run at once and share one podman store, so each names what it makes after its runner, and a job's cleanup removes its own runner's leftovers and nothing of another runner's (#736); the ctest script `CiJobsTakeTheirShare` (`CiJobsTest.sh`): each job builds, links and tests with its share of the host's threads, which `scripts/ci-jobs.sh` prints from `CI_BUILD_JOBS`, or refuses, and no workflow step, server image build or Release link takes every thread (#738) | - |
@@ -1600,7 +1596,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | **Data Models** | `DataModelDef.h/cpp`, `TypesDef.h`, `QueuesDef.h`, `TasksDef.h` |
 | **Codecs** | `OrderCodec.h/cpp`, `InstrumentCodec.h/cpp`, `AccountCodec.h/cpp`, `ClearingCodec.h/cpp`, `RawDataCodec.h/cpp`, `StringTCodec.h/cpp`, `CodecChecks.h` |
 | **Concurrency** | `TaskManager.h/cpp`, `AllocateCache.h/cpp` |
-| **Low-Latency** | `TransactionScopePool.h`, `CacheAlignedAtomic.h`, `CpuAffinity.h`, `HugePages.h`, `NumaAllocator.h`, `NodePool.h` |
+| **Low-Latency** | `TransactionScopePool.h`, `CacheAlignedAtomic.h`, `CpuAffinity.h`, `NodePool.h` |
 | **Events** | `DeferedEvents.h`, `CancelOrderDeferedEvent.cpp`, `ExecutionDeferedEvent.cpp`, `MatchOrderDeferedEvent.cpp`, `ReleaseStopDeferedEvent.cpp`, `ReplaceRequestDeferedEvent.cpp`, `StateChangeDeferedEvent.cpp` |
 | **PostgreSQL** | `PGWriteBehind.h/cpp`, `PGRequestBuilder.h/cpp`, `PGWriteRequest.h`, `PGEnumStrings.h` (optional) |
 | **Utilities** | `Logger.h/cpp`, `IdTGenerator.h/cpp`, `ExchUtils.h/cpp`, `Singleton.h`, `WideDataStorage.h/cpp`, `WideDataLazyRef.h` |
@@ -1609,7 +1605,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 
 | Category | Files |
 |----------|-------|
-| **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityHugePagesTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `ExpirySchedulerTest.cpp`, `IdTGeneratorTest.cpp`, `InFlightGaugeTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NodePoolTest.cpp`, `NumaAllocatorTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `ReferenceDataFileTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
+| **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `ExpirySchedulerTest.cpp`, `IdTGeneratorTest.cpp`, `InFlightGaugeTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `NLinkTreeTest.cpp`, `NodePoolTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `ReferenceDataFileTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `DummyOrderSaver.h`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 | **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `SeedDataFileTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh`, `MemoryCapTest.sh`, `CiBuildsCappedTest.sh`, `CiNamesTest.sh`, `CiJobsTest.sh`, `CpuBusyTest.sh`, `BenchmarkBaselineTest.sh`, `BenchmarkBusyStartTest.sh`, `LineEndingsTest.sh`, `CtestSkipsTest.sh`, `LineLengthTest.sh` |
@@ -1623,7 +1619,6 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | `OrderMatchingBench.cpp` | The order book: add, remove, find and top of book at the book's depth (#293); no matching |
 | `StateMachineBench.cpp` | State transition performance |
 | `TransactionScopePoolBench.cpp` | Lock-free object pool allocation |
-| `NumaAllocatorBench.cpp` | NUMA-aware allocation performance |
 | `OrderParamsLayoutBench.cpp` | Field layout optimization |
 | `ProcessorBench.cpp` | The real path: new order, match, cancel and replace (#457) through a `Processor`, an IOC's remainder and an expiry (#426), a restatement (#451), the reject of an order `isValid()` refuses and of a market order with no market (#435), a match whose records are encoded as the server's dispatcher encodes them (#442), and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290), each reporting into a queue that keeps nothing, as production's keep none (#447), and running a chain's transactions as production does, each after the one draining it, in id order (#486); each per-order benchmark makes its incoming order in its loop, just before its event, as a session makes one as it arrives, and times the push and the processing by hand (#503) |
 | `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159), and a fill's report pushed through `WsOutQueues` (#442) |
