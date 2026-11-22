@@ -56,6 +56,7 @@ IMAGE="localhost/$NAME"
 STAND_IN="$NAME-server"
 NO_CERT="$NAME-nocert"
 HSTS="$NAME-hsts"
+BAD_HOST="$NAME-badhost"
 START_TIMEOUT="${START_TIMEOUT:-30}"
 PORT=3000 # the port docker/nginx.conf listens on
 CERTS=/etc/nginx/certs # where docker/nginx.conf reads its certificate and key
@@ -106,7 +107,7 @@ cleanup() {
     # holding an anonymous one would leak it into the store the runners share
     podman rm -f -v -t 0 "$NAME" >/dev/null 2>&1 || true
     podman rm -f -v -t 0 "$STAND_IN" >/dev/null 2>&1 || true
-    podman rm -f -v -t 0 "$NO_CERT" "$HSTS" >/dev/null 2>&1 || true
+    podman rm -f -v -t 0 "$NO_CERT" "$HSTS" "$BAD_HOST" >/dev/null 2>&1 || true
     podman network rm -f "$NAME" >/dev/null 2>&1 || true
     podman rmi -f "$IMAGE" >/dev/null 2>&1 || true
     rm -rf "${WORK:?}"
@@ -198,11 +199,23 @@ status="$(get "$script")"
 echo "/ is the app's index.html, and its script $script is served ($(wc -c < "$WORK/body") bytes)"
 
 step "TLS only"
-redirect="$(podman exec "$NAME" curl -s -o /dev/null --max-time 5 -w '%{http_code} %{redirect_url}' \
-    "http://127.0.0.1:$PORT/some/path?x=1")" || true
-[[ "$redirect" == "301 https://127.0.0.1:$PORT/some/path?x=1" ]] \
-    || fail "plain HTTP got '${redirect:-nothing}', not a 301 to https://127.0.0.1:$PORT/some/path?x=1"
-echo "plain HTTP: $redirect"
+# The redirect goes to OMS_PUBLIC_HOST, localhost:3000 in the image run on its own, whatever Host header the request
+# carries (#564); it repeated the client's Host header until then
+want="301 https://localhost:3000/some/path?x=1"
+for host in "" "evil.example:3000"; do
+    redirect="$(podman exec "$NAME" curl -s -o /dev/null --max-time 5 -w '%{http_code} %{redirect_url}' \
+        ${host:+-H "Host: $host"} "http://127.0.0.1:$PORT/some/path?x=1")" || true
+    [[ "$redirect" == "$want" ]] \
+        || fail "plain HTTP${host:+ with Host: $host} got '${redirect:-nothing}', not $want"
+    echo "plain HTTP${host:+ with Host: $host}: $redirect"
+done
+# The headers a browser gets with the app (#564), and nginx's version in none of them
+headers="$(podman exec "$NAME" curl -s -I --max-time 5 --cacert "$CERTS/tls.crt" "https://127.0.0.1:$PORT/" | tr -d '\r')"
+for expected in "content-security-policy: default-src 'self'; connect-src 'self' wss://localhost:3000; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" \
+    "x-frame-options: DENY" "x-content-type-options: nosniff" "referrer-policy: no-referrer" "server: nginx"; do
+    grep -qixF "$expected" <<< "$headers" || fail "the app's response lacks '$expected': $(tr '\n' ' ' <<< "$headers")"
+done
+echo "the app's response has its CSP, X-Frame-Options, X-Content-Type-Options and Referrer-Policy, and Server: nginx"
 hsts() {
     podman exec "$1" curl -s -I --max-time 5 --cacert "$CERTS/tls.crt" "https://127.0.0.1:$PORT/" \
         | tr -d '\r' | sed -n 's/^strict-transport-security: //Ip'
@@ -221,6 +234,24 @@ done
 [[ "$sent" == "max-age=60" ]] || fail "with OMS_HSTS=max-age=60 it sends '${sent:-no Strict-Transport-Security}'"
 echo "with OMS_HSTS=max-age=60: Strict-Transport-Security: $sent"
 podman rm -f -v -t 0 "$HSTS" >/dev/null 2>&1 || true
+
+step "with a scheme in OMS_PUBLIC_HOST, it doesn't start"
+# The redirect and the CSP's socket take a host and a port (#564): one written as OMS_ALLOWED_ORIGINS is, with its
+# scheme, would redirect to https://https://..., so the entrypoint stops at docker/nginx-public-host-check.sh
+podman run -d --name "$BAD_HOST" -e OMS_PUBLIC_HOST="https://oms.example.com:3000" -v "$WORK/certs:$CERTS:ro,z" "$IMAGE" \
+    >/dev/null || fail "couldn't run the image with a scheme in OMS_PUBLIC_HOST"
+running=true
+for _ in $(seq 1 "$START_TIMEOUT"); do
+    running="$(podman inspect --format '{{.State.Running}}' "$BAD_HOST")"
+    [[ "$running" == false ]] && break
+    sleep 1
+done
+[[ "$running" == false ]] || fail "the image still runs ${START_TIMEOUT}s after starting with a scheme in OMS_PUBLIC_HOST"
+podman logs "$BAD_HOST" > "$WORK/badhost.log" 2>&1 || fail "podman logs failed"
+grep -q "OMS_PUBLIC_HOST is 'https://oms.example.com:3000', not a host and an optional port" "$WORK/badhost.log" \
+    || fail "with a scheme in OMS_PUBLIC_HOST it stopped without saying why: $(tail -n 3 "$WORK/badhost.log")"
+echo "it stopped: $(grep -o "OMS_PUBLIC_HOST is [^,]*" "$WORK/badhost.log")"
+podman rm -f -v -t 0 "$BAD_HOST" >/dev/null 2>&1 || true
 
 step "the image's health check"
 check="$(podman image inspect --format '{{json .HealthCheck}}' "$IMAGE")"
