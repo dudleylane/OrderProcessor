@@ -5,7 +5,14 @@ services:
   oms-db:
     image: docker.io/library/postgres:16-alpine
     restart: unless-stopped
-    env_file: .env
+    # Its own variables alone (#568): it read the whole .env, the WebSocket token included. Both passwords are
+    # required, and .env.example leaves them empty, as it leaves the token, so compose refuses it as it is.
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-oms}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env}"
+      POSTGRES_DB: "${POSTGRES_DB:-oms}"
+      # The password of oms_server, the role the server connects as, which init-db/002_server_role.sh makes (#568)
+      OMS_DB_SERVER_PASSWORD: "${OMS_DB_SERVER_PASSWORD:?set OMS_DB_SERVER_PASSWORD in docker/.env}"
     # No host port (#146): services reach it as oms-db:5432 on the stack's network, and the host through
     # `docker compose exec oms-db psql`
     volumes:
@@ -87,11 +94,14 @@ services:
     environment:
       OMS_WS_TOKEN: "${OMS_WS_TOKEN:?set OMS_WS_TOKEN in docker/.env, as docker/README.md says}"
       OMS_ALLOWED_ORIGINS: "${OMS_ALLOWED_ORIGINS:-}"
-      # The Postgres the server mirrors its reference data and orders to, behind LMDB (#151). The password goes to libpq
-      # on its own, in PGPASSWORD, not in the connection string's single quotes, which a quote ended and a backslash
-      # changed (#642): it may hold any character, though compose reads a $ in .env as a variable's, so write $$.
-      OMS_PG_CONNECTION: "host=oms-db port=5432 dbname=${POSTGRES_DB:-oms} user=${POSTGRES_USER:-oms}"
-      PGPASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env}"
+      # The Postgres the server mirrors its reference data and orders to, behind LMDB (#151), as oms_server, a role that
+      # may read and write the rows it mirrors and nothing else, where it connected as the superuser (#568). The
+      # password goes to libpq on its own, in PGPASSWORD, not in the connection string's single quotes, which a quote
+      # ended and a backslash changed (#642). It may hold a quote or a backslash, but not ${: podman-compose 1.5.0 reads
+      # ${NAME} in .env as a variable whatever quotes surround it, and Docker Compose reads a $ its own way, so a
+      # password without a $ is the one both take as written (docker/README.md).
+      OMS_PG_CONNECTION: "host=oms-db port=5432 dbname=${POSTGRES_DB:-oms} user=oms_server"
+      PGPASSWORD: "${OMS_DB_SERVER_PASSWORD:?set OMS_DB_SERVER_PASSWORD in docker/.env}"
     # Room for a large book and LMDB's map; raise it with them (#158)
     mem_limit: 2g
     pids_limit: 512
