@@ -306,6 +306,55 @@ protected:
 // Basic Initialization Tests
 // =============================================================================
 
+namespace
+{
+/// Keeps each refusal of an order or a replacement the engine never stored (#67)
+class RefusalRecorder final : public Queues::OutQueues
+{
+public:
+    void push(const Queues::ExecReportEvent &, const std::string &) override {}
+    void push(const Queues::CancelRejectEvent &, const std::string &) override {}
+    void push(const Queues::BusinessRejectEvent &, const std::string &) override {}
+    void push(const Queues::OrderRejectEvent &evnt, const std::string &) override
+    {
+        refusals_.push_back(evnt);
+    }
+
+    std::vector<Queues::OrderRejectEvent> refusals_;
+};
+} // namespace
+
+TEST_F(ProcessorTest, AReplaceRefusalKeepsWhatItCanResolve)
+{
+    // A replace of an order the engine doesn't have, whose replacement names an instrument the store doesn't hold. The
+    // refusal still names the original's ClOrdID, which it can resolve (#611): in one try, the symbol's lookup, before
+    // it, threw past it, and the client couldn't tell which order the refusal was for.
+    RefusalRecorder out;
+    ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(), &out,
+                           inQueues_.get(), transMgr_.get());
+    Processor processor;
+    processor.init(params);
+
+    auto original = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    auto replacement = createTestOrder(instrId1_, BUY_SIDE, 11.0, 100);
+    replacement->origClOrderId_ = original->clOrderId_;
+    replacement->instrument_ = WideDataLazyRef<InstrumentEntry>(SourceIdT(987654321, 1));
+    ASSERT_THROW(replacement->instrument_.get(), std::exception) << "the instrument resolved: nothing to see";
+    const RawDataEntry &origClOrdId = original->clOrderId_.get();
+    const std::string expectedOrig(origClOrdId.data_, origClOrdId.length_);
+
+    inQueues_->push("client", OrderReplaceEvent(IdT(987654321, 1), replacement.release()));
+    processor.process();
+
+    ASSERT_EQ(1u, out.refusals_.size());
+    const OrderRejectEvent &refusal = out.refusals_.front();
+    EXPECT_TRUE(refusal.replacement_);
+    EXPECT_EQ(Queues::CancelRejectEvent::UNKNOWN_ORDER, refusal.refusal_);
+    EXPECT_EQ(expectedOrig, refusal.origClOrderId_) << "the original's ClOrdID was lost to the symbol's lookup";
+    EXPECT_FALSE(refusal.clOrderId_.empty()) << "the replacement's own ClOrdID resolves, and is reported";
+    EXPECT_TRUE(refusal.symbol_.empty());
+}
+
 TEST_F(ProcessorTest, CreateProcessor)
 {
     ASSERT_NE(nullptr, processor_);
