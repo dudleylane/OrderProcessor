@@ -4,6 +4,9 @@
 # or no log, is refused.
 # usage: CtestSkipsTest.sh <scripts/ctest-skips.sh>
 set -u
+# A workflow sets GITHUB_ACTIONS, and the script then adds an annotation line for each skip, which the counts below
+# would see twice: the cases run without it, and the annotation's case sets it itself
+unset GITHUB_ACTIONS
 SCRIPT=$(realpath -e -- "$1") || { echo "no script $1"; exit 1; }
 work=$(mktemp -d)
 trap 'rm -rf -- "${work:?}"' EXIT
