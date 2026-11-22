@@ -58,7 +58,7 @@ CLIENT_A   client_a   pbkdf2-sha256$600000$<salt>$<key>     TRADING-1,TRADING-2
 ### Startup Order
 
 1. **oms-db** starts first, initializes schema from `init-db/001_schema.sql`
-2. **oms-server** waits for `oms-db` to be healthy (`pg_isready` check), seeds the data volume if it has no instrument yet, then starts the C++ engine on port 8080
+2. **oms-server** waits for `oms-db` to be healthy (`pg_isready` over TCP, which the server Postgres runs while it initializes a new volume doesn't answer: #763), seeds the data volume if it has no instrument yet, then starts the C++ engine on port 8080
 3. **oms-frontend** waits for `oms-server` to be healthy (it answers HTTP on 8080, which it does only after restoring its data), then serves the React app over TLS on port 3000
 
 All three restart unless stopped (`restart: unless-stopped`), and each has a health check, a memory limit and a process limit in `docker-compose.yml`. The server's and the frontend's health checks are also in their images; compose repeats them because podman builds OCI images by default, and those don't keep a `HEALTHCHECK`. The server's 2 GB is a starting point: raise it for a large book or a large LMDB map. The server answers only after restoring its data directory, and its health check allows two minutes for that: raise `start_period` for a larger directory, or Docker Compose will find the server unhealthy and won't start the frontend.
