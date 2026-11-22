@@ -525,7 +525,9 @@ The matcher has no minimum quantity. An order's `minQty_` is stored, persisted a
 │    to FixServer.cpp — no header leakage to other TUs            │
 ├─────────────────────────────────────────────────────────────────┤
 │ FIX↔COP Enum Mapping:                                           │
-│   Side:  '1'↔BUY  '2'↔SELL  '5'↔SELL_SHORT  '6'↔CROSS        │
+│   Side:  '1'↔BUY  '2'↔SELL  '3'↔BUY_MINUS  '4'↔SELL_PLUS        │
+│          '5'↔SELL_SHORT  '8'↔CROSS, which the engine rejects    │
+│          (#510); any other side is refused at entry (#549)      │
 │   OrdType: '1'↔MARKET  '2'↔LIMIT  '3'↔STOP  '4'↔STOPLIMIT    │
 │   TIF:  '0'↔DAY  '1'↔GTC  '3'↔IOC  '4'↔FOK  '6'↔GTD             │
 │         '2'↔OPG  '7'↔ATCLOSE, which the engine rejects (#601)   │
