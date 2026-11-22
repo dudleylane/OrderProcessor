@@ -11,12 +11,16 @@
 
 #include <gtest/gtest.h>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <future>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <regex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -75,6 +79,38 @@ bool returnsWithinFiveSeconds(std::function<void()> call)
     return std::future_status::ready == done.wait_for(std::chrono::seconds(5));
 }
 } // namespace
+
+TEST(ExpirySchedulerSourceTest, OnlyTheSchedulerReadsTheZoneDatabase)
+{
+    // libstdc++'s time_zone fills in its transitions on first use under a lock TSan can't see, so ExpiryScheduler takes
+    // a mutex of its own, zoneLock, around every lookup (#244). It is the only file that reads the zone database; a
+    // lookup added anywhere else wouldn't know about the lock, and TSan, which gates CI, would report a race whenever
+    // two threads first reached the zone at once (#633). So any of the zone API elsewhere in src/ or app/ fails here:
+    // the zones and the database (get_tzdb_list too), zoned_time and its zoned_seconds, and the clocks and casts that
+    // read the database's leap seconds. The check reads text, so a name spelled some other way, or a comment that
+    // names one, decides it either way.
+    const std::regex zoneApi(R"(\b(locate_zone|current_zone|get_tzdb\w*|reload_tzdb|remote_version|zoned_\w+|)"
+                             R"(time_zone\w*|tzdb\w*|leap_second\w*|utc_clock|tai_clock|gps_clock|clock_cast)\b)");
+    const std::filesystem::path root = test::sourceRoot();
+    for (const char *dir : { "src", "app" })
+    {
+        for (const auto &entry : std::filesystem::directory_iterator(root / dir))
+        {
+            const std::filesystem::path &file = entry.path();
+            if ((file.filename() == "ExpiryScheduler.cpp") ||
+                ((file.extension() != ".cpp") && (file.extension() != ".h")))
+            {
+                continue;
+            }
+            std::ifstream in(file);
+            const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            std::smatch found;
+            EXPECT_FALSE(std::regex_search(text, found, zoneApi))
+                << file << " uses the zone database (" << found.str()
+                << "): look the day up through ExpiryScheduler, whose lookUpDay() holds zoneLock (#633)";
+        }
+    }
+}
 
 TEST(ExpirySchedulerTest, ADayEndsAt1700NewYork)
 {
