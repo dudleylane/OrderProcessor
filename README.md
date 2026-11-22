@@ -702,7 +702,7 @@ OrderProcessor/
 ├── docs/                   # Architecture documentation
 │   └── ARCHITECTURE.md     # Comprehensive architecture document
 ├── CMakeLists.txt          # Root build configuration
-├── AUDIT_REPORT.md         # Code audit report
+├── AUDIT_REPORT.md         # January 2026's code audit, kept as a record (not the current status)
 └── README.md               # This file
 ```
 

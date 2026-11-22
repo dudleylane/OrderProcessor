@@ -1,7 +1,8 @@
 ================================================================================
 HISTORICAL DOCUMENT: Version history from original Windows/MSVC development.
 The project was migrated to Linux/GCC with C++23 in January 2026.
-See AUDIT_REPORT.md for current status and README.md for build instructions.
+See README.md for build instructions. AUDIT_REPORT.md is January 2026's audit, kept as a
+record of that time; the issue tracker holds the current status (#577).
 ================================================================================
 
 /**
