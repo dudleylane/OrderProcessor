@@ -158,8 +158,9 @@ protected:
 };
 
 // docs/FIX_TEST_SUITE.md says it lists the tests by suite and what each one checks. It missed the 13 #145 added, and
-// #228's, because nothing compared it with the tests (#257). Every TEST and TEST_F in test/Fix*.cpp is named on it in
-// backticks now, and so is every test/Fix*.py, the ctests that run a real server.
+// #228's, because nothing compared it with the tests (#257). Every TEST and TEST_F in test/Fix*.cpp and test/Fx*.cpp
+// is named on it in backticks now, and so is every test/Fix*.py, the ctests that run a real server. FxSwapTest's were
+// left out, and the page named 13 of its 24 (#557).
 TEST_F(DocConsistencyTest, FixTestSuiteNamesEveryFixTest)
 {
     const auto root = test::sourceRoot();
@@ -179,7 +180,7 @@ TEST_F(DocConsistencyTest, FixTestSuiteNamesEveryFixTest)
     for (const auto &entry : std::filesystem::directory_iterator(root / "test"))
     {
         const std::string file = entry.path().filename().string();
-        if (0 != file.rfind("Fix", 0))
+        if ((0 != file.rfind("Fix", 0)) && (0 != file.rfind("Fx", 0)))
         {
             continue;
         }
