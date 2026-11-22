@@ -12,6 +12,8 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
 #include "OrderCodec.h"
 #include "StringTCodec.h"
 #include "CodecChecks.h"
@@ -71,6 +73,25 @@ static_assert((INVALID_CURRENCY == 0) && (USD_CURRENCY == 1) && (EUR_CURRENCY ==
                   (JPY_CURRENCY == 4) && (CHF_CURRENCY == 5) && (AUD_CURRENCY == 6) && (CAD_CURRENCY == 7) &&
                   (NZD_CURRENCY == 8),
               "Currency values are persisted");
+
+/// Reads a stored enum value and refuses one outside its enum, from 0, each one's INVALID, which a stored order may
+/// hold (an order rejected as it arrived keeps what it gave), to its last enumerator (#540). A damaged record restored
+/// an order with an out-of-range status or side, which later code switches on. An enumerator added at the end moves
+/// its enum's last here, with its value pinned above; the decoder is the only reader. The value is read as the enum's
+/// underlying type and checked before it becomes the enum: a value outside an enum's range is undefined to load
+/// through the enum's type, which UBSan's enum check reports.
+template <typename E> E readEnum(const char *p, E last, const char *field)
+{
+    std::underlying_type_t<E> raw;
+    static_assert(sizeof(raw) == sizeof(E));
+    memcpy(&raw, p, sizeof(raw));
+    if ((raw < 0) || (raw > static_cast<std::underlying_type_t<E>>(last)))
+    {
+        throw std::runtime_error(std::string("Invalid format of the encoded OrderEntry - ") + field + " " +
+                                 std::to_string(raw) + " is out of range!");
+    }
+    return static_cast<E>(raw);
+}
 // A carried ClOrdID's type, since format version 3 (#192), is stored as RawDataCodec stores it
 static_assert(sizeof(RawDataType) == 4, "a ClOrdID's type is stored as 4 bytes");
 static_assert((INVALID_RAWDATATYPE == 0) && (STRING_RAWDATATYPE == 1) && (MESSAGE_RAWDATATYPE == 2) &&
@@ -233,9 +254,10 @@ const char *readRaw(const char *p, const char *end, const SourceIdT &fieldId, co
     {
         return p;
     }
-    RawDataType type = INVALID_RAWDATATYPE;
     u32 length = 0;
-    p = readBytes(p, end, sizeof(type), &type, field);
+    expectBytes(p, end, sizeof(RawDataType), field);
+    const RawDataType type = readEnum(p, BINARY_RAWDATATYPE, field);
+    p += sizeof(RawDataType);
     p = readBytes(p, end, sizeof(length), &length, field);
     expectBytes(p, end, length, field);
     raw->emplace(type, p, length);
@@ -752,7 +774,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
         throw std::runtime_error(
             "Invalid format of the encoded OrderEntry - size less than required, unable decode status_!");
     }
-    memcpy(&(val->status_), p, sizeof(val->status_));
+    val->status_ = readEnum(p, CANCELED_ORDSTATUS, "status_");
     p += sizeof(val->status_);
     p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after status_!");
 
@@ -761,7 +783,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
         throw std::runtime_error(
             "Invalid format of the encoded OrderEntry - size less than required, unable decode side_!");
     }
-    memcpy(&(val->side_), p, sizeof(val->side_));
+    val->side_ = readEnum(p, CROSS_SIDE, "side_");
     p += sizeof(val->side_);
     p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after side_!");
 
@@ -770,7 +792,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
         throw std::runtime_error(
             "Invalid format of the encoded OrderEntry - size less than required, unable decode ordType_!");
     }
-    memcpy(&(val->ordType_), p, sizeof(val->ordType_));
+    val->ordType_ = readEnum(p, FXSWAP_ORDERTYPE, "ordType_");
     p += sizeof(val->ordType_);
     p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after ordType_!");
 
@@ -779,7 +801,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
         throw std::runtime_error(
             "Invalid format of the encoded OrderEntry - size less than required, unable decode tif_!");
     }
-    memcpy(&(val->tif_), p, sizeof(val->tif_));
+    val->tif_ = readEnum(p, ATCLOSE_TIF, "tif_");
     p += sizeof(val->tif_);
     p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after tif_!");
 
@@ -788,7 +810,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
         throw std::runtime_error(
             "Invalid format of the encoded OrderEntry - size less than required, unable decode settlType_!");
     }
-    memcpy(&(val->settlType_), p, sizeof(val->settlType_));
+    val->settlType_ = readEnum(p, TENOR_SETTLTYPE, "settlType_");
     p += sizeof(val->settlType_);
     p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after settlType_!");
 
@@ -797,7 +819,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
         throw std::runtime_error(
             "Invalid format of the encoded OrderEntry - size less than required, unable decode capacity_!");
     }
-    memcpy(&(val->capacity_), p, sizeof(val->capacity_));
+    val->capacity_ = readEnum(p, AGENT_FOR_ANOTHER_MEMBER_CAPACITY, "capacity_");
     p += sizeof(val->capacity_);
     p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after capacity_!");
 
@@ -806,7 +828,7 @@ OrderEntry *OrderCodec::decode(const IdT &id, u32 formatVersion, const char *buf
         throw std::runtime_error(
             "Invalid format of the encoded OrderEntry - size less than required, unable decode currency_!");
     }
-    memcpy(&(val->currency_), p, sizeof(val->currency_));
+    val->currency_ = readEnum(p, NZD_CURRENCY, "currency_");
     p += sizeof(val->currency_);
     p = skipSeparator(p, end, "Invalid format of the encoded OrderEntry - missed '.' after currency_!");
 
