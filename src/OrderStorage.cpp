@@ -122,6 +122,19 @@ u64 OrderDataStorage::maxOrderNumber() const
 
 OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *idGenerator, PublishGuard *publishGuard)
 {
+    const char *refusal = nullptr;
+    OrderEntry *saved = saveUnlessClOrdIdInUse(order, idGenerator, publishGuard, &refusal);
+    if (nullptr == saved) [[unlikely]]
+    {
+        throw std::runtime_error(refusal);
+    }
+    return saved;
+}
+
+OrderEntry *OrderDataStorage::saveUnlessClOrdIdInUse(const OrderEntry &order, IdTValueGenerator *idGenerator,
+                                                     PublishGuard *publishGuard, const char **refusal)
+{
+    assert(nullptr != refusal);
     if (aux::ExchLogger::instance()->isDebugOn())
     {
         aux::ExchLogger::instance()->debug("OrderDataStorage saving order");
@@ -146,9 +159,10 @@ OrderEntry *OrderDataStorage::save(const OrderEntry &order, IdTValueGenerator *i
         {
             throw std::runtime_error("Unable to save order - order contains empty ClOrderId.");
         }
-        if (ordersByClId_.end() != ordersByClId_.find(order.clOrderId_.get()))
+        if (ordersByClId_.end() != ordersByClId_.find(order.clOrderId_.get())) [[unlikely]]
         {
-            throw std::runtime_error("Unable to save order - order with same ClOrderId already exists.");
+            *refusal = CLORDID_IN_USE;
+            return nullptr;
         }
 
         std::unique_ptr<OrderEntry> cp(order.clone());

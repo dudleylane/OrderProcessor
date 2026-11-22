@@ -207,21 +207,34 @@ void OrderState_::receive(onOrderReceived const &evnt)
     }
     assert(nullptr == orderData_);
     assert(nullptr != evnt.order_);
+    // What storing the order refuses, a ClOrdID already in use, which refused() can't decide before the store does. The
+    // reject is queued, and the throw stops the transition to New, so that the reject leaves Rcvd_New (#436): a
+    // TransitionRefused, which exception_caught() notes rather than logs as a failure (#432). An action can't veto its
+    // row otherwise, so that throw stays; the store says the ClOrdID is in use without one, and the reject doesn't
+    // store the order again, where each threw too (#605).
+    auto refuse = [this, &evnt](const char *reason, bool clOrdIdInUse)
+    {
+        onRecvOrderRejected newEvnt(evnt, evnt.order_, reason);
+        newEvnt.clOrdIdInUse_ = clOrdIdInUse;
+        newEvnt.order4StateMachine_ = orderData_;
+        static_cast<OrderState *>(this)->process_event(newEvnt);
+        throw TransitionRefused(reason);
+    };
+    const char *inUse = nullptr;
+    bool stored = false;
     try
     {
-        OrdStateImpl::processReceive(&orderData_, evnt);
-        evnt.order4StateMachine_ = orderData_;
+        stored = OrdStateImpl::processReceive(&orderData_, evnt, &inUse);
     }
     catch (const std::exception &ex)
     {
-        // What storing the order refuses, a ClOrdID already in use, which refused() can't decide before the store does.
-        // The reject is queued, and the throw stops the transition to New, so that the reject leaves Rcvd_New (#436): a
-        // TransitionRefused, which exception_caught() notes rather than logs as a failure (#432).
-        onRecvOrderRejected newEvnt(evnt, evnt.order_, ex.what());
-        newEvnt.order4StateMachine_ = orderData_;
-        static_cast<OrderState *>(this)->process_event(newEvnt);
-        throw TransitionRefused(ex.what());
+        refuse(ex.what(), false);
     }
+    if (!stored) [[unlikely]]
+    {
+        refuse(inUse, true);
+    }
+    evnt.order4StateMachine_ = orderData_;
 }
 
 /// Whether the order is refused before it is stored: isValid() refuses it, or it is a market order with nothing to

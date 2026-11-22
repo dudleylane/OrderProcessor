@@ -666,6 +666,45 @@ TEST_F(OrderStorageTest, FailedSaveDoesNotLeaveAGuardHeld)
     EXPECT_FALSE(guard.holds());
 }
 
+TEST_F(OrderStorageTest, AClOrdIdInUseRefusesTheOrderWithoutAnException)
+{
+    // A new order's receive stores through this, so that a client's duplicate ClOrdID is refused without the exceptions
+    // save() raised, for the store and again for the reject's own store (#605)
+    auto order = createCorrectOrder();
+    OrderEntry *first = storage()->save(*order, IdTGenerator::instance());
+    ASSERT_NE(nullptr, first);
+
+    COP::Store::PublishGuard guard;
+    const char *refusal = nullptr;
+    OrderEntry *second = nullptr;
+    EXPECT_NO_THROW(second = storage()->saveUnlessClOrdIdInUse(*order, IdTGenerator::instance(), &guard, &refusal));
+    EXPECT_EQ(nullptr, second);
+    ASSERT_NE(nullptr, refusal);
+    EXPECT_STREQ(COP::Store::OrderDataStorage::CLORDID_IN_USE, refusal);
+    EXPECT_FALSE(guard.holds()) << "refused before the clone is made, so nothing is locked";
+    EXPECT_EQ(first, storage()->locateByClOrderId(order->clOrderId_.get())) << "the stored order is untouched";
+
+    // save() still throws, with the same reason, for its other callers
+    try
+    {
+        storage()->save(*order, IdTGenerator::instance());
+        ADD_FAILURE() << "save() stored a second order with the same ClOrdID";
+    }
+    catch (const std::runtime_error &ex)
+    {
+        EXPECT_STREQ(COP::Store::OrderDataStorage::CLORDID_IN_USE, ex.what());
+    }
+
+    // and a new ClOrdID is stored as save() stores it, the reason left alone
+    auto other = createCorrectOrder();
+    assignClOrderId(other.get());
+    refusal = nullptr;
+    OrderEntry *stored = storage()->saveUnlessClOrdIdInUse(*other, IdTGenerator::instance(), nullptr, &refusal);
+    ASSERT_NE(nullptr, stored);
+    EXPECT_EQ(nullptr, refusal);
+    EXPECT_TRUE(stored->orderId_.isValid());
+}
+
 // =============================================================================
 // Booking mark (#83): a new order stays marked until its creator has enqueued the transaction that books it
 // =============================================================================
