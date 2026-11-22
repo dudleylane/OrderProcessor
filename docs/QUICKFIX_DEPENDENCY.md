@@ -128,9 +128,11 @@ Check it: `cat "$PREFIX/quickfix-ref"` names the ref and its commit, and
 `ldd build/orderProcessorTest | grep quickfix` should show a library under `$PREFIX`.
 
 Without `CMAKE_PREFIX_PATH`, CMake takes the first QuickFIX 22 it finds, usually the host's
-`/usr/local` one. So a build directory configured that way, as the pre-push hook's first configure
-is, may test another 22.x than CI. Configure a fresh build directory to switch: a build directory
-keeps the QuickFIX it found first (`quickfix_DIR` in its cache).
+`/usr/local` one, so a build directory configured that way may test another 22.x than CI. Configure
+a fresh build directory to switch: a build directory keeps the QuickFIX it found first
+(`quickfix_DIR` in its cache). The pre-push hook's first configure does what the block above does,
+into the same cache, or takes `QUICKFIX_PREFIX`, and the hook refuses a build directory whose
+QuickFIX's prefix has no `quickfix-ref` naming the pinned ref, such as the host's own (#604).
 
 ## Taking a new release
 

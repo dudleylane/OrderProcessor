@@ -28,8 +28,16 @@
 #                 configure turns the FIX gateway on (BUILD_FIX=ON), unlike
 #                 master's: CI builds both configurations here (#99), and
 #                 FIX ON is the one that compiles everything a push can
-#                 change. FIX OFF is left to CI. It needs QuickFIX; without
-#                 it the configure fails and the push is refused.
+#                 change. FIX OFF is left to CI. It builds against QuickFIX
+#                 at docker/Dockerfile.oms-server's QUICKFIX_REF, as CI and
+#                 the server image do (#178, #604): that configure builds
+#                 the ref with scripts/build-quickfix.sh into the cache CI
+#                 keeps under this user's home, if it isn't there, and every
+#                 run refuses a directory built against another QuickFIX,
+#                 such as the host's /usr/local one.
+#   QUICKFIX_PREFIX  a prefix scripts/build-quickfix.sh installed
+#                 QUICKFIX_REF into, for the first configure to use in
+#                 place of CI's cache.
 #   CLANG_FORMAT  clang-format binary (default: clang-format-22, the version
 #                 format.yml pins, so the hook and CI check the same thing).
 #
@@ -113,12 +121,31 @@ fi
 "$ROOT/scripts/memory-cap.sh" 4G true >/dev/null \
     || refuse "can't run the tests under a memory cap; scripts/memory-cap.sh said why above"
 
+# The QuickFIX CI's FIX-on jobs and the server image build against (#178). Configured without it, CMake took the first
+# QuickFIX 22 it found, usually the host's /usr/local one, which CI doesn't test and the image doesn't ship (#604).
+quickfix_ref="$(sed -n 's/^ARG QUICKFIX_REF=//p' "$ROOT/docker/Dockerfile.oms-server" | tr -d '\r')"
+[[ -n "$quickfix_ref" ]] || refuse "docker/Dockerfile.oms-server pins no QUICKFIX_REF (#178)"
+
 # 1. Configure on first use, then build. CI tests a Release build; insist on one.
 step "build ($BUILD_DIR)"
 if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+    if [[ -z "${QUICKFIX_PREFIX:-}" ]]; then
+        # CI's cache, as build-test.yml's QuickFIX step names it, built under its lock (#736), which a CI job on this
+        # host may be waiting for: the subshell releases it once the cache is built, before the build and the tests
+        QUICKFIX_PREFIX="$HOME/.cache/orderprocessor/quickfix-$quickfix_ref-gcc$(g++ -dumpfullversion)-$(sha256sum \
+            "$ROOT/scripts/build-quickfix.sh" | cut -c1-12)"
+        mkdir -p "$(dirname "$QUICKFIX_PREFIX")"
+        (
+            flock 9 || exit 1
+            if [[ ! -f "$QUICKFIX_PREFIX/quickfix-ref" ]]; then
+                rm -rf "${QUICKFIX_PREFIX:?}" || exit 1
+                "$ROOT/scripts/build-quickfix.sh" "$quickfix_ref" "$QUICKFIX_PREFIX" || exit 1
+            fi
+        ) 9> "$QUICKFIX_PREFIX.lock" || refuse "couldn't build QuickFIX $quickfix_ref into $QUICKFIX_PREFIX"
+    fi
     cmake -S "$ROOT" -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON -DBUILD_APP=ON -DBUILD_PG=OFF -DWARNINGS_AS_ERRORS=ON \
-        -DBUILD_FIX=ON \
+        -DBUILD_FIX=ON -DCMAKE_PREFIX_PATH="$QUICKFIX_PREFIX" \
         || refuse "configure failed; if $BUILD_DIR is left with a CMakeCache.txt, the next push configures it again"
 fi
 # A directory configured from another tree, such as another worktree, would build and test that tree, and pass the push
@@ -152,6 +179,16 @@ for option in BUILD_TESTS BUILD_BENCHMARKS BUILD_APP WARNINGS_AS_ERRORS BUILD_FI
         refuse "$BUILD_DIR has $option off; CI builds with it on. Point BUILD_DIR at a directory configured as CI configures."
     fi
 done
+# The QuickFIX the directory found, PREFIX/lib/cmake/quickfix: scripts/build-quickfix.sh names its ref in
+# PREFIX/quickfix-ref, which the host's own installation has none of (#604)
+quickfix_dir="$(sed -n 's/^quickfix_DIR:PATH=//p' "$BUILD_DIR/CMakeCache.txt")"
+quickfix_found=""
+if [[ -n "$quickfix_dir" && -f "$quickfix_dir/../../../quickfix-ref" ]]; then
+    read -r quickfix_found _ < "$quickfix_dir/../../../quickfix-ref" || quickfix_found=""
+fi
+if [[ "$quickfix_found" != "$quickfix_ref" ]]; then
+    refuse "$BUILD_DIR builds against the QuickFIX in ${quickfix_dir:-a directory its CMakeCache.txt does not name} (${quickfix_found:-not one scripts/build-quickfix.sh built}), not $quickfix_ref, which CI and the server image use (#604). Delete $BUILD_DIR, and the next push configures it against $quickfix_ref"
+fi
 # ctest exits 0 when it finds no tests, so a BUILD_TESTS=OFF directory would
 # pass the gate vacuously. Refuse it here, before the slow build step.
 if ! ctest --test-dir "$BUILD_DIR" -N 2>/dev/null | grep -qE '^Total Tests: [1-9]'; then
