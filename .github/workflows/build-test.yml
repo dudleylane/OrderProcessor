@@ -41,7 +41,7 @@ jobs:
         run: scripts/ci-tested-tree.sh build-test.yml
 
   build-and-test:
-    name: Release build + ctest
+    name: Release build + ctest${{ matrix.pg == 'OFF' && ' (BUILD_PG OFF)' || '' }}
     # Self-hosted runner on the dev box.  The same toolchain CI used to
     # install via `dnf install` is already on this host: gcc-toolset-15
     # at /opt/rh/gcc-toolset-15, cmake, ninja, tbb-devel, spdlog-devel,
@@ -64,6 +64,13 @@ jobs:
     # either branch to 2026-10-14, took 7.5 minutes at most; the rest is room for a loaded laptop and for a FetchContent
     # clone on a cold cache.
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # BUILD_PG's default, OFF, is what a user without libpqxx builds, and no CI job built it: its own code paths
+        # (the server refusing --pg-connection, the engine without the write-behind) went unbuilt but in the opt-in
+        # pre-push hook (#559). The ON leg keeps the Postgres tests; the sanitizer jobs keep theirs.
+        pg: ['ON', 'OFF']
     env:
       # Activate gcc-toolset-15 the same way the container path did:
       # put its binaries first on PATH, its libs first on LD_LIBRARY_PATH.
@@ -84,7 +91,7 @@ jobs:
             -DBUILD_TESTS=ON \
             -DBUILD_BENCHMARKS=ON \
             -DBUILD_APP=ON \
-            -DBUILD_PG=ON \
+            -DBUILD_PG=${{ matrix.pg }} \
             -DWARNINGS_AS_ERRORS=ON \
             -DLTO_JOBS="$jobs"
 
@@ -122,6 +129,7 @@ jobs:
           scripts/ctest-skips.sh "$RUNNER_TEMP/tests.log" 'PGWriteBehind|Postgres'
 
       - name: Postgres write-behind tests, against a throwaway database
+        if: matrix.pg == 'ON'
         # The step above built these and skipped them, for want of a database (#151). This starts one with the schema,
         # in a container on a loopback port, and leaves the host's own PostgreSQL alone. It is named for this runner:
         # another runner's job may have a database of its own up at the same time (#736).
