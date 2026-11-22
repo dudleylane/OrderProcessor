@@ -45,7 +45,7 @@ jobs:
     # Self-hosted runner on the dev box.  The same toolchain CI used to
     # install via `dnf install` is already on this host: gcc-toolset-15
     # at /opt/rh/gcc-toolset-15, cmake, ninja, tbb-devel, spdlog-devel,
-    # boost-devel, lmdb-devel, numactl-devel, and libpqxx-devel 8.0.2 from
+    # boost-devel, lmdb-devel, openssl-devel, and libpqxx-devel 8.0.2 from
     # PostgreSQL's own repository (PGDG), for BUILD_PG (#151).
     # Skip a fork's pull request: this self-hosted runner is the maintainer's laptop (#143).
     # A pull request can delete this line, so the runner's job-started hook,
