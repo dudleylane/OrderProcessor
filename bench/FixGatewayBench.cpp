@@ -91,7 +91,6 @@ public:
         count_++;
     }
     void push(const CancelRejectEvent &, const std::string &) override {}
-    void push(const BusinessRejectEvent &, const std::string &) override {}
     int count_ = 0;
 };
 
@@ -113,7 +112,6 @@ public:
         }
     }
     void push(const CancelRejectEvent &, const std::string &) override {}
-    void push(const BusinessRejectEvent &, const std::string &) override {}
 
     u64 reports() const
     {

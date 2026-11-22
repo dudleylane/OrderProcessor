@@ -27,14 +27,6 @@ void MultiOutQueues::push(const CancelRejectEvent &evnt, const std::string &targ
     }
 }
 
-void MultiOutQueues::push(const BusinessRejectEvent &evnt, const std::string &target)
-{
-    for (auto *d : delegates_)
-    {
-        d->push(evnt, target);
-    }
-}
-
 void MultiOutQueues::push(const OrderRejectEvent &evnt, const std::string &target)
 {
     for (auto *d : delegates_)

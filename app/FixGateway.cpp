@@ -2432,40 +2432,6 @@ void FixGateway::sendCancelReject(const Queues::CancelRejectEvent &evnt, const s
     }
 }
 
-void FixGateway::sendBusinessReject(const IdT &refOrderId, const std::string &reason)
-{
-    // To the session of the order it names, and to nobody else. One that named no order went to every session logged
-    // on, so each got a refusal of an order it never sent (#189). The gateway answers its own refusals with
-    // refuseOrder().
-    if (!refOrderId.isValid())
-    {
-        aux::ExchLogger::instance()->warn("FixGateway: a business reject that names no order is not sent: " + reason);
-        return;
-    }
-    const OrderEntry *order = orderStorage_->locateByOrderId(refOrderId);
-    if (nullptr == order)
-    {
-        return;
-    }
-    FIX::SessionID target;
-    {
-        const std::string source = order->source_.get();
-        oneapi::tbb::spin_rw_mutex::scoped_lock lock(sessionMapLock_, false);
-        const auto it = sessionMap_.find(source);
-        if (sessionMap_.end() == it)
-        {
-            return; // not a FIX session's order
-        }
-        target = it->second;
-    }
-    FIX50SP2::BusinessMessageReject reject;
-    reject.set(FIX::RefMsgType("D")); // NewOrderSingle/NewOrderMultileg
-    reject.set(FIX::BusinessRejectReason(FIX::BusinessRejectReason_OTHER));
-    reject.set(FIX::Text(reason));
-    reject.set(FIX::BusinessRejectRefID(std::to_string(refOrderId.id_)));
-    FIX::Session::sendToTarget(reject, target);
-}
-
 // =============================================================================
 // Enum conversions
 // =============================================================================

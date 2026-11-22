@@ -101,11 +101,6 @@ public:
         totalEvents_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    void push(const BusinessRejectEvent &, const std::string &) override
-    {
-        totalEvents_.fetch_add(1, std::memory_order_relaxed);
-    }
-
     void push(const OrderRejectEvent &evnt, const std::string &target) override
     {
         {

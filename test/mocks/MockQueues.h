@@ -89,7 +89,6 @@ class MockOutQueues : public COP::Queues::OutQueues
 public:
     MOCK_METHOD(void, push, (const COP::Queues::ExecReportEvent &evnt, const std::string &target), (override));
     MOCK_METHOD(void, push, (const COP::Queues::CancelRejectEvent &evnt, const std::string &target), (override));
-    MOCK_METHOD(void, push, (const COP::Queues::BusinessRejectEvent &evnt, const std::string &target), (override));
     MOCK_METHOD(void, push, (const COP::Queues::OrderRejectEvent &evnt, const std::string &target), (override));
 };
 

@@ -1462,9 +1462,6 @@ std::vector<Message> WireContractTest::serverMessages()
     messages.push_back({ "book_update", App::serializeBookUpdate("AAPL", book), "", "" });
     messages.push_back(
         { "cancel_reject", App::serializeCancelReject(2, "Cancel rejected: too late, the order is FILLED"), "", "" });
-    // On FX until its pick of master's removal (#603): websocket.ts declares it, and WsOutQueues sends one for a
-    // BusinessRejectEvent, though nothing raises one
-    messages.push_back({ "business_reject", App::serializeBusinessReject(2, "Business reject"), "", "" });
     messages.push_back({ "error", App::serializeError("Unknown message type: hello"), "", "" });
     // Each field is written whatever its value
     messages.push_back({ "metrics_update", App::serializeMetricsUpdate(App::SystemMetrics{}), "", "" });
@@ -1512,8 +1509,7 @@ TEST_F(WireContractTest, EveryOptionalFieldTheFrontendDeclaresIsOneAMessageWrite
 
 TEST_F(WireContractTest, EveryMessageTheFrontendHandlesIsOneTheServerSends)
 {
-    // A variant the server doesn't send is a message the frontend waits for in vain (#521). FX's business_reject passes
-    // because the serializer can write one, though nothing raises one, until FX's pick of its removal (#603)
+    // A variant the server doesn't send is a message the frontend waits for in vain, as business_reject was (#521)
     const TsDeclarations ts = readFrontend();
     const std::set<std::string> sent = typesOf(serverMessages());
     for (const auto &[type, variant] : serverVariants(ts))

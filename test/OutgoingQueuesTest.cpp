@@ -98,15 +98,6 @@ TEST_F(OutgoingQueuesTest, PushCancelRejectEvent)
     SUCCEED();
 }
 
-TEST_F(OutgoingQueuesTest, PushBusinessRejectEvent)
-{
-    BusinessRejectEvent event;
-
-    // Should not throw
-    queues_->push(event, "target3");
-    SUCCEED();
-}
-
 // =============================================================================
 // Multiple Events Tests
 // =============================================================================
@@ -137,9 +128,6 @@ TEST_F(OutgoingQueuesTest, PushMixedEventTypes)
 
         CancelRejectEvent cancelEvent;
         queues_->push(cancelEvent, "target");
-
-        BusinessRejectEvent bizEvent;
-        queues_->push(bizEvent, "target");
     }
 
     SUCCEED();
@@ -193,20 +181,15 @@ TEST_F(OutgoingQueuesTest, ConcurrentPushMixedEvents)
             {
                 for (int i = 0; i < numEventsPerThread; ++i)
                 {
-                    if (t % 3 == 0)
+                    if (t % 2 == 0)
                     {
                         auto exec = createMockExecution();
                         ExecReportEvent event(exec);
                         queues_->push(event, "target");
                     }
-                    else if (t % 3 == 1)
-                    {
-                        CancelRejectEvent event;
-                        queues_->push(event, "target");
-                    }
                     else
                     {
-                        BusinessRejectEvent event;
+                        CancelRejectEvent event;
                         queues_->push(event, "target");
                     }
                     ++totalPushed;

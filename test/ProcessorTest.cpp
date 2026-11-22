@@ -314,7 +314,6 @@ class RefusalRecorder final : public Queues::OutQueues
 public:
     void push(const Queues::ExecReportEvent &, const std::string &) override {}
     void push(const Queues::CancelRejectEvent &, const std::string &) override {}
-    void push(const Queues::BusinessRejectEvent &, const std::string &) override {}
     void push(const Queues::OrderRejectEvent &evnt, const std::string &) override
     {
         refusals_.push_back(evnt);
@@ -825,10 +824,6 @@ public:
     {
         seq_->push_back("publish");
     }
-    void push(const Queues::BusinessRejectEvent &, const std::string &) override
-    {
-        seq_->push_back("publish");
-    }
 
 private:
     std::vector<std::string> *seq_;
@@ -1192,7 +1187,6 @@ public:
     {
         rejects_.emplace_back(evnt.reason_, evnt.requestClOrdId_);
     }
-    void push(const Queues::BusinessRejectEvent &, const std::string &) override {}
 
     std::vector<std::string> acks_;
     std::vector<std::pair<Queues::CancelRejectEvent::Reason, std::string>> rejects_;
@@ -1421,7 +1415,6 @@ public:
         return result;
     }
     void push(const CancelRejectEvent &, const std::string &) override {}
-    void push(const BusinessRejectEvent &, const std::string &) override {}
 
     std::vector<Report> reports_;
 };
@@ -1631,7 +1624,6 @@ public:
         return std::string();
     }
     void push(const Queues::CancelRejectEvent &, const std::string &) override {}
-    void push(const Queues::BusinessRejectEvent &, const std::string &) override {}
     /// A new order or a replacement refused without being stored, which has no order id to report (#67): its reason
     void push(const Queues::OrderRejectEvent &evnt, const std::string &) override
     {
