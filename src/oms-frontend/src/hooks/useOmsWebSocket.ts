@@ -7,7 +7,6 @@ import type {
   Instrument,
   Account,
   NewOrderRequest,
-  CancelOrderRequest,
   ReplaceOrderRequest,
   SystemMetrics,
 } from '../types';
