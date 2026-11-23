@@ -26,6 +26,8 @@
 #include <chrono>
 #include <deque>
 #include <mutex>
+#include <optional>
+#include <string>
 #include <thread>
 #include <variant>
 #include <vector>
@@ -75,6 +77,12 @@ struct CapturedExecReport
     std::string leavesQty;        // its LeavesQty (151) (#386)
     std::string text;             // its Text (58), a reject's reason (#510)
     std::string side;             // its Side (54) (#549)
+    std::string fixExecType;      // its ExecType (150) (#594)
+    std::string fixOrdStatus;     // its OrdStatus (39)
+    std::string lastQty;          // its LastQty (32), a fill's
+    std::string lastPx;           // its LastPx (31)
+    std::string cumQty;           // its CumQty (14)
+    std::string avgPx;            // its AvgPx (6)
 };
 
 class CapturingOutQueues : public Queues::OutQueues
@@ -147,6 +155,7 @@ private:
             r->leavesQty = "(not sent)";
             r->text = "(not sent)";
             r->side = "(not sent)";
+            r->fixExecType = r->fixOrdStatus = r->lastQty = r->lastPx = r->cumQty = r->avgPx = "(not sent)";
             return;
         }
         if (!evnt.figures_)
@@ -156,6 +165,7 @@ private:
             r->leavesQty = "(no figures)";
             r->text = "(no figures)";
             r->side = "(no figures)";
+            r->fixExecType = r->fixOrdStatus = r->lastQty = r->lastPx = r->cumQty = r->avgPx = "(no figures)";
             return;
         }
         const FIX50SP2::ExecutionReport report =
@@ -164,6 +174,12 @@ private:
         r->leavesQty = fieldOf(report, FIX::FIELD::LeavesQty);
         r->text = fieldOf(report, FIX::FIELD::Text);
         r->side = fieldOf(report, FIX::FIELD::Side);
+        r->fixExecType = fieldOf(report, FIX::FIELD::ExecType);
+        r->fixOrdStatus = fieldOf(report, FIX::FIELD::OrdStatus);
+        r->lastQty = fieldOf(report, FIX::FIELD::LastQty);
+        r->lastPx = fieldOf(report, FIX::FIELD::LastPx);
+        r->cumQty = fieldOf(report, FIX::FIELD::CumQty);
+        r->avgPx = fieldOf(report, FIX::FIELD::AvgPx);
     }
 
     mutable std::mutex mtx_;
@@ -895,26 +911,46 @@ TEST_F(FixEndToEndTest, MarketOrder_FillsImmediately)
     ASSERT_NE(nullptr, sellVerify);
     ASSERT_EQ(NEW_ORDSTATUS, sellVerify->status_);
 
-    // Market buy — enters as NEW then matches via deferred events
+    // A market buy for all of it trades with it at once, and its session is told so (#594): this case checked only
+    // that the gateway translated the order. waitForProcessing() returns once the match and its fills have run
     auto buyMsg = makeNOS("FIX-MKT-B1", FIX::Side_BUY, FIX::OrdType_MARKET, 0.0, 100);
     gateway_->onMessage(buyMsg, fixSid_);
     waitForProcessing();
-    waitForProcessing();
-    waitForProcessing(); // market orders chain: match → execution → cancel-if-unfilled
 
     OrderEntry *sellOrder = orderOf("FIX-MKT-S1");
     OrderEntry *buyOrder = orderOf("FIX-MKT-B1");
-
     ASSERT_NE(nullptr, sellOrder);
     ASSERT_NE(nullptr, buyOrder);
-
-    // Market order was accepted and entered the pipeline
-    // Full market fill lifecycle is async (deferred event chain) and tested
-    // separately in IntegrationTest::MarketOrderNotMatched.
-    // Here we verify the FIX gateway correctly translated and queued the order.
     EXPECT_EQ(MARKET_ORDERTYPE, buyOrder->ordType_);
     EXPECT_EQ(BUY_SIDE, buyOrder->side_);
-    EXPECT_EQ(100u, buyOrder->orderQty_);
+    EXPECT_EQ(FILLED_ORDSTATUS, buyOrder->status_);
+    EXPECT_EQ(100u, buyOrder->cumQty_);
+    EXPECT_EQ(0u, buyOrder->leavesQty_);
+    EXPECT_EQ(FILLED_ORDSTATUS, sellOrder->status_);
+    EXPECT_EQ(0u, sellOrder->leavesQty_);
+    EXPECT_EQ((std::vector<ExecType>{ NEW_EXECTYPE, TRADE_EXECTYPE }), reportsOf(*buyOrder))
+        << "a market order that fills has nothing left for the engine to cancel";
+
+    // Each side's fill as its session gets it: a trade (150=F) that fills the order (39=2), all 100 at the sell's price
+    for (const OrderEntry *order : { buyOrder, sellOrder })
+    {
+        std::optional<CapturedExecReport> fill;
+        for (const auto &r : outQueues_->reports())
+        {
+            if ((order->orderId_ == r.orderId) && (TRADE_EXECTYPE == r.execType))
+            {
+                fill = r;
+            }
+        }
+        ASSERT_TRUE(fill.has_value()) << "no trade report for order " << order->orderId_.id_;
+        EXPECT_EQ("F", fill->fixExecType);
+        EXPECT_EQ("2", fill->fixOrdStatus);
+        EXPECT_DOUBLE_EQ(100.0, std::stod(fill->lastQty));
+        EXPECT_DOUBLE_EQ(1.0850, std::stod(fill->lastPx));
+        EXPECT_DOUBLE_EQ(100.0, std::stod(fill->cumQty));
+        EXPECT_DOUBLE_EQ(1.0850, std::stod(fill->avgPx));
+        EXPECT_DOUBLE_EQ(0.0, std::stod(fill->leavesQty));
+    }
 }
 
 // =============================================================================
