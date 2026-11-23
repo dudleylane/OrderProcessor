@@ -539,9 +539,11 @@ QuickFIX starts each session day from sequence number 1 with an empty store, and
 
 | Test | Description |
 |------|-------------|
-| `AReportItsClientDidntGetIsResentOnTheNextSessionDay` | Two reports stored while CLIENT_A was away go into the next day's store as 1 and 2 when it connects the next morning; the session's Logon is 3, and its ResendRequest gets them with 43=Y and 97=Y. The report it got before it went isn't carried, and the day after carries nothing |
+| `AReportItsClientDidntGetIsResentOnTheNextSessionDay` | Two reports stored while CLIENT_A was away go into the next day's store as 1 and 2 when it connects the next morning; the session's Logon is 3, and its ResendRequest gets them with 43=Y and 97=Y. The report it got before it went, heard from after it, isn't carried, and the day after carries nothing |
 | `AServerThatStartsAfterTheSessionDayEndedCarriesThemToo` | A restart within the day keeps the mark, from its file; a server that starts the next morning carries the two as QuickFIX makes the session, before CLIENT_A connects |
 | `AClientLoggedOnAsTheDayEndsGetsWhatWasSentBeforeItLoggedOnAgain` | QuickFIX ends the day at its first check in 16:59:59 and logs CLIENT_A out (#656); a report at 17:00:00.5 is stored, and carried when CLIENT_A connects at 17:00:10, when QuickFIX begins the day again |
+| `ReportsSentIntoAConnectionThatDiedUnnoticedAreCarried` | CLIENT_A heartbeats after E1, then its connection dies unnoticed: E2 and E3 go out while it is still logged on, and the day ends 49 s after the heartbeat, inside QuickFIX's 72 s. The next morning its ResendRequest gets E2 and E3 with 43=Y and 97=Y, and not E1 (#658) |
+| `AClientHeardFromAfterItsLastReportHasNothingCarried` | A heartbeat after the last report: the day ends and the next carries nothing (#658) |
 | `ALogonThatAsksToStartAgainFrom1GetsNothingCarried` | A Logon with ResetSeqNumFlag (141) Y the next morning: both sides start from 1, and nothing is resent |
 | `AReportResentWithinTheDayIsntCarried` | CLIENT_A's ResendRequest within the day gets the two, with 43=Y and without 97, and the next day carries nothing |
 | `ASessionThatNeverEndsCarriesNothing` | NonStopSession: no session time, and a reset carries nothing |
