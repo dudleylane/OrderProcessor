@@ -1709,6 +1709,7 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | `DummyOrderSaver` | `DummyOrderSaver.h`, which `TestAux.h` includes | No-op order persistence, for the tests and, without GoogleTest, the benchmarks (#530) |
 | `check()` | `TestAux.h/cpp` | Assertion with error messages |
 | `uniqueTestPath()` | `TestAux.h` | A per-test-case path, so tests can run in parallel (#10) |
+| `swapSettlementDate()`, `swapLocalMktDate()` | `SettlementDates.h` | A swap's settlement date some days after the business day's, which the entries take (#551), for the tests and, without GoogleTest, the benchmarks, that send a swap |
 | `SingletonFixture`, `OrderStorageFixture`, ... | `TestFixtures.h` | Create and destroy the singletons per test |
 | `OrderStateWrapper` | `StateMachineHelper.h/cpp` | State machine event processing |
 | `TestInQueueObserver` | Various test files | Queue event capture |
@@ -1745,7 +1746,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 |----------|-------|
 | **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EnumCouplingTest.cpp`, `ExpirySchedulerTest.cpp`, `IdTGeneratorTest.cpp`, `IncomingQueuesTest.cpp`, `InFlightGaugeTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `MetricsPublisherTest.cpp`, `NLinkTreeTest.cpp`, `NodePoolTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `ReferenceDataFileTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WireContractTest.cpp`, `WsAuthorizationTest.cpp`, `WsAuthTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
 | **This branch's** | `FxSwapTest.cpp`, and with `BUILD_FIX=ON`: `FixCredentialsTest.cpp`, `FixEndToEndTest.cpp`, `FixFullPipelineTest.cpp`, `FixGatewayTest.cpp`, `FixRotatingLogTest.cpp`, `FixStoresTest.cpp`, `FixTlsTest.cpp` |
-| **Utilities** | `TestAux.h/cpp`, `DummyOrderSaver.h`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
+| **Utilities** | `TestAux.h/cpp`, `DummyOrderSaver.h`, `SettlementDates.h`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 | **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `SeedDataFileTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh`, `MemoryCapTest.sh`, `CiBuildsCappedTest.sh`, `CiNamesTest.sh`, `CiJobsTest.sh`, `CpuBusyTest.sh`, `BenchmarkBaselineTest.sh`, `BenchmarkBusyStartTest.sh`, `LineEndingsTest.sh`, `CtestSkipsTest.sh`, `LineLengthTest.sh`, `SanitizerReportsTest.sh` |
 | **FIX ctest scripts** (`BUILD_FIX=ON`) | `FixLogonTest.py`, `FixRefusalTest.py`, `FixResendTest.py`, `FixTlsTest.py`, and the client they share, `fix_client.py`; with `BUILD_BENCHMARKS=ON` too, `FixBenchConfigTest.sh` |
@@ -1764,7 +1765,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159), and a fill's report pushed through `WsOutQueues` (#442) |
 | `FixGatewayBench.cpp` | The FIX gateway (`BUILD_FIX=ON`): enum conversion, NewOrderSingle translation and NewOrderMultileg's, an FX swap (#516), the gateway's ExecutionReport builder, a report's way to a logged-on session, and a new order with its acknowledgement (#395), a session's cancels, replaces and status requests and the refusals it is sent (#423), the fan-out, swap and single-leg matching, and a FIX order's fill end to end |
 | `ClientMessageParserBench.cpp` | The IO thread's parse of a client's `new_order`, as the order entry panel sends one (#516) |
-| `WsSessionBench.cpp` | The IO thread's work for each message a flooding client sends: a served session's read, parse and push of a burst of cancels (#519) |
+| `WsSessionBench.cpp` | The IO thread's work for each message a flooding client sends: a served session's read, parse and push of a burst of cancels (#519), and of swaps, each queued as an order (#551) |
 | `nogtest/gtest/gtest.h` | Not a benchmark: an `#error`, first on the benchmarks' include path, so that a benchmark that includes GoogleTest, directly or through a test header, fails to build on every host (#530) |
 
 ---

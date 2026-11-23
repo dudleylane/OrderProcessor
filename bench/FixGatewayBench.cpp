@@ -62,6 +62,7 @@
 #include "DeferedEvents.h"
 #include "Logger.h"
 #include "DummyOrderSaver.h"
+#include "SettlementDates.h"
 #include "InFlightGauge.h"
 #include "ServerDefaults.h"
 
@@ -234,6 +235,10 @@ FIX50SP2::NewOrderSingle makeBenchNOS(const std::string &clOrdId, char side, cha
 /// as an even swap may (#698, #701), so that the gateway's checks of them read each field
 FIX50SP2::NewOrderMultileg makeBenchSwap(const std::string &clOrdId)
 {
+    // Dates after the business day's (#551), made once a run, outside every timed span: a fixed date passes, and the
+    // gateway then refuses the swap where every swap must reach the engine's queue
+    static const std::string nearDate = test::swapLocalMktDate(2);
+    static const std::string farDate = test::swapLocalMktDate(33);
     FIX50SP2::NewOrderMultileg msg;
     msg.set(FIX::ClOrdID(clOrdId));
     msg.set(FIX::Side(FIX::Side_BUY));
@@ -249,7 +254,7 @@ FIX50SP2::NewOrderMultileg makeBenchSwap(const std::string &clOrdId)
     nearLeg.set(FIX::LegSymbol("BENCHFX"));
     nearLeg.set(FIX::LegSide(FIX::Side_BUY));
     nearLeg.set(FIX::LegPrice(1.2650));
-    nearLeg.set(FIX::LegSettlDate("20261027"));
+    nearLeg.set(FIX::LegSettlDate(nearDate));
     nearLeg.set(FIX::LegOrderQty(100));
     nearLeg.set(FIX::LegRatioQty(1));
     msg.addGroup(nearLeg);
@@ -258,7 +263,7 @@ FIX50SP2::NewOrderMultileg makeBenchSwap(const std::string &clOrdId)
     farLeg.set(FIX::LegSymbol("BENCHFX"));
     farLeg.set(FIX::LegSide(FIX::Side_SELL));
     farLeg.set(FIX::LegPrice(1.2660));
-    farLeg.set(FIX::LegSettlDate("20261127"));
+    farLeg.set(FIX::LegSettlDate(farDate));
     farLeg.set(FIX::LegOrderQty(100));
     farLeg.set(FIX::LegRatioQty(1));
     msg.addGroup(farLeg);
