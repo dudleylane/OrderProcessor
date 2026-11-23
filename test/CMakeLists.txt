@@ -127,6 +127,7 @@ if(BUILD_FIX)
         ${CMAKE_SOURCE_DIR}/app/FixGateway.cpp
         ${CMAKE_SOURCE_DIR}/app/FixOutQueues.cpp
         ${CMAKE_SOURCE_DIR}/app/FixRotatingLog.cpp
+        ${CMAKE_SOURCE_DIR}/app/FixServer.cpp # FixServerTest's server (#553)
         ${CMAKE_SOURCE_DIR}/app/FixStores.cpp
         ${CMAKE_SOURCE_DIR}/app/MultiOutQueues.cpp)
 endif()

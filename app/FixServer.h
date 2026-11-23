@@ -79,7 +79,10 @@ public:
     /// the pinned QuickFIX has no setting that holds an acceptor to one address (#641). Empty before createSessions().
     std::string acceptPorts() const;
 
-    /// Stop the FIX acceptor gracefully.
+    /// Stop taking messages: log each session out, close its connection and listen no more, as QuickFIX's
+    /// Acceptor::stop() does. The sessions stay until the server is destroyed, so that a report the engine sends while
+    /// it drains is stored for its client, which asks for it when it logs on again. Freed here, they made the report's
+    /// send throw SessionNotFound out of its transaction (#553): destroy the server once the engine has finished.
     void stop();
 
     /// Get the OutQueues implementation for routing execution reports to FIX.

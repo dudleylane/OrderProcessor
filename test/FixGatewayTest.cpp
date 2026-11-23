@@ -25,6 +25,7 @@
 #include <quickfix/Utility.h>
 #include "ExpiryScheduler.h"
 #include "FixGateway.h"
+#include "FixCredentials.h"
 #include "FixOutQueues.h"
 #include "FixServer.h"
 #include "FixStores.h"
@@ -46,6 +47,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -3334,6 +3336,123 @@ TEST_F(FixtSessionTest, EveryKindOfExecutionReportIsTaken)
         EXPECT_EQ(std::to_string(order->orderQty_), fieldOf(sent, FIX::FIELD::OrderQty))
             << "ExecType " << fieldOf(sent, FIX::FIELD::ExecType);
     }
+}
+
+// A report for a session the acceptor's stop() left as it leaves each: logged out, its connection closed and no longer
+// registered, though QuickFIX still has it. Stored for its client, which asks for it when it logs on again (#553): the
+// server stops its sessions so before the engine drains, and frees them once it has.
+TEST_F(FixtSessionTest, AReportForASessionTheAcceptorStoppedIsStoredForItsClient)
+{
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1");
+    session_->logout();
+    session_->disconnect();
+    FIX::Session::unregisterSession(sid_);
+    ASSERT_FALSE(session_->isLoggedOn());
+    ASSERT_EQ(session_, FIX::Session::lookupSession(sid_))
+        << "QuickFIX has its sessions until its acceptor is destroyed";
+    sent_.clear();
+    const auto next = session_->getStore()->getNextSenderMsgSeqNum();
+
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+    trade.orderId_ = order->orderId_;
+    trade.lastQty_ = 40;
+    trade.lastPx_ = 10.5;
+    EXPECT_NO_THROW(gateway_->sendExecutionReport(&trade, *order));
+    EXPECT_TRUE(sent_.empty()) << "sent over the connection the stop closed: " << sentText();
+    ASSERT_EQ(next + 1, session_->getStore()->getNextSenderMsgSeqNum()) << "the report wasn't stored";
+    std::vector<std::string> stored;
+    session_->getStore()->get(next, next, stored);
+    ASSERT_EQ(1u, stored.size());
+    const FIX::Message report = parsed(stored.front());
+    EXPECT_EQ(FIX::MsgType_ExecutionReport, report.getHeader().getField(FIX::FIELD::MsgType));
+    EXPECT_EQ("F", fieldOf(report, FIX::FIELD::ExecType));
+}
+
+// A report for a session QuickFIX no longer has, as once the acceptor has freed its sessions: its send throws
+// SessionNotFound, which came out of the report's push into its transaction, failed it and rolled back persists whose
+// WebSocket report had gone out (#553). It is logged instead, as the two rejects' sends log theirs.
+TEST_F(FixtSessionTest, AReportForASessionQuickFixNoLongerHasIsLoggedNotThrown)
+{
+    OrderEntry *order = saveOrderOf(sid_, "ORD-1");
+    factory_->destroy(session_); // the gateway still has it, as it does once the acceptor is gone
+    session_ = nullptr;
+    ASSERT_EQ(nullptr, FIX::Session::lookupSession(sid_));
+
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+    trade.orderId_ = order->orderId_;
+    trade.lastQty_ = 40;
+    trade.lastPx_ = 10.5;
+    test::CapturedLog log;
+    EXPECT_NO_THROW(gateway_->sendExecutionReport(&trade, *order));
+    const std::vector<std::string> lines = log.lines();
+    EXPECT_TRUE(std::any_of(lines.begin(), lines.end(),
+                            [](const std::string &line)
+                            {
+                                return (std::string::npos != line.find("[Error]")) &&
+                                       (std::string::npos != line.find("execution report"));
+                            }))
+        << "the lost report wasn't logged";
+}
+
+/// The server itself (#553): CLIENT_A's session, from settings like config/fix.cfg's with its files under the test's
+/// own directory and a port the system picks, and CLIENT_A's credentials, with the fixture's data
+class FixServerTest : public FixGatewayInboundTest
+{
+protected:
+    void SetUp() override
+    {
+        FixGatewayInboundTest::SetUp();
+        dir_ = test::uniqueTestPath("fix_server");
+        std::filesystem::create_directories(dir_);
+        const std::filesystem::path spec = test::sourceRoot() / "config" / "spec";
+        std::ofstream(dir_ / "fix.cfg") << "[DEFAULT]\nConnectionType=acceptor\nBeginString=FIXT.1.1\n"
+                                           "DefaultApplVerID=FIX.5.0SP2\nSenderCompID=ORDER_PROCESSOR\n"
+                                           "SocketAcceptPort=0\nNonStopSession=Y\nHeartBtInt=30\nResetOnLogon=N\n"
+                                           "FileLogMaxMB=1\nFileLogBackups=1\n"
+                                        << "FileStorePath=" << (dir_ / "store").string() << "\n"
+                                        << "FileLogPath=" << (dir_ / "log").string() << "\n"
+                                        << "TransportDataDictionary=" << (spec / "FIXT11.xml").string() << "\n"
+                                        << "AppDataDictionary=" << (spec / "FIX50SP2.xml").string() << "\n";
+        std::ofstream(dir_ / "credentials")
+            << "CLIENT_A client_a " << FixCredentials::hashPassword("password-a", 1000) << " CLIENT-A\n";
+    }
+
+    void TearDown() override
+    {
+        FixGatewayInboundTest::TearDown();
+        std::filesystem::remove_all(dir_);
+    }
+
+    std::filesystem::path dir_;
+};
+
+// stop() stops the sessions taking messages and keeps them: a report the engine sends while it drains finds its session
+// and is stored for its client, where stop() had freed the sessions and the report's send threw SessionNotFound out of
+// its transaction (#553). Destroying the server frees them.
+TEST_F(FixServerTest, AStoppedServersSessionsStoreWhatTheEngineStillReports)
+{
+    const FIX::SessionID sid("FIXT.1.1", "ORDER_PROCESSOR", "CLIENT_A");
+    {
+        FixServer server(mockInQueues_.get(), WideDataStorage::instance(), OrderStorage::instance(), defaultClearingId_,
+                         defaultAccountId_);
+        server.createSessions((dir_ / "fix.cfg").string(), (dir_ / "credentials").string());
+        server.start();
+        server.stop();
+
+        FIX::Session *session = FIX::Session::lookupSession(sid);
+        ASSERT_NE(nullptr, session) << "stop() freed the session, which a report sent now wouldn't find";
+        ASSERT_FALSE(session->isLoggedOn());
+        const auto next = session->getStore()->getNextSenderMsgSeqNum();
+        OrderEntry *order = saveOrderOf(sid, "ORD-1");
+        auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+        trade.orderId_ = order->orderId_;
+        trade.lastQty_ = 40;
+        trade.lastPx_ = 10.5;
+        EXPECT_NO_THROW(server.outQueues()->push(ExecReportEvent(&trade), FixGateway::makeSourceString(sid)));
+        EXPECT_EQ(next + 1, session->getStore()->getNextSenderMsgSeqNum()) << "the report wasn't stored";
+    }
+    EXPECT_EQ(nullptr, FIX::Session::lookupSession(sid)) << "the server's destruction left its session";
 }
 
 TEST_F(FixtSessionTest, AReplacementAmendedToWhatItsOriginalFilledIsReportedFilled)

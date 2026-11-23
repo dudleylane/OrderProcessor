@@ -2056,8 +2056,20 @@ void FixGateway::sendExecutionReport(const ExecutionEntry *exec, const OrderEntr
         sid = it->second;
     }
 
-    FIX50SP2::ExecutionReport report = buildExecutionReport(exec, order, figures, requestClOrdId);
-    FIX::Session::sendToTarget(report, sid);
+    // Nothing gets out of here into the report's transaction (#553), as nothing gets out of the two rejects' sends: an
+    // exception failed the transaction, and its rollback undid persists whose WebSocket reports had gone out. QuickFIX
+    // throws SessionNotFound for a session it no longer has; one it has, its client away, stores the report for the
+    // client to ask for when it logs on again.
+    try
+    {
+        FIX50SP2::ExecutionReport report = buildExecutionReport(exec, order, figures, requestClOrdId);
+        FIX::Session::sendToTarget(report, sid);
+    }
+    catch (const std::exception &ex)
+    {
+        aux::ExchLogger::instance()->error("FixGateway: could not send order " + std::to_string(order.orderId_.id_) +
+                                           "'s execution report to " + source + ": " + ex.what());
+    }
 }
 
 FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry *exec, const OrderEntry &order,

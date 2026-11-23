@@ -468,6 +468,8 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `AReplaceThatChangesTheOrderTypeIsRefusedReadably` | A limit order made a market order, a stop limit order made a limit order, and a limit order made a stop with a StopPx each get an OrderCancelReject (434=2, 102=99, 39=0) saying a replace can't change the order type, which the session takes; a replace with the order's own OrdType is queued, and one without OrdType gets the session's Reject, required tag missing (#528) |
 | `TheEnginesRefusalsAreTaken` | The engine's refusals as the gateway reports them: a new order and a replacement whose ClOrdID is in use, a cancel too late, a business reject |
 | `EveryKindOfExecutionReportIsTaken` | Every ExecType the gateway sends, a stop's release (150=L, #236) among them, and a trade, a correction, a cancel's acknowledgement and a replacement's report, each with the order's OrderQty (38) as a counterparty reads it (#384) |
+| `AReportForASessionTheAcceptorStoppedIsStoredForItsClient` | A session left as QuickFIX's `Acceptor::stop()` leaves one, logged out, disconnected, unregistered and still QuickFIX's, is sent a fill's report: nothing goes over the closed connection, and the session stores the report for its client (#553) |
+| `AReportForASessionQuickFixNoLongerHasIsLoggedNotThrown` | A report for a session the gateway knows and QuickFIX no longer has is logged at Error, where its `SessionNotFound` came out of the report's transaction and failed it (#553) |
 | `AReplacementAmendedToWhatItsOriginalFilledIsReportedFilled` | EP284's C.3.b and C.3.c: the report of a replacement amended to what its original filled is taken, 150=5 and 39=2 with OrderQty its CumQty, LeavesQty 0, both ClOrdIDs and no WorkingIndicator (#381) |
 | `ASwapsLegReportIsTakenWithItsTrdMatchId` | A swap leg's trade report is taken by a counterparty that validates, and pairs with its other leg's by TrdMatchID (880). It carried TradeLinkID (820) until #378, which neither FIX 4.4's ExecutionReport nor FIX 5.0 SP2's has, and was refused for it. Its LegLastQty (1418) is in the NoLegs group, where FIX 5.0 SP2 has it. Its TradeDate (75) is its fill's business day's, YYYYMMDD, as an outright trade's: the engine gave every swap leg's trade 1 until #445. It carries MultiLegReportingType (442) 2, a leg's report (#529) |
 | `AReportGivesWhatItsOwnFillLeftTheOrder` | A fill's report pushed through `FixOutQueues` after a later fill of the order was applied gives what its own fill left, from the figures the engine gave the report: CumQty, LeavesQty, AvgPx, DayOrderQty, DayCumQty and DayAvgPx, with OrderQty from the order. A held stop's acknowledgement pushed after its release says WorkingIndicator (636) N. Without figures, a report gives the order as it is (#411) |
@@ -544,6 +546,19 @@ QuickFIX starts each session day from sequence number 1 with an empty store, and
 | `TheSessionTimeIsTheSessionFactorys` | `FixCarryingStoreFactory::sessionTime()` reads `config/fix.cfg` as QuickFIX's SessionFactory does: 17:00 to 16:59:59 New York, the process's local time |
 | `ARenumberedMessageIsWholeAndMayHaveBeenSentBefore` (FixCarryingStoreTest) | `restamped()`: a report renumbered, with 97=Y, its BodyLength and CheckSum right as QuickFIX checks them, and its body as it was; carried twice, one 97; a message cut short, or without MsgSeqNum, gives none |
 | `OnlyAnApplicationMessageIsCarried` (FixCarryingStoreTest) | `isApplication()`: an ExecutionReport and a BusinessMessageReject are carried; a Logon, Heartbeat, Reject, ResendRequest and SequenceReset aren't |
+
+---
+
+## 23. FixServerTest — The Server's Stop
+
+**File:** `test/FixGatewayTest.cpp`
+**Requires:** `BUILD_FIX=ON`
+
+A real `FixServer`, with CLIENT_A's session from settings like `config/fix.cfg`'s, its files under the test's own directory and a port the system picks.
+
+| Test | Description |
+|------|-------------|
+| `AStoppedServersSessionsStoreWhatTheEngineStillReports` | Started and stopped, the server keeps CLIENT_A's session: a fill's report pushed through its `FixOutQueues` finds it, and the session stores it for its client. Destroying the server frees the session. `stop()` freed it until #553, and a report sent while the engine drained then threw out of its transaction |
 
 ---
 
