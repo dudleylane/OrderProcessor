@@ -529,6 +529,10 @@ int main(int argc, char *argv[])
     aux::ExchLogger::instance()->note("Shutting down...");
 
 #ifdef BUILD_FIX
+    // The FIX sessions take no more messages, as the WebSocket sessions, whose io_context has stopped, read none. Each
+    // stays, logged out, so that what the engine reports to it while it drains below is stored for its client: freed
+    // here, a report's send threw out of its transaction and rolled back its persists (#553). They go with fixServer,
+    // once every transaction has run.
     if (fixServer)
     {
         fixServer->stop();
@@ -557,7 +561,7 @@ int main(int argc, char *argv[])
     transactMgr.reset();
 #ifdef BUILD_FIX
     multiOutQueues.reset();
-    fixServer.reset();
+    fixServer.reset(); // and its sessions, which nothing reports to now (#553)
 #endif
 
     // Nothing draws ids now: save the exact next one, so that the next run continues without a gap (#81). If that
