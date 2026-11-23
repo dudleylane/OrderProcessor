@@ -112,14 +112,23 @@ public:
     /// its restatement, if it outlives the business day (#244)
     void scheduleExpiry(const OrderEntry &order) const;
 
+    /// What matchRestored() did with an order (#768)
+    enum class RestoredOutcome
+    {
+        MATCHED, ///< matched, and booked if it rests
+        EXPIRED, ///< its time in force ended while the server was down: expired, never matched
+        CLOSED   ///< no longer working when its turn came: left as it is
+    };
     /// Matches a restored order that lost its fills, or the cancel of what it couldn't trade, as the transaction that
     /// booked it did when it ran (#207, #489), and books it if it rests in the price book: a market, IOC or FOK order
     /// never does, and what it can't trade is canceled. The fills and the cancel go to the transaction manager, each in
     /// a transaction of its own, but they are applied before this returns, so the next order matched sees them. The
     /// releases of the held stops its trades reach are enqueued once its whole sweep is decided, as production's order
-    /// runs them (#533). Call it before the server takes orders, for each of
-    /// StorageRecordDispatcher::ordersToMatch() in turn. Throws if the order can't be matched or booked.
-    void matchRestored(OrderEntry *order);
+    /// runs them (#533). An order whose time in force ended while the server was down is expired instead, and never
+    /// trades, and one no longer working is left as it is (#768). Call it before the server takes orders, for each of
+    /// StorageRecordDispatcher::ordersToMatch() in turn, once the restored orders' due timers have fired
+    /// (App::finishRestart()). Throws if the order can't be matched, booked or expired.
+    RestoredOutcome matchRestored(OrderEntry *order);
     /// Releases a restored held stop whose release a crash lost (#237, #518), as that release would have: in a
     /// transaction of its own, on a transaction worker. Call it for each of StorageRecordDispatcher::stopsReached()
     /// in turn, once the orders matchRestored() matches are done, and wait for the manager between them.
@@ -160,6 +169,12 @@ private:
     void processDeferedEvent();
     /// matchRestored()'s drain (#533): processDeferedEvent()'s, but the stops' releases wait until the drain is done
     void processRestoredDeferedEvent();
+    /// matchRestored()'s expiry of an order whose time in force ended while the server was down (#768, as ruled): the
+    /// expiry is decided first, under the order's write lock, as a timer's is. Restore left the order out of the book,
+    /// and the expiry's unbooking takes it out of the book it rests in, so the expiry's own transaction books it first:
+    /// an operation that runs after the decision closed the order, so nothing sees it in the book working. An order
+    /// that never rests, a market, IOC or FOK order, is expired without booking.
+    void expireRestored(OrderEntry *order, const ACID::Context &cntxt);
     void clearDeferedEvents();
     /// Tells the sender that its new order or replacement was refused without being stored (#67)
     void rejectUnstoredOrder(const std::string &source, const OrderEntry &order, bool replacement);
