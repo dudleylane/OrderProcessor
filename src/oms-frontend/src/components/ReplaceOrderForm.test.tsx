@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Order, ReplaceOrderRequest } from '../types';
-import { TimeInForce } from '../types/enums';
+import { OrderStatus, TimeInForce } from '../types/enums';
 import { order } from '../test/fixtures';
 import { ReplaceOrderForm } from './ReplaceOrderForm';
 
@@ -45,6 +45,27 @@ describe('ReplaceOrderForm', () => {
     fireEvent.click(sendButton());
     expect(replaceOrder).toHaveBeenCalledWith({ orderId: 7, clOrderId: 'cl-7', price: 11 });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([40, 30])(
+    'sends a quantity of %i, at or below the 40 the order has filled, saying that the order ends (#544)',
+    qty => {
+      const partly = order({ orderId: 7, clOrderId: 'cl-7', cumQty: 40, leavesQty: 60, status: OrderStatus.PARTIAL_FILL });
+      const { replaceOrder, onClose } = renderForm(partly);
+      fireEvent.change(screen.getAllByRole('textbox')[1], { target: { value: String(qty) } });
+      expect(screen.getByText('At or below the 40 already filled: the order ends, filled at 40')).toBeTruthy();
+      expect(sendButton().disabled).toBe(false);
+      fireEvent.click(sendButton());
+      expect(replaceOrder).toHaveBeenCalledWith({ orderId: 7, clOrderId: 'cl-7', orderQty: qty });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('says nothing of the order ending for a quantity above what it has filled (#544)', () => {
+    renderForm(order({ cumQty: 40, leavesQty: 60, status: OrderStatus.PARTIAL_FILL }));
+    fireEvent.change(screen.getAllByRole('textbox')[1], { target: { value: '41' } });
+    expect(screen.queryByText(/the order ends/)).toBeNull();
+    expect(sendButton().disabled).toBe(false);
   });
 
   it('offers the five times in force the server takes for a GTC order (#601)', () => {
