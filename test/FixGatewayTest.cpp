@@ -49,6 +49,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -149,6 +150,9 @@ TEST_F(FixEnumTest, OrdStatusConversion)
     EXPECT_EQ(FIX::OrdStatus_EXPIRED, FixGateway::fromOrdStatus(EXPIRED_ORDSTATUS));
     EXPECT_EQ(FIX::OrdStatus_SUSPENDED, FixGateway::fromOrdStatus(SUSPENDED_ORDSTATUS));
     EXPECT_EQ(FIX::OrdStatus_DONE_FOR_DAY, FixGateway::fromOrdStatus(DFD_ORDSTATUS));
+    // The two pending statuses, which no case asserted (#594)
+    EXPECT_EQ(FIX::OrdStatus_PENDING_NEW, FixGateway::fromOrdStatus(PENDINGNEW_ORDSTATUS));
+    EXPECT_EQ(FIX::OrdStatus_PENDING_REPLACE, FixGateway::fromOrdStatus(PENDINGREPLACE_ORDSTATUS));
 }
 
 TEST_F(FixEnumTest, ExecTypeConversion)
@@ -163,6 +167,27 @@ TEST_F(FixEnumTest, ExecTypeConversion)
     EXPECT_EQ(FIX::ExecType_TRADE_CORRECT, FixGateway::fromExecType(CORRECT_EXECTYPE));
     // A stop's release (#236): not NEW (0), which an execution type the gateway didn't know became
     EXPECT_EQ(FIX::ExecType_TRIGGERED_OR_ACTIVATED_BY_SYSTEM, FixGateway::fromExecType(TRIGGERED_EXECTYPE));
+    // The five no case asserted (#594)
+    EXPECT_EQ(FIX::ExecType_SUSPENDED, FixGateway::fromExecType(SUSPENDED_EXECTYPE));
+    EXPECT_EQ(FIX::ExecType_PENDING_REPLACE, FixGateway::fromExecType(PEND_REPLACE_EXECTYPE));
+    EXPECT_EQ(FIX::ExecType_DONE_FOR_DAY, FixGateway::fromExecType(DFD_EXECTYPE));
+    EXPECT_EQ(FIX::ExecType_ORDER_STATUS, FixGateway::fromExecType(STATUS_EXECTYPE));
+    EXPECT_EQ(FIX::ExecType_RESTATED, FixGateway::fromExecType(RESTATED_EXECTYPE));
+}
+
+// Every execution type the engine has maps to a FIX one of its own (#594). A type the switch doesn't name takes its
+// default, NEW, so a report of it reads as a new order's acknowledgement, as a stop's release did until #236: a type
+// added after TRIGGERED_EXECTYPE moves this loop's end, as EnumCouplingTest's does.
+TEST_F(FixEnumTest, EveryExecTypeMapsToOneOfItsOwn)
+{
+    std::set<char> mapped;
+    for (int type = NEW_EXECTYPE; type <= TRIGGERED_EXECTYPE; ++type)
+    {
+        const char fix = FixGateway::fromExecType(static_cast<ExecType>(type));
+        EXPECT_TRUE(mapped.insert(fix).second)
+            << "execution type " << type << " maps to ExecType " << fix << ", which another type maps to";
+    }
+    EXPECT_EQ(static_cast<size_t>(TRIGGERED_EXECTYPE), mapped.size());
 }
 
 // =============================================================================

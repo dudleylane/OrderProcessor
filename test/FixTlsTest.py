@@ -12,6 +12,10 @@ clear. With a certificate made for the run (it needs the openssl command):
      ends, whatever the server sets. FixTlsTest.cpp checks the protocols the server sets by default.)
   5. Without the flags FIX runs over plain TCP, and the server says so, once. With --bind 127.0.0.1 it also says, once,
      that FIX still listens on every interface, on its port, and without --bind it doesn't (#641).
+  6. Counterparties' own certificates (#594), which QuickFIX checks when config/fix.cfg names the CAs that sign them
+     (CertificationAuthoritiesFile) and asks for them (CertificateVerifyLevel): at 1 a client must show a certificate
+     one of them signed, and one with none, or with one they didn't sign, is refused; at 2 a client may show none,
+     and one it shows must be signed by them.
 
 usage: FixTlsTest.py <orderProcessorServer> <seedData> <config/fix.cfg> <config/spec>
 """
@@ -44,6 +48,28 @@ def make_certificate(work):
     return cert, key
 
 
+def openssl(*args):
+    subprocess.run(['openssl', *args], check=True, capture_output=True)
+
+
+def make_client_certificates(work):
+    """A CA, a certificate for CLIENT_A that the CA signed, and one CLIENT_A signed itself, each with its key"""
+    ca, ca_key = os.path.join(work, 'ca.crt'), os.path.join(work, 'ca.key')
+    openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=FIX test CA',
+            '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign',
+            '-keyout', ca_key, '-out', ca)
+    signed = (os.path.join(work, 'client-a.crt'), os.path.join(work, 'client-a.key'))
+    csr = os.path.join(work, 'client-a.csr')
+    openssl('req', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=CLIENT_A', '-addext', 'extendedKeyUsage=clientAuth',
+            '-keyout', signed[1], '-out', csr)
+    openssl('x509', '-req', '-in', csr, '-CA', ca, '-CAkey', ca_key, '-set_serial', '2', '-days', '1',
+            '-copy_extensions', 'copy', '-out', signed[0])
+    own = (os.path.join(work, 'client-a-own.crt'), os.path.join(work, 'client-a-own.key'))
+    openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=CLIENT_A',
+            '-addext', 'extendedKeyUsage=clientAuth', '-keyout', own[1], '-out', own[0])
+    return ca, signed, own
+
+
 def context(cert, maximum=None):
     """A client's TLS: it trusts cert alone, and goes no higher than maximum"""
     ctx = ssl.create_default_context(cafile=cert)
@@ -64,6 +90,50 @@ def logs_on(port, tls, what):
     on = client.read_until(lambda m: m.get('35') == 'A') is not None
     expect(on, f'{what}: CLIENT_A logs on, over {client.sock.version() if tls else "plain TCP"}')
     return client
+
+
+def with_certificate(cert, certificate):
+    """A client's TLS that trusts cert alone and shows certificate, a (certificate, key) pair"""
+    ctx = context(cert)
+    ctx.load_cert_chain(*certificate)
+    return ctx
+
+
+def logs_on_over(port, ctx):
+    """Whether CLIENT_A logs on over ctx, and how it went. Under TLS 1.3 the server checks a client's certificate
+    after the client's side of the handshake is done, so a refusal can come at the Logon's answer, not the handshake"""
+    try:
+        client = Client(port, 'CLIENT_A', tls=ctx)
+    except (ssl.SSLError, OSError) as refused:
+        return False, f'the handshake failed: {refused!r}'
+    try:
+        client.logon('client_a', 'password-a')
+        on = client.read_until(lambda m: m.get('35') == 'A', 10) is not None
+        return on, (f'logged on over {client.sock.version()}' if on else 'no Logon answered, the connection closed')
+    except (ssl.SSLError, OSError) as refused:
+        return False, f'refused after the handshake: {refused!r}'
+    finally:
+        client.close()
+
+
+def client_certificates(args, work, cert, key):
+    ca, signed, own = make_client_certificates(work)
+    required = {'CertificationAuthoritiesFile': ca, 'CertificateVerifyLevel': '1'}
+    with Server(*args, COUNTERPARTIES, tls=(cert, key), settings=required) as running:
+        on, how = logs_on_over(running.fix_port, with_certificate(cert, signed))
+        expect(on, f'CertificateVerifyLevel 1: a client showing a certificate the CA signed logs on ({how})')
+        on, how = logs_on_over(running.fix_port, context(cert))
+        expect(not on, f'CertificateVerifyLevel 1: a client showing no certificate is refused ({how})')
+        on, how = logs_on_over(running.fix_port, with_certificate(cert, own))
+        expect(not on,
+               f'CertificateVerifyLevel 1: a client showing a certificate the CA didn\'t sign is refused ({how})')
+    optional = {'CertificationAuthoritiesFile': ca, 'CertificateVerifyLevel': '2'}
+    with Server(*args, COUNTERPARTIES, tls=(cert, key), settings=optional) as running:
+        on, how = logs_on_over(running.fix_port, context(cert))
+        expect(on, f'CertificateVerifyLevel 2: a client showing no certificate logs on ({how})')
+        on, how = logs_on_over(running.fix_port, with_certificate(cert, own))
+        expect(not on,
+               f'CertificateVerifyLevel 2: a client showing a certificate the CA didn\'t sign is refused ({how})')
 
 
 def startup(args, cert, key):
@@ -150,6 +220,7 @@ def main():
         startup(args, cert, key)
         tls_only(args, cert, key)
         settings_protocols(args, cert, key)
+        client_certificates(args, work, cert, key)
         plain_warns(args)
     finally:
         shutil.rmtree(work, ignore_errors=True)
