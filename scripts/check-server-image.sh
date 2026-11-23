@@ -126,7 +126,11 @@ ws_upgrade() {
 
 cd "$ROOT"
 
-step "build $IMAGE from docker/Dockerfile.oms-server ($(podman --version))"
+# The builder runs the test suite on the binaries it ships (#566): CI's other jobs test a native Ninja build with the
+# runner's packages, not this one. A failing test fails the build.
+BUILD_ARGS+=(--build-arg TEST_IN_IMAGE=ON)
+
+step "build $IMAGE from docker/Dockerfile.oms-server, with its test suite ($(podman --version))"
 # --layers=false keeps no intermediate images, so a run leaves nothing behind in the
 # store it shares with everything else this user runs, and every run installs current
 # packages. --pull=newer refreshes the base image, and uses the local copy when the

@@ -69,12 +69,16 @@ check "and each gives its links the share" "$releases" "$(cat "${workflows[@]}" 
 
 # The server image's builds take its JOBS, and every thread only where JOBS is empty, as by default
 dockerfile=$(tr -d '\r' < docker/Dockerfile.oms-server)
-check "the image declares JOBS, empty by default" 1 "$(grep -c '^ARG JOBS=$' <<< "$dockerfile")"
+# Each stage that builds declares it, since a stage's ARG doesn't reach the next (#566: build-OFF and build-ON)
+check "the image declares JOBS, empty by default" yes "$(grep -q '^ARG JOBS=$' <<< "$dockerfile" && echo yes)"
+check "and in no stage with a value" "" "$(grep -n '^ARG JOBS' <<< "$dockerfile" | grep -v '^[0-9]*:ARG JOBS=$')"
 check "it counts the threads only where JOBS is empty" "" \
     "$(grep -n 'nproc' <<< "$dockerfile" | grep -vF '"${JOBS:-$(nproc)}"')"
 check "every build in it takes JOBS" "" \
     "$(grep -n 'cmake --build' <<< "$dockerfile" | grep -vF -- '-j"${JOBS:-$(nproc)}"')"
-check "and its Release configure gives its links JOBS" 1 \
+configures=$(grep -c 'cmake -B out -DCMAKE_BUILD_TYPE=Release' <<< "$dockerfile")
+check "the image configures the project's Release build" yes "$( ((configures > 0)) && echo yes)"
+check "and each configure gives its links JOBS" "$configures" \
     "$(grep -cF -- '-DLTO_JOBS="${JOBS:-auto}"' <<< "$dockerfile")"
 # A RUN that reads JOBS ahead of its ARG, or in another stage, reads it empty, and takes every thread: QuickFIX's
 # build too, whose script reads JOBS from the environment

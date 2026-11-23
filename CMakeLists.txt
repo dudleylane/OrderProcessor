@@ -262,6 +262,14 @@ if(BUILD_TESTS)
     add_test(NAME LineLengthIsChecked
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/LineLengthTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/line-length.sh)
+
+    # The tests of the repository's own tooling: CI's scripts, the benchmark harness and the format checks. They test no
+    # binary, and need git, jq, python3, systemd or podman, so the server image's builder leaves them out when it runs
+    # the suite on what it ships (ctest -LE tooling, #566). A new one of its kind takes the label too.
+    set_tests_properties(JobStartedHookDecides CiTestedTreeDecides MemoryCapStopsARunaway CiNamesKeepRunnersApart
+                         CiJobsTakeTheirShare CiBuildsRunCapped CpuBusyDecides BenchmarkBaselineKeepsItsConfig
+                         BenchmarkBusyStartIsInconclusive LineEndingsAreChecked CtestSkipsAreRefused LineLengthIsChecked
+                         SanitizerReportsAreRefused PROPERTIES LABELS tooling)
 endif()
 
 if(BUILD_BENCHMARKS)
