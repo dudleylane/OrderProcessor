@@ -497,6 +497,10 @@ protected:
 
     void TearDown() override
     {
+        // A case that limits the workers (init()) leaves the limit in TaskManager's static, process-wide, until
+        // destroy() releases it, as the server does at its shutdown. Released here, a later case in the same process
+        // runs with every worker: the gate cases failed after the pinning case's init(2) (#767).
+        TaskManager::destroy();
         if (transMgr_)
         {
             transMgr_->stop();
