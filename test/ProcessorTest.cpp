@@ -2984,6 +2984,45 @@ TEST_F(ProcessorTest, AStopReplacedBeforeItsReleaseRunsWithNoMarketIsRefusedAndI
     EXPECT_TRUE(heldStops(*orderBook_, instrId1_).empty());
 }
 
+TEST_F(ProcessorTest, ARestingSwapIsNoMarketForAStopReplacedBeforeItsRelease)
+{
+    // As the case above, with a swap resting on the bid side: the replace asks whether its released replacement has a
+    // market as the matcher would see it, and a swap is none for an outright order (#212, #552). It asked whether the
+    // bid side held anything at all, so the swap made a market, and the replacement was stored.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const auto restingSwap = [this](Side side, PriceT nearPrice)
+    {
+        auto order = createTestOrder(instrId1_, side, nearPrice, 100);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->farPrice_ = nearPrice + 0.0022;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        return order;
+    };
+    const OrderEntry *swap = engine.submit(restingSwap(BUY_SIDE, 9.0));
+    ASSERT_EQ(NEW_ORDSTATUS, swap->status_);
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0));
+    OrderEntry *replacement = replacementFor(*stop);
+    replacement->orderQty_ = 20;
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+
+    transMgr_->keep_ = true;
+    inQueues_->push("test", OrderEvent(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5).release()));
+    engine.processor_.process();
+    inQueues_->push("test", OrderReplaceEvent(stop->orderId_, replacement));
+    engine.processor_.process();
+    transMgr_->keep_ = false;
+    ASSERT_EQ(2u, transMgr_->kept_.size());
+    transMgr_->runKept();
+
+    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByClOrderId(replacementId))
+        << "the swap was taken for the replacement's market";
+    EXPECT_EQ(CANCELED_ORDSTATUS, stop->status_);
+    EXPECT_TRUE(engine.reports_.tradesOf(stop->orderId_).empty());
+    EXPECT_EQ(NEW_ORDSTATUS, swap->status_);
+}
+
 TEST_F(ProcessorTest, AStopSuspendedBeforeItsReleaseRunsIsReleasedByATradeOnceResumed)
 {
     // The release finds the stop suspended and does nothing, and the suspend takes it out of the stop book. Resumed, it
@@ -4071,6 +4110,34 @@ TEST_F(ProcessorTest, AnOrderItsChecksRefuseIsReportedWithTheirReason)
     EXPECT_EQ(REJECTED_ORDSTATUS, market->status_);
     EXPECT_EQ("Invalid value of the order price!", engine.reports_.rejectReasonOf(invalid->orderId_));
     EXPECT_EQ("There is no market for this instrument!", engine.reports_.rejectReasonOf(market->orderId_));
+}
+
+TEST_F(ProcessorTest, ARestingSwapIsNoMarketForAnOutrightMarketOrder)
+{
+    // A swap rests in the outright book's price levels, but an outright order never trades with one (#212): with only
+    // a swap on the other side, a market order has no market and is refused, as with nothing at all. It was taken, and
+    // its whole quantity canceled, as the matcher passed over the swap (#552).
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    const auto restingSwap = [this](Side side, PriceT nearPrice)
+    {
+        auto order = createTestOrder(instrId1_, side, nearPrice, 100);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->farPrice_ = nearPrice + 0.0022;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        return order;
+    };
+    const OrderEntry *swap = engine.submit(restingSwap(SELL_SIDE, 1.0850));
+    ASSERT_EQ(NEW_ORDSTATUS, swap->status_);
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 100);
+    order->ordType_ = MARKET_ORDERTYPE;
+    const OrderEntry *market = engine.submit(std::move(order));
+
+    ASSERT_NE(nullptr, market);
+    EXPECT_EQ(REJECTED_ORDSTATUS, market->status_) << "a resting swap was taken for a market";
+    EXPECT_EQ("There is no market for this instrument!", engine.reports_.rejectReasonOf(market->orderId_));
+    EXPECT_EQ(NEW_ORDSTATUS, swap->status_);
+    EXPECT_TRUE(engine.reports_.tradesOf(swap->orderId_).empty());
 }
 
 TEST_F(ProcessorTest, AnOrderOnASideTheBookDoesntHoldIsRejected)

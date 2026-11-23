@@ -550,7 +550,8 @@ void aggregateLevels(const RestingOrdersT &resting, const OrderDataStorage *stor
     for (const auto &[price, orderId] : resting)
     {
         OrderEntry *order = storage->locateByOrderId(orderId);
-        if (nullptr == order)
+        // The outright book's depth: a resting swap, which an outright order never trades with, isn't in it (#552)
+        if ((nullptr == order) || !order->tradesWithOutrights())
         {
             continue;
         }

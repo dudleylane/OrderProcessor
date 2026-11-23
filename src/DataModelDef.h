@@ -354,6 +354,13 @@ public:
     {
         return (MARKET_ORDERTYPE == ordType_) || ((STOP_ORDERTYPE == ordType_) && stopTriggered_);
     }
+    /// Whether it trades with outright orders: a swap trades only with a swap (#212). The matcher asks it of each order
+    /// it comes to, and so do the outright book's depth and an outright market order's check that it has a market
+    /// (#552): the three see the same resting orders. An order's type never changes, so it needs no lock.
+    bool tradesWithOutrights() const noexcept
+    {
+        return FXSWAP_ORDERTYPE != ordType_;
+    }
     /// Matched once and never rested: a market order, a stop order released as one, or an IOC or FOK order, which keep
     /// their limit (#240). What one doesn't trade when it is matched is canceled.
     bool cancelsWhatIsLeft() const noexcept

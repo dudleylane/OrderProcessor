@@ -19,6 +19,7 @@
 #include "DataModelDef.h"
 #include "TransactionScope.h"
 #include "TrOperations.h"
+#include "OrderMatcher.h"
 #include "DataModelDef.h"
 
 using namespace std;
@@ -29,30 +30,6 @@ using namespace COP::OrdState;
 
 namespace
 {
-class FindAnyOpositeOrder : public OrderFunctor
-{
-public:
-    FindAnyOpositeOrder(OrderEntry *orderData) : orderData_(orderData)
-    {
-        assert(nullptr != orderData_);
-        side_ = (BUY_SIDE == orderData_->side_) ? (SELL_SIDE) : (BUY_SIDE);
-    }
-    ~FindAnyOpositeOrder() {}
-
-    SourceIdT instrument() const override
-    {
-        return orderData_->instrument_.getId();
-    }
-    bool match(const IdT &, bool *stop) const override
-    {
-        *stop = true;
-        return true;
-    }
-
-private:
-    OrderEntry *orderData_;
-};
-
 /// The operations that put a working order where it rests (#223): a held stop goes into its instrument's stop book, and
 /// anything else is matched, then booked unless it trades as a market order, which is matched once
 void addBooking(OrderEntry *order, Scope *transaction)
@@ -224,7 +201,9 @@ bool OrdStateImpl::processRefused(OrdState::onOrderReceived const &evnt)
     if (evnt.order_->marketLike())
     {
         assert(nullptr != evnt.orderBook_);
-        if (!evnt.orderBook_->find(FindAnyOpositeOrder(evnt.order_)).isValid())
+        assert(nullptr != evnt.orderStorage_);
+        // A resting swap is no market for an outright order, which never trades with one (#552)
+        if (!Proc::OrderMatcher::hasMarket(*evnt.order_, *evnt.orderBook_, *evnt.orderStorage_))
         {
             evnt.refusal_ = "There is no market for this instrument!";
             return true;
@@ -357,7 +336,8 @@ void OrdStateImpl::processAccept(OrderEntry **orderData, OrdState::onExternalOrd
     if ((*orderData)->marketLike())
     {
         assert(nullptr != evnt.orderBook_);
-        if (!evnt.orderBook_->find(FindAnyOpositeOrder(*orderData)).isValid())
+        assert(nullptr != evnt.orderStorage_);
+        if (!Proc::OrderMatcher::hasMarket(**orderData, *evnt.orderBook_, *evnt.orderStorage_))
         {
             throw std::runtime_error("There is no market for this instrument!");
         }

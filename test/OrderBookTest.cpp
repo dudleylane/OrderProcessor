@@ -570,6 +570,29 @@ TEST_F(OrderBookTest, SnapshotLeavesOutAnUnreportedOrderAndAClosedOne)
     EXPECT_EQ(1u, book.asks[0].orderCount) << "the canceled order is counted";
 }
 
+// The outright book's depth leaves a resting swap out: swaps rest in the same price levels, but no outright order
+// trades with one (#212), and summed with the outright orders, swaps of every date pair could show a crossed book
+// (#552). The outright order's last report is held back, as the depth's other cases hold one (#628): it shows what that
+// report gave.
+TEST_F(OrderBookTest, SnapshotLeavesOutARestingSwap)
+{
+    OrderEntry *swap = storedOrder(instrumentId1_, IdT(1, 1), SELL_SIDE, 5.0, 50);
+    swap->ordType_ = FXSWAP_ORDERTYPE;
+    swap->published_.emplace(*swap);
+    OrderEntry *outright = storedOrder(instrumentId1_, IdT(1, 2), SELL_SIDE, 6.0, 30);
+    outright->published_.emplace(*outright);
+    outright->leavesQty_ = 10; // a fill of 20 decided, and its report not out
+    orderBook_->add(*swap);
+    orderBook_->add(*outright);
+
+    const BookSnapshot book = orderBook_->getSnapshot(instrumentId1_, OrderStorage::instance());
+    ASSERT_EQ(1u, book.asks.size()) << "the swap has a level";
+    EXPECT_EQ(6.0, book.asks[0].price);
+    EXPECT_EQ(30u, book.asks[0].totalQty) << "the depth shows a fill before its report";
+    EXPECT_EQ(1u, book.asks[0].orderCount);
+    EXPECT_TRUE(book.bids.empty());
+}
+
 // A level's total is a sum of the orders' leaves, each a QuantityT, and it wrapped past 4,294,967,295 (#525)
 TEST_F(OrderBookTest, SnapshotLevelTotalsPastThirtyTwoBits)
 {
