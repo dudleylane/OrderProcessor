@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <deque>
 #include <memory>
 #include <string>
 #include <boost/beast/core.hpp>
@@ -35,6 +36,8 @@ namespace App
 
 class SessionManager;
 class InFlightGauge;
+
+class WsSession;
 
 class WsServer : public std::enable_shared_from_this<WsServer>
 {
@@ -88,10 +91,13 @@ private:
     InFlightGauge *inFlight_; // the engine's work in flight, which each session checks before it reads (#519)
     /// Sessions alive, against limits_.maxConnections: each one's destructor counts itself out (#159)
     std::shared_ptr<std::atomic<std::size_t>> connections_ = std::make_shared<std::atomic<std::size_t>>(0);
+    /// The connections accepted whose upgrade isn't decided yet, oldest first, which only onAccept touches (#541)
+    std::deque<std::weak_ptr<WsSession>> handshakes_;
     boost::asio::steady_timer acceptRetry_;     // the pause before accepting again after an accept failed (#202)
     std::atomic<bool> failNextAccept_{ false }; // failNextAccept()'s, which the IO thread takes (#672)
     ThrottledWarning acceptFailures_;
     ThrottledWarning refusals_;
+    ThrottledWarning handshakeDrops_;
 };
 
 } // namespace App

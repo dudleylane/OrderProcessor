@@ -235,6 +235,9 @@ TEST_F(DocConsistencyTest, WebSocketLimits)
     expectDocEq("ws_max_connections", COP::App::DEFAULT_MAX_CONNECTIONS);
     expectDocEq("ws_max_session_queue_mb", COP::App::DEFAULT_MAX_SESSION_QUEUE_MB);
     expectDocEq("ws_max_client_message_kib", COP::App::MAX_CLIENT_MESSAGE_BYTES / 1024);
+    // Connections whose upgrade isn't decided yet, and how long each has to send it (#541)
+    expectDocEq("ws_max_handshakes", COP::App::WsLimits().maxHandshakes);
+    expectDocEq("ws_handshake_timeout_s", COP::App::WsLimits().handshakeTimeout.count());
 }
 
 // The engine's work in flight at which the WebSocket sessions stop reading their clients' messages (#519)

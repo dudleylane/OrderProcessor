@@ -64,6 +64,14 @@ public:
     {
         return ws_.get_executor();
     }
+    /// Whether the session's upgrade is still undecided: from its accept until its request is answered (#541)
+    bool inHandshake() const
+    {
+        return inHandshake_.load(std::memory_order_acquire);
+    }
+    /// Closes the connection if its upgrade is still undecided, on the session's strand: the WsServer drops the oldest
+    /// such connection to take a new one past WsLimits::maxHandshakes (#541). Safe from any thread.
+    void dropInHandshake();
     /// The identity the session's token named (#225), or null without credentials, when the session may see and trade
     /// everything. Set before the session is added to its SessionManager, and never after, so other threads may read it
     /// under the manager's lock.
@@ -132,8 +140,12 @@ private:
     SourceIdT defaultClearingId_;
     SourceIdT defaultAccountId_;
     WsLimits limits_;
-    /// Counts the server's sessions, for its connection limit; null for a session no WsServer made (#159)
+    /// Counts the server's sessions, for its connection limit; null for a session no WsServer made (#159). A session
+    /// counts itself once its upgrade is accepted, not at its accept (#541), and is counted out at its destruction.
     std::shared_ptr<std::atomic<std::size_t>> connections_;
+    bool counted_ = false;
+    /// Until the upgrade is decided: the WsServer reads it on its acceptor's thread (#541)
+    std::atomic<bool> inHandshake_{ true };
     /// The engine's work in flight, against its bound; null for no bound (#519)
     InFlightGauge *inFlight_;
     /// The wait before looking at the work in flight again, and whether the session is waiting (#519)

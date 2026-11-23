@@ -81,7 +81,7 @@ WsSession::WsSession(tcp::socket &&socket, SessionManager *sessionMgr, Store::Wi
 
 WsSession::~WsSession()
 {
-    if (connections_)
+    if (counted_)
     {
         connections_->fetch_sub(1, std::memory_order_relaxed);
     }
@@ -89,8 +89,9 @@ WsSession::~WsSession()
 
 void WsSession::run()
 {
-    // A client that connects and sends nothing is dropped, as the WebSocket's own timeouts drop one later
-    beast::get_lowest_layer(ws_).expires_after(std::chrono::seconds(30));
+    // A client that connects and sends nothing is dropped, as the WebSocket's own timeouts drop one later: in 5 s,
+    // where it was 30, since such a connection holds a place in the server's handshakes (#541)
+    beast::get_lowest_layer(ws_).expires_after(limits_.handshakeTimeout);
     http::async_read(ws_.next_layer(), buffer_, upgradeRequest_,
                      beast::bind_front_handler(&WsSession::onRequest, shared_from_this()));
 }
@@ -126,6 +127,20 @@ void WsSession::onRequest(beast::error_code ec, std::size_t /*bytesTransferred*/
     case WsUpgrade::Accept:
         break;
     }
+    // Counted from here, not from its accept, so that connections that send nothing can't lock clients out (#541). The
+    // server closes a connection it takes while full, so only one taken before can come past the limit here.
+    if (connections_)
+    {
+        if (connections_->fetch_add(1, std::memory_order_relaxed) >= limits_.maxConnections)
+        {
+            connections_->fetch_sub(1, std::memory_order_relaxed);
+            refuse(http::status::service_unavailable,
+                   "This server has as many clients as it takes (--max-connections): try again later.");
+            return;
+        }
+        counted_ = true;
+    }
+    inHandshake_.store(false, std::memory_order_release);
 
     beast::get_lowest_layer(ws_).expires_never();
     ws_.set_option(readingTimeouts());
@@ -145,8 +160,22 @@ void WsSession::onRequest(beast::error_code ec, std::size_t /*bytesTransferred*/
     ws_.async_accept(upgradeRequest_, beast::bind_front_handler(&WsSession::onAccept, shared_from_this()));
 }
 
+void WsSession::dropInHandshake()
+{
+    net::post(ws_.get_executor(),
+              [self = shared_from_this()]
+              {
+                  if (self->inHandshake())
+                  {
+                      beast::error_code ignored;
+                      beast::get_lowest_layer(self->ws_).socket().close(ignored);
+                  }
+              });
+}
+
 void WsSession::refuse(http::status status, const std::string &reason)
 {
+    inHandshake_.store(false, std::memory_order_release); // decided: the connection ends once the answer is written
     auto response = std::make_shared<http::response<http::string_body>>(status, upgradeRequest_.version());
     response->set(http::field::server, "OrderProcessorServer");
     response->set(http::field::content_type, "text/plain");
