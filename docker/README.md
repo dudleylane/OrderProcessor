@@ -281,23 +281,21 @@ CI builds and runs this image as well, with `scripts/check-frontend-image.sh` (#
 
 The schema is initialized automatically on first boot from `init-db/001_schema.sql`. The server mirrors its reference data and orders into it, behind LMDB (#151): README's [PostgreSQL Integration](../README.md#postgresql-integration) says how. It includes:
 
-**Enum types** (matching C++ and TypeScript): `side`, `order_type`, `order_status`, `exec_type`, `time_in_force`, `currency`, `capacity`, `settl_type`, `account_type`, `audit_action`
+**Enum types** (matching C++ and TypeScript): `side`, `order_type`, `order_status`, `exec_type`, `time_in_force`, `currency`, `capacity`, `settl_type`, `account_type`
 
 **Tables:**
 
 | Table | Description |
 |-------|-------------|
-| `users` | User accounts (UUID primary keys); nothing authenticates against them |
 | `instruments` | Reference data — symbol, security ID |
 | `accounts` | Reference data — account name, firm, type |
 | `clearing_firms` | Reference data — clearing firm names |
 | `orders` | Order archive with full order parameters |
 | `executions` | Unused: nothing writes execution reports to Postgres, which mirrors orders and reference data alone (#575, #599) |
-| `audit_log` | Audit trail with JSONB detail; nothing enforces append-only |
 
-**Indexes:** active orders (a partial index), executions by order and time, and the audit log's JSONB detail (GIN). The frontend doesn't query Postgres: it gets everything from the server over WebSocket.
+**Indexes:** active orders (a partial index), and executions by order and time. The frontend doesn't query Postgres: it gets everything from the server over WebSocket.
 
-Prices are `NUMERIC` with no precision, so they hold any price the engine accepts (#538), and read back with the places they were written with: `101.25`, where `NUMERIC(18,8)` gave `101.25000000`.
+Prices are `NUMERIC` with no precision, so they hold any price the engine accepts (#538), and read back with the places they were written with: `101.25`, where `NUMERIC(18,8)` gave `101.25000000`. Since #590 a new volume has no `users` or `audit_log` table and no `audit_action` type, which nothing read or wrote; a volume made before keeps them, and nothing drops them.
 
 ### An `oms-pgdata` volume from before #151
 
@@ -313,7 +311,7 @@ docker compose exec oms-db psql -U oms -d oms -c "
   ALTER TABLE executions ALTER COLUMN last_qty TYPE BIGINT, ALTER COLUMN new_qty TYPE BIGINT;"
 ```
 
-A volume made before #236 also lacks `orders.stop_triggered`. The server then can't prepare its order write, so it writes nothing to Postgres, and at each retry logs `can't connect to PostgreSQL` with the missing column. Add the column and the `TRIGGERED` execution type:
+A volume made before #236 also lacks `orders.stop_triggered`. The server then can't prepare its order write, so it writes nothing to Postgres: since #590 it logs once that PostgreSQL's schema refused a statement, naming the missing column, and tries again until the schema matches, where it had logged `can't connect to PostgreSQL` at each retry. Add the column and the `TRIGGERED` execution type:
 
 ```bash
 docker compose exec oms-db psql -U oms -d oms -c "
