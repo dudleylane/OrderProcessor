@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# runner/job-started.sh: refuse a job that a fork's pull request started (#143), or that Dependabot started (#168).
+# runner/job-started.sh: refuse a job that a fork's pull request started (#143), or that Dependabot started (#168), or
+# whose event isn't one this repository's workflows run on (#567).
 #
 # This repository's CI runs on self-hosted runners on the maintainer's laptop, and its jobs
 # run as the maintainer's user. The repository is public, so anyone can open a pull request
@@ -10,12 +11,13 @@
 # without it. This hook is out of the pull request's reach. The runner runs it from the host
 # before every job, and a non-zero exit fails the job before any of its steps run.
 #
-# It reads the job's event payload. A payload with a pull_request object comes from a pull
-# request event (pull_request, pull_request_review, ...). Such a job runs only when the pull
-# request's head repository is its base repository. Any other event, such as a push or a
-# manual dispatch, runs as before. The payload must be the one the runner wrote for this
-# job, in its own _work directory: a job is refused when the payload is anywhere else or
-# can't be parsed.
+# It decides by the job's event name, from a list (#567): push, pull_request, schedule and workflow_dispatch, the events
+# this repository's workflows run on, which test/JobStartedHookTest.sh holds to every workflow's `on:`. A job for any
+# other event is refused whatever its payload holds, so an event a workflow adds is refused until it joins the list.
+# Until #567 the hook decided by the payload's shape, and ran any job whose payload had no pull_request object. A
+# pull_request job runs only when the pull request's head repository is its base repository; a job for one of the other
+# three runs, unless its payload holds a pull request. The payload must be the one the runner wrote for this job, in its
+# own _work directory: a job is refused when the payload is anywhere else or can't be parsed.
 #
 # Dependabot pushes its branches into this repository itself, so its pull requests pass the fork check, and the push of
 # its branch starts every workflow too. Its jobs would run the updated dependencies, a new action's code among them,
@@ -47,7 +49,7 @@
 set -u
 
 refuse() {
-    echo "job-started hook (#143): $1; refusing the job" >&2
+    echo "job-started hook (#143, #567): $1; refusing the job" >&2
     exit 1
 }
 
@@ -59,15 +61,28 @@ event=${GITHUB_EVENT_PATH:-}
 [[ "$(realpath -e -- "$event")" == "$(realpath -e -- "$expected" 2>/dev/null)" ]] ||
     refuse "the event payload $event is not the one the runner writes, $expected"
 
+# The events this repository's workflows run on (#567). The runner names each job's event, from GitHub's job message,
+# which a workflow file can't change.
+event_name=${GITHUB_EVENT_NAME:-}
+case "$event_name" in
+    push | pull_request | schedule | workflow_dispatch) ;;
+    "") refuse "GITHUB_EVENT_NAME is not set" ;;
+    *) refuse "a $event_name event, which none of this repository's workflows runs on" ;;
+esac
+
 # head.repo is null once the fork has been deleted.
-verdict=$(jq -e -r --slurp '
+verdict=$(jq -e -r --slurp --arg event "$event_name" '
     if length != 1 or (.[0] | type) != "object" then
         error("not one JSON object")
     else .[0] end
     | if (.sender.login // "") == "dependabot[bot]" then
         "refuse: dependabot[bot] sent the event"
-    elif has("pull_request") | not then
-        "run: not a pull request"
+    elif $event != "pull_request" then
+        if has("pull_request") then
+            "refuse: a \($event) event whose payload holds a pull_request"
+        else
+            "run: not a pull request"
+        end
     elif (.pull_request | type) != "object" then
         "refuse: a pull_request that is not an object"
     elif .pull_request.base.repo.full_name != null
@@ -77,11 +92,11 @@ verdict=$(jq -e -r --slurp '
         "refuse: a pull request from \(.pull_request.head.repo.full_name // "a deleted repository") into \(.pull_request.base.repo.full_name // "an unknown repository")"
     end' "$event" 2>&1) || refuse "can't parse the event payload $event: $verdict"
 
-echo "job-started hook (#143, #168): ${GITHUB_EVENT_NAME:-unknown} event, $verdict"
+echo "job-started hook (#143, #168, #567): $event_name event, $verdict"
 if [[ "$verdict" != "run: "* ]]; then
     if [[ "$verdict" == *"dependabot[bot]"* ]]; then
         echo "Dependabot's jobs don't run on this self-hosted runner (#168), and Dependabot is off here (#340)." >&2
-    else
+    elif [[ "$verdict" == "refuse: a pull request from"* ]]; then
         echo "A fork's pull request doesn't run on this self-hosted runner (#143)." >&2
     fi
     exit 1

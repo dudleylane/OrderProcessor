@@ -178,8 +178,8 @@ if(BUILD_TESTS)
     include(GoogleTest)
     gtest_discover_tests(orderProcessorTest)
 
-    # The runner's job-started hook against the payloads it decides on (#143, #168). It needs jq, as the hook does: without
-    # it the test is skipped.
+    # The runner's job-started hook against the payloads it decides on (#143, #168), and against every event the workflows
+    # run on (#567). It needs jq, as the hook does: without it the test is skipped.
     add_test(NAME JobStartedHookDecides
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/JobStartedHookTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/runner/job-started.sh)
