@@ -12,7 +12,9 @@
 
 #include <algorithm>
 #include <cstring>
+#include <new>
 #include <stdexcept>
+#include <string>
 #include "StorageRecordDispatcher.h"
 
 #include "InstrumentCodec.h"
@@ -177,7 +179,36 @@ void StorageRecordDispatcher::init(DataStorageRestore *storage, OrderBook *order
 
 void StorageRecordDispatcher::startLoad() {}
 
+namespace
+{
+/// The record a load refuses, as its key and version name it, so that whoever reads the refusal can find it (#591)
+std::string recordName(const char *kind, const IdT &id, u32 version)
+{
+    std::string name(kind);
+    name += ' ';
+    id.toString(name);
+    name += " version " + std::to_string(version);
+    return name;
+}
+} // namespace
+
 void StorageRecordDispatcher::onRecordLoaded(const IdT &id, u32 version, const char *buf, size_t size)
+{
+    try
+    {
+        restoreRecord(id, version, buf, size);
+    }
+    catch (const std::bad_alloc &)
+    {
+        throw;
+    }
+    catch (const std::exception &ex)
+    {
+        throw std::runtime_error(recordName("Record", id, version) + ": " + ex.what());
+    }
+}
+
+void StorageRecordDispatcher::restoreRecord(const IdT &id, u32 version, const char *buf, size_t size)
 {
     assert(nullptr != buf);
 
@@ -371,8 +402,20 @@ void StorageRecordDispatcher::finishLoad()
     {
         const std::string &record = it->second.record_;
         Codec::OrderStrings carried;
-        std::unique_ptr<OrderEntry> order(
-            Codec::OrderCodec::decode(it->first, it->second.formatVersion_, record.data(), record.size(), &carried));
+        std::unique_ptr<OrderEntry> order;
+        try
+        {
+            order.reset(Codec::OrderCodec::decode(it->first, it->second.formatVersion_, record.data(), record.size(),
+                                                  &carried));
+        }
+        catch (const std::bad_alloc &)
+        {
+            throw;
+        }
+        catch (const std::exception &ex)
+        {
+            throw std::runtime_error(recordName("Order", it->first, it->second.version_) + ": " + ex.what());
+        }
         assert(nullptr != orderStorage_);
         // A closed order of a business day before the kept ones isn't restored, and every version of its record is
         // erased once the loop ends (#597). Its day is the one its day figures are for (#244), which a fill in a later

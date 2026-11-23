@@ -108,4 +108,24 @@ TEST(SeedDataArgsTest, RejectsASecondFile)
     EXPECT_EQ("--file is given more than once", error);
 }
 
+TEST(SeedDataArgsTest, ChecksADirectoryOnlyWhenAskedTo)
+{
+    // seedData --check restores the directory read-only, and writes no record (#591)
+    std::string error;
+    EXPECT_FALSE(parseSeedDataArgs({ "/data" }, &error)->check);
+    const std::optional<SeedDataArgs> parsed = parseSeedDataArgs({ "--check", "--data-dir", "/backup" }, &error);
+    ASSERT_TRUE(parsed.has_value()) << error;
+    EXPECT_TRUE(parsed->check);
+    EXPECT_EQ("/backup", parsed->dataDir);
+}
+
+TEST(SeedDataArgsTest, RejectsCheckWithWhatWouldWrite)
+{
+    std::string error;
+    EXPECT_FALSE(parse({ "--check", "--if-empty", "/data" }, &error));
+    EXPECT_EQ("--check writes no record, so it takes neither --if-empty nor --file", error);
+    EXPECT_FALSE(parse({ "--file", "a.json", "--check" }, &error));
+    EXPECT_EQ("--check writes no record, so it takes neither --if-empty nor --file", error);
+}
+
 } // namespace

@@ -294,7 +294,7 @@ if(BUILD_APP)
     target_link_libraries(orderProcessorServer PRIVATE
         orderEngine nlohmann_json::nlohmann_json OpenSSL::Crypto pthread)
 
-    add_executable(seedData app/seed_data.cpp app/ReferenceDataFile.cpp)
+    add_executable(seedData app/seed_data.cpp app/ReferenceDataFile.cpp app/ServerData.cpp)
     op_warnings(seedData)
     target_link_libraries(seedData PRIVATE orderEngine nlohmann_json::nlohmann_json pthread)
 
@@ -318,6 +318,9 @@ if(BUILD_APP)
         # that's wrong or would change what's stored, writing nothing (#585)
         add_test(NAME SeedDataLoadsAFile
                  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/SeedDataFileTest.sh $<TARGET_FILE:seedData>)
+        # seedData --check restores a directory as a start does, read-only, writing nothing, and says so (#591)
+        add_test(NAME SeedDataChecksADirectory
+                 COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/SeedDataCheckTest.sh $<TARGET_FILE:seedData>)
         # Run the server so that it can't start: it must say why and exit, not abort (#203)
         add_test(NAME ServerThatCannotStartExits
                  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/ServerStartupTest.sh $<TARGET_FILE:orderProcessorServer>)
