@@ -1433,10 +1433,11 @@ public:
         {
             return;
         }
-        // What the report says the order has, which the WebSocket and FIX gateways write (#411)
+        // What the report says the order has, which the WebSocket and FIX gateways write (#411), and when (#546, #612)
         reports_.push_back(Report{ evnt.exec_->orderId_, evnt.exec_->type_,
                                    evnt.figures_ ? evnt.figures_->leavesQty_ : UNKNOWN_LEAVES,
-                                   evnt.figures_ ? evnt.figures_->cumQty_ : UNKNOWN_LEAVES });
+                                   evnt.figures_ ? evnt.figures_->cumQty_ : UNKNOWN_LEAVES, evnt.exec_->transactTime_,
+                                   evnt.figures_ ? evnt.figures_->lastUpdateTime_ : 0 });
         if (nullptr != log_)
         {
             log_->push_back(std::string("report ") + typeName(evnt.exec_->type_));
@@ -1566,12 +1567,30 @@ public:
         return result;
     }
 
+    /// When each of the order's reports of the type said it was made, its TransactTime and its figures' lastUpdateTime_
+    /// (#546, #612), in the order they went out
+    std::vector<std::pair<DateTimeT, DateTimeT>> timesOf(const IdT &orderId, ExecType type) const
+    {
+        std::vector<std::pair<DateTimeT, DateTimeT>> result;
+        for (const Report &report : reports_)
+        {
+            if ((report.orderId_ == orderId) && (report.type_ == type))
+            {
+                result.emplace_back(report.transactTime_, report.updated_);
+            }
+        }
+        return result;
+    }
+
     struct Report
     {
         IdT orderId_;
         ExecType type_;
         QuantityT leaves_;
         QuantityT cum_;
+        DateTimeT transactTime_ = 0;
+        /// The figures' lastUpdateTime_, 0 if the report carried none
+        DateTimeT updated_ = 0;
     };
 
     std::vector<Trade> trades_;
@@ -4549,14 +4568,19 @@ TEST_F(ProcessorTest, ATimerOfAnOrderThatFilledDecidesNothing)
 TEST_F(ProcessorTest, ADayReplacementExpiresAtTheEndOfTheDayItWasReplacedIn)
 {
     // A replacement keeps its original's creationTime_: a GTC order from the day before, replaced by a DAY one,
-    // expired at once, its original's day long over. Its day is the replace's, its lastUpdateTime_ (#240).
+    // expired at once, its original's day long over. Its day is the replace's, its lastUpdateTime_ (#240), which the
+    // replace's decision sets from the engine's clock (#546).
     DateTimeT now = OCT15 + 13 * HOUR;
     ExpiryScheduler expiry(inQueues_.get(),
                            [&now]
                            {
                                return now;
                            });
-    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry);
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), &expiry,
+                      [&now]
+                      {
+                          return now;
+                      });
     auto order = withTif(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), GTC_TIF);
     order->creationTime_ = now;
     order->lastUpdateTime_ = now;
@@ -5369,4 +5393,302 @@ TEST_F(ProcessorTest, AnOrdersLifeWritesNoNote)
     ASSERT_NE(to, added);
     EXPECT_NE(std::string::npos, saving->find(": [Debug][")) << *saving;
     EXPECT_NE(std::string::npos, added->find(": [Debug][")) << *added;
+}
+
+// =============================================================================
+// Each decision's time (#546, #612)
+// =============================================================================
+
+namespace
+{
+/// The engine's clock in these tests: each read returns a time a second after the one before, from start, and is kept,
+/// so a test can tell which decision read it, and that each read it once (#546)
+class SteppingClock
+{
+public:
+    explicit SteppingClock(DateTimeT start) : next_(start) {}
+
+    /// The clock to give the engine, which must not outlive this
+    std::function<DateTimeT()> clock()
+    {
+        return [this]
+        {
+            reads_.push_back(next_);
+            next_ += 1000;
+            return reads_.back();
+        };
+    }
+
+    /// Moves the next read on, as time passes between decisions
+    void skip(DateTimeT by)
+    {
+        next_ += by;
+    }
+
+    std::vector<DateTimeT> reads_;
+
+private:
+    DateTimeT next_;
+};
+
+/// Keeps the time each record was written with: its order's lastUpdateTime_, as its decision left it (#546)
+class UpdateTimeLog final : public COP::OrderSaver
+{
+public:
+    COP::u32 save(const COP::OrderEntry &order, const COP::OrderFigures &figures) override
+    {
+        records_.emplace_back(order.orderId_, figures.lastUpdateTime_);
+        return version_++;
+    }
+    void erase(const COP::IdT &, COP::u32) override {}
+
+    /// The times the order's records were written with, in the order they were written
+    std::vector<DateTimeT> recordsOf(const IdT &orderId) const
+    {
+        std::vector<DateTimeT> times;
+        for (const auto &record : records_)
+        {
+            if (record.first == orderId)
+            {
+                times.push_back(record.second);
+            }
+        }
+        return times;
+    }
+
+private:
+    std::vector<std::pair<IdT, DateTimeT>> records_;
+    COP::u32 version_ = 0;
+};
+
+/// The times of the trades stored for the order: each is there twice, as its fill stored it and as it was reported
+std::vector<DateTimeT> storedTradeTimesOf(OrderEntry &order)
+{
+    std::vector<DateTimeT> times;
+    for (const EventData &event : *order.executions_.get())
+    {
+        const ExecutionEntry *exec = OrderStorage::instance()->locateByExecId(event.eventId_);
+        if ((nullptr != exec) && (TRADE_EXECTYPE == exec->type_))
+        {
+            times.push_back(exec->transactTime_);
+        }
+    }
+    return times;
+}
+
+/// What reports said of their time: each one's TransactTime and its figures' lastUpdateTime_
+using ReportTimes = std::vector<std::pair<DateTimeT, DateTimeT>>;
+} // namespace
+
+TEST_F(ProcessorTest, BothSidesOfATradeTheirRecordsReportsAndStoredTradesHaveTheMatchsTime)
+{
+    // An order's lastUpdateTime_ never changed once it was stored (#546), and a fill's stored trade had transactTime 1,
+    // 1970-01-01 (#612). A decision reads the engine's clock once, and the order, its record and its report have that
+    // time: a match's both sides, and each side's stored trades. The fills' transaction waits an hour to run, and its
+    // reports still say when the match was made.
+    UpdateTimeLog saver;
+    OrderStorage::instance()->attach(&saver);
+    SteppingClock clock(OCT15 + 13 * HOUR);
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr, clock.clock());
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), OCT15 + 13 * HOUR));
+    ASSERT_NE(nullptr, buy);
+    ASSERT_EQ(1u, clock.reads_.size()) << "an acceptance reads the clock once";
+    const DateTimeT accepted = clock.reads_[0];
+    EXPECT_EQ(accepted, buy->lastUpdateTime_);
+    EXPECT_EQ(std::vector<DateTimeT>{ accepted }, saver.recordsOf(buy->orderId_));
+    EXPECT_EQ((ReportTimes{ { accepted, accepted } }), engine.reports_.timesOf(buy->orderId_, NEW_EXECTYPE));
+
+    // The sell is accepted and matched, and the fills' transaction is kept while the clock moves on
+    auto order = asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), OCT15 + 13 * HOUR);
+    const RawDataEntry sellId = order->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(order.release()));
+    engine.processor_.process();
+    ASSERT_EQ(3u, clock.reads_.size()) << "the sell's acceptance and the match each read the clock once";
+    const DateTimeT traded = clock.reads_[2];
+    clock.skip(HOUR);
+    transMgr_->runKept();
+    OrderEntry *sell = OrderStorage::instance()->locateByClOrderId(sellId);
+    ASSERT_NE(nullptr, sell);
+    ASSERT_EQ(FILLED_ORDSTATUS, sell->status_);
+    ASSERT_EQ(PARTFILL_ORDSTATUS, buy->status_);
+    EXPECT_EQ(3u, clock.reads_.size()) << "a record or a report read the clock";
+    EXPECT_EQ((ReportTimes{ { clock.reads_[1], clock.reads_[1] } }),
+              engine.reports_.timesOf(sell->orderId_, NEW_EXECTYPE));
+    for (OrderEntry *side : { buy, sell })
+    {
+        EXPECT_EQ(traded, side->lastUpdateTime_);
+        EXPECT_EQ(traded, saver.recordsOf(side->orderId_).back());
+        EXPECT_EQ((ReportTimes{ { traded, traded } }), engine.reports_.timesOf(side->orderId_, TRADE_EXECTYPE));
+        EXPECT_EQ((std::vector<DateTimeT>{ traded, traded }), storedTradeTimesOf(*side))
+            << "as its fill stored it and as it was reported";
+    }
+}
+
+TEST_F(ProcessorTest, ACancelsTimeIsTheOrdersItsRecordsAndItsReports)
+{
+    // A client's cancel, and the engine's of what an IOC order couldn't trade, are each a decision with a time of its
+    // own (#546)
+    UpdateTimeLog saver;
+    OrderStorage::instance()->attach(&saver);
+    SteppingClock clock(OCT15 + 13 * HOUR);
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr, clock.clock());
+    OrderEntry *buy = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    ASSERT_NE(nullptr, buy);
+    clock.skip(HOUR);
+    engine.request(OrderCancelEvent(buy->orderId_, "cancel-1"));
+    ASSERT_EQ(CANCELED_ORDSTATUS, buy->status_);
+    ASSERT_EQ(2u, clock.reads_.size()) << "the cancel read the clock other than once";
+    const DateTimeT canceled = clock.reads_[1];
+    EXPECT_EQ(canceled, buy->lastUpdateTime_);
+    EXPECT_EQ((std::vector<DateTimeT>{ clock.reads_[0], canceled }), saver.recordsOf(buy->orderId_));
+    EXPECT_EQ((ReportTimes{ { canceled, canceled } }), engine.reports_.timesOf(buy->orderId_, CANCEL_EXECTYPE));
+
+    // An ask the IOC buy doesn't trade at: the buy is accepted, then canceled by the engine
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 11.0, 10));
+    OrderEntry *ioc = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), IOC_TIF));
+    ASSERT_NE(nullptr, ioc);
+    ASSERT_EQ(CANCELED_ORDSTATUS, ioc->status_);
+    ASSERT_EQ(5u, clock.reads_.size()) << "the IOC order's acceptance and its cancel each read the clock once";
+    EXPECT_EQ(clock.reads_[4], ioc->lastUpdateTime_);
+    EXPECT_EQ((std::vector<DateTimeT>{ clock.reads_[3], clock.reads_[4] }), saver.recordsOf(ioc->orderId_));
+    EXPECT_EQ((ReportTimes{ { clock.reads_[3], clock.reads_[3] } }),
+              engine.reports_.timesOf(ioc->orderId_, NEW_EXECTYPE));
+    EXPECT_EQ((ReportTimes{ { clock.reads_[4], clock.reads_[4] } }),
+              engine.reports_.timesOf(ioc->orderId_, CANCEL_EXECTYPE));
+}
+
+TEST_F(ProcessorTest, AnExpirysTimeIsTheOrdersItsRecordsAndItsReports)
+{
+    UpdateTimeLog saver;
+    OrderStorage::instance()->attach(&saver);
+    SteppingClock clock(OCT15 + 9 * HOUR);
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr, clock.clock());
+    OrderEntry *gtd =
+        engine.submit(asGtd(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), OCT15 + 9 * HOUR, OCT15 + 10 * HOUR));
+    ASSERT_NE(nullptr, gtd);
+    clock.skip(HOUR);
+    engine.request(TimerEvent(gtd->orderId_, TimerEvent::EXPIRATION));
+    ASSERT_EQ(EXPIRED_ORDSTATUS, gtd->status_);
+    ASSERT_EQ(2u, clock.reads_.size()) << "the expiry read the clock other than once";
+    const DateTimeT expired = clock.reads_[1];
+    EXPECT_EQ(expired, gtd->lastUpdateTime_);
+    EXPECT_EQ((std::vector<DateTimeT>{ clock.reads_[0], expired }), saver.recordsOf(gtd->orderId_));
+    EXPECT_EQ((ReportTimes{ { expired, expired } }), engine.reports_.timesOf(gtd->orderId_, EXPIRED_EXECTYPE));
+}
+
+TEST_F(ProcessorTest, ARestatementsTimeIsTheOrdersItsRecordsAndItsReports)
+{
+    // One read gives the restatement both the day it begins and its time (#244, #546)
+    UpdateTimeLog saver;
+    OrderStorage::instance()->attach(&saver);
+    SteppingClock clock(OCT15 + 13 * HOUR);
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr, clock.clock());
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), OCT15 + 13 * HOUR));
+    ASSERT_NE(nullptr, buy);
+    clock.skip(8 * HOUR); // past 17:00 New York
+    engine.request(TimerEvent(buy->orderId_, TimerEvent::RESTATEMENT));
+    ASSERT_EQ(2u, clock.reads_.size()) << "the restatement read the clock other than once";
+    const DateTimeT restated = clock.reads_[1];
+    EXPECT_EQ(OCT15 + 21 * HOUR, buy->dayStart_);
+    EXPECT_EQ(restated, buy->lastUpdateTime_);
+    EXPECT_EQ((std::vector<DateTimeT>{ clock.reads_[0], restated }), saver.recordsOf(buy->orderId_));
+    EXPECT_EQ((ReportTimes{ { restated, restated } }), engine.reports_.timesOf(buy->orderId_, RESTATED_EXECTYPE));
+}
+
+TEST_F(ProcessorTest, AReplacesTimeIsBothOrdersTheirRecordsAndTheirReports)
+{
+    // One read for the replace, the original's and the replacement's, whatever time its gateway gave the replacement
+    // (#546)
+    UpdateTimeLog saver;
+    OrderStorage::instance()->attach(&saver);
+    SteppingClock clock(OCT15 + 13 * HOUR);
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr, clock.clock());
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), OCT15 + 13 * HOUR));
+    ASSERT_NE(nullptr, buy);
+    clock.skip(HOUR);
+
+    OrderEntry *replacement = buy->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = buy->clOrderId_;
+    replacement->orderQty_ = 150;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    replacement->lastUpdateTime_ = OCT15 + 14 * HOUR; // as a gateway sets it
+    const RawDataEntry replacementId = replacement->clOrderId_.get();
+    engine.request(OrderReplaceEvent(buy->orderId_, replacement));
+    OrderEntry *live = OrderStorage::instance()->locateByClOrderId(replacementId);
+    ASSERT_NE(nullptr, live);
+    ASSERT_EQ(REPLACED_ORDSTATUS, buy->status_);
+    ASSERT_EQ(NEW_ORDSTATUS, live->status_);
+    ASSERT_EQ(2u, clock.reads_.size()) << "the replace read the clock other than once";
+    const DateTimeT replaced = clock.reads_[1];
+    for (OrderEntry *order : { buy, live })
+    {
+        EXPECT_EQ(replaced, order->lastUpdateTime_);
+        EXPECT_EQ(replaced, saver.recordsOf(order->orderId_).back());
+        EXPECT_EQ((ReportTimes{ { replaced, replaced } }), engine.reports_.timesOf(order->orderId_, REPLACE_EXECTYPE));
+    }
+}
+
+TEST_F(ProcessorTest, AReleasesTimeIsTheStopsItsRecordsAndItsTriggeredReports)
+{
+    // A stop's release decides as its transaction runs, and reads the clock then; the trade it leads to is a decision
+    // of its own, later (#546)
+    UpdateTimeLog saver;
+    OrderStorage::instance()->attach(&saver);
+    SteppingClock clock(OCT15 + 13 * HOUR);
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr, clock.clock());
+    engine.submit(createTestOrder(instrId1_, BUY_SIDE, 9.0, 100));
+    OrderEntry *stop = engine.submit(asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 50), STOP_ORDERTYPE, 9.5));
+    ASSERT_NE(nullptr, stop);
+    // A sell at 9 trades with the bid, which reaches the stop: it is released, and sells to the bid at the market
+    engine.submit(createTestOrder(instrId1_, SELL_SIDE, 9.0, 10));
+    ASSERT_TRUE(stop->stopTriggered_);
+    ASSERT_EQ(FILLED_ORDSTATUS, stop->status_);
+    // The bid's and the stop's acceptance, the sell's, its match, the release, and the release's match
+    ASSERT_EQ(6u, clock.reads_.size()) << "a decision read the clock other than once";
+    const DateTimeT released = clock.reads_[4];
+    EXPECT_EQ((ReportTimes{ { released, released } }), engine.reports_.timesOf(stop->orderId_, TRIGGERED_EXECTYPE));
+    EXPECT_EQ((std::vector<DateTimeT>{ clock.reads_[1], released, clock.reads_[5] }), saver.recordsOf(stop->orderId_));
+    EXPECT_EQ((ReportTimes{ { clock.reads_[5], clock.reads_[5] } }),
+              engine.reports_.timesOf(stop->orderId_, TRADE_EXECTYPE));
+    EXPECT_EQ(clock.reads_[5], stop->lastUpdateTime_);
+}
+
+TEST_F(ProcessorTest, AnOrderTheEngineStoresAndRejectsHasItsRejectsTime)
+{
+    UpdateTimeLog saver;
+    OrderStorage::instance()->attach(&saver);
+    SteppingClock clock(OCT15 + 13 * HOUR);
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr, clock.clock());
+    OrderEntry *invalid = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 0.0, 100)); // refused for its price
+    ASSERT_NE(nullptr, invalid);
+    ASSERT_EQ(REJECTED_ORDSTATUS, invalid->status_);
+    ASSERT_EQ(1u, clock.reads_.size()) << "the reject read the clock other than once";
+    const DateTimeT rejected = clock.reads_[0];
+    EXPECT_EQ(rejected, invalid->lastUpdateTime_);
+    EXPECT_EQ(std::vector<DateTimeT>{ rejected }, saver.recordsOf(invalid->orderId_));
+    EXPECT_EQ((ReportTimes{ { rejected, rejected } }), engine.reports_.timesOf(invalid->orderId_, REJECT_EXECTYPE));
+}
+
+TEST_F(ProcessorTest, AChangeTheStateMachineRefusesKeepsTheOrdersTime)
+{
+    // A resume of an order that isn't suspended has no row: the machine refuses it, and the order is persisted
+    // unchanged (#432). It decided nothing, so the order keeps its last decision's time, and the clock isn't read
+    // (#546).
+    UpdateTimeLog saver;
+    OrderStorage::instance()->attach(&saver);
+    SteppingClock clock(OCT15 + 13 * HOUR);
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr, clock.clock());
+    OrderEntry *buy = engine.submit(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
+    ASSERT_NE(nullptr, buy);
+    ASSERT_EQ(1u, clock.reads_.size());
+    const DateTimeT accepted = clock.reads_[0];
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    engine.request(OrderChangeStateEvent(buy->orderId_, OrderChangeStateEvent::RESUME));
+    ASSERT_EQ(failed + 1, OrdState::OrderState::failedCount()) << "the state machine has a row for the resume";
+    EXPECT_EQ(NEW_ORDSTATUS, buy->status_);
+    EXPECT_EQ(1u, clock.reads_.size()) << "a change that decided nothing read the clock";
+    EXPECT_EQ(accepted, buy->lastUpdateTime_);
+    EXPECT_EQ((std::vector<DateTimeT>{ accepted, accepted }), saver.recordsOf(buy->orderId_));
 }

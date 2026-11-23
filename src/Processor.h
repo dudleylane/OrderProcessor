@@ -106,7 +106,8 @@ public:
 
     /// Appends the operation that persists the order when the transaction commits (#20), once per transaction (#148),
     /// with the figures the decision just made left it with (#411): a later decision goes to the operation the first
-    /// made, since the scope refuses a second (#632). Call it under the order's write lock, once the decision is done.
+    /// made, since the scope refuses a second (#632). Call it under the order's write lock, once the decision is done
+    /// and has set the order's lastUpdateTime_ to its time (#546).
     static void persistOrder(ACID::Scope *transaction, const OrderEntry &order);
     /// Sets the timers of an order just accepted: its expiry, if its time in force ends, a DAY or GTD order (#240), and
     /// its restatement, if it outlives the business day (#244)
@@ -138,6 +139,8 @@ private:
     /// Enqueues a state change of the order with id, to be decided on the transaction worker (#96). caller names the
     /// handler in the error when the order doesn't exist.
     void enqueueStateChange(const IdT &id, OrderStateChange change, const char *caller);
+    /// The engine's clock, as Context::now() reads it, for a decision made where no Context is: a new order's (#546)
+    DateTimeT clockNow() const;
 
 public:
 public:

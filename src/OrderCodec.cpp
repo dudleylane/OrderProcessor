@@ -333,8 +333,9 @@ void OrderCodec::encode(const OrderEntry &val, const OrderFigures &figures, std:
     buf->append(typebuf, sizeof(val.creationTime_));
     buf->append(1, '.');
 
-    memcpy(typebuf, &(val.lastUpdateTime_), sizeof(val.lastUpdateTime_));
-    buf->append(typebuf, sizeof(val.lastUpdateTime_));
+    // A decision's time, which each decision changes, so it is the figures' (#546)
+    memcpy(typebuf, &(figures.lastUpdateTime_), sizeof(figures.lastUpdateTime_));
+    buf->append(typebuf, sizeof(figures.lastUpdateTime_));
     buf->append(1, '.');
 
     memcpy(typebuf, &(val.expireTime_), sizeof(val.expireTime_));
@@ -495,8 +496,9 @@ char *OrderCodec::encode(const OrderEntry &val, const OrderFigures &figures, cha
     *p = '.';
     ++p;
 
-    memcpy(p, &(val.lastUpdateTime_), sizeof(val.lastUpdateTime_));
-    p += sizeof(val.lastUpdateTime_);
+    // A decision's time, which each decision changes, so it is the figures' (#546)
+    memcpy(p, &(figures.lastUpdateTime_), sizeof(figures.lastUpdateTime_));
+    p += sizeof(figures.lastUpdateTime_);
     *p = '.';
     ++p;
 

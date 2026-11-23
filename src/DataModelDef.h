@@ -263,6 +263,10 @@ public:
     PriceT dayAvgPx_;
 
     DateTimeT creationTime_; //8
+    /// When the engine last decided about the order (#546): each decision sets it under the order's write lock, from
+    /// its one read of the engine's clock (Context::now()), and its record and its report carry it in OrderFigures, as
+    /// the report's TransactTime too (#612). A gateway sets it with creationTime_, which isValid() needs; the order's
+    /// acceptance then sets it again. Readers outside a transaction read published_'s (#404).
     DateTimeT lastUpdateTime_;
     DateTimeT expireTime_;
     DateTimeT settlDate_;
@@ -343,8 +347,9 @@ private:
 };
 
 /// What one decision about a stored order left it with, of the fields its decisions change (#411): its status, its
-/// quantities and prices, its day figures, whether its stop was reached, and its state machine's state. Everything else
-/// a record or a report writes is set when the order is stored and never changes: a replace stores a new order (#74).
+/// quantities and prices, its day figures, whether its stop was reached, its state machine's state, and when it was
+/// decided (#546). Everything else a record or a report writes is set when the order is stored and never changes: a
+/// replace stores a new order (#74).
 /// The transaction that persists and reports a decision runs after the decision, and can run after a later one. A fill
 /// is applied while the booking that matched it drains, and the fill's transaction names the orders, not their
 /// instrument, so the instrument's next booking can fill an order again before that transaction runs. Written from the
@@ -354,15 +359,19 @@ struct OrderFigures
 {
     explicit OrderFigures(const OrderParams &order) noexcept
         : avgPx_(order.avgPx_), dayAvgPx_(order.dayAvgPx_), dayStart_(order.dayStart_),
-          stateMachinePersistance_(order.stateMachinePersistance_), status_(order.status_),
-          leavesQty_(order.leavesQty_), cumQty_(order.cumQty_), dayOrderQty_(order.dayOrderQty_),
-          dayCumQty_(order.dayCumQty_), stopTriggered_(order.stopTriggered_)
+          lastUpdateTime_(order.lastUpdateTime_), stateMachinePersistance_(order.stateMachinePersistance_),
+          status_(order.status_), leavesQty_(order.leavesQty_), cumQty_(order.cumQty_),
+          dayOrderQty_(order.dayOrderQty_), dayCumQty_(order.dayCumQty_), stopTriggered_(order.stopTriggered_)
     {
     }
 
     PriceT avgPx_;
     PriceT dayAvgPx_;
     DateTimeT dayStart_;
+    /// When the decision was made, milliseconds since the epoch, UTC (#546): the record's lastUpdateTime_, and the
+    /// report's, which is its TransactTime too (#612), so a report held back says when its decision was made, not when
+    /// it was built
+    DateTimeT lastUpdateTime_;
     /// Written to the order's record. A trade's report takes its figures as the state machine enters the state the
     /// fill leads to, before the machine's state is saved into the order, and no report writes this.
     OrdState::OrderStatePersistence stateMachinePersistance_;
