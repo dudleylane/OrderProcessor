@@ -20,6 +20,10 @@ struct FixCounterparty
     std::string passwordHash;
     /// The accounts its orders may name. An order that names none trades the first.
     std::vector<std::string> accounts;
+    /// The addresses it may connect from, IPv4 in dotted form as QuickFIX compares them, which its session gets as
+    /// AllowedRemoteAddresses: QuickFIX closes a connection from any other before it reads the Logon, so no password
+    /// check runs for it (#554). Empty for any address.
+    std::vector<std::string> addresses;
 };
 
 /// Who may log on to the FIX acceptor, and what each may trade (#147). Before #147 a Logon was checked for nothing, so
@@ -27,9 +31,12 @@ struct FixCounterparty
 ///
 /// The credentials file has one line per counterparty, and each makes a session:
 ///
-///     # CompID    Username   PasswordHash                          Accounts
-///     CLIENT_A    client_a   pbkdf2-sha256$600000$<salt>$<key>     TRADING-1,TRADING-2
+///     # CompID    Username   PasswordHash                          Accounts              Addresses
+///     CLIENT_A    client_a   pbkdf2-sha256$600000$<salt>$<key>     TRADING-1,TRADING-2   203.0.113.7,203.0.113.8
 ///
+/// Addresses, the counterparty's IPv4 addresses, may be left out: it then connects from anywhere (#554). Behind
+/// rootless podman's published port a client on the server's own host shows as the host's address or as
+/// 169.254.1.2, not as itself; QuickFIX's event log for the session names the address of each connection.
 /// Fields are separated by spaces or tabs. Blank lines, and lines whose first non-blank character is '#', are ignored.
 /// The file holds only password hashes, so it may be readable by others: the server runs as uid 10001 in its image, and
 /// a rootless container can't read a host file that only its owner may read.
@@ -37,8 +44,8 @@ class FixCredentials final
 {
 public:
     /// Reads the file. Throws std::runtime_error, naming the file and the line, for a file it can't read or a line it
-    /// can't use: too few or too many fields, a CompID given twice, a hash it doesn't recognise, an empty account, or
-    /// an account given twice.
+    /// can't use: too few or too many fields, a CompID given twice, a hash it doesn't recognise, an empty account, an
+    /// account given twice, or an address that isn't IPv4 in dotted form or is given twice.
     static FixCredentials load(const std::string &path);
     /// Parses text as load() parses a file's; source names it in errors
     static FixCredentials parse(std::string_view text, const std::string &source);

@@ -15,6 +15,7 @@ named, CLIENT_A, and trade any account. Now:
 
 usage: FixLogonTest.py <orderProcessorServer> <seedData> <config/fix.cfg> <config/spec>
 """
+import glob
 import hashlib
 import os
 import shutil
@@ -105,6 +106,36 @@ def logons_and_accounts(args):
         a.close()
 
 
+def addresses(args):
+    """#554: a counterparty whose line gives addresses connects only from them. QuickFIX closes a connection from any
+    other before it reads the Logon, so no password check runs for it, and the session's event log names the address it
+    denied. The server runs here directly, so a local client is 127.0.0.1."""
+    counterparties = [('CLIENT_A', 'client_a', 'password-a', 'CLIENT-A', '203.0.113.7'),
+                      ('CLIENT_B', 'client_b', 'password-b', 'CLIENT-A', '203.0.113.7,127.0.0.1')]
+    with Server(*args, counterparties) as running:
+        port = running.fix_port
+        a = Client(port, 'CLIENT_A')
+        a.logon('client_a', 'password-a')
+        answer = a.read_until(lambda m: m.get('35') in ('A', '5'), 10)
+        expect(answer is None,
+               f'CLIENT_A, allowed only 203.0.113.7, connecting from 127.0.0.1: not answered ({answer})')
+        expect(a.closed_by_server(), 'and the server closes its connection')
+        a.close()
+        b = Client(port, 'CLIENT_B')
+        b.logon('client_b', 'password-b')
+        expect(b.read_until(lambda m: m.get('35') == 'A') is not None,
+               'CLIENT_B, allowed 127.0.0.1 too, logs on from it')
+        b.send('5', [])
+        b.read_until(lambda m: m.get('35') == '5', 5)
+        b.close()
+        logs = glob.glob(os.path.join(running.work, 'fix-log', '*CLIENT_A*event*'))
+        events = ''.join(open(path).read() for path in logs)
+        expect('Deny connections to the acceptor from 127.0.0.1' in events,
+               'CLIENT_A\'s event log names the address it denied')
+        expect('FIX logon refused for FIXT.1.1:ORDER_PROCESSOR->CLIENT_A' not in running.log(),
+               'no password was checked for it')
+
+
 def hash_tool(server):
     made = subprocess.run([server, '--hash-fix-password'], input='a password\n', capture_output=True, text=True,
                           timeout=120)
@@ -123,6 +154,7 @@ def main():
     args = sys.argv[1:]
     startup(args)
     logons_and_accounts(args)
+    addresses(args)
     hash_tool(args[0])
     sys.exit(1 if problems else 0)
 

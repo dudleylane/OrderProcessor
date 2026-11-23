@@ -154,12 +154,12 @@ def write_cfg(source, work, port, spec, extra=None):
 
 
 def write_credentials(work, counterparties):
-    """A credentials file with a line per (CompID, Username, password, accounts)"""
+    """A credentials file with a line per (CompID, Username, password, accounts[, addresses]) (#554)"""
     path = os.path.join(work, 'fix-credentials')
     with open(path, 'w') as f:
-        f.write('# CompID  Username  PasswordHash  Accounts\n')
-        for comp_id, username, password, accounts in counterparties:
-            f.write(f'{comp_id} {username} {hash_password(password)} {accounts}\n')
+        f.write('# CompID  Username  PasswordHash  Accounts  Addresses\n')
+        for comp_id, username, password, accounts, *addresses in counterparties:
+            f.write(f'{comp_id} {username} {hash_password(password)} {accounts} {" ".join(addresses)}'.rstrip() + '\n')
     return path
 
 
