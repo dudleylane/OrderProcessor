@@ -988,7 +988,7 @@ void Processor::process([[maybe_unused]] const ACID::TransactionId &id, ACID::Tr
     }
 }
 
-void Processor::matchRestored(OrderEntry *order)
+Processor::RestoredOutcome Processor::matchRestored(OrderEntry *order)
 {
     if (nullptr == order) [[unlikely]]
     {
@@ -997,6 +997,29 @@ void Processor::matchRestored(OrderEntry *order)
     if (!threadState().events.empty()) [[unlikely]]
     {
         throw std::runtime_error("Processor::matchRestored: events queue is not empty!");
+    }
+    Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
+    cntxt.clock_ = &clock_;
+    bool expired = false;
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, false);
+        // The restart fires the restored orders' due timers first (#768), and an order may have been closed since it
+        // was restored: a closed order is neither matched nor booked
+        if (!order->working())
+        {
+            return RestoredOutcome::CLOSED;
+        }
+        // Its time in force ended while the server was down: it expires, as its timer would have expired it then, and
+        // never trades (#768, as ruled). App::finishRestart() sets its timer only once this is done: restore left it
+        // out of the book, where a timer's unbooking wouldn't find it.
+        DateTimeT expiresAt = 0;
+        Queues::TimerEvent::TimerType timer = Queues::TimerEvent::INVALID_TIMER;
+        expired = ExpiryScheduler::expiryOf(*order, &expiresAt, &timer) && (expiresAt <= cntxt.now());
+    }
+    if (expired)
+    {
+        expireRestored(order, cntxt);
+        return RestoredOutcome::EXPIRED;
     }
     // The operations OrdStateImpl::processReceive gave the transaction that booked the order, run here, on the caller's
     // thread, as process() runs a transaction: the order is matched, then booked if it rests in the price book. Not
@@ -1015,8 +1038,6 @@ void Processor::matchRestored(OrderEntry *order)
             scope.addOperation(book);
         }
     }
-    Context cntxt(orderStorage_, orderBook_, inQueues_, outQueues_, &matcher_, generator_, this);
-    cntxt.clock_ = &clock_;
     if (!scope.executeTransaction(cntxt))
     {
         clearDeferedEvents();
@@ -1025,6 +1046,32 @@ void Processor::matchRestored(OrderEntry *order)
     }
     // The fills, and a market order's cancel when nothing is left to trade with, as process() applies them, and then
     // the releases of the held stops they reach
+    processRestoredDeferedEvent();
+    return RestoredOutcome::MATCHED;
+}
+
+void Processor::expireRestored(OrderEntry *order, const Context &cntxt)
+{
+    // Run here, on the caller's thread, as matchRestored() runs the order's match: nothing else runs on the book now
+    TransactionScope scope;
+    {
+        ScopeArenaGuard arenaGuard(&scope);
+        if (OrderParams::Book::PRICE == order->book())
+        {
+            // Added before the decision's own operations, and run after the decision below: the order is closed, with
+            // no leaves, before it is in the book, and the decision's unbooking takes it out again
+            std::unique_ptr<Operation> book(new AddToOrderBookTrOperation(*order));
+            scope.addOperation(book);
+        }
+        process(OrderStateChange::EXPIRE, order, &scope, cntxt);
+    }
+    if (!scope.executeTransaction(cntxt))
+    {
+        clearDeferedEvents();
+        throw std::runtime_error("Processor::matchRestored: order " + std::to_string(order->orderId_.id_) +
+                                 ", whose time in force ended while the server was down, could not be expired!");
+    }
+    // An expiry queues no event; whatever one queued would be drained as a match's are
     processRestoredDeferedEvent();
 }
 

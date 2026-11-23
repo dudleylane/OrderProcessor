@@ -16,12 +16,14 @@
 #include <format>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 
 #include "Logger.h"
 #include "WideDataStorage.h"
 #include "IdTGenerator.h"
 #include "OrderStorage.h"
 #include "ExpiryScheduler.h"
+#include "Processor.h"
 
 using namespace COP;
 
@@ -146,19 +148,51 @@ App::ServerData App::loadServerData(const std::string &dataDir, size_t lmdbMapSi
     return data;
 }
 
-size_t App::scheduleRestoredExpiries(const Store::OrderDataStorage &storage, Proc::ExpiryScheduler *expiry)
+namespace
+{
+bool isLive(const OrderEntry &order)
+{
+    return (NEW_ORDSTATUS == order.status_) || (PARTFILL_ORDSTATUS == order.status_) ||
+           (SUSPENDED_ORDSTATUS == order.status_);
+}
+
+/// Sets the order's expiry timer, if its time in force ends, a DAY or GTD order's: true if it set one
+bool scheduleExpiry(const OrderEntry &order, Proc::ExpiryScheduler *expiry)
+{
+    DateTimeT when = 0;
+    Queues::TimerEvent::TimerType type = Queues::TimerEvent::INVALID_TIMER;
+    if (!Proc::ExpiryScheduler::expiryOf(order, &when, &type))
+    {
+        return false;
+    }
+    // Taken before #511 refused one: the timers wait for it with no deadline, so it never comes due
+    if (Proc::ExpiryScheduler::LATEST_TIME < when)
+    {
+        aux::ExchLogger::instance()->warn(
+            "Order " + std::to_string(order.orderId_.id_) + " expires at " + std::to_string(when) +
+            " ms, past the latest time the server can wait until: it won't expire, and stays open until it is canceled "
+            "(#511)");
+    }
+    expiry->schedule(order.orderId_, when, type);
+    return true;
+}
+} // namespace
+
+size_t App::scheduleRestoredExpiries(const Store::OrderDataStorage &storage, Proc::ExpiryScheduler *expiry,
+                                     const std::vector<OrderEntry *> &unbooked)
 {
     assert(nullptr != expiry);
+    const std::unordered_set<const OrderEntry *> leftOut(unbooked.begin(), unbooked.end());
     size_t timers = 0;
     storage.forEachOrder(
         [&](const IdT &, const OrderEntry &order)
         {
-            DateTimeT when = 0;
-            Queues::TimerEvent::TimerType type = Queues::TimerEvent::INVALID_TIMER;
-            const bool live = (NEW_ORDSTATUS == order.status_) || (PARTFILL_ORDSTATUS == order.status_) ||
-                              (SUSPENDED_ORDSTATUS == order.status_);
+            if (!isLive(order))
+            {
+                return;
+            }
             // Taken before #601 refused it: no auction runs, so it trades as a GTC order, as it did. It has no timer.
-            if (live && ((OPG_TIF == order.tif_) || (ATCLOSE_TIF == order.tif_)))
+            if ((OPG_TIF == order.tif_) || (ATCLOSE_TIF == order.tif_))
             {
                 aux::ExchLogger::instance()->warn(
                     "Order " + std::to_string(order.orderId_.id_) + " is " +
@@ -166,24 +200,119 @@ size_t App::scheduleRestoredExpiries(const Store::OrderDataStorage &storage, Pro
                     ", which the server no longer takes: it trades as a GTC order until it is filled or canceled, and "
                     "a replace must give it another time in force (#601)");
             }
-            if (live && Proc::ExpiryScheduler::expiryOf(order, &when, &type))
+            // One restore left out of the book gets its expiry's timer once the restart has matched it (#768)
+            if ((0 == leftOut.count(&order)) && scheduleExpiry(order, expiry))
             {
-                // Taken before #511 refused one: the timers wait for it with no deadline, so it never comes due
-                if (Proc::ExpiryScheduler::LATEST_TIME < when)
-                {
-                    aux::ExchLogger::instance()->warn(
-                        "Order " + std::to_string(order.orderId_.id_) + " expires at " + std::to_string(when) +
-                        " ms, past the latest time the server can wait until: it won't expire, and stays open until "
-                        "it is canceled (#511)");
-                }
-                expiry->schedule(order.orderId_, when, type);
                 ++timers;
             }
-            if (live && Proc::ExpiryScheduler::restatementOf(order, &when))
+            DateTimeT when = 0;
+            if (Proc::ExpiryScheduler::restatementOf(order, &when))
             {
                 expiry->schedule(order.orderId_, when, Queues::TimerEvent::RESTATEMENT);
                 ++timers;
             }
         });
     return timers;
+}
+
+size_t App::scheduleExpiriesOf(const std::vector<OrderEntry *> &orders, Proc::ExpiryScheduler *expiry)
+{
+    assert(nullptr != expiry);
+    size_t timers = 0;
+    for (const OrderEntry *order : orders)
+    {
+        if (isLive(*order) && scheduleExpiry(*order, expiry))
+        {
+            ++timers;
+        }
+    }
+    return timers;
+}
+
+App::RestartWork App::finishRestart(Proc::Processor &processor, const std::vector<OrderEntry *> &ordersToMatch,
+                                    const std::vector<OrderEntry *> &stopsReached,
+                                    const Store::OrderDataStorage &storage, Proc::ExpiryScheduler &expiry,
+                                    const std::function<void()> &waitIdle)
+{
+    RestartWork work;
+    // Expire first (#768, as ruled): what a firing decides can set another timer, and that one due too (a restatement
+    // sets the next), so the timers fire until none is due, with the engine idle between rounds. Each round is decided
+    // before the next, and all of them before the matching below.
+    work.timers = scheduleRestoredExpiries(storage, &expiry, ordersToMatch);
+    for (size_t fired = expiry.fireDue(); 0 < fired; fired = expiry.fireDue())
+    {
+        work.fired += fired;
+        waitIdle();
+    }
+
+    // A crash after the transaction that booked an order committed, and before the one with its fills, or with the
+    // cancel of what it couldn't trade, did, leaves the order restored as booked: the load left each such order out of
+    // the book, which it would cross (#207) or, as an order that never rests, rest in (#489). Match them now, in the
+    // order they arrived and before any client can send an order, as their bookings did. Their fills and cancels
+    // persist and report through the transaction workers.
+    for (OrderEntry *order : ordersToMatch)
+    {
+        try
+        {
+            switch (processor.matchRestored(order))
+            {
+            case Proc::Processor::RestoredOutcome::MATCHED:
+                ++work.matched;
+                break;
+            case Proc::Processor::RestoredOutcome::EXPIRED:
+                ++work.expired;
+                break;
+            case Proc::Processor::RestoredOutcome::CLOSED:
+                break;
+            }
+        }
+        catch (const std::exception &ex)
+        {
+            aux::ExchLogger::instance()->error("Restored order " + std::to_string(order->orderId_.id_) +
+                                               " lost its fills or its cancel and could not be matched: " + ex.what());
+        }
+        // A trade here can release a held stop, and the release matches it in a transaction of its own, on a
+        // transaction worker (#223). The next order is matched on this thread, outside the manager, so it waits for
+        // every transaction to finish: matched at once, the two could trade with the same resting order.
+        waitIdle();
+    }
+    if (!ordersToMatch.empty())
+    {
+        aux::ExchLogger::instance()->warn(
+            std::to_string(ordersToMatch.size()) + " restored order(s) had lost their fills or their cancel; matched " +
+            std::to_string(work.matched) + " of them and expired " + std::to_string(work.expired) +
+            ", whose time in force ended while the server was down, before taking orders");
+    }
+
+    // A crash after a trade's transaction committed, and before the release of a held stop it reached did, leaves the
+    // stop held, and only a trade releases one (#237). The trade's transaction persisted its instrument's last trade,
+    // which names the releases pending then (#518), and the load found the stops among them still held. Release them
+    // now, after the orders above, whose lost trades came before the lost releases, and before any client can send an
+    // order.
+    for (OrderEntry *stop : stopsReached)
+    {
+        try
+        {
+            processor.releaseRestored(stop);
+            ++work.released;
+        }
+        catch (const std::exception &ex)
+        {
+            aux::ExchLogger::instance()->error(
+                "Restored stop " + std::to_string(stop->orderId_.id_) +
+                " whose release a trade left pending could not be released: " + ex.what());
+        }
+        // Each release matches on a transaction worker, and the next one must see its trades
+        waitIdle();
+    }
+    if (!stopsReached.empty())
+    {
+        aux::ExchLogger::instance()->warn(std::to_string(stopsReached.size()) +
+                                          " restored stop(s) had lost their release; released " +
+                                          std::to_string(work.released) + " before taking orders");
+    }
+
+    // The orders matched above that rest get their expiries' timers now (#768)
+    work.timers += scheduleExpiriesOf(ordersToMatch, &expiry);
+    return work;
 }
