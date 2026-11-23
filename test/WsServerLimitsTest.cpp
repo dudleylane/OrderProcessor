@@ -16,6 +16,8 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <array>
+#include <functional>
 #include <optional>
 #include <string>
 #include <thread>
@@ -141,6 +143,50 @@ protected:
         websocket::stream<beast::tcp_stream> ws{ ioc };
         beast::flat_buffer buffer;
     };
+
+    /// A connection that sends nothing until the test makes it, as a client that never upgrades (#541)
+    struct Idle
+    {
+        net::io_context ioc;
+        tcp::socket socket{ ioc };
+    };
+
+    bool connectIdle(Idle &idle)
+    {
+        beast::error_code ec;
+        idle.socket.connect(endpoint_, ec);
+        return !ec;
+    }
+
+    /// What the server sends an idle connection within timeout, until it closes it; nullopt if it doesn't close it
+    std::optional<std::string> closedWithin(Idle &idle, std::chrono::milliseconds timeout)
+    {
+        std::string received;
+        std::array<char, 512> chunk{};
+        std::optional<beast::error_code> ended;
+        std::function<void(beast::error_code, std::size_t)> onRead = [&](beast::error_code ec, std::size_t bytes)
+        {
+            received.append(chunk.data(), bytes);
+            if (ec)
+            {
+                ended = ec;
+                return;
+            }
+            idle.socket.async_read_some(net::buffer(chunk), onRead);
+        };
+        idle.socket.async_read_some(net::buffer(chunk), onRead);
+        idle.ioc.restart();
+        idle.ioc.run_for(timeout);
+        if (!ended)
+        {
+            beast::error_code ignored;
+            idle.socket.cancel(ignored);
+            idle.ioc.restart();
+            idle.ioc.run();
+            return std::nullopt;
+        }
+        return received;
+    }
 
     /// Connects, and is true once the server has answered the handshake and sent its first message. The kernel
     /// completes the TCP connection whether or not the server accepts it, so a server that refuses it, or never
@@ -484,6 +530,71 @@ TEST_F(WsServerLimitsTest, AConnectionBeyondTheLimitIsClosed)
     // Once one closes, there is room again
     first.ws.close(websocket::close_code::normal);
     EXPECT_NE(nullptr, connectEventually()) << "a connection within the limit wasn't served";
+}
+
+TEST_F(WsServerLimitsTest, AConnectionInItsHandshakeDoesntCountAgainstTheLimit)
+{
+    // A connection counted against --max-connections from its accept, so one that connected and sent nothing held a
+    // place for 30 s, and as many as the limit kept every client out (#541). Here the limit is one.
+    App::WsLimits limits;
+    limits.maxConnections = 1;
+    limits.handshakeTimeout = std::chrono::seconds(60); // the idle connection stays, however slow the run
+    start(limits);
+    Idle idle;
+    ASSERT_TRUE(connectIdle(idle));
+    Client client;
+    EXPECT_TRUE(connect(client)) << "a connection that sent nothing kept a client out";
+}
+
+TEST_F(WsServerLimitsTest, TheOldestConnectionInItsHandshakeIsDroppedToTakeANewOne)
+{
+    // Connections whose upgrade isn't decided have a limit of their own (#541). Past it the oldest is dropped, so a
+    // client behind connections that send nothing still gets its 101.
+    App::WsLimits limits;
+    limits.maxHandshakes = 4;
+    limits.handshakeTimeout = std::chrono::seconds(60); // only the drop closes one, however slow the run
+    start(limits);
+    std::vector<std::unique_ptr<Idle>> idle;
+    for (int i = 0; i < 4; ++i)
+    {
+        idle.push_back(std::make_unique<Idle>());
+        ASSERT_TRUE(connectIdle(*idle.back()));
+    }
+    Client client;
+    EXPECT_TRUE(connect(client)) << "connections that sent nothing kept a client out";
+    EXPECT_TRUE(closedWithin(*idle[0], 2000ms).has_value()) << "the oldest connection in its handshake wasn't dropped";
+    EXPECT_FALSE(closedWithin(*idle[1], 200ms).has_value()) << "a newer connection in its handshake was dropped";
+}
+
+TEST_F(WsServerLimitsTest, AConnectionThatSendsNoUpgradeIsClosedAtItsHandshakeTime)
+{
+    // 5 s where it was 30 (#541); here 1 s
+    App::WsLimits limits;
+    limits.handshakeTimeout = std::chrono::seconds(1);
+    start(limits);
+    Idle idle;
+    ASSERT_TRUE(connectIdle(idle));
+    EXPECT_TRUE(closedWithin(idle, 3000ms).has_value()) << "a connection that sent nothing outlived its handshake time";
+}
+
+TEST_F(WsServerLimitsTest, AnUpgradePastTheLimitIsRefusedWith503)
+{
+    // A connection taken while there was room upgrades after a client has taken it: its upgrade, where it is counted,
+    // is refused, since the server would otherwise run past its limit (#541)
+    App::WsLimits limits;
+    limits.maxConnections = 1;
+    limits.handshakeTimeout = std::chrono::seconds(60); // the late connection is still open to upgrade, however slow
+    start(limits);
+    Idle late;
+    ASSERT_TRUE(connectIdle(late));
+    Client client;
+    ASSERT_TRUE(connect(client));
+    const std::string upgrade = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+    net::write(late.socket, net::buffer(upgrade));
+    const std::optional<std::string> answer = closedWithin(late, REPLY_TIMEOUT);
+    ASSERT_TRUE(answer.has_value()) << "the server didn't answer and close the upgrade past its limit";
+    EXPECT_EQ(0u, answer->rfind("HTTP/1.1 503", 0)) << *answer;
 }
 
 TEST_F(WsServerLimitsTest, BookUpdatesGoOutWhileAClientSubscribes)
