@@ -73,7 +73,7 @@ Integration tests using real IncomingQueues, Processor, TaskManager, and OrderBo
 | `ReplaceOfAFilledOrder_ViaFix_IsRefusedToTheSender` | Replace of a filled order → refused (too late) to the sending session, with the request's ClOrdIDs |
 | `ReplaceToBelowWhatIsFilled_ViaFix_FillsTheReplacement` | EP284's C.3.c: Replace (Y,X) to 30 of a buy of 100 with 40 filled → X REPLACED, Y FILLED with OrderQty amended up to 40 and nothing left, one REPLACE report, no reject; a status request for X or Y gets Y's state, and a sell at the price rests (#381) |
 | `SourceStringPreserved` | Order source tracks back to `"FIX:TRADER_A->ORDER_PROCESSOR"` |
-| `MarketOrder_FillsImmediately` | Market order enters pipeline with correct type/side/qty |
+| `MarketOrder_FillsImmediately` | A market buy for a resting sell's whole quantity fills both at once: the buy's reports are NEW, then TRADE, and each side's ExecutionReport, as its session gets it, is 150=F and 39=2, with LastQty and CumQty 100, LastPx and AvgPx the sell's price and LeavesQty 0. It checked only the gateway's translation until #594 |
 | `TwoSessions_CanUseTheSameClOrdId` | Two sessions each place ClOrdID `SAME-1` → both NEW, and each session's cancel finds its own order (#71) |
 | `AnotherSessionsCancelAndReplace_ViaFix_DoNotReachTheEngine` | A second session's cancel and replace naming the first session's ClOrdID → the order is untouched, and the engine sees neither (#71) |
 | `CancelSentBeforeItsOrderIsStored_CancelsIt` | A cancel sent while the engine's input holds its order waits for the order, which is then acknowledged and canceled (NEW, then CANCEL), as in EP284's B.1.d and B.1.e; it was refused as unknown, and the order rested (#380) |
@@ -109,7 +109,8 @@ Pure unit tests for static enum conversion functions. No I/O, no singletons.
 | `TifConversion` | FIX TimeInForce (0,1,2,3,4,7) → COP TimeInForce |
 | `CurrencyConversion` | FIX currency strings → COP Currency (8 currencies + invalid) |
 | `OrdStatusConversion` | COP OrderStatus → FIX OrdStatus chars (11 statuses; REPLACED → 4, since 39=5 has been out of use since FIX 4.4) |
-| `ExecTypeConversion` | COP ExecType → FIX ExecType chars (12 types) |
+| `ExecTypeConversion` | COP ExecType → FIX ExecType chars (all 14) |
+| `EveryExecTypeMapsToOneOfItsOwn` | Every ExecType from NEW to TRIGGERED maps to a FIX ExecType that no other maps to: one the switch doesn't name takes its default, NEW, as a stop's release did until #236 (#594) |
 
 ---
 
@@ -406,6 +407,7 @@ Runs `orderProcessorServer` with a certificate made for the run, and checks, on 
 - a client that checks the certificate logs on over TLS 1.2 or 1.3, and its order is acknowledged;
 - a plain TCP client gets no answer, and the server closes the connection;
 - with the settings' own `SSLProtocol` at TLS 1.3 only, a TLS 1.2 client fails the handshake and a TLS 1.3 one logs on;
+- with `CertificationAuthoritiesFile` naming a CA made for the run: at `CertificateVerifyLevel` 1 a client showing a certificate the CA signed logs on, and one showing none, or one it signed itself, is refused; at 2 one showing none logs on, and one showing its own is refused (#594);
 - without the flags FIX runs over plain TCP, and the server warns so, once (#228);
 - with `--bind 127.0.0.1` the server warns, once, that FIX listens on every interface, naming its port, and without `--bind` it doesn't (#641).
 
