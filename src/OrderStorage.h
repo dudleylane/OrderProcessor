@@ -161,6 +161,14 @@ public:
         }
     }
 
+    /// How many orders are stored, open or closed, under the store's read lock: what metrics_update reports, where it
+    /// walked every order under the lock once a second on the IO thread and called the count active (#543)
+    size_t orderCount() const
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
+        return ordersById_.size();
+    }
+
     ExecutionEntry *locateByExecId(const IdT &execId) const;
     void save(const ExecutionEntry *exec);
     ExecutionEntry *save(const ExecutionEntry &exec, IdTValueGenerator *idGenerator);

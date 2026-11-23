@@ -50,10 +50,17 @@ const DEFAULT_RULES: AlertRule[] = [
   },
 ];
 
+// Metrics the server sends under another name now: a rule saved on the old name moves to the new one as it loads, or
+// it would read a figure no sample has and never fire (#543)
+const RENAMED_METRICS: Record<string, string> = { activeOrders: 'storedOrders' };
+
 function loadRules(): AlertRule[] {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return JSON.parse(stored);
+    if (stored) {
+      const rules: AlertRule[] = JSON.parse(stored);
+      return rules.map(rule => (rule.metric in RENAMED_METRICS ? { ...rule, metric: RENAMED_METRICS[rule.metric] } : rule));
+    }
   } catch { /* ignore */ }
   return DEFAULT_RULES;
 }

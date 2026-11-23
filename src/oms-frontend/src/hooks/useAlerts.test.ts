@@ -140,6 +140,26 @@ describe('useAlerts (#520)', () => {
     expect(raised[0].value).toBe(1); // the step from 3, not the count of 4
   });
 
+  it('moves a rule saved on activeOrders to storedOrders, the name the server sends that count under (#543)', () => {
+    const saved: AlertRule = {
+      id: 'many-orders',
+      name: 'Many Orders',
+      metric: 'activeOrders',
+      operator: '>',
+      threshold: 10,
+      severity: 'WARNING',
+      enabled: true,
+      useDelta: false,
+    };
+    localStorage.setItem('oms-alert-rules', JSON.stringify([saved]));
+    const hook = renderAlerts();
+    expect(hook.result.current.rules[0].metric).toBe('storedOrders');
+    hook.rerender({ history: withSamples([], [sample({ storedOrders: 11 })]) });
+    const raised = raisedBy(hook.result.current.alerts, 'many-orders');
+    expect(raised).toHaveLength(1);
+    expect(raised[0].value).toBe(11);
+  });
+
   it('sees two rises of 3 in one render as two rises of 3, not one of 6, and alerts on a later rise of 6', () => {
     const rising: AlertRule = {
       id: 'queue-rising',

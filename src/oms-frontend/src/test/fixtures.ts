@@ -22,7 +22,7 @@ export function sample(figures: Partial<SystemMetrics> = {}): SystemMetrics {
     poolAllocations: 0,
     poolArenaSize: 0,
     activeSessions: 0,
-    activeOrders: 0,
+    storedOrders: 0,
     storageMapSize: 0,
     storageMapUsed: 0,
     serverStart: 0,
