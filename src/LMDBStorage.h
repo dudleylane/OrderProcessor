@@ -146,7 +146,8 @@ private:
     std::atomic<size_t> mapUsed_;
     /// Held around every transaction. LMDB serializes writers itself, but it lets the map's size change only while no
     /// transaction is open in the process (#148), and only a lock of the storage's own can promise that. Last in the
-    /// lock order (#636; docs/ARCHITECTURE.md section 6.2): no other lock of the engine's is taken under it.
+    /// lock order (#636; docs/ARCHITECTURE.md section 6.2): no other lock of the engine's is taken under it, but the
+    /// logger's, as grow() warns that the map grew.
     mutable std::mutex txnLock_;
     std::atomic<u64> commits_{ 0 };
 
