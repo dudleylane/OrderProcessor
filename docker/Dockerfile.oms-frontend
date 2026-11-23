@@ -7,8 +7,9 @@ COPY src/oms-frontend/package*.json ./
 RUN npm ci
 COPY src/oms-frontend/ .
 # No VITE_WS_URL: the app connects to /ws on the page's own host and port, which nginx.conf passes to the server (#157)
-# The frontend's tests first (#548): a test that fails stops the image, and with it CI's frontend image job
-RUN npm test && npm run build
+# The frontend's lint and tests first (#548): a finding or a failing test stops the image, and with it CI's frontend image
+# job
+RUN npm run lint && npm test && npm run build
 
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
