@@ -109,6 +109,37 @@ describe('useAlerts (#520)', () => {
     expect(raisedBy(hook.result.current.alerts, FAILED_RULE)).toHaveLength(1);
   });
 
+  it('takes a restarted server\'s first sample as having no predecessor, though the server before it counted more (#677)', () => {
+    const hook = renderAlerts();
+    // The server before the restart had counted 3 failures: its first sample raises an alert of its own
+    let history = withSamples([], [sample({ serverStart: 1000, transactionsFailed: 3 })]);
+    hook.rerender({ history });
+    expect(raisedBy(hook.result.current.alerts, FAILED_RULE)).toHaveLength(1);
+    wait(31_000);
+    // The restarted server has counted 1 failure since its start: compared with the 3 before, it would be a step of -2
+    history = withSamples(history, [sample({ serverStart: 2000, transactionsFailed: 1 })]);
+    hook.rerender({ history });
+    const raised = raisedBy(hook.result.current.alerts, FAILED_RULE);
+    expect(raised).toHaveLength(2);
+    expect(raised[0].value).toBe(1);
+  });
+
+  it('compares a sample from the same start with the one before it, as after a reconnect to the same server (#677)', () => {
+    const hook = renderAlerts();
+    let history = withSamples([], [sample({ serverStart: 1000, transactionsFailed: 3 })]);
+    hook.rerender({ history });
+    wait(31_000);
+    history = withSamples(history, [sample({ serverStart: 1000, transactionsFailed: 3 })]);
+    hook.rerender({ history });
+    expect(raisedBy(hook.result.current.alerts, FAILED_RULE)).toHaveLength(1); // the first sample's own
+    wait(31_000);
+    history = withSamples(history, [sample({ serverStart: 1000, transactionsFailed: 4 })]);
+    hook.rerender({ history });
+    const raised = raisedBy(hook.result.current.alerts, FAILED_RULE);
+    expect(raised).toHaveLength(2);
+    expect(raised[0].value).toBe(1); // the step from 3, not the count of 4
+  });
+
   it('sees two rises of 3 in one render as two rises of 3, not one of 6, and alerts on a later rise of 6', () => {
     const rising: AlertRule = {
       id: 'queue-rising',

@@ -270,5 +270,8 @@ export interface SystemMetrics {
   storageMapSize: number;
   /** bytes of the map in use: the high-water mark of its pages */
   storageMapUsed: number;
+  /** when the server started, in ms since the epoch: the same in every sample one start sends, so a sample with another
+   * comes from a restarted server, whose counters began again from 0 (#677) */
+  serverStart: number;
   timestamp: number;
 }
