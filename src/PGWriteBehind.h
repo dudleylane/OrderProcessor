@@ -39,8 +39,8 @@ public:
     ~PGWriteBehind();
 
     void enqueue(PGWriteRequest &&req);
-    /// Writes what is queued, then stops the thread. If the database can't be reached by then, what is left is dropped,
-    /// counted and logged: shutdown doesn't wait for it.
+    /// Writes what is queued, then stops the thread. If the database can't be reached by then, or its schema refuses
+    /// the server's statements (#590), what is left is dropped, counted and logged: shutdown doesn't wait for it.
     void shutdown();
 
     u64 totalEnqueued() const
@@ -57,7 +57,7 @@ public:
     {
         return totalErrors_.load(std::memory_order_relaxed);
     }
-    /// Requests left unwritten at shutdown, because the database couldn't be reached
+    /// Requests left unwritten at shutdown, because the database couldn't be reached or its schema refused them (#590)
     u64 totalDropped() const
     {
         return totalDropped_.load(std::memory_order_relaxed);
@@ -67,6 +67,12 @@ public:
     u64 totalCoalesced() const
     {
         return totalCoalesced_.load(std::memory_order_relaxed);
+    }
+    /// Connections whose statements the database's schema refused (#590): the writer closes each and connects again,
+    /// as it does for a database it can't reach, and only the first of a run is logged. Nothing is written meanwhile.
+    u64 totalSchemaRefusals() const
+    {
+        return totalSchemaRefusals_.load(std::memory_order_relaxed);
     }
     /// The rows of the requests queued and not yet taken by the writer, in the order it will write them: at most one
     /// per row (#231)
@@ -107,6 +113,7 @@ private:
     std::atomic<u64> totalErrors_{ 0 };
     std::atomic<u64> totalDropped_{ 0 };
     std::atomic<u64> totalCoalesced_{ 0 };
+    std::atomic<u64> totalSchemaRefusals_{ 0 };
 };
 
 } // namespace COP::PG
