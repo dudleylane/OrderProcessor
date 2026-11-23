@@ -376,11 +376,11 @@ public:
 
     ~EnqueueOrderEventTrOperation() {}
 
-    virtual void execute(const Context &cnxt)
+    void execute(const Context &cnxt) override
     {
         executeEnqueueOrderEvent(event_, cnxt);
     }
-    virtual void rollback(const Context &cnxt)
+    void rollback(const Context &cnxt) override
     {
         rollbackEnqueueOrderEvent(event_, cnxt);
     }
