@@ -93,14 +93,9 @@ SystemMetrics MetricsPublisher::collect() const
     // Sessions
     m.activeSessions = sessionMgr_->sessionCount();
 
-    // Order count
-    size_t orderCount = 0;
-    orderStorage_->forEachOrder(
-        [&orderCount](const IdT &, const OrderEntry &)
-        {
-            ++orderCount;
-        });
-    m.activeOrders = orderCount;
+    // The orders stored, open or closed: the store's size, where a walk over every order under its lock counted them,
+    // and called the count active (#543)
+    m.storedOrders = orderStorage_->orderCount();
 
     // LMDB's map: its size, which doubles when a write finds it full, and how much of it is in use (#148)
     if (nullptr != storage_)
