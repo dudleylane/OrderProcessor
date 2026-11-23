@@ -23,6 +23,7 @@
 #include "OrderBookImpl.h"
 #include "OrderStorage.h"
 #include "SessionManager.h"
+#include "SettlementDates.h"
 #include "TransactionMgr.h"
 #include "WideDataStorage.h"
 #include "WsServer.h"
@@ -46,6 +47,26 @@ const u32 BURST = 64;
 /// in an empty store, the push), and one that leaves nothing behind, where a new order's strings and execution list
 /// stay in WideDataStorage. The session answers it with nothing: the engine's cancel_reject would.
 const std::string CANCEL = R"({"type":"cancel_order","data":{"orderId":987654321}})";
+
+/// A swap the session takes: its symbol, and its dates after the business day's (#551), made once a run, outside
+/// every timed span. Each reaches the engine's queue as an order of its own, whose ClOrdID, source, destination and
+/// execution list stay in WideDataStorage, as a new order's do: the store grows with the iterations, as the engine
+/// benchmarks' stores do.
+std::string swapOrder()
+{
+    return R"({"type":"new_swap_order","data":{"symbol":"BENCHFX","side":"BUY","nearPrice":1.085,"farPrice":1.087,)"
+           R"("settlDate":)" +
+           std::to_string(test::swapSettlementDate(2)) + R"(,"farSettlDate":)" +
+           std::to_string(test::swapSettlementDate(33)) +
+           R"(,"orderQty":1000000,"currency":"USD","capacity":"AGENCY"}})";
+}
+
+/// What a client's bursts hold
+enum class Burst
+{
+    CANCELS,
+    SWAPS
+};
 
 /// How long a step may wait before the benchmark gives up, so a broken session fails it instead of hanging
 const std::chrono::seconds STEP_TIMEOUT(5);
@@ -76,19 +97,41 @@ struct Singletons
 /// A real WsServer on loopback, as app/main.cpp serves it, with one client connected, both on the benchmark's thread.
 /// The server's io_context runs only when the benchmark serves: the client writes with blocking calls before that, and
 /// a burst fits in the sockets' buffers. The sessions check the engine's work in flight, the queue's events and a
-/// transaction manager's transactions, none, against the server's default bound (#519).
+/// transaction manager's transactions, none, against the server's default bound (#519). A client that sends swaps is
+/// served with what a swap needs: its instrument, and the server's default account and clearing firm (#551).
 class ServedClient
 {
 public:
-    ServedClient()
+    explicit ServedClient(Burst burst = Burst::CANCELS)
     {
         book_.init(OrderBookImpl::InstrumentsT());
         transactMgr_.init(ACID::TransactionMgrParams(IdTGenerator::instance()));
 
+        SourceIdT accountId;
+        SourceIdT clearingId;
+        if (Burst::SWAPS == burst)
+        {
+            auto *instr = new InstrumentEntry();
+            instr->symbol_ = "BENCHFX";
+            instr->securityId_ = "SEC1";
+            instr->securityIdSource_ = "SRC1";
+            instr->instrumentType_ = EQUITY_INSTRUMENTTYPE;
+            Store::WideDataStorage::instance()->add(instr);
+            auto *acct = new AccountEntry();
+            acct->account_ = "BENCHACCT";
+            acct->firm_ = "BENCHFIRM";
+            acct->type_ = PRINCIPAL_ACCOUNTTYPE;
+            accountId = Store::WideDataStorage::instance()->add(acct);
+            auto *clr = new ClearingEntry();
+            clr->firm_ = "BENCHCLR";
+            clearingId = Store::WideDataStorage::instance()->add(clr);
+            message_ = swapOrder();
+        }
+
         server_ = std::make_shared<App::WsServer>(
             serverIoc_, tcp::endpoint(net::ip::make_address("127.0.0.1"), 0), &sessions_,
             Store::WideDataStorage::instance(), Store::OrderStorage::instance(), &inQueues_, IdTGenerator::instance(),
-            &book_, SourceIdT(), SourceIdT(), App::WsLimits(), App::WsAuth(), &inFlight_);
+            &book_, accountId, clearingId, App::WsLimits(), App::WsAuth(), &inFlight_);
         server_->run();
         connected_ = connect();
     }
@@ -106,13 +149,13 @@ public:
         return connected_;
     }
 
-    /// Sends a burst of cancels, each a message of its own
+    /// Sends a burst of cancels or swaps, each a message of its own
     void sendBurst()
     {
         client_.text(true);
         for (u32 i = 0; i < BURST; ++i)
         {
-            client_.write(net::buffer(CANCEL));
+            client_.write(net::buffer(message_));
         }
     }
 
@@ -186,6 +229,7 @@ private:
     OrderBookImpl book_;
     std::shared_ptr<App::WsServer> server_;
     websocket::stream<beast::tcp_stream> client_{ clientIoc_ };
+    std::string message_ = CANCEL;
     bool connected_ = false;
 };
 
@@ -229,3 +273,41 @@ static void BM_WsSessionReadFlood(benchmark::State &state)
     state.SetItemsProcessed(state.iterations() * BURST);
 }
 BENCHMARK(BM_WsSessionReadFlood)->UseManualTime();
+
+/// BM_WsSessionReadFlood for a burst of swaps, each read, parsed, checked and queued as an order of its own (#551): a
+/// swap's entry on the IO thread, which no benchmark reached until #551 checked its dates there. The queue's drain
+/// frees each order; its strings stay in WideDataStorage.
+static void BM_WsSessionReadSwapFlood(benchmark::State &state)
+{
+    ServedClient served(Burst::SWAPS);
+    if (!served.connected())
+    {
+        state.SkipWithError("the client couldn't connect");
+        return;
+    }
+    // Each swap must reach the queue: one the session refused would time its refusal
+    served.sendBurst();
+    if (!served.serveBurst() || (BURST != served.queued()))
+    {
+        state.SkipWithError("the session didn't queue each swap of a burst");
+        return;
+    }
+    served.drain();
+
+    for (auto _ : state)
+    {
+        served.sendBurst();
+        const auto start = std::chrono::steady_clock::now();
+        const bool ok = served.serveBurst();
+        const auto end = std::chrono::steady_clock::now();
+        if (!ok)
+        {
+            state.SkipWithError("the session stopped queueing the burst's swaps");
+            break;
+        }
+        state.SetIterationTime(std::chrono::duration<double>(end - start).count());
+        served.drain();
+    }
+    state.SetItemsProcessed(state.iterations() * BURST);
+}
+BENCHMARK(BM_WsSessionReadSwapFlood)->UseManualTime();
