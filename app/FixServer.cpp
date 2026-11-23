@@ -42,7 +42,26 @@ void addCounterpartySessions(FIX::SessionSettings &settings, const FixCredential
         const FIX::SessionID sid(beginString, senderCompId, counterparty.compId);
         if (!settings.has(sid))
         {
-            settings.set(sid, FIX::Dictionary()); // the rest from [DEFAULT]
+            FIX::Dictionary session; // the rest from [DEFAULT]
+            if (!counterparty.addresses.empty())
+            {
+                // QuickFIX closes a connection from any other address before it reads its Logon (#554)
+                std::string addresses;
+                for (const std::string &address : counterparty.addresses)
+                {
+                    addresses += (addresses.empty() ? "" : ",") + address;
+                }
+                session.setString(FIX::ALLOWED_REMOTE_ADDRESSES, addresses);
+            }
+            settings.set(sid, session);
+        }
+        else if (!counterparty.addresses.empty())
+        {
+            // QuickFIX's settings take a session once, and these name it already
+            throw std::runtime_error(
+                credentialsFile + " gives " + counterparty.compId +
+                "'s addresses, and the FIX settings name its session too: give them in one "
+                "place, as AllowedRemoteAddresses in its section there or on its line here (#554)");
         }
     }
     const std::set<FIX::SessionID> sessions = settings.getSessions();

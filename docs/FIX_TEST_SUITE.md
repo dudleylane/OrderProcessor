@@ -344,6 +344,7 @@ Runs `orderProcessorServer` with this branch's `config/fix.cfg` and two FIX clie
 | `ALogonNeedsTheUsernameAndThePassword` | `verify()` takes only the counterparty's Username and Password, and no stored password that isn't a hash |
 | `AFileNamesEachCounterpartyItsUserAndItsAccounts` | Lines with spaces or tabs, CR LF endings, comments and blank lines; accounts in order |
 | `ALineThatCantBeUsedIsRefusedWithItsNumber` | A wrong field count, a CompID or an account given twice, an empty account, a hash in another form: refused with the file and line |
+| `AddressesAreTakenAsQuickFixComparesThem` | A line's fifth field, its addresses, read in order, and none from a line without one; an address QuickFIX would never match, written with leading zeros, as a name, as IPv6 or short of four numbers, refused, and so are an empty one and one given twice (#554) |
 | `AFileItCantReadIsRefused` | A missing file is refused, naming it |
 
 ---
@@ -357,6 +358,7 @@ Runs `orderProcessorServer` with this branch's `config/fix.cfg` and a credential
 - the server won't start FIX without `--fix-credentials` (exit 2), nor with an account the data directory lacks, nor with a BeginString or DefaultApplVerID other than FIXT.1.1's and FIX 5.0 SP2's (exit 1, #377);
 - a Logon with a wrong password, none, another username, or DefaultApplVerID 7 (FIX 5.0, not SP2) gets a Logout and a closed connection, and one from a CompID no line names, or of FIX 4.4, is dropped; the log says why, and has no password in it;
 - with its password the counterparty logs on, an order on one of its accounts is acknowledged, and one on another account is refused with 150=8 and 103=15;
+- a counterparty whose line allows only another address is closed unanswered from 127.0.0.1, with no password checked, and its session's event log names the address it denied, while one whose line lists 127.0.0.1 logs on (#554);
 - `--hash-fix-password` makes a hash Python's own PBKDF2 agrees with, with 600000 iterations.
 
 `test/fix_client.py` holds the raw-socket FIX client and server harness it shares with `FixResendTest.py`.

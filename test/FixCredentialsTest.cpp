@@ -57,7 +57,7 @@ TEST(FixCredentialsTest, EachHashHasItsOwnSalt)
 
 TEST(FixCredentialsTest, ALogonNeedsTheUsernameAndThePassword)
 {
-    const FixCounterparty counterparty{ "CLIENT_A", "client_a", quickHash("secret"), { "TRADING-1" } };
+    const FixCounterparty counterparty{ "CLIENT_A", "client_a", quickHash("secret"), { "TRADING-1" }, {} };
     EXPECT_TRUE(FixCredentials::verify(counterparty, "client_a", "secret"));
     EXPECT_FALSE(FixCredentials::verify(counterparty, "client_a", "Secret"));
     EXPECT_FALSE(FixCredentials::verify(counterparty, "client_a", "secret "));
@@ -65,7 +65,7 @@ TEST(FixCredentialsTest, ALogonNeedsTheUsernameAndThePassword)
     EXPECT_FALSE(FixCredentials::verify(counterparty, "client_b", "secret"));
     EXPECT_FALSE(FixCredentials::verify(counterparty, "", "secret"));
 
-    const FixCounterparty unusable{ "CLIENT_A", "client_a", "secret", { "TRADING-1" } };
+    const FixCounterparty unusable{ "CLIENT_A", "client_a", "secret", { "TRADING-1" }, {} };
     EXPECT_FALSE(FixCredentials::verify(unusable, "client_a", "secret")); // a password, not a hash
 }
 
@@ -102,7 +102,8 @@ TEST(FixCredentialsTest, ALineThatCantBeUsedIsRefusedWithItsNumber)
 {
     const std::string hash = quickHash("a");
     expectRefused("CLIENT_A client_a " + hash, "creds:1: a counterparty takes 4 fields");
-    expectRefused("\nCLIENT_A client_a " + hash + " TRADING-1 extra", "creds:2: a counterparty takes 4 fields");
+    expectRefused("\nCLIENT_A client_a " + hash + " TRADING-1 10.0.0.1 extra",
+                  "creds:2: a counterparty takes 4 fields");
     expectRefused("CLIENT_A a " + hash + " T\nCLIENT_A b " + hash + " T",
                   "creds:2: the CompID CLIENT_A is given twice");
     expectRefused("CLIENT_A client_a secret TRADING-1", "creds:1: the password hash isn't pbkdf2-sha256$");
@@ -118,6 +119,30 @@ TEST(FixCredentialsTest, ALineThatCantBeUsedIsRefusedWithItsNumber)
                   "an account in \"TRADING-1,,CLIENT-A\" is empty");
     expectRefused("CLIENT_A client_a " + hash + " TRADING-1,", "is empty");
     expectRefused("CLIENT_A client_a " + hash + " TRADING-1,TRADING-1", "the account TRADING-1 is given twice");
+}
+
+// A counterparty's addresses, the fifth field, which its session gets as AllowedRemoteAddresses (#554). QuickFIX
+// compares a connection's address, as inet_ntoa() writes it, exactly: an address written any other way would refuse
+// every connection, so it is refused here
+TEST(FixCredentialsTest, AddressesAreTakenAsQuickFixComparesThem)
+{
+    const std::string hash = quickHash("a");
+    const FixCredentials credentials = FixCredentials::parse("CLIENT_A client_a " + hash +
+                                                                 " TRADING-1 203.0.113.7,127.0.0.1\n"
+                                                                 "CLIENT_B client_b " +
+                                                                 hash + " TRADING-1\n",
+                                                             "creds");
+    EXPECT_EQ((std::vector<std::string>{ "203.0.113.7", "127.0.0.1" }), credentials.find("CLIENT_A")->addresses);
+    EXPECT_TRUE(credentials.find("CLIENT_B")->addresses.empty()) << "none given: any address";
+
+    const std::string line = "CLIENT_A client_a " + hash + " TRADING-1 ";
+    for (const char *address : { "10.0.0.256", "localhost", "010.0.0.1", "10.0.0", "10.0.0.1.2", "::1" })
+    {
+        expectRefused(line + address, "isn't an IPv4 address in dotted form");
+    }
+    expectRefused(line + "10.0.0.1,,10.0.0.2", "the address \"\" isn't an IPv4 address");
+    expectRefused(line + "10.0.0.1,", "an address in \"10.0.0.1,\" is empty");
+    expectRefused(line + "10.0.0.1,10.0.0.1", "the address 10.0.0.1 is given twice");
 }
 
 TEST(FixCredentialsTest, AFileItCantReadIsRefused)
