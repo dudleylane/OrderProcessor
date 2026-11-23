@@ -55,7 +55,7 @@ export function DashboardTab({ metricsHistory }: Props) {
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
         <MetricCard label="Active Sessions" value={String(latest.activeSessions)} />
-        <MetricCard label="Active Orders" value={String(latest.activeOrders)} />
+        <MetricCard label="Stored Orders" value={String(latest.storedOrders)} />
         <MetricCard label="Queue Depth" value={String(latest.queueDepth)} />
         <MetricCard label="Pending Transactions" value={String(latest.pendingTransactions)} />
         <MetricCard
