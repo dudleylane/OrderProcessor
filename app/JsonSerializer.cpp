@@ -296,7 +296,7 @@ std::string App::serializeMetricsUpdate(const SystemMetrics &m)
     data["poolAllocations"] = m.poolAllocations;
     data["poolArenaSize"] = m.poolArenaSize;
     data["activeSessions"] = m.activeSessions;
-    data["activeOrders"] = m.activeOrders;
+    data["storedOrders"] = m.storedOrders;
     data["storageMapSize"] = m.storageMapSize;
     data["storageMapUsed"] = m.storageMapUsed;
     data["serverStart"] = m.serverStart;

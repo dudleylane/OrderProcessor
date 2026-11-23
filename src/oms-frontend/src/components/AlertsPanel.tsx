@@ -23,7 +23,7 @@ const METRIC_OPTIONS = [
   { value: 'pendingTransactions', label: 'Pending Transactions' },
   { value: 'poolCacheMisses', label: 'Pool Cache Misses' },
   { value: 'poolAllocations', label: 'Pool Scope Allocations' },
-  { value: 'activeOrders', label: 'Active Orders' },
+  { value: 'storedOrders', label: 'Stored Orders' },
   { value: 'activeSessions', label: 'Active Sessions' },
   { value: 'eventsProcessed', label: 'Events Processed' },
   { value: 'transactionsProcessed', label: 'Transactions Processed' },
