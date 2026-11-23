@@ -105,7 +105,7 @@ void WsServer::onAccept(beast::error_code ec, tcp::socket socket)
     }
     if (connections_->load(std::memory_order_relaxed) >= limits_.maxConnections)
     {
-        // Over the limit: closed at once (#159)
+        // As many sessions as the limit: closed at once (#159). Only sessions count, from their upgrade (#541).
         refusals_.warn("refused a connection: " + std::to_string(limits_.maxConnections) +
                        " clients are connected, the limit (--max-connections)");
         beast::error_code ignored;
@@ -114,10 +114,29 @@ void WsServer::onAccept(beast::error_code ec, tcp::socket socket)
         return;
     }
 
-    connections_->fetch_add(1, std::memory_order_relaxed);
+    // Connections whose upgrade isn't decided yet have a limit of their own (#541). Past it the oldest is dropped,
+    // rather than this one refused: a client that connects and sends nothing can hold a place only until a newer one
+    // needs it, or for its 5 s.
+    std::erase_if(handshakes_,
+                  [](const std::weak_ptr<WsSession> &held)
+                  {
+                      const std::shared_ptr<WsSession> session = held.lock();
+                      return (nullptr == session) || !session->inHandshake();
+                  });
+    if (handshakes_.size() >= limits_.maxHandshakes)
+    {
+        if (const std::shared_ptr<WsSession> oldest = handshakes_.front().lock())
+        {
+            oldest->dropInHandshake();
+        }
+        handshakes_.pop_front();
+        handshakeDrops_.warn("dropped the oldest of " + std::to_string(limits_.maxHandshakes) +
+                             " connections still in their handshake, to take a new one");
+    }
     auto session = std::make_shared<WsSession>(std::move(socket), sessionMgr_, wideData_, orderStorage_, inQueues_,
                                                idGen_, orderBook_, defaultClearingId_, defaultAccountId_, limits_,
                                                connections_, auth_, inFlight_);
+    handshakes_.push_back(session);
     session->run();
 
     doAccept();
