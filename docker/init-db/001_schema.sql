@@ -212,8 +212,9 @@ CREATE TABLE orders (
     -- Order parameters
     side                side          NOT NULL,
     ord_type            order_type    NOT NULL,
-    price               NUMERIC(18,8),
-    stop_px             NUMERIC(18,8),
+    -- Prices are NUMERIC with no precision: (18,8) refused 1e10 or more, which the engine accepts (#538)
+    price               NUMERIC,
+    stop_px             NUMERIC,
     -- A STOP or STOPLIMIT order's stop was reached, and the order released (#223, #236)
     stop_triggered      BOOLEAN       NOT NULL DEFAULT false,
     -- Quantities are BIGINT: the engine's are unsigned 32-bit, which INTEGER can't hold above 2147483647 (#151)
@@ -221,10 +222,10 @@ CREATE TABLE orders (
     min_qty             BIGINT        NOT NULL DEFAULT 0,
     leaves_qty          BIGINT        NOT NULL DEFAULT 0,
     cum_qty             BIGINT        NOT NULL DEFAULT 0,
-    avg_px              NUMERIC(18,8) NOT NULL DEFAULT 0,
+    avg_px              NUMERIC       NOT NULL DEFAULT 0,
     day_order_qty       BIGINT        NOT NULL DEFAULT 0,
     day_cum_qty         BIGINT        NOT NULL DEFAULT 0,
-    day_avg_px          NUMERIC(18,8) NOT NULL DEFAULT 0,
+    day_avg_px          NUMERIC       NOT NULL DEFAULT 0,
     -- When the business day the day figures are for began, 17:00 New York (#244); NULL for none
     day_start           TIMESTAMPTZ,
 
@@ -243,7 +244,7 @@ CREATE TABLE orders (
     expire_time         TIMESTAMPTZ,
     settl_date          DATE,
     -- An FX swap's far leg, NULL for any other order: its price, and its settlement day in UTC (#151)
-    far_price           NUMERIC(18,8),
+    far_price           NUMERIC,
     far_settl_date      DATE,
     created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),

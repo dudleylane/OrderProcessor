@@ -209,7 +209,8 @@ TEST_F(PGWriteBehindTest, ASwapsFarLegLandsInItsRow)
     writer.shutdown();
     ASSERT_EQ(0u, writer.totalErrors());
 
-    EXPECT_EQ("1.08750000", select("SELECT far_price::text FROM orders WHERE order_id = 151009"));
+    // Compared as a number: the column has no scale since #538, so its text is the value's own, 1.0875
+    EXPECT_EQ("true", select("SELECT (far_price = 1.0875)::text FROM orders WHERE order_id = 151009"));
     EXPECT_EQ("2026-12-16", select("SELECT far_settl_date::text FROM orders WHERE order_id = 151009"));
     EXPECT_EQ("2026-11-15", select("SELECT settl_date::text FROM orders WHERE order_id = 151009"));
     EXPECT_EQ(
@@ -232,6 +233,29 @@ TEST_F(PGWriteBehindTest, AQuantityAboveIntegersRangeLands)
 
     EXPECT_EQ("4000000000", select("SELECT order_qty::text FROM orders WHERE order_id = 151003"));
     EXPECT_EQ("4000000000", select("SELECT leaves_qty::text FROM orders WHERE order_id = 151003"));
+}
+
+TEST_F(PGWriteBehindTest, APriceOfTenBillionOrMoreLands)
+{
+    forget(151538);
+    // The price columns were NUMERIC(18,8), which refused 1e10 or more, though the engine accepts any finite price
+    // (#538)
+    PGWriteBehind writer(connection_);
+    writeReferenceData(writer);
+    OrderWrite order = makeOrder(151538);
+    order.price = 1e12;
+    order.stopPx = 2.5e10;
+    order.avgPx = 1.5e10;
+    order.dayAvgPx = 1.25e10;
+    order.farPrice = 3e10; // a swap's far leg's, on this branch
+    writer.enqueue(PGWriteRequest{ std::move(order) });
+    writer.shutdown();
+    ASSERT_EQ(0u, writer.totalErrors());
+
+    EXPECT_EQ("true", select("SELECT (price = 1000000000000 AND stop_px = 25000000000 AND avg_px = 15000000000 AND "
+                             "day_avg_px = 12500000000 AND far_price = 30000000000)::text FROM orders "
+                             "WHERE order_id = 151538"));
+    forget(151538);
 }
 
 TEST_F(PGWriteBehindTest, AStopsReleaseReachesItsRow)
@@ -308,7 +332,8 @@ TEST_F(PGWriteBehindTest, ALaterWriteOfAnOrderReplacesItsRowAndADeleteRemovesIt)
         ASSERT_EQ(0u, writer.totalErrors());
     }
     EXPECT_EQ("FILLED", select("SELECT status::text FROM orders WHERE order_id = 151004"));
-    EXPECT_EQ("101.25000000", select("SELECT price::text FROM orders WHERE order_id = 151004"));
+    // As a number: NUMERIC with no precision keeps the scale it is given, where (18,8) padded it to eight places (#538)
+    EXPECT_EQ("true", select("SELECT (price = 101.25)::text FROM orders WHERE order_id = 151004"));
     EXPECT_EQ("1", select("SELECT count(*) FROM orders WHERE order_id = 151004"));
 
     // A rollback that leaves LMDB no version of the order (#151)
