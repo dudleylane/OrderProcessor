@@ -38,8 +38,15 @@ class FixGateway;
 /// mark on go into the new day's store first, numbered from 1, each with PossResend (97) Y, and the session numbers
 /// what it sends next after them, so the client's ResendRequest at its logon gets them. They keep the mark, at 1, until
 /// one does. A reset within the day carries nothing: a Logon with ResetSeqNumFlag (141) Y asks to start again from 1,
-/// and does, as it always has. A message QuickFIX sent while the client was logged on isn't carried, even if the
-/// connection had died before it arrived: within the day a ResendRequest gets it back.
+/// and does, as it always has.
+///
+/// A message QuickFIX sent while the client was logged on can have gone into a connection that died unnoticed: one
+/// without a FIN stays logged on until 2.4 heartbeat intervals of silence have passed. So the new day also carries
+/// the application messages stored after the client was last heard from, whichever of the two comes first (#658,
+/// as ruled). Hearing is QuickFIX's taking an incoming message in sequence, which advances the store's expected
+/// MsgSeqNum; a heartbeat counts. A client heard from after the last report has nothing carried this way, and a
+/// healthy one, which heartbeats every interval, gets at most an interval's reports again, each with 97=Y. That
+/// point is kept in memory alone: a server restarted across the day's end carries only the mark.
 ///
 /// QuickFIX calls set(), get() and reset() under its session state's lock, so the mark needs no lock of its own.
 class FixCarryingStore final : public FIX::MessageStore
@@ -73,6 +80,9 @@ public:
 
     /// The first message the client hasn't received, as far as this store knows, or 0 for none
     FIX::SEQNUM unsentFrom() const;
+    /// The first application message stored after the client was last heard from, or 0 when it has been heard from
+    /// since the last one stored: a new day carries from here, or from unsentFrom(), whichever comes first (#658)
+    FIX::SEQNUM unheardFrom() const;
     /// Where the messages are kept: what get() would give, without moving the mark
     FIX::MessageStore *inner() const;
 
@@ -96,6 +106,11 @@ private:
     const std::string name_;
     std::atomic<FIX::Session *> session_{ nullptr };
     mutable FIX::SEQNUM unsentFrom_ = 0; // get(), a const reader, moves it
+    // The first application message stored since the client was last heard from, and whether it has been heard from
+    // since the last one stored (#658). QuickFIX changes the store's sequence numbers and stores under one lock, as
+    // it calls set(), get() and reset().
+    FIX::SEQNUM unheardFrom_ = 0;
+    bool heard_ = false;
 };
 
 /// Makes a FixCarryingStore for each session, over the store inner makes for it, with the session time the session's

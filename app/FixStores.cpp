@@ -59,10 +59,20 @@ bool FixCarryingStore::set(FIX::SEQNUM seq, const std::string &message)
     const bool stored = inner_->set(seq, message);
     // QuickFIX stores each message it sends before it decides, under the same lock, whether to send it: only to a
     // client that is logged on
-    if ((0 == unsentFrom_) && !loggedOn() && isApplication(message))
+    if (!isApplication(message))
+    {
+        return stored;
+    }
+    if ((0 == unsentFrom_) && !loggedOn())
     {
         unsentFrom_ = seq;
         keepMark();
+    }
+    // The first one since the client was last heard from: it, and what follows it, may not have arrived (#658)
+    if (heard_ || (0 == unheardFrom_))
+    {
+        unheardFrom_ = seq;
+        heard_ = false;
     }
     return stored;
 }
@@ -97,6 +107,7 @@ void FixCarryingStore::setNextSenderMsgSeqNum(FIX::SEQNUM seq)
 void FixCarryingStore::setNextTargetMsgSeqNum(FIX::SEQNUM seq)
 {
     inner_->setNextTargetMsgSeqNum(seq);
+    heard_ = true; // a gap fill the client sent, taken (#658)
 }
 
 void FixCarryingStore::incrNextSenderMsgSeqNum()
@@ -107,6 +118,7 @@ void FixCarryingStore::incrNextSenderMsgSeqNum()
 void FixCarryingStore::incrNextTargetMsgSeqNum()
 {
     inner_->incrNextTargetMsgSeqNum();
+    heard_ = true; // QuickFIX took a message the client sent, in sequence: it was alive then (#658)
 }
 
 FIX::UtcTimeStamp FixCarryingStore::getCreationTime() const
@@ -119,10 +131,15 @@ void FixCarryingStore::reset(const FIX::UtcTimeStamp &now)
     std::vector<std::string> carried;
     // QuickFIX resets a store for a new session day when the store's day isn't now's, which is this test
     // (Session::checkSessionTime()), and for nothing else unless a Logon asks for it, within the day
-    if ((0 != unsentFrom_) && sessionTime_ && !sessionTime_->isInSameRange(now, inner_->getCreationTime()))
+    // From the first the client hasn't received, or the first stored since it was last heard from, whichever comes
+    // first (#658)
+    const FIX::SEQNUM unheard = heard_ ? 0 : unheardFrom_;
+    const FIX::SEQNUM from =
+        ((0 == unsentFrom_) || ((0 != unheard) && (unheard < unsentFrom_))) ? unheard : unsentFrom_;
+    if ((0 != from) && sessionTime_ && !sessionTime_->isInSameRange(now, inner_->getCreationTime()))
     {
         std::vector<std::string> stored;
-        inner_->get(unsentFrom_, inner_->getNextSenderMsgSeqNum() - 1, stored);
+        inner_->get(from, inner_->getNextSenderMsgSeqNum() - 1, stored);
         for (std::string &message : stored)
         {
             // A session message is the old day's alone: a ResendRequest gets a gap fill in its place
@@ -134,6 +151,8 @@ void FixCarryingStore::reset(const FIX::UtcTimeStamp &now)
     }
     inner_->reset(now);
     unsentFrom_ = 0;
+    unheardFrom_ = 0;
+    heard_ = false;
     FIX::SEQNUM seq = 1;
     for (const std::string &message : carried)
     {
@@ -172,6 +191,11 @@ void FixCarryingStore::refresh()
 FIX::SEQNUM FixCarryingStore::unsentFrom() const
 {
     return unsentFrom_;
+}
+
+FIX::SEQNUM FixCarryingStore::unheardFrom() const
+{
+    return heard_ ? 0 : unheardFrom_;
 }
 
 FIX::MessageStore *FixCarryingStore::inner() const
