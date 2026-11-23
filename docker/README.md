@@ -37,10 +37,11 @@ The first build takes several minutes (C++ compilation inside the container). Su
 The server's FIX acceptor, on port 5001, lets a counterparty log on only with the Username and Password its line in `docker/fix-credentials` gives, and trade only the accounts it lists (#147). Compose mounts the file into the server's container, and the server won't start without it. A line per counterparty:
 
 ```
-# CompID   Username   PasswordHash                          Accounts
-CLIENT_A   client_a   pbkdf2-sha256$600000$<salt>$<key>     TRADING-1,TRADING-2
+# CompID   Username   PasswordHash                          Accounts              Addresses (optional)
+CLIENT_A   client_a   pbkdf2-sha256$600000$<salt>$<key>     TRADING-1,TRADING-2   203.0.113.7
 ```
 
+- **Addresses (#554).** If given, the counterparty's IPv4 addresses, comma-separated: QuickFIX closes a connection from any other before it reads the Logon. Through the stack's published port a client on this host shows as the host's address or as 169.254.1.2 (rootless podman's pasta), not as itself. The session's event log, under the server's `fix-log`, names each connection's address: list that one.
 - **The hash.** The quick start's line makes one with Python's PBKDF2. The server makes the same, `orderProcessorServer --hash-fix-password`, from a password on standard input.
 - **Readable by others.** The file holds only hashes, so it may be, and it must be: the server runs as `oms` (uid 10001), and rootless podman shows a file only its owner may read as root's, which `oms` can't read.
 - **Changes.** Add or change a line, then `docker compose restart oms-server`.

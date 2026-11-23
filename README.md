@@ -157,11 +157,11 @@ With FIX gateway enabled (requires `BUILD_FIX=ON`):
 
 Add `--fix-tls-cert tls.crt --fix-tls-key tls.key` to serve FIX over TLS (#228).
 
-`fix-credentials` has a line per FIX counterparty: its CompID, Username, password hash and the accounts it may trade (#147). `orderProcessorServer --hash-fix-password` reads a password from standard input and prints its hash:
+`fix-credentials` has a line per FIX counterparty: its CompID, Username, password hash and the accounts it may trade (#147), and, if given, the IPv4 addresses it may connect from (#554). QuickFIX closes a connection from any other before it reads the Logon, and its event log for the session names each connection's address. Behind rootless podman's published port, a client on the server's own host shows as the host's address or as 169.254.1.2, not as itself. `orderProcessorServer --hash-fix-password` reads a password from standard input and prints its hash:
 
 ```
-# CompID   Username   PasswordHash                          Accounts
-CLIENT_A   client_a   pbkdf2-sha256$600000$<salt>$<key>     TRADING-1,TRADING-2
+# CompID   Username   PasswordHash                          Accounts              Addresses (optional)
+CLIENT_A   client_a   pbkdf2-sha256$600000$<salt>$<key>     TRADING-1,TRADING-2   203.0.113.7,203.0.113.8
 ```
 
 Seed a new data directory first. Until then it has no instruments, accounts or clearing firm, and the server answers every order with an `error` (#161). `seedData` on its own seeds test data, so don't run it that way on a directory in real use: give it your own reference data with `--file`.

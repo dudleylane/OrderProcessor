@@ -6,6 +6,9 @@
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
 #include <algorithm>
 #include <charconv>
 #include <fstream>
@@ -141,6 +144,17 @@ std::vector<std::string_view> fieldsOf(std::string_view line)
         at = end;
     }
 }
+
+/// Whether text is an IPv4 address as inet_ntoa() writes one: four numbers 0 to 255, in decimal with no leading zeros,
+/// and nothing else. That is the form QuickFIX gives a connection's address in, and it compares an address it is
+/// given exactly (#554), so one written any other way would never match. inet_pton() takes that form alone: four
+/// decimal parts, not the fewer, octal or hex ones inet_aton() takes, and glibc's refuses a leading zero.
+bool isDottedIpv4(std::string_view text)
+{
+    const std::string address(text);
+    in_addr parsed{};
+    return 1 == inet_pton(AF_INET, address.c_str(), &parsed);
+}
 } // namespace
 
 FixCredentials FixCredentials::load(const std::string &path)
@@ -178,12 +192,13 @@ FixCredentials FixCredentials::parse(std::string_view text, const std::string &s
         {
             throw std::runtime_error(source + ":" + std::to_string(lineNumber) + ": " + what);
         };
-        if (4 != fields.size())
+        if ((4 != fields.size()) && (5 != fields.size()))
         {
-            fail("a counterparty takes 4 fields, its CompID, Username, PasswordHash and Accounts, not " +
+            fail("a counterparty takes 4 fields, its CompID, Username, PasswordHash and Accounts, and a fifth, the "
+                 "Addresses it may connect from, if it gives them; not " +
                  std::to_string(fields.size()));
         }
-        FixCounterparty counterparty{ std::string(fields[0]), std::string(fields[1]), std::string(fields[2]), {} };
+        FixCounterparty counterparty{ std::string(fields[0]), std::string(fields[1]), std::string(fields[2]), {}, {} };
         if (nullptr != credentials.find(counterparty.compId))
         {
             fail("the CompID " + counterparty.compId + " is given twice");
@@ -213,6 +228,32 @@ FixCredentials FixCredentials::parse(std::string_view text, const std::string &s
                 break;
             }
             accounts.remove_prefix(comma + 1);
+        }
+        std::string_view addresses = (5 == fields.size()) ? fields[4] : std::string_view();
+        while (!addresses.empty())
+        {
+            const std::size_t comma = addresses.find(',');
+            const std::string_view address = addresses.substr(0, comma);
+            if (!isDottedIpv4(address))
+            {
+                fail("the address \"" + std::string(address) +
+                     "\" isn't an IPv4 address in dotted form, as QuickFIX compares a connection's (#554)");
+            }
+            if (counterparty.addresses.end() !=
+                std::find(counterparty.addresses.begin(), counterparty.addresses.end(), address))
+            {
+                fail("the address " + std::string(address) + " is given twice");
+            }
+            counterparty.addresses.emplace_back(address);
+            if (std::string_view::npos == comma)
+            {
+                break;
+            }
+            addresses.remove_prefix(comma + 1);
+            if (addresses.empty())
+            {
+                fail("an address in \"" + std::string(fields[4]) + "\" is empty");
+            }
         }
         credentials.counterparties_.push_back(std::move(counterparty));
     }
