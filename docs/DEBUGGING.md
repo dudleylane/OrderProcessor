@@ -111,6 +111,33 @@ nm build/orderProcessorBench | grep -c 'TransactionScopePool'
 # Paste isolated hot-path functions to check for unexpected spills, branches, or calls
 ```
 
+### Where jumps fall (Skylake's JCC erratum)
+
+A Skylake-era core, such as the CI laptop's i7-6820HQ, runs microcode for the JCC erratum that keeps a 32-byte block out of the uop cache when a jump in it crosses or ends on its boundary. So a change that only moves code can move a benchmark: #516's check made `BM_FixReplaceRequest` +6.0% at 20 x 3 with 92 more instructions a call, and -1.6% once both trees were built with the assembler's mitigation. Haswell, such as an i7-4770, and Zen aren't affected. On an affected core, a regression that is gone once both builds carry the mitigation, with each span's instructions counted (`scripts/loop-instructions.sh`), is placement, which CLAUDE.md's layout rule takes with a `Deviation:` trailer (#670).
+
+```bash
+# In each tree, before the change and after it: a bench build with the mitigation, at compile and at link, since
+# LTO generates and assembles the code at link time
+cmake -S . -B build-jcc -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_APP=OFF \
+  -DCMAKE_CXX_FLAGS=-Wa,-mbranches-within-32B-boundaries -DCMAKE_EXE_LINKER_FLAGS=-Wa,-mbranches-within-32B-boundaries
+cmake --build build-jcc --target orderProcessorBench
+
+# The mitigation took: no conditional jump in the function the regression is in crosses or ends on a 32-byte
+# boundary (FUNCTION: the start of its demangled name)
+objdump -d --no-show-raw-insn -C build-jcc/orderProcessorBench | awk '/<FUNCTION/,/^$/' | python3 -c '
+import re, sys
+ins = [(int(m.group(1), 16), m.group(2)) for m in (re.match(r"\s*([0-9a-f]+):\s+(\S+)", l) for l in sys.stdin) if m]
+print(sum(1 for (a, op), (b, _) in zip(ins, ins[1:])
+          if op.startswith("j") and op != "jmp" and (b % 32 == 0 or a // 32 != (b - 1) // 32)), "on a boundary")'
+
+# The tree before the change: its mitigated binary as the baseline. The tree after it: the comparison
+scripts/benchmark-regression.sh --update-baseline --no-build --build-dir build-jcc --baseline /tmp/jcc-before.bin
+scripts/benchmark-regression.sh --no-build --build-dir build-jcc --baseline /tmp/jcc-before.bin --pinned 2-5 \
+  --rounds 20 --repetitions 3 --filter 'REGEX'
+```
+
+The counter, run on one engine source compiled alone, found 12 of its 194 conditional jumps on a boundary, and none with the mitigation. On a bench binary built as above, it found none in `OrderMatcher::match`, `Processor::process` or `OrderDataStorage::save`, where a Release bench binary built without the mitigation has 2, 35 and 53 (2026-11-22, on the i7-4770, a Haswell: the counts are the assembler's, whatever the host).
+
 ### Fuzzing
 
 The WebSocket client-message parser (`app/ClientMessageParser.cpp`, the only place untrusted client input is parsed) has a libFuzzer target under `test/fuzz/`. It is built from that one translation unit plus nlohmann::json, with no engine link, so it builds under Clang even though the engine itself does not on this platform (the el10 spdlog 1.14 / fmt 11 pair fails Clang's consteval check inside spdlog's own headers). Always build it with `--target fuzzClientMessage`; a plain `cmake --build` would try to compile the engine too.
