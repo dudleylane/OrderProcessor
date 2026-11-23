@@ -36,8 +36,15 @@ inline constexpr std::size_t DEFAULT_MAX_IN_FLIGHT = 10'000;
 /// state it got as it connected, its order snapshot included, until it has read it (#512).
 struct WsLimits
 {
-    /// Clients connected at once. One more is closed as soon as it is accepted.
+    /// Sessions at once, each counted from its upgrade (#541). A connection taken while the server has this many is
+    /// closed as soon as it is accepted, and an upgrade past it, made by one taken before, is refused with a 503.
     std::size_t maxConnections = DEFAULT_MAX_CONNECTIONS;
+    /// Connections accepted whose upgrade isn't decided yet, which don't count against maxConnections (#541). A
+    /// connection past this many drops the oldest of them, so connections that send nothing can't lock clients out.
+    std::size_t maxHandshakes = 64;
+    /// How long a connection has to send its upgrade request; one that sends nothing is closed then. 5 s, where it
+    /// was 30 (#541).
+    std::chrono::seconds handshakeTimeout{ 5 };
     /// Bytes waiting to be sent to one client after the state it gets as it connects, which isn't counted: its order
     /// snapshot alone can be larger (#512). A client past this, one that doesn't read, is dropped. A message is taken
     /// whatever its size when nothing waits after that state.
