@@ -56,6 +56,8 @@ target_sources(orderProcessorTest
 
         # Doc-code consistency enforcement
         DocConsistencyTest.cpp
+        # The C++ enums against the frontend's and the Postgres schema's (#154 on FX, #548)
+        EnumCouplingTest.cpp
 
         # WebSocket client-message parser (built from app/, which the test target does not link)
         ClientMessageParserTest.cpp
