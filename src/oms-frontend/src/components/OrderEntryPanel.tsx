@@ -20,7 +20,7 @@ export function OrderEntryPanel({
   sendOrder,
   connected,
 }: OrderEntryPanelProps) {
-  const [symbol, setSymbol] = useState('');
+  const [heldSymbol, setSymbol] = useState('');
   const [side, setSide] = useState<Side>(Side.BUY);
   const [ordType, setOrdType] = useState<OrderType>(OrderType.LIMIT);
   const [price, setPrice] = useState('');
@@ -29,11 +29,17 @@ export function OrderEntryPanel({
   const [tif, setTif] = useState<TimeInForce>(TimeInForce.DAY);
   // A GTD order expires at this local date and time (#240)
   const [expireAt, setExpireAt] = useState('');
-  const [account, setAccount] = useState('');
+  const [heldAccount, setAccount] = useState('');
   const [currency, setCurrency] = useState<Currency>(Currency.USD);
   const [capacity, setCapacity] = useState<Capacity>(Capacity.AGENCY);
   // A refused check, or whether the order was sent: its outcome comes later, in the blotters, or as a notice (#521)
   const [lastResult, setLastResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // The instrument and account chosen, while the server's lists have them: a reconnect's session sends both lists
+  // again, and a select whose value its list lacks shows its first option while the panel would send the old value
+  // (#686)
+  const symbol = instruments.some(i => i.symbol === heldSymbol) ? heldSymbol : '';
+  const account = accounts.some(a => a.account === heldAccount) ? heldAccount : '';
 
   const needsPrice = ordType === OrderType.LIMIT || ordType === OrderType.STOPLIMIT;
   const needsStopPx = ordType === OrderType.STOP || ordType === OrderType.STOPLIMIT;
