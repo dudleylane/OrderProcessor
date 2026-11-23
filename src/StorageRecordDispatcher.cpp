@@ -32,6 +32,39 @@
 #include "PGRequestBuilder.h"
 #include "PGWriteBehind.h"
 #include "WideDataStorage.h"
+
+namespace
+{
+/// The mirror's writes while this thread has a group open on a dispatcher (#599). Inside a group LMDB stages a version
+/// and commits it only at commitGroup(), so the version's write waits here until the commit has returned, and goes if
+/// the group aborts or its commit fails: Postgres never gets a version LMDB didn't commit. A thread has one group open
+/// at a time (LMDBStorage refuses a second).
+struct GroupMirror
+{
+    const COP::Store::StorageRecordDispatcher *dispatcher = nullptr;
+    std::vector<COP::PG::PGWriteRequest> writes;
+};
+thread_local GroupMirror groupMirror;
+
+/// Sends the write to Postgres once LMDB has committed its version: now, or at the commit of the group the dispatcher
+/// has open on this thread
+void mirror(const COP::Store::StorageRecordDispatcher *dispatcher, COP::PG::PGWriteBehind *writer,
+            COP::PG::PGWriteRequest &&write)
+{
+    if (dispatcher == groupMirror.dispatcher)
+    {
+        groupMirror.writes.push_back(std::move(write));
+        return;
+    }
+    writer->enqueue(std::move(write));
+}
+
+void forgetGroupMirror() noexcept
+{
+    groupMirror.dispatcher = nullptr;
+    groupMirror.writes.clear();
+}
+} // namespace
 #endif
 
 using namespace std;
@@ -514,7 +547,7 @@ void StorageRecordDispatcher::save(const InstrumentEntry &val)
 #ifdef BUILD_PG
     if (pgWriter_)
     {
-        pgWriter_->enqueue(PG::PGRequestBuilder::fromInstrument(val));
+        mirror(this, pgWriter_, PG::PGRequestBuilder::fromInstrument(val));
     }
 #endif
 }
@@ -545,7 +578,7 @@ void StorageRecordDispatcher::save(const AccountEntry &val)
 #ifdef BUILD_PG
     if (pgWriter_)
     {
-        pgWriter_->enqueue(PG::PGRequestBuilder::fromAccount(val));
+        mirror(this, pgWriter_, PG::PGRequestBuilder::fromAccount(val));
     }
 #endif
 }
@@ -560,7 +593,7 @@ void StorageRecordDispatcher::save(const ClearingEntry &val)
 #ifdef BUILD_PG
     if (pgWriter_)
     {
-        pgWriter_->enqueue(PG::PGRequestBuilder::fromClearing(val));
+        mirror(this, pgWriter_, PG::PGRequestBuilder::fromClearing(val));
     }
 #endif
 }
@@ -610,7 +643,7 @@ u32 StorageRecordDispatcher::save(const OrderEntry &val, const OrderFigures &fig
 #ifdef BUILD_PG
     if (pgWriter_)
     {
-        pgWriter_->enqueue(PG::PGRequestBuilder::fromOrder(val, figures));
+        mirror(this, pgWriter_, PG::PGRequestBuilder::fromOrder(val, figures));
     }
 #endif
     return written;
@@ -624,8 +657,9 @@ void StorageRecordDispatcher::erase(const IdT &orderId, u32 version)
     if (pgWriter_)
     {
         // Postgres follows LMDB back (#151): to the newest version a rollback left, or to no row when it left none.
-        // save() had mirrored the erased version already. This runs inside a rollback, whose remaining steps an
-        // exception would skip, so it never throws.
+        // save() had mirrored the erased version if LMDB committed it; if not, as in a group that aborted (#599), this
+        // writes again a version Postgres has, or deletes a row it never had. This runs inside a rollback, whose
+        // remaining steps an exception would skip, so it never throws.
         try
         {
             std::vector<char> record;
@@ -701,12 +735,39 @@ void StorageRecordDispatcher::beginGroup()
 {
     assert(nullptr != fileStorage_);
     fileStorage_->beginGroup();
+#ifdef BUILD_PG
+    forgetGroupMirror();
+    groupMirror.dispatcher = this;
+#endif
 }
 
 void StorageRecordDispatcher::commitGroup()
 {
     assert(nullptr != fileStorage_);
+#ifdef BUILD_PG
+    try
+    {
+        fileStorage_->commitGroup();
+    }
+    catch (...)
+    {
+        forgetGroupMirror(); // nothing of a group whose commit failed reaches Postgres
+        throw;
+    }
+    // LMDB has committed the group: its versions go to Postgres now, in the order they were written (#599)
+    std::vector<PG::PGWriteRequest> writes;
+    writes.swap(groupMirror.writes);
+    forgetGroupMirror();
+    if (nullptr != pgWriter_)
+    {
+        for (PG::PGWriteRequest &write : writes)
+        {
+            pgWriter_->enqueue(std::move(write));
+        }
+    }
+#else
     fileStorage_->commitGroup();
+#endif
 }
 
 void StorageRecordDispatcher::abortGroup() noexcept
@@ -715,6 +776,9 @@ void StorageRecordDispatcher::abortGroup() noexcept
     {
         fileStorage_->abortGroup();
     }
+#ifdef BUILD_PG
+    forgetGroupMirror();
+#endif
 }
 
 u32 StorageRecordDispatcher::saveLastTrade(const SourceIdT &instrument, PriceT lastPx, const IdT &tradeId,

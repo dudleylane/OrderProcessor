@@ -41,6 +41,11 @@
 #include <filesystem>
 
 #ifdef BUILD_PG
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <pqxx/pqxx>
 
 #include "PGWriteBehind.h"
@@ -1158,6 +1163,132 @@ TEST_F(StorageRecordDispatcherTest, PostgresGetsWhatTheDirectoryHeldBeforeItWasW
                                                    "i.id = o.instrument_id WHERE o.order_id = 151102"));
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
+}
+
+namespace
+{
+/// A local port nothing listens on, for a writer that never connects: what it is given stays queued, and counted
+int closedLocalPort()
+{
+    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(addr);
+    ::bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+    ::getsockname(fd, reinterpret_cast<sockaddr *>(&addr), &length);
+    ::close(fd);
+    return ntohs(addr.sin_port);
+}
+
+std::string offlineConnection()
+{
+    return "host=127.0.0.1 port=" + std::to_string(closedLocalPort()) + " dbname=oms user=oms";
+}
+
+/// Stages what it is given and fails a group's commit, as LMDB's can (#163)
+class FailingCommitSaver final : public FileSaver
+{
+public:
+    void load(const std::string &, FileStorageObserver *) override {}
+    IdT save(const char *, size_t) override
+    {
+        return IdT();
+    }
+    void save(const IdT &, const char *, size_t) override {}
+    u32 update(const IdT &, const char *, size_t) override
+    {
+        return 0;
+    }
+    u32 replace(const IdT &, u32 version, const char *, size_t) override
+    {
+        return version;
+    }
+    void erase(const IdT &, u32) override {}
+    void erase(const IdT &) override {}
+    void commitGroup() override
+    {
+        throw std::runtime_error("the group's commit failed");
+    }
+};
+} // namespace
+
+TEST_F(StorageRecordDispatcherTest, AGroupsVersionsReachPostgresOnlyOnceLMDBHasCommittedThem)
+{
+    // Inside a group LMDB stages a version and commits it at the group's end (#163). Postgres got each version as it
+    // was staged, so a crash before the commit left it a version ahead of LMDB (#599): it gets them at the commit now.
+    const std::string dir = test::uniqueTestPath("dispatcher-pg-group");
+    std::unique_ptr<OrderEntry> buyer(pgTestOrder(599001));
+    std::unique_ptr<OrderEntry> seller(pgTestOrder(599002));
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        PG::PGWriteBehind writer(offlineConnection());
+        dispatcher_->setPGWriter(&writer);
+        const u64 before = writer.totalEnqueued();
+        dispatcher_->beginGroup();
+        dispatcher_->save(*buyer);
+        dispatcher_->save(*seller);
+        EXPECT_EQ(before, writer.totalEnqueued()) << "Postgres got a version LMDB hadn't committed";
+        dispatcher_->commitGroup();
+        EXPECT_EQ(before + 2, writer.totalEnqueued());
+
+        // Outside a group update() commits as it writes, so the version goes at once
+        dispatcher_->save(*buyer);
+        EXPECT_EQ(before + 3, writer.totalEnqueued());
+        dispatcher_->setPGWriter(nullptr);
+        writer.shutdown();
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_F(StorageRecordDispatcherTest, AnAbortedGroupSendsPostgresNothing)
+{
+    const std::string dir = test::uniqueTestPath("dispatcher-pg-abort");
+    std::unique_ptr<OrderEntry> order(pgTestOrder(599003));
+    {
+        LMDBStorage lmdb;
+        dispatcher_->init(restore_.get(), orderBook_.get(), &lmdb, orderStorage_.get());
+        lmdb.load(dir, dispatcher_.get());
+        PG::PGWriteBehind writer(offlineConnection());
+        dispatcher_->setPGWriter(&writer);
+        const u64 before = writer.totalEnqueued();
+        dispatcher_->beginGroup();
+        dispatcher_->save(*order);
+        dispatcher_->abortGroup();
+        EXPECT_EQ(before, writer.totalEnqueued()) << "Postgres got a version LMDB never committed";
+
+        // The next group starts with nothing of the aborted one
+        dispatcher_->beginGroup();
+        dispatcher_->commitGroup();
+        EXPECT_EQ(before, writer.totalEnqueued());
+        dispatcher_->setPGWriter(nullptr);
+        writer.shutdown();
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_F(StorageRecordDispatcherTest, AGroupWhoseCommitFailsSendsPostgresNothing)
+{
+    std::unique_ptr<OrderEntry> order(pgTestOrder(599004));
+    FailingCommitSaver saver;
+    dispatcher_->init(restore_.get(), orderBook_.get(), &saver, orderStorage_.get());
+    PG::PGWriteBehind writer(offlineConnection());
+    dispatcher_->setPGWriter(&writer);
+    const u64 before = writer.totalEnqueued();
+    dispatcher_->beginGroup();
+    dispatcher_->save(*order);
+    EXPECT_THROW(dispatcher_->commitGroup(), std::runtime_error);
+    EXPECT_EQ(before, writer.totalEnqueued()) << "Postgres got a version whose commit failed";
+
+    // Nothing of the failed group is left to go with a later write
+    dispatcher_->save(*order);
+    EXPECT_EQ(before + 1, writer.totalEnqueued());
+    dispatcher_->setPGWriter(nullptr);
+    writer.shutdown();
 }
 #endif
 
