@@ -265,7 +265,8 @@ export interface SystemMetrics {
   poolAllocations: number;
   poolArenaSize: number;
   activeSessions: number;
-  activeOrders: number;
+  /** every order the server holds, open or closed (#543): activeOrders until then, the same count */
+  storedOrders: number;
   /** LMDB's map in bytes, which doubles when a write finds it full (#148) */
   storageMapSize: number;
   /** bytes of the map in use: the high-water mark of its pages */

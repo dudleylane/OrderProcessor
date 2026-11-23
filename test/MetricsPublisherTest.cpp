@@ -224,7 +224,8 @@ TEST_F(MetricsPublisherTest, EachFigureComesFromItsSource)
     EXPECT_EQ(TransactionScope::ARENA_SIZE, m.poolArenaSize);
 
     EXPECT_EQ(sessions.sessionCount(), m.activeSessions);
-    EXPECT_EQ(1u, m.activeOrders);
+    EXPECT_EQ(OrderStorage::instance()->orderCount(), m.storedOrders);
+    EXPECT_EQ(1u, m.storedOrders);
 
     EXPECT_EQ(storage.mapSize(), m.storageMapSize);
     EXPECT_LT(0u, m.storageMapSize);

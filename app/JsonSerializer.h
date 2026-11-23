@@ -60,7 +60,7 @@ struct SystemMetrics
     size_t poolAllocations; ///< scopes the pool allocated: one per transaction, and one per miss (#515)
     size_t poolArenaSize;
     size_t activeSessions;
-    size_t activeOrders;
+    size_t storedOrders;   ///< every order the server holds, open or closed: the store's size (#543)
     size_t storageMapSize; ///< LMDB's map in bytes, which doubles when a write finds it full (#148)
     size_t storageMapUsed; ///< bytes of the map in use: the high-water mark of its pages
     /// When this server started, in ms since the epoch: the same in every sample one start sends, so a client can tell
