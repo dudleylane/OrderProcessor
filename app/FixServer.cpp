@@ -102,6 +102,7 @@ struct FixServer::Impl
     std::unique_ptr<FixRotatingLogFactory> logFactory;      // FileLog's files, bounded (#160)
     std::unique_ptr<FIX::Acceptor> acceptor;                // ThreadedSSLSocketAcceptor with TLS (#228)
     std::string tlsCertificate;                             // what TLS is served with; empty for plain TCP
+    bool stopped = false;                                   // taking no more messages (#553)
 };
 
 FixServer::FixServer(Queues::InQueues *inQueues, Store::WideParamsDataStorage *wideData,
@@ -116,6 +117,9 @@ FixServer::FixServer(Queues::InQueues *inQueues, Store::WideParamsDataStorage *w
 FixServer::~FixServer()
 {
     stop();
+    // The sessions go with the acceptor, before the factories that made their stores and logs and the gateway that is
+    // their application: the members after it are destroyed in the reverse of their order
+    impl_->acceptor.reset();
 }
 
 void FixServer::createSessions(const std::string &configFile, const std::string &credentialsFile,
@@ -207,14 +211,12 @@ std::string FixServer::acceptPorts() const
 
 void FixServer::stop()
 {
-    if (impl_->acceptor)
+    if (impl_->acceptor && !impl_->stopped)
     {
         impl_->acceptor->stop();
-        impl_->acceptor.reset();
-        impl_->settings.reset();
-        impl_->logFactory.reset();
-        impl_->storeFactory.reset();
-        aux::ExchLogger::instance()->note("FIX gateway stopped");
+        impl_->stopped = true;
+        aux::ExchLogger::instance()->note("FIX gateway stopped: its sessions take no more messages, and store what "
+                                          "the engine still reports for their clients (#553)");
     }
 }
 
