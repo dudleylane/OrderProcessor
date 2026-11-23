@@ -100,7 +100,7 @@ struct ExecutionDeferedEvent : public DeferedEventBase
     ExecutionDeferedEvent();
     explicit ExecutionDeferedEvent(OrderEntry *ord);
 
-    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+    void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope) override;
 
     /// Whether a trade's base order can take all of it, qty, before either side is filled (#483): working, with qty
     /// left at least, as the matcher finds each contra (#432). leaves gets what the order has left, read under its lock
@@ -120,7 +120,7 @@ struct MatchOrderDeferedEvent : public DeferedEventBase
     MatchOrderDeferedEvent();
     explicit MatchOrderDeferedEvent(OrderEntry *ord);
 
-    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+    void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope) override;
 };
 
 struct CancelOrderDeferedEvent : public DeferedEventBase
@@ -131,7 +131,7 @@ struct CancelOrderDeferedEvent : public DeferedEventBase
     CancelOrderDeferedEvent();
     explicit CancelOrderDeferedEvent(OrderEntry *ord);
 
-    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+    void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope) override;
 };
 
 /// The release of a held stop order that a trade reached (#223), queued once the trade's fills are decided, if the
@@ -142,7 +142,7 @@ struct ReleaseStopDeferedEvent : public DeferedEventBase
     OrderEntry *order_;
 
     explicit ReleaseStopDeferedEvent(OrderEntry *ord);
-    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+    void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope) override;
 };
 
 /// A client's replace, queued by ReplaceOrderTrOperation once the transactions before it on the original are done
@@ -157,7 +157,7 @@ struct ReplaceRequestDeferedEvent : public DeferedEventBase
                                const std::string &requester);
     ~ReplaceRequestDeferedEvent();
 
-    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+    void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope) override;
 };
 
 /// A client's cancel, queued by CancelOrderTrOperation once the transactions before it on the order are done (#73)
@@ -170,7 +170,7 @@ struct CancelRequestDeferedEvent : public DeferedEventBase
     CancelRequestDeferedEvent(OrderEntry *ord, const std::string &requester,
                               const std::string &requestClOrdId = std::string());
 
-    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+    void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope) override;
 };
 
 /// A state change of an order, queued by ChangeOrderStateTrOperation once the transactions before it on the order are
@@ -182,7 +182,7 @@ struct StateChangeDeferedEvent : public DeferedEventBase
 
     StateChangeDeferedEvent(OrderEntry *ord, OrderStateChange change);
 
-    virtual void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope);
+    void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope) override;
 };
 
 } // namespace Proc

@@ -46,22 +46,22 @@ public:
 
 public:
     /// reimplemented from TransactionManager
-    void attach(TransactionObserver *obs);
-    TransactionObserver *detach();
-    virtual void addTransaction(std::unique_ptr<Transaction> &tr);
-    virtual bool removeTransaction(const TransactionId &id, Transaction *t);
-    virtual bool getParentTransactions(const TransactionId &id, TransactionIdsT *parent) const;
-    virtual bool getRelatedTransactions(const TransactionId &id, TransactionIdsT *related) const;
-    virtual TransactionIterator *iterator();
+    void attach(TransactionObserver *obs) override;
+    TransactionObserver *detach() override;
+    void addTransaction(std::unique_ptr<Transaction> &tr) override;
+    bool removeTransaction(const TransactionId &id, Transaction *t) override;
+    bool getParentTransactions(const TransactionId &id, TransactionIdsT *parent) const override;
+    bool getRelatedTransactions(const TransactionId &id, TransactionIdsT *related) const override;
+    TransactionIterator *iterator() override;
     /// The transactions added and not yet removed, waiting or running. A transaction's deferred events add theirs
     /// before it is removed, so this is 0 only once every transaction and each it led to is done (#223).
-    virtual size_t pendingTransactions() const;
+    size_t pendingTransactions() const override;
 
 public:
     /// reimplemented from TransactionIterator
-    virtual bool next(TransactionId *id, Transaction **tr);
-    virtual bool get(TransactionId *id, Transaction **tr) const;
-    virtual bool isValid() const;
+    bool next(TransactionId *id, Transaction **tr) override;
+    bool get(TransactionId *id, Transaction **tr) const override;
+    bool isValid() const override;
 
 private:
     mutable oneapi::tbb::mutex lock_;

@@ -68,12 +68,12 @@ public:
 
 public:
     /// reimplemented from Scope
-    virtual void addOperation(std::unique_ptr<Operation> &op);
-    virtual void addOperationFirst(std::unique_ptr<Operation> &op);
-    virtual void removeLastOperation();
-    virtual size_t startNewStage();
-    virtual void removeStage(const size_t &id);
-    virtual Operation *findOperation(OperationType type, const IdT &id) const;
+    void addOperation(std::unique_ptr<Operation> &op) override;
+    void addOperationFirst(std::unique_ptr<Operation> &op) override;
+    void removeLastOperation() override;
+    size_t startNewStage() override;
+    void removeStage(const size_t &id) override;
+    Operation *findOperation(OperationType type, const IdT &id) const override;
 
     /// the operations the scope holds
     size_t operationCount() const noexcept
@@ -83,10 +83,10 @@ public:
 
 public:
     /// reimplemented from Transaction
-    virtual const TransactionId &transactionId() const;
-    virtual void setTransactionId(const TransactionId &id);
-    virtual void getRelatedObjects(ObjectsInTransactionT *obj) const;
-    virtual bool executeTransaction(const Context &cnxt);
+    const TransactionId &transactionId() const override;
+    void setTransactionId(const TransactionId &id) override;
+    void getRelatedObjects(ObjectsInTransactionT *obj) const override;
+    bool executeTransaction(const Context &cnxt) override;
 
     /// How many transactions have failed in this process: an operation threw, or their persists' group did as it began
     /// or committed (#163), and their operations were rolled back. Each is logged at error level too (#514).

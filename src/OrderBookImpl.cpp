@@ -41,7 +41,7 @@ class OBLogMessage : public aux::LogMessage
 public:
     OBLogMessage(LogMessages type, const IdT &id) : type_(type), id_(id) {}
 
-    virtual void prepareMessage()
+    void prepareMessage() override
     {
         switch (type_)
         {

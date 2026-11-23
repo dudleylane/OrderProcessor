@@ -34,26 +34,26 @@ public:
 
 public:
     /// reimplemented from InQueues
-    virtual void push(const std::string &source, const OrderEvent &evnt);
-    virtual void push(const std::string &source, const OrderCancelEvent &evnt);
-    virtual void push(const std::string &source, const OrderReplaceEvent &evnt);
-    virtual void push(const std::string &source, const OrderChangeStateEvent &evnt);
-    virtual void push(const std::string &source, const ProcessEvent &evnt);
-    virtual void push(const std::string &source, const TimerEvent &evnt);
-    virtual InQueuesObserver *attach(InQueuesObserver *obs);
-    virtual InQueuesObserver *detach();
+    void push(const std::string &source, const OrderEvent &evnt) override;
+    void push(const std::string &source, const OrderCancelEvent &evnt) override;
+    void push(const std::string &source, const OrderReplaceEvent &evnt) override;
+    void push(const std::string &source, const OrderChangeStateEvent &evnt) override;
+    void push(const std::string &source, const ProcessEvent &evnt) override;
+    void push(const std::string &source, const TimerEvent &evnt) override;
+    InQueuesObserver *attach(InQueuesObserver *obs) override;
+    InQueuesObserver *detach() override;
 
 public:
     /// reimplemented from InQueuesPublisher
-    virtual InQueueProcessor *attach(InQueueProcessor *obs);
-    virtual InQueueProcessor *detachProcessor();
+    InQueueProcessor *attach(InQueueProcessor *obs) override;
+    InQueueProcessor *detachProcessor() override;
 
 public:
     /// reimplemented from InQueuesContainer
-    virtual u32 size() const;
-    virtual bool top(InQueueProcessor *obs);
-    virtual bool pop();
-    virtual bool pop(InQueueProcessor *obs);
+    u32 size() const override;
+    bool top(InQueueProcessor *obs) override;
+    bool pop() override;
+    bool pop(InQueueProcessor *obs) override;
 
 private:
     std::atomic<InQueueProcessor *> processor_;

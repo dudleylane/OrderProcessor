@@ -534,33 +534,33 @@ struct TradeExecEntry : public ExecutionEntry, public ExecTradeParams
     TradeExecEntry();
     TradeExecEntry(const ExecutionEntry &exec, const ExecTradeParams &trade);
     TradeExecEntry(const TradeExecEntry &params);
-    virtual ExecutionEntry *clone() const;
+    ExecutionEntry *clone() const override;
 };
 
 struct RejectExecEntry : public ExecutionEntry, public ExecRejectParams
 {
-    virtual ExecutionEntry *clone() const;
+    ExecutionEntry *clone() const override;
 };
 
 struct ExecCorrectExecEntry : public ExecutionEntry, public ExecCorrectParams
 {
     IdT execRefId_;
 
-    virtual ExecutionEntry *clone() const;
+    ExecutionEntry *clone() const override;
 };
 
 struct ReplaceExecEntry : public ExecutionEntry
 {
     IdT origOrderId_;
 
-    virtual ExecutionEntry *clone() const;
+    ExecutionEntry *clone() const override;
 };
 
 struct TradeCancelExecEntry : public ExecutionEntry
 {
     IdT execRefId_;
 
-    virtual ExecutionEntry *clone() const;
+    ExecutionEntry *clone() const override;
 };
 
 class OrderSaver
