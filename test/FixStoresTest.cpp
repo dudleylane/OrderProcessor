@@ -293,11 +293,13 @@ protected:
 
 TEST_F(FixStoresTest, AReportItsClientDidntGetIsResentOnTheNextSessionDay)
 {
-    // CLIENT_A is logged on in the morning, and gets a report
+    // CLIENT_A is logged on in the morning, and gets a report: it is heard from after it, as a live client is each
+    // heartbeat interval (#658)
     start(newYork(15, 9, 0));
     connect();
     logOn();
     report("E1");
+    receive(FIXT11::Heartbeat());
     EXPECT_EQ((std::vector<std::string>{ "E1 2" }), reportsSent());
     EXPECT_EQ(0u, store()->unsentFrom());
     // Its connection goes, and two reports are stored for it, 3 and 4, not sent
@@ -363,6 +365,7 @@ TEST_F(FixStoresTest, AClientLoggedOnAsTheDayEndsGetsWhatWasSentBeforeItLoggedOn
     connect();
     logOn();
     report("E1");
+    receive(FIXT11::Heartbeat()); // heard from after E1, as a live client is (#658)
     // QuickFIX ends the session day at its first check in 16:59:59, and logs CLIENT_A out: its arithmetic makes that
     // second a day of its own, which ends at 17:00
     now_ = newYork(15, 16, 59, 59, 200);
@@ -383,6 +386,62 @@ TEST_F(FixStoresTest, AClientLoggedOnAsTheDayEndsGetsWhatWasSentBeforeItLoggedOn
     EXPECT_EQ(2u, session_->getExpectedSenderNum());
     logOn();
     EXPECT_EQ((std::vector<std::string>{ "E2 1 43=Y 97=Y" }), reportsSent()) << sentText();
+}
+
+// A connection that dies unnoticed, with no FIN, stays logged on until 2.4 heartbeat intervals of silence have passed:
+// what the session sent into it in that time never arrived, though it went out while the client was logged on. The
+// new day carries what was stored after the client was last heard from, each with 97=Y (#658)
+TEST_F(FixStoresTest, ReportsSentIntoAConnectionThatDiedUnnoticedAreCarried)
+{
+    start(newYork(15, 16, 58, 0));
+    connect();
+    logOn();
+    report("E1");
+    // CLIENT_A heartbeats after E1, then its connection dies: E2 and E3 go into it, and it is never heard from again.
+    // The session heartbeats too as it takes CLIENT_A's, 70 s after it last sent, so E2 and E3 are 4 and 5
+    now_ = newYork(15, 16, 59, 10);
+    receive(FIXT11::Heartbeat());
+    EXPECT_EQ(0u, store()->unheardFrom());
+    now_ = newYork(15, 16, 59, 30);
+    report("E2");
+    report("E3");
+    EXPECT_EQ((std::vector<std::string>{ "E1 2", "E2 4", "E3 5" }), reportsSent()) << sentText();
+    EXPECT_EQ(4u, store()->unheardFrom());
+    EXPECT_EQ(0u, store()->unsentFrom()) << "each went out while CLIENT_A was logged on";
+    // The day ends at QuickFIX's check in 16:59:59, 49 s after the heartbeat: within the 2.4 intervals of silence, 72 s
+    // at 30 s, before QuickFIX would find the connection dead
+    now_ = newYork(15, 16, 59, 59, 200);
+    session_->next(now_);
+    EXPECT_FALSE(session_->isLoggedOn());
+    EXPECT_EQ(1u, store()->unsentFrom());
+
+    // It connects the next morning, and gets E2 and E3, the reports after it was last heard from, not E1
+    now_ = newYork(16, 8, 0);
+    clientDayEnds();
+    connect();
+    logOn();
+    EXPECT_EQ((std::vector<std::string>{ "E2 1 43=Y 97=Y", "E3 2 43=Y 97=Y" }), reportsSent()) << sentText();
+}
+
+// A client heard from after the last report has nothing carried for it: what a live client may get again is what
+// went out in its last heartbeat interval, with 97=Y (#658)
+TEST_F(FixStoresTest, AClientHeardFromAfterItsLastReportHasNothingCarried)
+{
+    start(newYork(15, 16, 58, 0));
+    connect();
+    logOn();
+    report("E1");
+    EXPECT_EQ(2u, store()->unheardFrom());
+    now_ = newYork(15, 16, 59, 30);
+    receive(FIXT11::Heartbeat());
+    EXPECT_EQ(0u, store()->unheardFrom());
+    now_ = newYork(15, 16, 59, 59, 200);
+    session_->next(now_);
+    EXPECT_EQ(0u, store()->unsentFrom());
+    now_ = newYork(16, 8, 0);
+    clientDayEnds();
+    connect();
+    EXPECT_EQ(1u, session_->getExpectedSenderNum()) << "nothing carried";
 }
 
 TEST_F(FixStoresTest, ALogonThatAsksToStartAgainFrom1GetsNothingCarried)
