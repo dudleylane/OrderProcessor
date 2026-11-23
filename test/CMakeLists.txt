@@ -62,6 +62,8 @@ target_sources(orderProcessorTest
         DocConsistencyTest.cpp
         # The C++ enums against the frontend's and the Postgres schema's (#154)
         EnumCouplingTest.cpp
+        # The server's JSON messages against the frontend's TypeScript types for them (#638)
+        WireContractTest.cpp
 
         # WebSocket client-message parser (built from app/, which the test target does not link)
         ClientMessageParserTest.cpp
