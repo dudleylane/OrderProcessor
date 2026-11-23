@@ -64,7 +64,10 @@ function saveRules(rules: AlertRule[]) {
 
 function evaluateRule(rule: AlertRule, current: SystemMetrics, prev: SystemMetrics | null): { triggered: boolean; value: number } {
   let value: number;
-  if (rule.useDelta && prev) {
+  // A sample from another start than the one before it is a restarted server's, whose counters began again from 0:
+  // it has no predecessor, as a page's first sample has none, so a delta rule takes its own figure (#677). A reconnect
+  // to the same server keeps comparing with the sample before it.
+  if (rule.useDelta && prev && prev.serverStart === current.serverStart) {
     value = (current[rule.metric as keyof SystemMetrics] as number) - (prev[rule.metric as keyof SystemMetrics] as number);
   } else {
     value = current[rule.metric as keyof SystemMetrics] as number;

@@ -5,6 +5,7 @@
 #include <vector>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include "TypesDef.h"
 
 namespace COP
 {
@@ -40,7 +41,7 @@ public:
     MetricsPublisher(boost::asio::io_context &ioc, SessionManager *sessionMgr, Tasks::TaskManager *taskMgr,
                      Queues::InQueuesContainer *inQueues, const ACID::TransactionManager *transactMgr,
                      Store::OrderDataStorage *orderStorage, std::vector<const ACID::TransactionScopePool *> scopePools,
-                     const Store::LMDBStorage *storage,
+                     const Store::LMDBStorage *storage, u64 serverStart,
                      std::chrono::milliseconds interval = std::chrono::milliseconds{ 1000 });
 
     void start();
@@ -65,6 +66,8 @@ private:
     /// Every processor's scope pool, whose figures the metrics sum (#542)
     std::vector<const ACID::TransactionScopePool *> scopePools_;
     const Store::LMDBStorage *storage_;
+    /// When the server started, in ms since the epoch, which every sample carries (#677)
+    const u64 serverStart_;
 };
 
 } // namespace App

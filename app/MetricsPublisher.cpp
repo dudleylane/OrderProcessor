@@ -17,10 +17,11 @@ MetricsPublisher::MetricsPublisher(boost::asio::io_context &ioc, SessionManager 
                                    Tasks::TaskManager *taskMgr, Queues::InQueuesContainer *inQueues,
                                    const ACID::TransactionManager *transactMgr, Store::OrderDataStorage *orderStorage,
                                    std::vector<const ACID::TransactionScopePool *> scopePools,
-                                   const Store::LMDBStorage *storage, std::chrono::milliseconds interval)
+                                   const Store::LMDBStorage *storage, u64 serverStart,
+                                   std::chrono::milliseconds interval)
     : timer_(ioc), interval_(interval), running_(false), sessionMgr_(sessionMgr), taskMgr_(taskMgr),
       inQueues_(inQueues), transactMgr_(transactMgr), orderStorage_(orderStorage), scopePools_(std::move(scopePools)),
-      storage_(storage)
+      storage_(storage), serverStart_(serverStart)
 {
 }
 
@@ -108,7 +109,8 @@ SystemMetrics MetricsPublisher::collect() const
         m.storageMapUsed = storage_->mapUsed();
     }
 
-    // Timestamp
+    // The server's start, the same in every sample it sends, and the sample's own time
+    m.serverStart = serverStart_;
     m.timestamp = static_cast<u64>(
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
             .count());
