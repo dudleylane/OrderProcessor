@@ -150,6 +150,47 @@ App::ServerData App::loadServerData(const std::string &dataDir, size_t lmdbMapSi
     return data;
 }
 
+App::DataCheck App::checkServerData(const std::string &dataDir, size_t lmdbMapSize)
+{
+    // The start's two passes: the reference data, which the book is made from, and then everything again, the orders
+    // restored into the book. Neither drops an order (#597), and no id is reserved (#81): both would write. The
+    // first pass's storage closes before the second opens, as the start's does.
+    {
+        Store::LMDBStorage lmdb(lmdbMapSize);
+        Store::StorageRecordDispatcher dispatcher;
+        dispatcher.init(Store::WideDataStorage::instance(), nullptr, &lmdb, Store::OrderStorage::instance());
+        lmdb.loadReadOnly(dataDir, &dispatcher);
+    }
+    DataCheck check;
+    OrderBookImpl::InstrumentsT instrumentIds;
+    Store::WideDataStorage::instance()->forEachInstrument(
+        [&](const SourceIdT &id, const InstrumentEntry & /*instr*/)
+        {
+            instrumentIds.insert(id);
+        });
+    OrderBookImpl book;
+    book.init(instrumentIds);
+    Store::LMDBStorage lmdb(lmdbMapSize);
+    Store::StorageRecordDispatcher dispatcher;
+    dispatcher.init(Store::WideDataStorage::instance(), &book, &lmdb, Store::OrderStorage::instance());
+    lmdb.loadReadOnly(dataDir, &dispatcher);
+
+    check.instruments = instrumentIds.size();
+    Store::WideDataStorage::instance()->forEachAccount(
+        [&check](const auto &, const auto &)
+        {
+            ++check.accounts;
+        });
+    Store::WideDataStorage::instance()->forEachClearing(
+        [&check](const auto &, const auto &)
+        {
+            ++check.clearingFirms;
+        });
+    check.orders = Store::OrderStorage::instance()->orderCount();
+    check.ordersToMatch = dispatcher.ordersToMatch().size();
+    return check;
+}
+
 namespace
 {
 bool isLive(const OrderEntry &order)

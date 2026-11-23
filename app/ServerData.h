@@ -74,6 +74,26 @@ ServerData loadServerData(const std::string &dataDir, size_t lmdbMapSize, u64 id
                           const std::string &defaultAccount, u32 keepClosedDays = 0, DateTimeT now = 0,
                           bool defaultAccountUsed = true);
 
+/// What a check of a data directory found (#591)
+struct DataCheck
+{
+    size_t instruments = 0;
+    size_t accounts = 0;
+    size_t clearingFirms = 0;
+    /// The orders restored, each from the newest version of its record
+    size_t orders = 0;
+    /// Of those, the open orders a crash left without their fills, which the next start matches (#207)
+    size_t ordersToMatch = 0;
+};
+
+/// Restores the data directory as loadServerData() does, in its two passes, for seedData --check (#591), with the
+/// environment opened read-only (LMDBStorage::loadReadOnly()). It writes nothing to the data file: it drops no order
+/// and reserves no id, so it may run on a directory a server is using, or on a copy mdb_copy made. LMDB still opens the
+/// directory's lock.mdb for writing, creating it beside a copy that has none, as every reader does, unless the
+/// filesystem is read-only. It throws what a start's load throws, and names a record it refuses by its key and version.
+/// It needs the singletons loadServerData() needs, and leaves what it restored in them.
+DataCheck checkServerData(const std::string &dataDir, size_t lmdbMapSize);
+
 /// Sets the timers of the restored orders that are live: a DAY or GTD order's expiry (#240), and the restatement of
 /// one that outlives its business day (#244). One whose time passed while the server was down is due at once: an order
 /// whose day ended then begins the day the server restarted in. An order of unbooked, which restore left out of the

@@ -263,6 +263,22 @@ docker compose down -v       # Removes all volumes
 docker compose up --build -d  # Rebuild and reinitialize
 ```
 
+### Backing up and checking the data
+
+The server image includes `mdb_copy`, LMDB's copy, which reads the environment in one read transaction, so a copy taken while the server runs is consistent (#591). It writes the copy to its standard output. Run it in the server's own container: LMDB keeps its readers' process ids in the lock file, and a process in another container's PID namespace could be taken for one of the server's. Then check the copy with `seedData --check`, in a container of its own, so that the check's memory, which holds every order as the server does, isn't counted against the server's limit. The copy is mounted read-only, where LMDB needs no lock file: on a writable mount it would open `lock.mdb` for writing, and make one, as every reader does:
+
+```bash
+backup=oms-data-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir "$backup"
+docker compose exec -T oms-server mdb_copy -c /data > "$backup/data.mdb"
+chmod 0755 "$backup" && chmod 0644 "$backup/data.mdb"   # readable by the image's user, oms
+docker compose run --rm --no-deps -v "$PWD/$backup:/backup:ro,z" --entrypoint seedData oms-server --check /backup
+```
+
+A server that can't start restarts again and again, and its container's `seedData --if-empty` opens the volume each time, so stop it first, with `docker compose stop oms-server`. Then copy the volume with `docker compose run --rm --no-deps -T --entrypoint mdb_copy oms-server -c /data > "$backup/data.mdb"` in place of the `exec` line.
+
+`-c` leaves out the free pages, and `-T` keeps the copy's bytes off a terminal. `seedData --check` restores a directory as the server's start does, with the environment opened read-only, and writes nothing to its data file: it says what it found and exits 0 when every record restores, or names the record it refuses, by its key and version, and exits 1. A server's start names a record it refuses the same way. Keep the copy outside the volume: `docker compose down -v` deletes the volume, and every order with it.
+
 ### A volume written by an older image
 
 Server images before #158 ran as root, so the files they wrote in `oms-data` belong to root. The server now runs as `oms` and can't open them: it exits with `LMDBStorage::load mdb_env_open: Permission denied`, and restarts again and again. Give the volume to `oms` once, and the server comes up at its next restart:
@@ -287,7 +303,7 @@ docker compose restart oms-server
 | Stage | Base Image | Purpose |
 |-------|-----------|---------|
 | Builder | `centos:stream10` | Installs GCC 15 (gcc-toolset-15), CMake, TBB, spdlog, Boost, LMDB, OpenSSL; compiles Release build |
-| Runtime | `centos:stream10` | Minimal image with only runtime libraries; copies `orderProcessorServer` and `seedData` |
+| Runtime | `centos:stream10` | Minimal image with only runtime libraries, and LMDB's tools for a backup (#591); copies `orderProcessorServer` and `seedData` |
 
 The build compiles with `-DCMAKE_BUILD_TYPE=Release` (LTO, -O3) and disables tests and benchmarks to minimize build time. It targets x86-64-v3 (`-DMARCH=x86-64-v3`), not the build machine's CPU, so the image runs on any CPU at that level, which has AVX2, BMI1/2, FMA and MOVBE: most Intel Core CPUs since Haswell (2013) and AMD CPUs since Excavator (2015), though not every Pentium or Celeron. CentOS Stream 10, its base, is built for the same level, so it can't run on less anyway. Builds outside the image default to `-march=native` (#170).
 
@@ -397,7 +413,9 @@ docker compose logs oms-server
 
 # Common issues:
 # - "mdb_env_open: Permission denied" → a volume an older image wrote as root (see "A volume written by an older image")
-# - Other LMDB errors → corrupt data (docker compose down -v starts again, and deletes it)
+# - "Record ... version ..." or "Order ... version ...": a record the server can't restore, named by its key and version
+# - Other LMDB errors → corrupt data. Before `docker compose down -v`, which starts again and deletes every order,
+#   copy the volume and check the copy (see "Backing up and checking the data")
 ```
 
 ### Frontend won't start

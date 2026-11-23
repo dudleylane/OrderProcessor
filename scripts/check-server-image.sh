@@ -24,12 +24,15 @@
 #      SIGSTOP: then the kernel still completes TCP handshakes, but nothing answers
 #      (#158). The image is built in docker format, because podman's default, OCI,
 #      drops a HEALTHCHECK.
-#   6. /ws, through the published port, answers a WebSocket upgrade with 101.
-#   7. With FIX's TLS, openssl s_client on the host completes a TLS handshake with the
+#   6. The backup docker/README.md gives (#591): mdb_copy, in the image, copies the
+#      running server's data directory, and once it has stopped its volume, to the host,
+#      and seedData --check restores each copy, mounted read-only.
+#   7. /ws, through the published port, answers a WebSocket upgrade with 101.
+#   8. With FIX's TLS, openssl s_client on the host completes a TLS handshake with the
 #      FIX acceptor through its published port, verifying the throwaway certificate.
 #      This one is checked from the host: the port forwarding can accept a connection
 #      with nothing behind it, but it can't complete a handshake with that certificate.
-#   8. SIGTERM stops the server with exit code 0, the clean stop that saves the next
+#   9. SIGTERM stops the server with exit code 0, the clean stop that saves the next
 #      id (#81), and its log has no errors. The image logs to standard output
 #      (EXCHANGE_LOG=-, #156), so the log is the container's output, and nothing
 #      may write /exchange.log into the container's layer.
@@ -261,6 +264,22 @@ podman kill --signal CONT "$NAME" >/dev/null || fail "couldn't resume the server
 (( stopped_health == 1 )) || fail "the health check couldn't run on the stopped server (exit $stopped_health)"
 echo "unhealthy while the server is stopped (exit 1)"
 
+# docker/README.md's backup (#591): mdb_copy writes the copy to its standard output, here a file on the host, and
+# seedData --check restores it in a container of its own, as a start would, writing nothing. The copy is mounted
+# read-only, where LMDB takes no lock, and must be readable by the image's user. The image logs to standard output, so
+# the check's output holds its log as well as its summary.
+check_copy() { # <directory on the host>
+    chmod 0755 "$1" || fail "couldn't make the copy's directory readable"
+    chmod 0644 "$1/data.mdb" || fail "couldn't make the copy readable"
+    checked=$(podman run --rm -v "$1:/backup:ro,z" --entrypoint seedData "$IMAGE" --check /backup 2>&1) \
+        || fail "seedData --check refused the copy: $checked"
+    grep -F "every record in /backup restores" <<< "$checked" || fail "seedData --check didn't say so: $checked"
+}
+step "copy the running server's directory, and check the copy"
+mkdir "$WORK/live"
+podman exec "$NAME" mdb_copy -c /data > "$WORK/live/data.mdb" || fail "mdb_copy couldn't copy the running server's data"
+check_copy "$WORK/live"
+
 step "WebSocket upgrade on /ws"
 published="$(podman port "$NAME" "$WS_PORT/tcp" | head -n 1)"
 status=""
@@ -306,5 +325,12 @@ if (( errors > 0 )); then
     fail "the server logged $errors error(s)"
 fi
 echo "exit code 0; exchange.log: $(wc -l < "$WORK/exchange.log") lines, $warnings warning(s), no errors"
+
+step "copy the stopped server's volume, and check the copy"
+# docker/README.md's copy for a server that isn't running, as one that can't start (#591)
+mkdir "$WORK/stopped"
+podman run --rm -v "$NAME:/data" --entrypoint mdb_copy "$IMAGE" -c /data > "$WORK/stopped/data.mdb" \
+    || fail "mdb_copy couldn't copy the stopped server's volume"
+check_copy "$WORK/stopped"
 
 step "passed in ${SECONDS}s (the build took ${build_seconds}s)"

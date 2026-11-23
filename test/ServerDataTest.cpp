@@ -14,10 +14,14 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <unistd.h>
 
 #include "TestAux.h"
 
@@ -27,6 +31,7 @@
 #include "WideDataStorage.h"
 #include "IdTGenerator.h"
 #include "OrderStorage.h"
+#include "OrderCodec.h"
 
 using namespace COP;
 using namespace COP::Store;
@@ -42,6 +47,25 @@ DateTimeT utc(int year, unsigned month, unsigned day, int hour)
     using namespace std::chrono;
     const sys_days date = year_month_day(std::chrono::year(year), std::chrono::month(month), std::chrono::day(day));
     return static_cast<DateTimeT>(duration_cast<milliseconds>((date + hours(hour)).time_since_epoch()).count());
+}
+
+/// A file's bytes
+std::string bytesOf(const std::string &path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+/// An order's record as the dispatcher writes it: its type and format version in the first 4 bytes (#149), then the
+/// order as it is
+std::string orderRecord(const OrderEntry &val)
+{
+    const u32 word = (Codec::OrderCodec::FORMAT_VERSION << 16) | StorageRecordDispatcher::ORDER_RECORDTYPE;
+    std::string record(reinterpret_cast<const char *>(&word), sizeof(word));
+    IdT id;
+    u32 version = 0;
+    Codec::OrderCodec::encode(val, &record, &id, &version);
+    return record;
 }
 
 /// The server's load (app/ServerData.cpp), over a directory a test writes first (#165). Each start makes the singletons
@@ -483,6 +507,172 @@ TEST_F(ServerDataTest, ARecordOfATypeThisBuildDoesNotKnowStopsTheLoad)
     catch (const std::runtime_error &ex)
     {
         EXPECT_NE(std::string::npos, std::string(ex.what()).find("Invalid record type")) << ex.what();
+    }
+}
+
+TEST_F(ServerDataTest, ACheckRestoresWhatAStartRestoresAndLeavesTheDataFileAsItWas)
+{
+    // seedData --check restores the directory as a start does, with the environment read-only (#591): it finds what the
+    // start finds, and data.mdb's bytes are the same after it. The start, which saves its id limit, changes them.
+    {
+        LMDBStorage lmdb(MAP_SIZE);
+        StorageRecordDispatcher writer;
+        writer.init(WideDataStorage::instance(), nullptr, &lmdb, OrderStorage::instance());
+        lmdb.load(dir_, &writer);
+        WideDataStorage::instance()->bindStorage(&writer);
+        const SourceIdT instrument = test::addInstrument("CHECKED");
+        writer.save(*order(instrument, 7, FILLED_ORDSTATUS, 0));
+        std::unique_ptr<OrderEntry> sell = order(instrument, 8, NEW_ORDSTATUS, 100);
+        sell->side_ = SELL_SIDE;
+        writer.save(*sell);
+        // A buy at the sell's price, which traded with it: a crash lost the fills, so a start matches it (#207)
+        writer.save(*order(instrument, 9, NEW_ORDSTATUS, 100));
+    }
+    const std::string dataFile = dir_ + "/data.mdb";
+    const std::string written = bytesOf(dataFile);
+    ASSERT_FALSE(written.empty());
+
+    restart();
+    const App::DataCheck found = App::checkServerData(dir_, MAP_SIZE);
+    EXPECT_EQ(written, bytesOf(dataFile)) << "the check wrote to the data file";
+    EXPECT_EQ(1u, found.instruments);
+    EXPECT_EQ(3u, found.orders);
+    EXPECT_EQ(1u, found.ordersToMatch) << "the buy whose fills a crash lost";
+
+    restart();
+    App::ServerData data = load();
+    size_t accounts = 0;
+    size_t clearingFirms = 0;
+    WideDataStorage::instance()->forEachAccount(
+        [&accounts](const auto &, const auto &)
+        {
+            ++accounts;
+        });
+    WideDataStorage::instance()->forEachClearing(
+        [&clearingFirms](const auto &, const auto &)
+        {
+            ++clearingFirms;
+        });
+    EXPECT_LT(0u, accounts);
+    EXPECT_EQ(accounts, found.accounts);
+    EXPECT_EQ(clearingFirms, found.clearingFirms);
+    EXPECT_EQ(OrderStorage::instance()->orderCount(), found.orders);
+    EXPECT_EQ(data.dispatcher->ordersToMatch().size(), found.ordersToMatch);
+    EXPECT_NE(written, bytesOf(dataFile)) << "a start writes its id limit, so a write would have shown";
+}
+
+TEST_F(ServerDataTest, ACheckReadsADataFileItMayNotWrite)
+{
+    // The check opens the environment read-only (#591), so it reads a data file its user may not write. A start, which
+    // opens it for writing, is refused the same file, unless its user is root, whom the file's mode doesn't stop.
+    // LMDB's lock file is another matter: every reader opens lock.mdb for writing, and creates it beside a copy that
+    // has none, so a copy in a directory its user may not write is refused, naming lock.mdb.
+    {
+        LMDBStorage lmdb(MAP_SIZE);
+        StorageRecordDispatcher writer;
+        writer.init(WideDataStorage::instance(), nullptr, &lmdb, OrderStorage::instance());
+        lmdb.load(dir_, &writer);
+        WideDataStorage::instance()->bindStorage(&writer);
+        test::addInstrument("READONLY");
+    }
+    namespace fs = std::filesystem;
+    const fs::path dataFile = fs::path(dir_) / "data.mdb";
+    fs::permissions(dataFile, fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read);
+    const std::string written = bytesOf(dataFile.string());
+
+    restart();
+    EXPECT_EQ(1u, App::checkServerData(dir_, MAP_SIZE).instruments);
+    EXPECT_EQ(written, bytesOf(dataFile.string()));
+    if (0 != geteuid())
+    {
+        restart();
+        EXPECT_THROW(load(), std::runtime_error) << "a start wrote to a data file its user may not write";
+
+        const fs::path copy = fs::path(dir_ + "-copy");
+        fs::remove_all(copy);
+        fs::create_directory(copy);
+        fs::copy_file(dataFile, copy / "data.mdb"); // as mdb_copy leaves one: data.mdb alone
+        fs::permissions(copy, fs::perms::owner_read | fs::perms::owner_exec);
+        restart();
+        try
+        {
+            App::checkServerData(copy.string(), MAP_SIZE);
+            ADD_FAILURE() << "the check read a copy where LMDB can't make its lock file";
+        }
+        catch (const std::runtime_error &ex)
+        {
+            EXPECT_NE(std::string::npos, std::string(ex.what()).find("lock.mdb")) << ex.what();
+        }
+        fs::permissions(copy, fs::perms::owner_all);
+        fs::remove_all(copy);
+    }
+}
+
+TEST_F(ServerDataTest, ACheckRefusesAnOrderRecordAStartRefusesAndNamesIt)
+{
+    // A record a start refuses, the check refuses too, and names it by its key and version, so that it can be found
+    // (#591): here the newest version of order 7's record, a byte short
+    {
+        LMDBStorage lmdb(MAP_SIZE);
+        StorageRecordDispatcher writer;
+        writer.init(WideDataStorage::instance(), nullptr, &lmdb, OrderStorage::instance());
+        lmdb.load(dir_, &writer);
+        WideDataStorage::instance()->bindStorage(&writer);
+        std::unique_ptr<OrderEntry> val = order(test::addInstrument("CUT"), 7, NEW_ORDSTATUS, 100);
+        writer.save(*val);
+        std::string record = orderRecord(*val);
+        record.pop_back();
+        ASSERT_EQ(1u, lmdb.update(val->orderId_, record.data(), record.size())) << "the cut record is the newest";
+    }
+    const std::string written = bytesOf(dir_ + "/data.mdb");
+    std::string refused;
+    restart();
+    try
+    {
+        App::checkServerData(dir_, MAP_SIZE);
+        ADD_FAILURE() << "the check restored a record cut short";
+    }
+    catch (const std::runtime_error &ex)
+    {
+        refused = ex.what();
+    }
+    EXPECT_EQ(0u, refused.find("Order 20261014.7 version 1: ")) << refused;
+    EXPECT_EQ(written, bytesOf(dir_ + "/data.mdb"));
+
+    restart();
+    try
+    {
+        load();
+        ADD_FAILURE() << "a start restored a record cut short";
+    }
+    catch (const std::runtime_error &ex)
+    {
+        EXPECT_EQ(refused, ex.what()) << "the check refuses what a start refuses";
+    }
+}
+
+TEST_F(ServerDataTest, ACheckNamesAReferenceRecordItRefuses)
+{
+    // A record the load's scan refuses names itself too (#591): an instrument's record of one byte
+    {
+        LMDBStorage lmdb(MAP_SIZE);
+        StorageRecordDispatcher writer;
+        writer.init(WideDataStorage::instance(), nullptr, &lmdb, OrderStorage::instance());
+        lmdb.load(dir_, &writer);
+        const u32 word = StorageRecordDispatcher::INSTRUMENT_RECORDTYPE;
+        std::string record(reinterpret_cast<const char *>(&word), sizeof(word));
+        record += "X";
+        lmdb.save(IdT(5, 20261014), record.data(), record.size());
+    }
+    restart();
+    try
+    {
+        App::checkServerData(dir_, MAP_SIZE);
+        ADD_FAILURE() << "the check restored an instrument's record of one byte";
+    }
+    catch (const std::runtime_error &ex)
+    {
+        EXPECT_EQ(0u, std::string(ex.what()).find("Record 20261014.5 version 0: ")) << ex.what();
     }
 }
 

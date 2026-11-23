@@ -11,6 +11,7 @@
 */
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <stdexcept>
 #include <cassert>
@@ -123,12 +124,25 @@ void LMDBStorage::close()
 
 void LMDBStorage::load(const std::string &path, FileStorageObserver *observer)
 {
+    loadEnvironment(path, observer, false);
+}
+
+void LMDBStorage::loadReadOnly(const std::string &path, FileStorageObserver *observer)
+{
+    loadEnvironment(path, observer, true);
+}
+
+void LMDBStorage::loadEnvironment(const std::string &path, FileStorageObserver *observer, bool readOnly)
+{
     // Runs before anything else uses the storage, so it takes no lock: the observer may not write back during the load
     assert(nullptr == env_);
     assert(nullptr != observer);
 
-    // Ensure the directory exists
-    mkdir(path.c_str(), 0755);
+    // Ensure the directory exists, unless this is a check, which makes nothing (#591)
+    if (!readOnly)
+    {
+        mkdir(path.c_str(), 0755);
+    }
 
     int rc = mdb_env_create(&env_);
     checkLMDB(rc, "LMDBStorage::load mdb_env_create");
@@ -137,17 +151,27 @@ void LMDBStorage::load(const std::string &path, FileStorageObserver *observer)
     rc = mdb_env_set_mapsize(env_, initialMapSize_);
     checkLMDB(rc, "LMDBStorage::load mdb_env_set_mapsize");
 
-    rc = mdb_env_open(env_, path.c_str(), 0, 0664);
+    // Read-only, LMDB writes nothing to the data file, and still takes a reader's slot in the lock file, so a server
+    // writing the directory keeps the pages the check reads (#591)
+    rc = mdb_env_open(env_, path.c_str(), readOnly ? MDB_RDONLY : 0, 0664);
     if (rc != MDB_SUCCESS)
     {
         mdb_env_close(env_);
         env_ = nullptr;
+        if (readOnly && (EACCES == rc))
+        {
+            // A reader needs the lock file too: LMDB opens lock.mdb for writing, and creates it beside a copy that has
+            // none, and does without only on a read-only filesystem
+            throw std::runtime_error("LMDBStorage::loadReadOnly mdb_env_open: Permission denied: LMDB reads data.mdb "
+                                     "and opens lock.mdb for writing, creating it if it isn't there, as every reader "
+                                     "does: check a copy this user may write, or one on a read-only mount");
+        }
         checkLMDB(rc, "LMDBStorage::load mdb_env_open");
     }
 
     // Open the default (unnamed) database
     MDB_txn *txn = nullptr;
-    rc = mdb_txn_begin(env_, nullptr, 0, &txn);
+    rc = mdb_txn_begin(env_, nullptr, readOnly ? MDB_RDONLY : 0, &txn);
     if (rc != MDB_SUCCESS)
     {
         mdb_env_close(env_);
@@ -155,7 +179,8 @@ void LMDBStorage::load(const std::string &path, FileStorageObserver *observer)
         checkLMDB(rc, "LMDBStorage::load mdb_txn_begin");
     }
 
-    rc = mdb_dbi_open(txn, nullptr, MDB_CREATE, &dbi_);
+    // The unnamed database always exists, and a read-only transaction may not create one
+    rc = mdb_dbi_open(txn, nullptr, readOnly ? 0 : MDB_CREATE, &dbi_);
     if (rc != MDB_SUCCESS)
     {
         mdb_txn_abort(txn);
