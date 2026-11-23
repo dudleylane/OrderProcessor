@@ -1324,7 +1324,9 @@ static void BM_TaskManagerThroughput(benchmark::State &state)
     }
     destroyEngineState();
 }
-BENCHMARK(BM_TaskManagerThroughput)->Arg(2)->Arg(4)->Arg(8)->UseRealTime()->Iterations(20);
+// 1 and 3 since #711 made N processors run N workers, where they ran N - 1: a comparison across it matches workers,
+// before's 2 and 4 against after's 1 and 3
+BENCHMARK(BM_TaskManagerThroughput)->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(8)->UseRealTime()->Iterations(20);
 
 /// The worker pool while orders trade (#290). BM_TaskManagerThroughput's orders all buy, so it times no match: no
 /// deferred match or execution event, no fill, and no transaction that waits for another's. Here each batch alternates
@@ -1453,6 +1455,6 @@ static void BM_TaskManagerTrades(benchmark::State &state)
 }
 BENCHMARK(BM_TaskManagerTrades)
     ->ArgNames({ "instruments", "processors" })
-    ->ArgsProduct({ { 1, 8 }, { 2, 4, 8 } })
+    ->ArgsProduct({ { 1, 8 }, { 1, 2, 3, 4, 8 } }) // 1 and 3 match a worker count across #711, as above
     ->UseRealTime()
     ->Iterations(20);
