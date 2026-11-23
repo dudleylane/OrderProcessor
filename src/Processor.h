@@ -90,10 +90,10 @@ public:
 
 public:
     /// reimplemented from DeferedEventContainer
-    virtual void addDeferedEvent(DeferedEventBase *evnt);
-    virtual size_t deferedEventCount() const;
-    virtual void removeDeferedEventsFrom(size_t startIndex);
-    virtual bool claimStopRelease(const IdT &order);
+    void addDeferedEvent(DeferedEventBase *evnt) override;
+    size_t deferedEventCount() const override;
+    void removeDeferedEventsFrom(size_t startIndex) override;
+    bool claimStopRelease(const IdT &order) override;
 
     const ACID::TransactionScopePool *scopePool() const noexcept
     {
@@ -102,7 +102,7 @@ public:
 
 public:
     /// reimplemented from TransactionProcessor
-    virtual void process(const ACID::TransactionId &id, ACID::Transaction *tr);
+    void process(const ACID::TransactionId &id, ACID::Transaction *tr) override;
 
     /// Appends the operation that persists the order when the transaction commits (#20), once per transaction (#148),
     /// with the figures the decision just made left it with (#411): a later decision goes to the operation the first
@@ -132,26 +132,26 @@ private:
 public:
 public:
     /// reimplemented from DeferedEventFunctor
-    virtual void process(OrdState::onTradeExecution &evnt, OrderEntry *order, const ACID::Context &cnxt);
-    virtual void process(OrdState::onInternalCancel &evnt, OrderEntry *order, const ACID::Context &cnxt);
-    virtual void process(OrdState::onExecCancel &evnt, OrderEntry *order, const std::string &requester,
-                         const ACID::Context &cnxt);
-    virtual void process(OrdState::onReplace &evnt, OrderEntry *original, OrderEntry &replacement,
-                         const std::string &requester, const ACID::Context &cnxt);
-    virtual void process(OrderStateChange change, OrderEntry *order, ACID::Scope *scope, const ACID::Context &cnxt);
+    void process(OrdState::onTradeExecution &evnt, OrderEntry *order, const ACID::Context &cnxt) override;
+    void process(OrdState::onInternalCancel &evnt, OrderEntry *order, const ACID::Context &cnxt) override;
+    void process(OrdState::onExecCancel &evnt, OrderEntry *order, const std::string &requester,
+                 const ACID::Context &cnxt) override;
+    void process(OrdState::onReplace &evnt, OrderEntry *original, OrderEntry &replacement, const std::string &requester,
+                 const ACID::Context &cnxt) override;
+    void process(OrderStateChange change, OrderEntry *order, ACID::Scope *scope, const ACID::Context &cnxt) override;
 
 public:
     /// reimplemented from InQueueProcessor
     /// retrives new event from inQueues, process it in transaction
     /// A handler that finds an order and enqueues a transaction about it waits for the order's booking first, as the
     /// cancel, replace and state change handlers do (#83); OrderDataStorage's lookups say why.
-    virtual bool process();
-    virtual void onEvent(const std::string &source, const Queues::OrderEvent &evnt);
-    virtual void onEvent(const std::string &source, const Queues::OrderCancelEvent &evnt);
-    virtual void onEvent(const std::string &source, const Queues::OrderReplaceEvent &evnt);
-    virtual void onEvent(const std::string &source, const Queues::OrderChangeStateEvent &evnt);
-    virtual void onEvent(const std::string &source, const Queues::ProcessEvent &evnt);
-    virtual void onEvent(const std::string &source, const Queues::TimerEvent &evnt);
+    bool process() override;
+    void onEvent(const std::string &source, const Queues::OrderEvent &evnt) override;
+    void onEvent(const std::string &source, const Queues::OrderCancelEvent &evnt) override;
+    void onEvent(const std::string &source, const Queues::OrderReplaceEvent &evnt) override;
+    void onEvent(const std::string &source, const Queues::OrderChangeStateEvent &evnt) override;
+    void onEvent(const std::string &source, const Queues::ProcessEvent &evnt) override;
+    void onEvent(const std::string &source, const Queues::TimerEvent &evnt) override;
 
     void onEvent(DeferedEventBase *evnt);
 

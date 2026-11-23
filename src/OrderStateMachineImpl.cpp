@@ -39,11 +39,11 @@ public:
     }
     ~FindAnyOpositeOrder() {}
 
-    virtual SourceIdT instrument() const
+    SourceIdT instrument() const override
     {
         return orderData_->instrument_.getId();
     }
-    virtual bool match(const IdT &, bool *stop) const
+    bool match(const IdT &, bool *stop) const override
     {
         *stop = true;
         return true;

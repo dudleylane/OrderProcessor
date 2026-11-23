@@ -65,7 +65,7 @@ public:
     {
     }
 
-    virtual void prepareMessage()
+    void prepareMessage() override
     {
         switch (type_)
         {
