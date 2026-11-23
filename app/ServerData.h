@@ -10,8 +10,10 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "TypesDef.h"
 #include "LMDBStorage.h"
@@ -23,7 +25,8 @@ namespace COP
 namespace Proc
 {
 class ExpiryScheduler;
-}
+class Processor;
+} // namespace Proc
 namespace Store
 {
 class OrderDataStorage;
@@ -72,10 +75,43 @@ ServerData loadServerData(const std::string &dataDir, size_t lmdbMapSize, u64 id
                           bool defaultAccountUsed = true);
 
 /// Sets the timers of the restored orders that are live: a DAY or GTD order's expiry (#240), and the restatement of
-/// one that outlives its business day (#244). One whose time passed while the server was down fires as soon as the
-/// timers start: an order whose day ended then begins the day the server restarted in. Call it with nothing else
-/// running on the orders, before the server takes orders. Returns how many it set.
-size_t scheduleRestoredExpiries(const Store::OrderDataStorage &storage, Proc::ExpiryScheduler *expiry);
+/// one that outlives its business day (#244). One whose time passed while the server was down is due at once: an order
+/// whose day ended then begins the day the server restarted in. An order of unbooked, which restore left out of the
+/// book (StorageRecordDispatcher::ordersToMatch()), gets its restatement alone: an expiry's unbooking wouldn't find
+/// it, so Processor::matchRestored() decides its expiry, and scheduleExpiriesOf() sets its timer after (#768). Call it
+/// with nothing else running on the orders, before the server takes orders. Returns how many it set.
+size_t scheduleRestoredExpiries(const Store::OrderDataStorage &storage, Proc::ExpiryScheduler *expiry,
+                                const std::vector<OrderEntry *> &unbooked = {});
+/// Sets the expiry timers of the orders that are still live, a DAY or GTD order's: the restart's, once it has matched
+/// those restore left out of the book (#768). Call it with nothing else running on the orders. Returns how many it set.
+size_t scheduleExpiriesOf(const std::vector<OrderEntry *> &orders, Proc::ExpiryScheduler *expiry);
+/// What finishRestart() did
+struct RestartWork
+{
+    /// The timers set for the restored orders, and how many of them were due, and fired, before the matching
+    size_t timers = 0;
+    size_t fired = 0;
+    /// Of the orders restore left out of the book: those matched, and those expired instead
+    size_t matched = 0;
+    size_t expired = 0;
+    /// The held stops whose lost releases were released
+    size_t released = 0;
+};
+/// The restart's work on the restored orders once the engine runs, before the server takes orders, which app/main.cpp
+/// did inline until #768. In this order:
+/// - expire first (#768, as ruled): the restored orders' timers are set, and those due fire, until none is, with the
+///   engine idle between rounds. An order whose time in force ended while the server was down expires before anything
+///   could trade with it, and one whose business day ended begins the new one;
+/// - each order restore left out of the book, which a crash left without its fills or its cancel (#207, #489), is
+///   matched, or expired if its time in force ended (Processor::matchRestored());
+/// - each held stop whose release a crash lost is released (#237, #518);
+/// - the expiry timers of the orders matched above that still rest are set.
+/// waitIdle returns once the engine has finished everything queued: the events, and the transactions they enqueue.
+/// The caller starts the expiry scheduler's thread after it. An order that can't be matched, expired or released is
+/// logged and left, as no reason not to start.
+RestartWork finishRestart(Proc::Processor &processor, const std::vector<OrderEntry *> &ordersToMatch,
+                          const std::vector<OrderEntry *> &stopsReached, const Store::OrderDataStorage &storage,
+                          Proc::ExpiryScheduler &expiry, const std::function<void()> &waitIdle);
 
 } // namespace App
 } // namespace COP

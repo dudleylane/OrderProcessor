@@ -364,83 +364,23 @@ int main(int argc, char *argv[])
 
     auto taskMgr = std::make_unique<Tasks::TaskManager>(taskParams);
 
-    // 9b. A crash after the transaction that booked an order committed, and before the one with its fills, or with the
-    // cancel of what it couldn't trade, did, leaves the order restored as booked: Phase 2 left each such order out of
-    // the book, which it would cross (#207) or, as an order that never rests, rest in (#489). Match them now, in the
-    // order they arrived and before any client can send an order, as their bookings did. Their fills and cancels
-    // persist and report through the transaction workers. One that can't be matched is no reason not to start.
+    // 9b. The restored orders before any client can send an order (App::finishRestart()): their timers set, and those
+    // due fired first, so an order whose time in force ended while the server was down expires before anything trades
+    // with it (#768); then the orders and the stops' releases a crash lost are matched (#207, #489, #237, #518), with
+    // the engine idle between each and the next; then the expiry thread starts, for every timer still to come (#240,
+    // #244).
     auto *restoreProcessor = static_cast<Proc::Processor *>(evntProcessors[0]);
-    const std::vector<OrderEntry *> &ordersToMatch = dispatcher->ordersToMatch();
-    if (!ordersToMatch.empty())
-    {
-        size_t matched = 0;
-        for (OrderEntry *order : ordersToMatch)
-        {
-            try
-            {
-                restoreProcessor->matchRestored(order);
-                ++matched;
-            }
-            catch (const std::exception &ex)
-            {
-                aux::ExchLogger::instance()->error(
-                    "Restored order " + std::to_string(order->orderId_.id_) +
-                    " lost its fills or its cancel and could not be matched: " + ex.what());
-            }
-            // A trade here can release a held stop, and the release matches it in a transaction of its own, on a
-            // transaction worker (#223). The next order is matched on this thread, outside the manager, so it waits for
-            // every transaction to finish: matched at once, the two could trade with the same resting order.
-            while (0 != transactMgr->pendingTransactions())
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-        }
-        aux::ExchLogger::instance()->warn(std::to_string(ordersToMatch.size()) +
-                                          " restored order(s) had lost their fills or their cancel; matched " +
-                                          std::to_string(matched) + " of them before taking orders");
-    }
-
-    // 9c. A crash after a trade's transaction committed, and before the release of a held stop it reached did, leaves
-    // the stop held, and only a trade releases one (#237). The trade's transaction persisted its instrument's last
-    // trade, which names the releases pending then (#518), and the load found the stops among them still held. Release
-    // them now, after the orders above, whose lost trades came before the lost releases, and before any client can send
-    // an order.
-    const std::vector<OrderEntry *> &stopsReached = dispatcher->stopsReached();
-    if (!stopsReached.empty())
-    {
-        size_t released = 0;
-        for (OrderEntry *stop : stopsReached)
-        {
-            try
-            {
-                restoreProcessor->releaseRestored(stop);
-                ++released;
-            }
-            catch (const std::exception &ex)
-            {
-                aux::ExchLogger::instance()->error(
-                    "Restored stop " + std::to_string(stop->orderId_.id_) +
-                    " whose release a trade left pending could not be released: " + ex.what());
-            }
-            // Each release matches on a transaction worker, and the next one must see its trades
-            while (0 != transactMgr->pendingTransactions())
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-        }
-        aux::ExchLogger::instance()->warn(std::to_string(stopsReached.size()) +
-                                          " restored stop(s) had lost their release; released " +
-                                          std::to_string(released) + " before taking orders");
-    }
-
-    // 9d. Restored DAY and GTD orders keep their times in force (#240): each gets its timer again, and one whose time
-    // passed while the server was down expires as soon as the timers start. An order that outlives a business day is
-    // restated at each day's start (#244), and one whose day ended while the server was down is restated at once.
-    // Read with nothing else running: no client is connected yet, and the restore's transactions are done.
-    const size_t timers = App::scheduleRestoredExpiries(*Store::OrderStorage::instance(), expiry.get());
+    const App::RestartWork restart =
+        App::finishRestart(*restoreProcessor, dispatcher->ordersToMatch(), dispatcher->stopsReached(),
+                           *Store::OrderStorage::instance(), *expiry,
+                           [&taskMgr]
+                           {
+                               taskMgr->waitUntilTransactionsFinished(-1);
+                           });
     expiry->start();
-    aux::ExchLogger::instance()->note("Expiry and restatement timers set for restored orders: " +
-                                      std::to_string(timers));
+    aux::ExchLogger::instance()->note(
+        "Expiry and restatement timers set for restored orders: " + std::to_string(restart.timers) + ", " +
+        std::to_string(restart.fired) + " of them due while the server was down, and fired before taking orders");
 
     // 10. Create Beast io_context and WsServer. The sessions read their clients' messages only while the engine's work
     // in flight is under --max-in-flight (#519).

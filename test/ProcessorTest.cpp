@@ -43,6 +43,7 @@
 #include "LMDBStorage.h"
 #include "StorageRecordDispatcher.h"
 #include "TransactionMgr.h"
+#include "ServerData.h"
 
 using namespace COP;
 using namespace COP::Queues;
@@ -1785,9 +1786,11 @@ public:
 class EngineOverDirectory
 {
 public:
-    /// dropClosedBefore: what a start given --keep-closed-days drops (#597); 0 drops nothing
+    /// dropClosedBefore: what a start given --keep-closed-days drops (#597); 0 drops nothing. expiry and clock: the
+    /// engine's timers and its time, where a test gives them (#768)
     EngineOverDirectory(const std::string &dir, const SourceIdT &instrument, IncomingQueues *inQueues,
-                        OutQueues *outQueues, DateTimeT dropClosedBefore = 0)
+                        OutQueues *outQueues, DateTimeT dropClosedBefore = 0, ExpiryScheduler *expiry = nullptr,
+                        std::function<DateTimeT()> clock = {})
     {
         OrderBookImpl::InstrumentsT instruments;
         instruments.insert(instrument);
@@ -1798,8 +1801,23 @@ public:
         storage_.attach(&dispatcher_);
         ProcessorParams params(IdTGenerator::instance(), &storage_, &book_, inQueues, outQueues, inQueues,
                                &transactions_);
+        params.expiry_ = expiry;
+        params.clock_ = std::move(clock);
         processor_.init(params);
         transactions_.proc_ = &processor_;
+    }
+
+    /// The restart's work on what the directory restored (App::finishRestart(), #768). The timers push into the queue
+    /// this engine's processor reads, and each round's events are processed here, their transactions run as added.
+    App::RestartWork finishRestart(ExpiryScheduler &expiry)
+    {
+        return App::finishRestart(processor_, dispatcher_.ordersToMatch(), dispatcher_.stopsReached(), storage_, expiry,
+                                  [this]
+                                  {
+                                      while (processor_.process())
+                                      {
+                                      }
+                                  });
     }
 
     /// Processes the order event queued, and returns the stored order
@@ -1818,6 +1836,14 @@ public:
     TestTransactionManager transactions_;
     Processor processor_;
 };
+
+/// The order, good till canceled. The test order is a DAY order created in 1970, which a restart expires as it starts
+/// (#768), so the tests that restart over a crash, to see what it left matched, give their orders no end.
+std::unique_ptr<OrderEntry> asGtc(std::unique_ptr<OrderEntry> order)
+{
+    order->tif_ = GTC_TIF;
+    return order;
+}
 } // namespace
 
 TEST_F(ProcessorTest, OrdersACrashLeftWithoutTheirFillsTradeAsTheyDidOnceRestarted)
@@ -1834,15 +1860,15 @@ TEST_F(ProcessorTest, OrdersACrashLeftWithoutTheirFillsTradeAsTheyDidOnceRestart
         TradeRecorder reports;
         EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
         crashed.transactions_.keepNested_ = true; // every fill is lost
-        auto order = createTestOrder(instrId1_, SELL_SIDE, 100.0, 100);
+        auto order = asGtc(createTestOrder(instrId1_, SELL_SIDE, 100.0, 100));
         RawDataEntry clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         x = crashed.process(clOrdId)->orderId_;
-        order = createTestOrder(instrId1_, BUY_SIDE, 101.0, 200);
+        order = asGtc(createTestOrder(instrId1_, BUY_SIDE, 101.0, 200));
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         y = crashed.process(clOrdId)->orderId_;
-        order = createTestOrder(instrId1_, SELL_SIDE, 100.5, 50);
+        order = asGtc(createTestOrder(instrId1_, SELL_SIDE, 100.5, 50));
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         w = crashed.process(clOrdId)->orderId_;
@@ -1915,17 +1941,17 @@ TEST_F(ProcessorTest, AFillsRecordCountsNoLaterFillACrashLost)
         TradeRecorder reports;
         EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
         crashed.transactions_.keepNested_ = true; // each fill's transaction waits
-        auto order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 100);
+        auto order = asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 100));
         RawDataEntry clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         const OrderEntry *resting = crashed.process(clOrdId);
         ASSERT_NE(nullptr, resting);
         o = resting->orderId_;
-        order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 30);
+        order = asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30));
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         a1 = crashed.process(clOrdId)->orderId_;
-        order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 30);
+        order = asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30));
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         a2 = crashed.process(clOrdId)->orderId_;
@@ -1988,16 +2014,16 @@ TEST_F(ProcessorTest, AnOpenMarketOrderACrashLeftTradesAndIsCanceledOnceRestarte
         TradeRecorder reports;
         EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
         crashed.transactions_.keepNested_ = true; // the trade and the cancel are lost
-        auto order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 20);
+        auto order = asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 20));
         RawDataEntry clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         s = crashed.process(clOrdId)->orderId_;
-        order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 50);
+        order = asGtc(createTestOrder(instrId1_, BUY_SIDE, 0.0, 50));
         order->ordType_ = MARKET_ORDERTYPE;
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         m = crashed.process(clOrdId)->orderId_;
-        order = createTestOrder(instrId1_, SELL_SIDE, 9.0, 10);
+        order = asGtc(createTestOrder(instrId1_, SELL_SIDE, 9.0, 10));
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         l = crashed.process(clOrdId)->orderId_;
@@ -2051,13 +2077,13 @@ TEST_F(ProcessorTest, AnIocOrderACrashLeftOpenIsCanceledOnceRestarted)
         TradeRecorder reports;
         EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
         crashed.transactions_.keepNested_ = true; // the cancel is lost
-        auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 50);
+        auto order = asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 50));
         order->tif_ = IOC_TIF;
         RawDataEntry clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         i = crashed.process(clOrdId)->orderId_;
         ASSERT_EQ(CANCELED_ORDSTATUS, crashed.storage_.locateByOrderId(i)->status_);
-        order = createTestOrder(instrId1_, SELL_SIDE, 9.0, 10);
+        order = asGtc(createTestOrder(instrId1_, SELL_SIDE, 9.0, 10));
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         l = crashed.process(clOrdId)->orderId_;
@@ -3364,17 +3390,17 @@ TEST_F(ProcessorTest, AReleasedStopACrashLeftOpenTradesAsAMarketOrderOnceRestart
     {
         TradeRecorder reports;
         EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
-        auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+        auto order = asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100));
         RawDataEntry clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         crashed.process(clOrdId);
-        order = asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 10.0);
+        order = asStop(asGtc(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10)), STOP_ORDERTYPE, 10.0);
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         id = crashed.process(clOrdId)->orderId_;
 
         crashed.transactions_.keepNested_ = true;
-        order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 5);
+        order = asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5));
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         crashed.process(clOrdId);
@@ -3771,31 +3797,31 @@ TEST_F(ProcessorTest, ATradeTheRestartMatchesStillNamesTheReleasesPendingBeforeT
     {
         TradeRecorder reports;
         EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
-        auto order = createTestOrder(instrId1_, BUY_SIDE, 8.0, 100);
+        auto order = asGtc(createTestOrder(instrId1_, BUY_SIDE, 8.0, 100));
         RawDataEntry clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         crashed.process(clOrdId);
-        order = createTestOrder(instrId1_, BUY_SIDE, 9.0, 5);
+        order = asGtc(createTestOrder(instrId1_, BUY_SIDE, 9.0, 5));
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         crashed.process(clOrdId);
-        order = asStop(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10), STOP_ORDERTYPE, 9.5);
+        order = asStop(asGtc(createTestOrder(instrId1_, SELL_SIDE, 0.0, 10)), STOP_ORDERTYPE, 9.5);
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         id = crashed.process(clOrdId)->orderId_;
 
         crashed.transactions_.keepNested_ = true; // from here, every transaction a trade queues is lost but the first
-        order = createTestOrder(instrId1_, SELL_SIDE, 9.0, 5);
+        order = asGtc(createTestOrder(instrId1_, SELL_SIDE, 9.0, 5));
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         crashed.process(clOrdId);
         ASSERT_EQ(2u, crashed.transactions_.kept_.size()) << "the trade's transaction and the stop's release";
         crashed.transactions_.runKept(1);
-        order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 5);
+        order = asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 5));
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         crashed.process(clOrdId);
-        order = createTestOrder(instrId1_, SELL_SIDE, 10.0, 5);
+        order = asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 5));
         clOrdId = order->clOrderId_.get();
         inQueues_->push("test", OrderEvent(order.release()));
         crossing = crashed.process(clOrdId)->orderId_;
@@ -3835,21 +3861,21 @@ IdT ProcessorTest::crashBeforeASweepThatReachesAStop(const std::string &dir, IdT
     IncomingQueues *inQueues = inQueues_.get();
     TradeRecorder reports;
     EngineOverDirectory crashed(dir, instrument, inQueues, &reports);
-    auto order = createTestOrder(instrument, SELL_SIDE, 10.0, 5);
+    auto order = asGtc(createTestOrder(instrument, SELL_SIDE, 10.0, 5));
     RawDataEntry clOrdId = order->clOrderId_.get();
     inQueues->push("test", OrderEvent(order.release()));
     crashed.process(clOrdId);
-    order = createTestOrder(instrument, SELL_SIDE, 11.0, 5);
+    order = asGtc(createTestOrder(instrument, SELL_SIDE, 11.0, 5));
     clOrdId = order->clOrderId_.get();
     inQueues->push("test", OrderEvent(order.release()));
     crashed.process(clOrdId);
-    order = asStop(createTestOrder(instrument, BUY_SIDE, 0.0, 5), STOP_ORDERTYPE, 10.0);
+    order = asStop(asGtc(createTestOrder(instrument, BUY_SIDE, 0.0, 5)), STOP_ORDERTYPE, 10.0);
     clOrdId = order->clOrderId_.get();
     inQueues->push("test", OrderEvent(order.release()));
     *stop = crashed.process(clOrdId)->orderId_;
 
     crashed.transactions_.keepNested_ = true;
-    order = createTestOrder(instrument, BUY_SIDE, 11.0, 10);
+    order = asGtc(createTestOrder(instrument, BUY_SIDE, 11.0, 10));
     order->tif_ = IOC_TIF;
     clOrdId = order->clOrderId_.get();
     inQueues->push("test", OrderEvent(order.release()));
@@ -5568,6 +5594,314 @@ TEST_F(ProcessorTest, AReplacementHasATimerOfItsOwnAndTheOriginalsFindsItReplace
     ASSERT_EQ(1u, expiry.fireDue());
     engine.processQueued(1);
     EXPECT_EQ(EXPIRED_ORDSTATUS, live->status_);
+}
+
+// =============================================================================
+// Expiring first on a restart (#768)
+// =============================================================================
+
+namespace
+{
+/// A DAY order, created at 'now'
+std::unique_ptr<OrderEntry> asDay(std::unique_ptr<OrderEntry> order, DateTimeT now)
+{
+    order->tif_ = DAY_TIF;
+    order->creationTime_ = now;
+    order->lastUpdateTime_ = now;
+    return order;
+}
+
+/// Writes X, a sell of 100 at 100 that rests, then Y, which crosses it, to the directory, and loses Y's fills in a
+/// crash (#207): restored, X rests and Y is left out of the book, to be matched. Each is made by the function given.
+void crashBeforeYTrades(EngineOverDirectory &crashed, IncomingQueues *inQueues, std::unique_ptr<OrderEntry> xOrder,
+                        std::unique_ptr<OrderEntry> yOrder, IdT *x, IdT *y)
+{
+    crashed.transactions_.keepNested_ = true; // the fills are lost
+    RawDataEntry clOrdId = xOrder->clOrderId_.get();
+    inQueues->push("test", OrderEvent(xOrder.release()));
+    *x = crashed.process(clOrdId)->orderId_;
+    clOrdId = yOrder->clOrderId_.get();
+    inQueues->push("test", OrderEvent(yOrder.release()));
+    *y = crashed.process(clOrdId)->orderId_;
+}
+} // namespace
+
+TEST_F(ProcessorTest, ARestoredOrderWhoseDayEndedWhileTheServerWasDownIsExpiredNotMatched)
+{
+    // X rests, and a DAY buy Y crosses it; a crash loses the fills, so Y is restored out of the book, to be matched.
+    // Its day ended while the server was down: it expires, and never trades (#768, as ruled). The restart matched it
+    // with X as it started, before any timer, and Y's expiry would have failed: its unbooking finds no order in the
+    // book.
+    const std::string dir = test::uniqueTestPath("expire-first-unbooked");
+    std::filesystem::remove_all(dir);
+    DateTimeT now = OCT15 + 9 * HOUR; // in the business day that ends at 21:00 UTC
+    const std::function<DateTimeT()> clock = [&now]
+    {
+        return now;
+    };
+    IdT x;
+    IdT y;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports, 0, nullptr, clock);
+        crashBeforeYTrades(crashed, inQueues_.get(), asGtc(createTestOrder(instrId1_, SELL_SIDE, 100.0, 100)),
+                           asDay(createTestOrder(instrId1_, BUY_SIDE, 101.0, 100), now), &x, &y);
+    }
+
+    now = OCT15 + 33 * HOUR; // the next morning: Y's day ended at 21:00
+    {
+        TradeRecorder reports;
+        ExpiryScheduler expiry(inQueues_.get(), clock);
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports, 0, &expiry, clock);
+        ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+        ASSERT_EQ(y, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+
+        const uint64_t failedBefore = TransactionScope::failedCount();
+        const App::RestartWork work = restarted.finishRestart(expiry);
+        EXPECT_EQ(failedBefore, TransactionScope::failedCount()) << "a timer's expiry failed on an order not booked";
+        EXPECT_EQ(1u, work.expired);
+        EXPECT_EQ(0u, work.matched);
+        const OrderEntry *expired = restarted.storage_.locateByOrderId(y);
+        EXPECT_EQ(EXPIRED_ORDSTATUS, expired->status_);
+        EXPECT_EQ(0u, expired->leavesQty_);
+        EXPECT_TRUE(reports.tradesOf(y).empty()) << "an order whose day ended traded";
+        EXPECT_TRUE(reports.tradesOf(x).empty());
+        EXPECT_EQ(std::vector<ExecType>{ EXPIRED_EXECTYPE }, reports.reportTypesOf(y));
+        EXPECT_EQ(x, restarted.book_.getTop(instrId1_, SELL_SIDE));
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, BUY_SIDE).isValid()) << "the expired order is in the book";
+        EXPECT_EQ(0u, expiry.fireDue()) << "a timer was left due";
+    }
+
+    // The expiry is durable: restarted again, nothing waits to be matched
+    {
+        TradeRecorder reports;
+        EngineOverDirectory again(dir, instrId1_, inQueues_.get(), &reports);
+        EXPECT_TRUE(again.dispatcher_.ordersToMatch().empty());
+        EXPECT_EQ(EXPIRED_ORDSTATUS, again.storage_.locateByOrderId(y)->status_);
+        EXPECT_EQ(NEW_ORDSTATUS, again.storage_.locateByOrderId(x)->status_);
+        EXPECT_EQ(x, again.book_.getTop(instrId1_, SELL_SIDE));
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, ARestoredMarketOrderWhoseDayEndedWhileTheServerWasDownIsExpiredWithoutBooking)
+{
+    // An order that never rests is left out of the book too, and matched as the restart starts (#489). A DAY market
+    // order whose day ended while the server was down expires there, and is never booked (#768, as ruled).
+    const std::string dir = test::uniqueTestPath("expire-first-market");
+    std::filesystem::remove_all(dir);
+    DateTimeT now = OCT15 + 9 * HOUR;
+    const std::function<DateTimeT()> clock = [&now]
+    {
+        return now;
+    };
+    IdT x;
+    IdT m;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports, 0, nullptr, clock);
+        auto market = asDay(createTestOrder(instrId1_, BUY_SIDE, 0.0, 50), now);
+        market->ordType_ = MARKET_ORDERTYPE;
+        crashBeforeYTrades(crashed, inQueues_.get(), asGtc(createTestOrder(instrId1_, SELL_SIDE, 100.0, 100)),
+                           std::move(market), &x, &m);
+    }
+
+    now = OCT15 + 33 * HOUR;
+    {
+        TradeRecorder reports;
+        ExpiryScheduler expiry(inQueues_.get(), clock);
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports, 0, &expiry, clock);
+        ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+        ASSERT_EQ(m, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+
+        EXPECT_EQ(1u, restarted.finishRestart(expiry).expired);
+        EXPECT_EQ(EXPIRED_ORDSTATUS, restarted.storage_.locateByOrderId(m)->status_);
+        EXPECT_EQ(0u, restarted.storage_.locateByOrderId(m)->leavesQty_);
+        EXPECT_TRUE(reports.tradesOf(m).empty()) << "an order whose day ended traded";
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, BUY_SIDE).isValid()) << "a market order is in the book";
+        EXPECT_EQ(x, restarted.book_.getTop(instrId1_, SELL_SIDE));
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, ARestoredSwapWhoseDayEndedWhileTheServerWasDownIsExpiredNotMatched)
+{
+    // On FX a swap left out of the book is expired as an outright order is (#768): swaps rest in the price book, so the
+    // expiry's transaction books it and takes it out again. A sell swap X rests, and a DAY buy swap Y of the same dates
+    // crosses it; a crash loses the fills, and Y's day ends while the server is down.
+    const std::string dir = test::uniqueTestPath("expire-first-swap");
+    std::filesystem::remove_all(dir);
+    DateTimeT now = OCT15 + 9 * HOUR;
+    const std::function<DateTimeT()> clock = [&now]
+    {
+        return now;
+    };
+    const auto swapOf = [this](Side side)
+    {
+        auto order = createTestOrder(instrId1_, side, 1.0850, 100);
+        order->ordType_ = FXSWAP_ORDERTYPE;
+        order->farPrice_ = 1.0872;
+        order->settlDate_ = 1000;
+        order->farSettlDate_ = 2000;
+        return order;
+    };
+    IdT x;
+    IdT y;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports, 0, nullptr, clock);
+        crashBeforeYTrades(crashed, inQueues_.get(), asGtc(swapOf(SELL_SIDE)), asDay(swapOf(BUY_SIDE), now), &x, &y);
+    }
+
+    now = OCT15 + 33 * HOUR; // the next morning: Y's day ended at 21:00
+    {
+        TradeRecorder reports;
+        ExpiryScheduler expiry(inQueues_.get(), clock);
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports, 0, &expiry, clock);
+        ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+        ASSERT_EQ(y, restarted.dispatcher_.ordersToMatch()[0]->orderId_);
+
+        const uint64_t failedBefore = TransactionScope::failedCount();
+        EXPECT_EQ(1u, restarted.finishRestart(expiry).expired);
+        EXPECT_EQ(failedBefore, TransactionScope::failedCount()) << "the swap's expiry failed";
+        EXPECT_EQ(EXPIRED_ORDSTATUS, restarted.storage_.locateByOrderId(y)->status_);
+        EXPECT_TRUE(reports.tradesOf(y).empty()) << "a swap whose day ended traded";
+        EXPECT_TRUE(reports.tradesOf(x).empty());
+        EXPECT_EQ(x, restarted.book_.getTop(instrId1_, SELL_SIDE));
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, BUY_SIDE).isValid()) << "the expired swap is in the book";
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, ARestingOrderWhoseTimeEndedWhileTheServerWasDownExpiresBeforeTheRestartMatches)
+{
+    // A GTD sell X rests, and a GTD buy Y crosses it; a crash loses the fills. X's time ended while the server was
+    // down: the restart expires it before it matches Y, which finds nothing to trade with and rests (#768). The restart
+    // matched Y with X first, and only then did the timers start. Y, matched, gets its timer once it rests.
+    const std::string dir = test::uniqueTestPath("expire-first-booked");
+    std::filesystem::remove_all(dir);
+    DateTimeT now = OCT15 + 9 * HOUR;
+    const std::function<DateTimeT()> clock = [&now]
+    {
+        return now;
+    };
+    IdT x;
+    IdT y;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports, 0, nullptr, clock);
+        crashBeforeYTrades(crashed, inQueues_.get(),
+                           asGtd(createTestOrder(instrId1_, SELL_SIDE, 100.0, 100), now, now + HOUR),
+                           asGtd(createTestOrder(instrId1_, BUY_SIDE, 101.0, 100), now, now + 5 * HOUR), &x, &y);
+    }
+
+    now += 2 * HOUR; // X's time ended an hour ago
+    {
+        TradeRecorder reports;
+        ExpiryScheduler expiry(inQueues_.get(), clock);
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports, 0, &expiry, clock);
+        ASSERT_EQ(x, restarted.book_.getTop(instrId1_, SELL_SIDE)) << "X should be restored into the book";
+        ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+
+        const App::RestartWork work = restarted.finishRestart(expiry);
+        EXPECT_EQ(1u, work.fired);
+        EXPECT_EQ(1u, work.matched);
+        EXPECT_EQ(EXPIRED_ORDSTATUS, restarted.storage_.locateByOrderId(x)->status_);
+        EXPECT_TRUE(reports.tradesOf(x).empty()) << "an order whose time ended traded";
+        EXPECT_TRUE(reports.tradesOf(y).empty());
+        EXPECT_EQ(NEW_ORDSTATUS, restarted.storage_.locateByOrderId(y)->status_);
+        EXPECT_EQ(y, restarted.book_.getTop(instrId1_, BUY_SIDE));
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, SELL_SIDE).isValid());
+        EXPECT_EQ(0u, expiry.fireDue()) << "a timer was left due";
+
+        now += 3 * HOUR; // Y's time
+        ASSERT_EQ(1u, expiry.fireDue()) << "Y, matched and resting, has no timer";
+        while (restarted.processor_.process())
+        {
+        }
+        EXPECT_EQ(EXPIRED_ORDSTATUS, restarted.storage_.locateByOrderId(y)->status_);
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, BUY_SIDE).isValid());
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, ARestoredOrderClosedBeforeItsTurnIsNeitherMatchedNorBooked)
+{
+    // The restart's timers fire before its matching (#768), so an order restore left out of the book may be closed by
+    // its turn: matchRestored() leaves it as it is, where it matched and booked any order it was given
+    const std::string dir = test::uniqueTestPath("expire-first-closed");
+    std::filesystem::remove_all(dir);
+    IdT x;
+    IdT y;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports);
+        crashBeforeYTrades(crashed, inQueues_.get(), createTestOrder(instrId1_, SELL_SIDE, 100.0, 100),
+                           createTestOrder(instrId1_, BUY_SIDE, 101.0, 100), &x, &y);
+    }
+
+    {
+        TradeRecorder reports;
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports);
+        ASSERT_EQ(1u, restarted.dispatcher_.ordersToMatch().size());
+        OrderEntry *order = restarted.dispatcher_.ordersToMatch()[0];
+        order->status_ = EXPIRED_ORDSTATUS; // as an expiry closes it
+        order->leavesQty_ = 0;
+
+        EXPECT_EQ(Processor::RestoredOutcome::CLOSED, restarted.processor_.matchRestored(order));
+        EXPECT_TRUE(reports.tradesOf(y).empty());
+        EXPECT_TRUE(reports.tradesOf(x).empty());
+        EXPECT_FALSE(restarted.book_.getTop(instrId1_, BUY_SIDE).isValid()) << "a closed order was booked";
+        EXPECT_EQ(x, restarted.book_.getTop(instrId1_, SELL_SIDE));
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AFillTheRestartMakesIsInTheBusinessDayTheServerRestartedIn)
+{
+    // X rests, and Y crosses it; a crash loses the fills, and the business day ends while the server is down. The
+    // restart's trade is the new day's, as a trade's day is the engine's clock's (#244): each order's day figures hold
+    // it. #768's third check: the restatement now comes before the trade, and the figures are the same as when it
+    // came after, since a fill begins the new day itself (OrderParams::applyTrade()) and the later restatement leaves a
+    // day already begun.
+    const std::string dir = test::uniqueTestPath("expire-first-day-figures");
+    std::filesystem::remove_all(dir);
+    DateTimeT now = OCT15 + 9 * HOUR;
+    const std::function<DateTimeT()> clock = [&now]
+    {
+        return now;
+    };
+    IdT x;
+    IdT y;
+    {
+        TradeRecorder reports;
+        EngineOverDirectory crashed(dir, instrId1_, inQueues_.get(), &reports, 0, nullptr, clock);
+        crashBeforeYTrades(crashed, inQueues_.get(), asGtc(createTestOrder(instrId1_, SELL_SIDE, 100.0, 100)),
+                           asGtc(createTestOrder(instrId1_, BUY_SIDE, 101.0, 100)), &x, &y);
+    }
+
+    now = OCT15 + 33 * HOUR;
+    {
+        TradeRecorder reports;
+        ExpiryScheduler expiry(inQueues_.get(), clock);
+        EngineOverDirectory restarted(dir, instrId1_, inQueues_.get(), &reports, 0, &expiry, clock);
+        const App::RestartWork work = restarted.finishRestart(expiry);
+        EXPECT_EQ(2u, work.fired) << "each order's restatement";
+        EXPECT_EQ(1u, work.matched);
+        EXPECT_EQ(std::vector<std::string>{ "100@100" }, reports.tradesOf(y));
+        const IdT ids[] = { x, y };
+        for (const IdT &id : ids)
+        {
+            const OrderEntry *order = restarted.storage_.locateByOrderId(id);
+            EXPECT_EQ(FILLED_ORDSTATUS, order->status_);
+            EXPECT_EQ(ExpiryScheduler::dayStartOf(now), order->dayStart_);
+            EXPECT_EQ(100u, order->dayCumQty_) << "the restart's fill isn't in the new day's figures";
+            EXPECT_EQ(100.0, order->dayAvgPx_);
+        }
+        EXPECT_EQ((std::vector<ExecType>{ RESTATED_EXECTYPE, TRADE_EXECTYPE }), reports.reportTypesOf(y))
+            << "the new day begins before the restart trades";
+    }
+    std::filesystem::remove_all(dir);
 }
 
 // =============================================================================
