@@ -281,7 +281,10 @@ docker compose down -v              # Stop and delete volumes
 cd src/oms-frontend
 npm install
 npm run dev                         # Vite dev server at http://localhost:3000
+npm test                            # The tests, with Vitest (#548)
 ```
+
+The tests sit beside the code they test, as `*.test.ts` and `*.test.tsx` under `src/`, and run in jsdom with Testing Library; the hook's use a stand-in WebSocket, `src/test/FakeWebSocket.ts`. The frontend image's build runs them before it builds the app, so a test that fails fails CI's frontend image job. `tsc` checks them with the app's code, and `src/index.css` keeps them out of Tailwind's sources, so the app built is the same with or without them.
 
 The app asks for the server's access token first: leave it empty for a server run without one. It connects to `/ws` on the host and port it was loaded from, and the dev server passes that on to the server at `ws://localhost:8080/ws`. The image's nginx does the same for the server's container. To point a build somewhere else, set `VITE_WS_URL` when building.
 
