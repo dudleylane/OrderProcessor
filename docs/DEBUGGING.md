@@ -170,6 +170,8 @@ ctest --test-dir build-fuzz-gcc -R FuzzCorpus --output-on-failure
 - To add a seed, drop a file into `test/fuzz/corpus/client_message/`; the ctest entry picks it up on reconfigure. Crashes land under `-artifact_prefix`; commit a minimised reproducer to the corpus together with the fix.
 - Contract under test: `parseClientMessage()` returns for every input and never throws. `WsSession::handleMessage()` calls it from a Beast read handler, which since #36 catches what escapes, logs it and goes on; the harness turns an escaping exception into an abort, so the parser's contract stays checked.
 
+The FIX gateway's input has a corpus too, `test/fuzz/corpus/fix_message/`, replayed by the gtest `FixtSessionTest.TheCorpusReplaysThroughTheSessionAndTheGatewayStaysInService` (#556), which CI's ASan job runs with the gateway. Each seed is a message from its MsgType (35) on, with `|` for SOH and without the fields the session fills in (8, 9, 49, 56, 34, 52 and 10). The replay adds them, hands the bytes to the session, which parses and validates them with its own dictionaries as it does a socket's, and the gateway gets what passes. Name a new seed with the next number: the replay runs them in name order. It isn't fuzzing, since nothing mutates. A libFuzzer campaign of the gateway needs the engine it links to build under Clang, which el10's spdlog and fmt don't allow (above).
+
 ### cppcheck
 
 Complementary to clang-tidy — catches different classes of bugs:
