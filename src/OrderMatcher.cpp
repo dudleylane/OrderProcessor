@@ -64,8 +64,8 @@ Walk walk(const OrderEntry &order, const OrderEntry &contra)
     {
         return Walk::TAKE;
     }
-    const bool contraIsSwap = (FXSWAP_ORDERTYPE == contra.ordType_);
-    if (FXSWAP_ORDERTYPE != order.ordType_)
+    const bool contraIsSwap = !contra.tradesWithOutrights();
+    if (order.tradesWithOutrights())
     {
         // A swap trades only with a swap, on both legs: an outright order passes over one, and keeps looking. It used
         // to take a swap by its near price alone, and filled the swap's near leg without its far leg (#212). Any other
@@ -184,16 +184,48 @@ bool FindOpositeOrder::match(const IdT &order, bool *stop) const
 }
 } // namespace
 
+namespace
+{
+/// hasMarket()'s search: the first order on the other side of order's instrument of the kind order trades with
+class FindMarket final : public OrderFunctor
+{
+public:
+    FindMarket(const OrderEntry &order, const Store::OrderDataStorage &storage) : order_(order), storage_(storage)
+    {
+        side_ = (BUY_SIDE == order.side_) ? SELL_SIDE : BUY_SIDE;
+    }
+    SourceIdT instrument() const override
+    {
+        return order_.instrument_.getId();
+    }
+    bool match(const IdT &id, bool *stop) const override
+    {
+        const OrderEntry *resting = storage_.locateByOrderId(id);
+        const bool found = (nullptr != resting) && (resting->tradesWithOutrights() == order_.tradesWithOutrights());
+        *stop = found;
+        return found;
+    }
+
+private:
+    const OrderEntry &order_;
+    const Store::OrderDataStorage &storage_;
+};
+} // namespace
+
+bool OrderMatcher::hasMarket(const OrderEntry &order, const OrderBook &book, const Store::OrderDataStorage &storage)
+{
+    return book.find(FindMarket(order, storage)).isValid();
+}
+
 bool OrderMatcher::tradesWith(const OrderEntry &order, const OrderEntry &contra)
 {
     // A swap trades only with a swap (#212), on both legs: the same near and far dates, the near prices crossing, and
     // the far prices crossing the other way, since the buyer of the near leg sells the far one
-    const bool swap = (FXSWAP_ORDERTYPE == order.ordType_);
-    if (swap != (FXSWAP_ORDERTYPE == contra.ordType_))
+    if (order.tradesWithOutrights() != contra.tradesWithOutrights())
     {
         return false;
     }
-    if (swap)
+    if (!order.tradesWithOutrights())
     {
         if ((contra.settlDate_ != order.settlDate_) || (contra.farSettlDate_ != order.farSettlDate_) ||
             !pricesCross(order, contra))

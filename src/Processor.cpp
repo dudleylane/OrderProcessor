@@ -794,11 +794,11 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
     replacement.stopTriggered_ =
         reached && ((STOP_ORDERTYPE == replacement.ordType_) || (STOPLIMIT_ORDERTYPE == replacement.ordType_));
     const bool releasedHere = replacement.stopTriggered_ && !original->stopTriggered_;
-    // A market replacement, or a released stop's, needs an order to trade with. Asked before the original's lock is
-    // taken: a matcher can hold the book's lock while it waits on the original (#74).
-    const Side opposite = (BUY_SIDE == replacement.side_) ? SELL_SIDE : BUY_SIDE;
+    // A market replacement, or a released stop's, needs an order to trade with, a resting swap being none for an
+    // outright one (#552). Asked before the original's lock is taken: a matcher can hold the book's lock while it waits
+    // on the original (#74).
     const bool noMarket =
-        replacement.marketLike() && !orderBook_->getTop(replacement.instrument_.getId(), opposite).isValid();
+        replacement.marketLike() && !OrderMatcher::hasMarket(replacement, *orderBook_, *orderStorage_);
 
     // write lock on the original for the decision and its state machine
     oneapi::tbb::spin_rw_mutex::scoped_lock origLock(original->entryMutex_, true);

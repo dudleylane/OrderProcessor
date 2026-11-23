@@ -64,6 +64,11 @@ public:
     /// swap's dates: the test findContra() applies to each working order it comes to. Neither quantity nor status is
     /// part of it: an order that isn't working trades with nothing, and the caller checks that.
     static bool tradesWith(const OrderEntry &order, const OrderEntry &contra);
+    /// Whether the other side of order's instrument holds an order of the kind order trades with, at any price: an
+    /// order's market, which a market order needs (#534), an outright one's any resting order but a swap (#552). The
+    /// side's lock is held as each resting order is looked up, as the matcher's search holds it; no order's lock is
+    /// taken, since only types are read.
+    static bool hasMarket(const OrderEntry &order, const OrderBook &book, const Store::OrderDataStorage &storage);
 
 private:
     void matchSwap(OrderEntry *order, const ACID::Context &ctxt);

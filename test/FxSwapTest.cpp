@@ -619,6 +619,27 @@ TEST_F(FxSwapTest, LimitOrderPassesOverASwapToTheOutrightOrderBehindIt)
     EXPECT_DOUBLE_EQ(1.0850, trade->trades_.front().lastPx_);
 }
 
+TEST_F(FxSwapTest, ARestingSwapIsNoMarketForAnOutrightOrder)
+{
+    // A market order needs an order to trade with (#534), and an outright order never trades with a swap (#212): the
+    // check the receive and the replace ask passes over a resting swap, as the matcher's search does (#552)
+    OrderEntry *sellSwap = createAndSaveSwapOrder(SELL_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    sellSwap->status_ = NEW_ORDSTATUS;
+    orderBook_->add(*sellSwap);
+    OrderEntry *buyMarket = createAndSaveLimitOrder(BUY_SIDE, 0.0, 100);
+    buyMarket->ordType_ = MARKET_ORDERTYPE;
+    EXPECT_FALSE(OrderMatcher::hasMarket(*buyMarket, *orderBook_, *OrderStorage::instance()))
+        << "a resting swap was taken for an outright order's market";
+
+    OrderEntry *sellLimit = createAndSaveLimitOrder(SELL_SIDE, 1.0900, 100);
+    sellLimit->status_ = NEW_ORDSTATUS;
+    orderBook_->add(*sellLimit);
+    EXPECT_TRUE(OrderMatcher::hasMarket(*buyMarket, *orderBook_, *OrderStorage::instance()));
+    // A swap's market is a swap
+    const OrderEntry *buySwap = createAndSaveSwapOrder(BUY_SIDE, 1.0850, 1.0872, 100, 1000, 2000);
+    EXPECT_TRUE(OrderMatcher::hasMarket(*buySwap, *orderBook_, *OrderStorage::instance()));
+}
+
 TEST_F(FxSwapTest, MarketOrderDoesNotMatchASwap)
 {
     // With only a swap on the other side, a market order finds nothing to trade, and is canceled

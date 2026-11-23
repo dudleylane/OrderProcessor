@@ -301,6 +301,7 @@ Tests for FX Swap data model, matching, validation, and codec support.
 | `LimitOrderDoesNotMatchASwap` | An outright limit order with only a swap opposite trades nothing: no outright takes a swap's near leg |
 | `LimitOrderPassesOverASwapToTheOutrightOrderBehindIt` | A swap at the best price is passed over, and the outright sell behind it trades, at its own price |
 | `MarketOrderDoesNotMatchASwap` | A market order with only a swap opposite finds nothing, and is canceled |
+| `ARestingSwapIsNoMarketForAnOutrightOrder` | A resting swap is no market for an outright market order: the check its receive and its replace ask passes over it, as the matcher's search does (#552) |
 | `AnOutrightFoksCheckPassesOverASwap` | An outright FOK's check passes over the swap at the best price and fills from the outright behind it |
 | `AFokSwapsCheckPassesOverWhatItsSweepPassesOver` | A FOK swap's check passes over what its sweep would: an outright, a swap of other dates, a far price that doesn't cross (#491) |
 | `ASwapThatIsntWorkingDoesntEndTheSearch` | A suspended swap with the best near price is passed by, and the working swap behind it found (#432) |
