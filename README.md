@@ -194,6 +194,8 @@ On this branch an instrument may also give its `instrumentType`: `EQUITY`, `FX_S
 
 An instrument that gives no type is stored with none, as the test set's equities are, and `EQUITY` is a type: a file that gives it for an instrument stored with none is refused, as any other change is. A currency on an instrument that isn't an FX pair is refused, since nothing would check it. Nothing but these checks reads an instrument's type or currencies yet: a swap trades on any instrument, an equity included (#718).
 
+**Backing up and checking a data directory (#591).** `mdb_copy -c ./data ./backup` copies the directory in one read transaction, so it may run while the server writes it; the destination must be an empty directory that exists, and `-c` leaves out free pages. It is in LMDB's tools, el10's `lmdb` package, from CRB. `./build/seedData --check ./backup` then restores the copy as the server's start does, with the environment opened read-only: it writes nothing to the data file, says what it found and exits 0 when every record restores, or names the record it refuses, by its key and version, and exits 1. LMDB opens the copy's `lock.mdb` for writing, and makes one beside a copy that has none, as every reader does, so the copy must be one its user may write, unless it's on a read-only filesystem. It can check the server's own directory while the server runs, holding every order in memory as the server does. A server's start names a record it refuses the same way. [docker/README.md](docker/README.md#backing-up-and-checking-the-data) gives the same for the stack.
+
 Server options:
 
 | Flag | Default | Description |

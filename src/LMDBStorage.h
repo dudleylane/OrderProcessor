@@ -52,6 +52,10 @@ public:
 public:
     /// reimplemented from FileSaver
     void load(const std::string &path, FileStorageObserver *observer) override;
+    /// Restores every record as load() does, with the environment opened read-only (MDB_RDONLY), for a check (#591):
+    /// it makes no directory and writes nothing to the data file, and reads one consistent snapshot of a directory a
+    /// server may be using. LMDB refuses a write through a storage loaded so (EACCES).
+    void loadReadOnly(const std::string &path, FileStorageObserver *observer);
     IdT save(const char *buf, size_t size) override;
     void save(const IdT &id, const char *buf, size_t size) override;
     u32 update(const IdT &id, const char *buf, size_t size) override;
@@ -130,6 +134,8 @@ private:
     u32 stage(const IdT &id, const char *buf, size_t size);
 
     void close();
+    /// load() and loadReadOnly(): opens the environment, and restores every record through observer
+    void loadEnvironment(const std::string &path, FileStorageObserver *observer, bool readOnly);
 
     /// Runs body(txn), which returns an LMDB result, in a write transaction and commits it. A write that finds the map
     /// full doubles the map and runs again (#148).

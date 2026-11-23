@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -10,18 +11,64 @@
 #include "IdTGenerator.h"
 #include "LMDBStorage.h"
 #include "StorageRecordDispatcher.h"
+#include "OrderStorage.h"
 #include "ReferenceDataFile.h"
 #include "SeedDataArgs.h"
+#include "ServerData.h"
 #include "ServerDefaults.h"
 
 using namespace COP;
 
 namespace
 {
-const char *const USAGE = "usage: seedData [--if-empty] [--file FILE] [--data-dir DIR | DIR]   (default ./data)\n"
-                          "  --if-empty   seed only a directory with no instrument yet (#161)\n"
-                          "  --file FILE  load FILE's instruments, accounts and clearing firms, and not the test set\n"
-                          "               (#585); README gives the format\n";
+const char *const USAGE =
+    "usage: seedData [--if-empty] [--file FILE] [--data-dir DIR | DIR]   (default ./data)\n"
+    "       seedData --check [--data-dir DIR | DIR]\n"
+    "  --if-empty   seed only a directory with no instrument yet (#161)\n"
+    "  --file FILE  load FILE's instruments, accounts and clearing firms, and not the test set\n"
+    "               (#585); README gives the format\n"
+    "  --check      restore DIR as a server's start does, read-only, and say whether every record\n"
+    "               restores (#591): it writes nothing to DIR's data file, so it may check a directory\n"
+    "               a server is using, or a copy mdb_copy made. LMDB opens DIR's lock.mdb for\n"
+    "               writing, as every reader does, unless DIR is on a read-only filesystem\n";
+
+/// seedData --check (#591): the directory restored as a server's start restores it, with the environment read-only.
+/// Returns 0 if every record restores, and 1 if one doesn't, or the directory holds no LMDB data file.
+int check(const std::string &dataDir)
+{
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(std::filesystem::path(dataDir) / "data.mdb", ec))
+    {
+        std::cerr << "seedData: " << dataDir << " holds no data.mdb, so there is nothing to check\n";
+        return 1;
+    }
+    aux::ExchLogger::create();
+    aux::ExchLogger::instance()->setNoteOn(true);
+    aux::ExchLogger::instance()->setDebugOn(false); // as the server does by default (#76)
+    Store::WideDataStorage::create();
+    IdTGenerator::create();
+    Store::OrderStorage::create();
+    int status = 0;
+    try
+    {
+        const App::DataCheck found = App::checkServerData(dataDir, Store::LMDBStorage::DEFAULT_MAP_SIZE);
+        std::cout << "seedData: every record in " << dataDir << " restores: " << found.instruments << " instruments, "
+                  << found.accounts << " accounts, " << found.clearingFirms << " clearing firms and " << found.orders
+                  << " orders, of which " << found.ordersToMatch
+                  << " were left by a crash without their fills, to be matched as the server starts\n";
+    }
+    catch (const std::exception &ex)
+    {
+        std::cerr << "seedData: " << dataDir << " can't be restored: " << ex.what() << "\n";
+        status = 1;
+    }
+    // The orders first, which name the reference data, as the server's tests stop
+    Store::OrderStorage::destroy();
+    IdTGenerator::destroy();
+    Store::WideDataStorage::destroy();
+    aux::ExchLogger::destroy();
+    return status;
+}
 
 /// What seedData seeds without --file: test data, so not for a directory in real use
 App::ReferenceData testSet()
@@ -131,6 +178,10 @@ int main(int argc, char *argv[])
         return 2;
     }
     const std::string dataDir = parsed->dataDir;
+    if (parsed->check)
+    {
+        return check(dataDir);
+    }
 
     // The file is read and checked whole before the directory is opened, so a file that's refused writes nothing (#585)
     std::optional<App::ReferenceData> data;

@@ -96,10 +96,13 @@ FROM build-${TEST_IN_IMAGE} AS built
 FROM quay.io/centos/centos:stream10
 
 # Packages aren't pinned to versions (hadolint's DL3041): the image takes CentOS Stream 10's current ones on every
-# build, as the image check's --pull=newer intends (#135), so it gets their fixes. A pin would freeze them.
+# build, as the image check's --pull=newer intends (#135), so it gets their fixes. A pin would freeze them. lmdb, LMDB's
+# tools, gives mdb_copy, which copies the data directory while the server runs (#591: docker/README.md's "Backing up
+# and checking the data"); el10 has it in CRB, which the builder enables for lmdb-devel, and this enables for it alone.
 # hadolint ignore=DL3041
 RUN dnf install -y epel-release \
     && dnf install -y tbb lmdb-libs spdlog libpq openssl-libs \
+    && dnf install -y --enablerepo=crb lmdb \
     && dnf clean all
 
 COPY --from=built /build/out/orderProcessorServer /usr/local/bin/
