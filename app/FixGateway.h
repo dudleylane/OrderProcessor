@@ -28,6 +28,7 @@
 #include "QueuesDef.h"
 #include "DataModelDef.h"
 #include "FixCredentials.h"
+#include "LogThrottle.h"
 
 // Catch QuickFIX ABI breaks at compile time (GroupArena added m_arena to FieldMap).
 static_assert(sizeof(FIX::Group) == 128, "FIX::Group size changed — ABI break. Clean rebuild required.");
@@ -83,6 +84,11 @@ public:
     /// WebSocket session waits to read its client's next message. A status request adds no work, and doesn't wait. Set
     /// it before the acceptor starts; without it, as in tests, nothing waits.
     void setInFlightGauge(InFlightGauge *inFlight, std::chrono::milliseconds longestWait = DEFAULT_IN_FLIGHT_WAIT);
+    /// How often a session's contained exceptions may be logged: one line, the rest counted into the next (#616)
+    static constexpr std::chrono::seconds DEFAULT_CONTAINED_LOG_PERIOD{ 1 };
+    /// Another period than DEFAULT_CONTAINED_LOG_PERIOD, for a test that mustn't race the clock; each session's
+    /// throttle starts again
+    void setContainedLogPeriod(std::chrono::steady_clock::duration period);
 
     // Application interface
     void onCreate(const FIX::SessionID &) override;
@@ -322,6 +328,12 @@ private:
     };
     std::unordered_map<std::string, Refusals> refusals_; // by source
     mutable std::mutex refusalsLock_;                    // guards it; taken with no other lock held
+
+    /// Each session's throttle of its contained exceptions' log lines (#616), by session: one a second, the rest
+    /// counted into the next
+    std::unordered_map<std::string, LogThrottle> containedLogs_;
+    std::chrono::steady_clock::duration containedLogPeriod_ = DEFAULT_CONTAINED_LOG_PERIOD;
+    mutable std::mutex containedLogsLock_; // guards both; taken with no other lock held
 
 public:
     // FIX → internal enum conversions (public static for testability)

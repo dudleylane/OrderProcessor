@@ -1128,8 +1128,8 @@ BENCHMARK(BM_FixReplaceRefusal)->UseManualTime();
 /// A cancel request for an order the session never sent, refused by the gateway itself: it finds no order under the
 /// session's key (#71), none on its way to the engine (#380) and no refused replacement by that ClOrdID (#398), and
 /// sends the session an OrderCancelReject (35=9) for an unknown order, quoting the request's ClOrdIDs (#73). The
-/// gateway logs each at Error, which the benchmarks can't turn off, so the time includes making the log line and
-/// handing it to spdlog's thread, which writes it to exchange.log.
+/// gateway logs each as a note since #616, which the benchmarks turn off; until then at Error, which they couldn't, so
+/// the time included making the log line and handing it to spdlog's thread, which wrote it to exchange.log.
 static void BM_FixCancelOfUnknownOrder(benchmark::State &state)
 {
     FixBenchSetup setup;
