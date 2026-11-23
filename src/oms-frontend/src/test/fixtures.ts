@@ -25,6 +25,7 @@ export function sample(figures: Partial<SystemMetrics> = {}): SystemMetrics {
     activeOrders: 0,
     storageMapSize: 0,
     storageMapUsed: 0,
+    serverStart: 0,
     timestamp: 0,
     ...figures,
   };

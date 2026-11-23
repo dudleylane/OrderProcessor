@@ -124,6 +124,11 @@ std::atomic<bool> terminating{ false };
 int main(int argc, char *argv[])
 {
     std::set_terminate(onTerminate);
+    // When this server started, which every metrics_update carries: the UI takes a sample with another start as a
+    // restarted server's, whose counters began again from 0 (#677)
+    const u64 serverStart = static_cast<u64>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count());
     // A flag the server doesn't know, or a value it can't read, is a usage error: the reason and the usage on standard
     // error, and exit status 2, as seedData does (#173). Before, the server ignored it and ran with the defaults.
     const std::vector<std::string> args(argv + 1, argv + argc);
@@ -506,7 +511,7 @@ int main(int argc, char *argv[])
     }
     auto metricsPublisher = std::make_shared<App::MetricsPublisher>(
         ioc, sessionMgr.get(), taskMgr.get(), inQueues.get(), transactMgr.get(), Store::OrderStorage::instance(),
-        std::move(scopePools), lmdbStorage.get());
+        std::move(scopePools), lmdbStorage.get(), serverStart);
     metricsPublisher->start();
 
     // 11. Signal handling for graceful shutdown
