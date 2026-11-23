@@ -63,7 +63,9 @@ json orderToJson(const OrderEntry &order, const OrderFigures &figures)
     j["destination"] = stringOrEmpty(order.destination_);
     j["source"] = stringOrEmpty(order.source_);
     j["creationTime"] = order.creationTime_;
-    j["lastUpdateTime"] = order.lastUpdateTime_;
+    // When its last decision was made, which each decision changes, so it is the figures' (#546): read from the order,
+    // which this doesn't lock, it would race with the next decision and could say a time no report has
+    j["lastUpdateTime"] = figures.lastUpdateTime_;
     j["expireTime"] = order.expireTime_;
     return j;
 }

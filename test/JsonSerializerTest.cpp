@@ -207,6 +207,40 @@ TEST_F(JsonSerializerTest, AnOrderUpdateGivesTheFiguresItsReportCarries)
     EXPECT_EQ(0u, data.value("leavesQty", 1u));
 }
 
+TEST_F(JsonSerializerTest, AnOrdersLastUpdateTimeIsItsReportsDecisions)
+{
+    // Each decision sets the order's lastUpdateTime_, which its report's figures carry (#546). An order update gives
+    // the report's time, and a snapshot its last report's, not the order's: a later decision may have set it, and
+    // neither takes the order's lock to read it.
+    std::unique_ptr<OrderEntry> restoredOrder = newOrder("CL-1", IdT(1, 1));
+    restoredOrder->status_ = NEW_ORDSTATUS;
+    restoredOrder->orderQty_ = 100;
+    restoredOrder->leavesQty_ = 100;
+    restoredOrder->creationTime_ = 1792098000000ULL;
+    restoredOrder->lastUpdateTime_ = 1792098000000ULL + 1000; // its acceptance's, which its record has
+    OrderEntry *order = restoredOrder.get();
+    OrderStorage::instance()->restore(restoredOrder.release());
+    {
+        // A fill, decided and not yet reported
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(order->entryMutex_, true);
+        order->status_ = PARTFILL_ORDSTATUS;
+        order->cumQty_ = 30;
+        order->leavesQty_ = 70;
+        order->lastUpdateTime_ = 1792098000000ULL + 2000;
+    }
+    nlohmann::json msg = nlohmann::json::parse(App::serializeOrderSnapshot(OrderStorage::instance()));
+    ASSERT_EQ(1u, msg["data"].size());
+    EXPECT_EQ(1792098000000ULL + 1000, msg["data"][0].value("lastUpdateTime", 0ULL))
+        << "the snapshot gives a fill that isn't reported";
+
+    // The fill's report goes out after a later decision was applied: its order update gives the fill's time
+    const OrderFigures filled(*order);
+    order->lastUpdateTime_ = 1792098000000ULL + 3000;
+    nlohmann::json data = nlohmann::json::parse(App::serializeOrderUpdate(*order, filled))["data"];
+    EXPECT_EQ(1792098000000ULL + 2000, data.value("lastUpdateTime", 0ULL));
+    EXPECT_EQ(1792098000000ULL, data.value("creationTime", 0ULL));
+}
+
 TEST_F(JsonSerializerTest, SetReferencesAreSerialized)
 {
     // A replacement has an origClOrderId, and an order may have an account: both still come through.

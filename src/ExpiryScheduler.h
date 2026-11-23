@@ -70,7 +70,8 @@ public:
     /// It began at 17:00 New York the evening before, 21:00 or 22:00 UTC, so twelve hours on is that date in either
     /// season. 0 for no day.
     static u32 tradeDateOf(DateTimeT dayStart);
-    /// When the order expires, and with which timer, if its time in force has an end: false for any other order
+    /// When the order expires, and with which timer, if its time in force has an end: false for any other order. A DAY
+    /// order's day is the one it was created in, or a replacement's the one it was replaced in (#240, #546).
     static bool expiryOf(const OrderEntry &order, DateTimeT *when, Queues::TimerEvent::TimerType *type);
     /// When the order's day figures next begin again, if it outlives the business day they are for (#244): an order
     /// that rests, in the price book or the stop book, unless its day ends it first, as it does a DAY order and a GTD

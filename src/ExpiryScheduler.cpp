@@ -135,9 +135,13 @@ bool ExpiryScheduler::expiryOf(const OrderEntry &order, DateTimeT *when, TimerEv
         *type = TimerEvent::EXPIRATION;
         return true;
     case DAY_TIF:
-        // The day it was created in, or a replacement's, replaced in: a replacement keeps its original's
-        // creationTime_, and the gateways set its lastUpdateTime_ to the replace's
-        *when = dayEndAfter(std::max(order.creationTime_, order.lastUpdateTime_));
+        // The day it was created in, or a replacement's, replaced in. A replacement keeps its original's
+        // creationTime_, and its lastUpdateTime_ is the replace's when its timer is set, as the replace is decided.
+        // Every decision sets lastUpdateTime_ (#546), so an original's day is its creationTime_'s alone: a fill decided
+        // after its day ended, as a restart's matching decides one, would give it another day. A replacement restored
+        // is given its last decision's day, which is the replace's unless a decision came after that day ended.
+        *when = dayEndAfter(order.origOrderId_.isValid() ? std::max(order.creationTime_, order.lastUpdateTime_)
+                                                         : order.creationTime_);
         *type = TimerEvent::DAY_END;
         return true;
     default:

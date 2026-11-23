@@ -278,6 +278,28 @@ TEST_F(ExpirySchedulerOrderTest, OnlyADayOrAGtdOrderHasAnExpiry)
     }
 }
 
+TEST_F(ExpirySchedulerOrderTest, ADayOrdersDayIsTheOneItWasCreatedInOrAReplacementsReplacedIn)
+{
+    // Every decision sets an order's lastUpdateTime_ (#546), a fill a restart's matching decides a day later among
+    // them: an original's day is its creationTime_'s whatever its last decision's. A replacement keeps its original's
+    // creationTime_, and its day is the replace's, its lastUpdateTime_ when its timer is set (#240).
+    const DateTimeT hour = 60ULL * 60 * 1000;
+    const DateTimeT oct15 = 1792022400000ULL; // 2026-10-15 00:00 UTC
+    auto order = test::createCorrectOrder(test::addInstrument("DAYS"));
+    order->tif_ = DAY_TIF;
+    order->creationTime_ = oct15 + 13 * hour;
+    order->lastUpdateTime_ = oct15 + 37 * hour; // the next day, 13:00 UTC
+    DateTimeT when = 0;
+    TimerEvent::TimerType type = TimerEvent::INVALID_TIMER;
+    ASSERT_TRUE(ExpiryScheduler::expiryOf(*order, &when, &type));
+    EXPECT_EQ(oct15 + 21 * hour, when) << "an original's day moved with its last decision";
+    EXPECT_EQ(TimerEvent::DAY_END, type);
+
+    order->origOrderId_ = IdT(7, 20261015); // a replacement
+    ASSERT_TRUE(ExpiryScheduler::expiryOf(*order, &when, &type));
+    EXPECT_EQ(oct15 + 45 * hour, when) << "a replacement's day is its original's";
+}
+
 TEST_F(ExpirySchedulerOrderTest, AnOrderThatRestsPastItsDayIsRestatedAtTheDaysEnd)
 {
     // #244: an order of any time in force but DAY, if it rests, unless it expires first

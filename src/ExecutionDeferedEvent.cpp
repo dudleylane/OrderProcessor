@@ -62,7 +62,7 @@ bool ExecutionDeferedEvent::takesTrade(const OrderEntry &base, QuantityT qty, Qu
 }
 
 void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope,
-                                    const TradeParams &param, DateTimeT dayStart)
+                                    const TradeParams &param, DateTimeT now, DateTimeT dayStart)
 {
     TradeExecEntry trade;
     trade.lastQty_ = param.lastQty_;
@@ -71,7 +71,9 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const ACID::Conte
     // The business day the match counts in, as YYYYMMDD (#258): every side of it gets the same
     trade.tradeDate_ = ExpiryScheduler::tradeDateOf(dayStart);
     trade.type_ = TRADE_EXECTYPE;
-    trade.transactTime_ = 1;
+    // When it was matched, which the fill gives its order and its stored trade, and so its record and its report: it
+    // was 1, which read as 1970-01-01 (#546, #612)
+    trade.transactTime_ = now;
     trade.orderId_ = param.order_->orderId_;
     onTradeExecution evnt4Proc(&trade);
     evnt4Proc.dayStart_ = dayStart;
@@ -113,9 +115,11 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
         cnxt.orderMatch_->afterTrade(baseOrder_, baseBefore, 0.0, cnxt);
         return;
     }
-    // Every side of the match trades in one business day (#244): the clock is read once, so a match at a day's end
-    // can't count in one day for one side and in the next for the other
-    const DateTimeT dayStart = ExpiryScheduler::dayStartOf(cnxt.now());
+    // Every side of the match trades in one business day (#244), at one time (#546, #612): the clock is read once, so a
+    // match at a day's end can't count in one day for one side and in the next for the other, and every fill, its
+    // stored trade, its record and its report say the same time
+    const DateTimeT now = cnxt.now();
+    const DateTimeT dayStart = ExpiryScheduler::dayStartOf(now);
     for (TradesT::const_iterator it = trades_.begin(); it != trades_.end(); ++it)
     {
         assert(nullptr != it->order_);
@@ -123,7 +127,7 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
         assert(0 < it->lastPx_);
 
         QuantityT quantBefore = it->order_->leavesQty_;
-        execute(func, cnxt, scope, *it, dayStart);
+        execute(func, cnxt, scope, *it, now, dayStart);
 
         /// ToDo: should be redesigned: if execution applied - increase executed quantity
         if (quantBefore > it->order_->leavesQty_)
@@ -138,7 +142,7 @@ void ExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context &cn
     {
         baseOrderParam.lastPx_ /= baseOrderParam.lastQty_;
 
-        execute(func, cnxt, scope, baseOrderParam, dayStart);
+        execute(func, cnxt, scope, baseOrderParam, now, dayStart);
 
         // The instrument's last trade, durable with the fills (#237), with the releases pending once this trade has
         // claimed its own, below (#518). The id is drawn now, from the generator every order id comes from, so a held
