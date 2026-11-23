@@ -1726,6 +1726,144 @@ TEST(FixMinQtyTest, OnlyAMinQtyOfZeroIsTaken)
     }
 }
 
+namespace
+{
+/// What the session's own dictionary, FIX 5.0 SP2's, defines for a field number: its name, and its values if it lists
+/// them. The dictionary is read once.
+struct DictionaryField
+{
+    std::string name;
+    std::set<std::string> values;
+};
+DictionaryField dictionaryField(int number)
+{
+    static const std::string xml = []
+    {
+        std::ifstream in(test::sourceRoot() / "config" / "spec" / "FIX50SP2.xml", std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    }();
+    DictionaryField field;
+    const std::string open = "<field number='" + std::to_string(number) + "' name='";
+    const size_t at = xml.find(open);
+    if (std::string::npos == at)
+    {
+        return field;
+    }
+    const size_t nameStart = at + open.size();
+    field.name = xml.substr(nameStart, xml.find('\'', nameStart) - nameStart);
+    const size_t tagEnd = xml.find('>', at);
+    if ('/' == xml[tagEnd - 1])
+    {
+        return field; // a field with no values listed
+    }
+    const size_t end = xml.find("</field>", tagEnd);
+    for (size_t p = xml.find("enum='", tagEnd); p < end; p = xml.find("enum='", p))
+    {
+        p += 6;
+        field.values.insert(xml.substr(p, xml.find('\'', p) - p));
+    }
+    return field;
+}
+} // namespace
+
+TEST(FixInstructionTest, EveryExecInstValueIsEitherTakenOrRefused)
+{
+    // The gateway takes the ExecInst (18) values it carries out and refuses the others (#667). Every value the
+    // session's dictionary defines must be in one of its two lists, and none in both, so that a value a new dictionary
+    // adds is decided before it is taken.
+    const DictionaryField execInst = dictionaryField(FIX::FIELD::ExecInst);
+    ASSERT_EQ("ExecInst", execInst.name);
+    std::set<std::string> listed;
+    for (const char value : FixGateway::EXEC_INST_TAKEN)
+    {
+        EXPECT_TRUE(listed.insert(std::string(1, value)).second) << value << " is listed twice";
+    }
+    for (const char value : FixGateway::EXEC_INST_REFUSED)
+    {
+        EXPECT_TRUE(listed.insert(std::string(1, value)).second) << value << " is in both lists, or listed twice";
+    }
+    EXPECT_EQ(execInst.values, listed);
+}
+
+TEST(FixInstructionTest, OnlyTheExecInstValuesTheServerCarriesOutAreTaken)
+{
+    // Its values are separated by spaces (#667)
+    const auto refusalOf = [](const char *execInst)
+    {
+        FIX::Message msg;
+        msg.setField(FIX::FIELD::ExecInst, execInst);
+        return FixGateway::instructionRefusal(msg, 100);
+    };
+    for (const char *taken : { "H", "J", "n", "h", "H n J h", "H H" })
+    {
+        EXPECT_EQ(std::nullopt, refusalOf(taken)) << taken;
+    }
+    for (const char *refused : { "G", "6", "o", "K", "m", "1", "g", "B" })
+    {
+        const std::optional<std::string> refusal = refusalOf(refused);
+        ASSERT_TRUE(refusal.has_value()) << refused;
+        EXPECT_EQ(0u, refusal->find("ExecInst (18) " + std::string(refused) + " asks for")) << *refusal;
+    }
+    EXPECT_EQ(std::optional<std::string>("ExecInst (18) G asks for what the server doesn't do: it takes only H, J and "
+                                         "n (reinstate) and h (no routing elsewhere)"),
+              refusalOf("H G"))
+        << "a value refused among taken ones";
+}
+
+TEST(FixInstructionTest, AnOrderIsShownWhole)
+{
+    // MaxFloor (111), MaxShow (210) and DisplayQty (1138) ask to show part of the order; one at least its quantity
+    // shows all of it, as the server does (#667)
+    const auto refusalOf = [](int tag, const char *value)
+    {
+        FIX::Message msg;
+        msg.setField(tag, value);
+        return FixGateway::instructionRefusal(msg, 100);
+    };
+    for (const int tag : { FIX::FIELD::MaxFloor, FIX::FIELD::MaxShow, FIX::FIELD::DisplayQty })
+    {
+        const std::string name = dictionaryField(tag).name;
+        ASSERT_FALSE(name.empty()) << tag;
+        for (const char *taken : { "100", "100.0", "150" })
+        {
+            EXPECT_EQ(std::nullopt, refusalOf(tag, taken)) << name << " " << taken;
+        }
+        for (const char *refused : { "99.5", "50", "0", "abc" })
+        {
+            EXPECT_EQ(std::optional<std::string>(name + " (" + std::to_string(tag) +
+                                                 ") must be at least the order's quantity, or left out: the server "
+                                                 "shows an order whole"),
+                      refusalOf(tag, refused))
+                << name << " " << refused;
+        }
+    }
+}
+
+TEST(FixInstructionTest, EveryOtherInstructionIsRefusedByItsDictionaryName)
+{
+    // The display instruction's other fields, the peg, discretion and triggering instructions', MatchIncrement,
+    // MaxPriceLevels and ParticipationRate, whatever their value (#667), each named as the dictionary names it
+    const std::vector<int> refused{ 211,  388,  389,  835,  836,  837,  838,  840,  841,  842,  843,
+                                    844,  846,  849,  1082, 1083, 1084, 1085, 1086, 1087, 1088, 1089,
+                                    1090, 1094, 1096, 1097, 1098, 1099, 1100, 1101, 1102, 1103, 1104,
+                                    1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113, 1114 };
+    for (const int tag : refused)
+    {
+        const std::string name = dictionaryField(tag).name;
+        ASSERT_FALSE(name.empty()) << tag << " isn't in the dictionary";
+        FIX::Message msg;
+        msg.setField(tag, "1");
+        EXPECT_EQ(std::optional<std::string>(name + " (" + std::to_string(tag) +
+                                             ") is an order instruction the server doesn't carry out"),
+                  FixGateway::instructionRefusal(msg, 100));
+    }
+    FIX::Message plain;
+    plain.setField(FIX::FIELD::ClOrdID, "ORD-1");
+    plain.setField(FIX::FIELD::Price, "10");
+    plain.setField(FIX::FIELD::OrderQty, "100");
+    EXPECT_EQ(std::nullopt, FixGateway::instructionRefusal(plain, 100)) << "an order with no instruction";
+}
+
 // =============================================================================
 // Session Routing Tests
 // =============================================================================
@@ -3966,6 +4104,75 @@ TEST_F(FixtSessionTest, AMinQtyOtherThanZeroIsRefusedOnEveryOrderMessage)
     EXPECT_EQ("ORD-X", fieldOf(rejects[0], FIX::FIELD::OrigClOrdID));
     EXPECT_EQ("Replace refused: " + why, fieldOf(rejects[0], FIX::FIELD::Text));
     expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AnOrderInstructionTheServerDoesntCarryOutIsRefusedOnEveryOrderMessage)
+{
+    // An order instruction the engine doesn't carry out is refused rather than ignored (#667), as a MinQty is (#516):
+    // a NewOrderSingle's all-or-none and a NewOrderMultileg's peg with an ExecutionReport, 150=8 and OrdRejReason
+    // 103=11, and a replace's iceberg with an OrderCancelReject. Nothing reaches the engine.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, NEW_ORDSTATUS, 100, 0, 100);
+
+    FIX50SP2::NewOrderSingle single =
+        makeNewOrderSingle("ORD-AON", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100);
+    single.set(FIX::ExecInst("H G"));
+    receive(single);
+    FIX50SP2::NewOrderMultileg swap = makeFxSwap("SWAP-PEG");
+    swap.setField(FIX::FIELD::PegOffsetValue, "0.0001");
+    receive(swap);
+    FIX50SP2::OrderCancelReplaceRequest replace = makeLimitReplace("ORD-X", "RPL-ICEBERG");
+    replace.setField(FIX::FIELD::DisplayQty, "10");
+    receive(replace);
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(2u, reports.size()) << sentText();
+    const std::vector<std::pair<std::string, std::string>> refused{
+        { "ORD-AON", "ExecInst (18) G asks for what the server doesn't do" },
+        { "SWAP-PEG", "PegOffsetValue (211) is an order instruction the server doesn't carry out" }
+    };
+    for (size_t i = 0; i < reports.size(); ++i)
+    {
+        SCOPED_TRACE(refused[i].first);
+        EXPECT_EQ(refused[i].first, fieldOf(reports[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ(std::string(1, FIX::OrdStatus_REJECTED), fieldOf(reports[i], FIX::FIELD::OrdStatus));
+        EXPECT_EQ(std::to_string(FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC),
+                  fieldOf(reports[i], FIX::FIELD::OrdRejReason));
+        EXPECT_EQ(0u, fieldOf(reports[i], FIX::FIELD::Text).find("Order refused: " + refused[i].second))
+            << fieldOf(reports[i], FIX::FIELD::Text);
+    }
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(1u, rejects.size()) << sentText();
+    EXPECT_EQ("RPL-ICEBERG", fieldOf(rejects[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ(0u, fieldOf(rejects[0], FIX::FIELD::Text)
+                      .find("Replace refused: DisplayQty (1138) must be at least the order's quantity"))
+        << fieldOf(rejects[0], FIX::FIELD::Text);
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AnOrderInstructionTheServerCarriesOutIsTaken)
+{
+    // Reinstate on system failure and on connection loss, as restore and a session that keeps its orders do, and an
+    // iceberg as big as the order, which shows it whole (#667): the order reaches the engine
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *taken = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&taken](const std::string &, const OrderEvent &evt)
+            {
+                taken = evt.order_;
+            }));
+    FIX50SP2::NewOrderSingle single = makeNewOrderSingle("ORD-H", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100);
+    single.set(FIX::ExecInst("H n"));
+    single.setField(FIX::FIELD::MaxFloor, "100");
+    receive(single);
+    const std::unique_ptr<OrderEntry> order(taken); // the queue owns the order it's handed, and the mock is the queue
+    ASSERT_NE(nullptr, order) << sentText();
+    EXPECT_TRUE(sentOfType(FIX::MsgType_ExecutionReport).empty()) << sentText();
+    EXPECT_TRUE(sentOfType(FIX::MsgType_Reject).empty()) << sentText();
 }
 
 TEST_F(FixtSessionTest, ASideTheServerHasNoValueForIsRefusedWithTheSideAsSent)

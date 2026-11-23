@@ -366,6 +366,22 @@ public:
     /// filled below one, so a MinQty other than 0 is refused rather than ignored, until a matching rule enforces it
     /// (#666). MinQtyMethod (1822) means nothing without it, and isn't read.
     static std::optional<std::string> minQtyRefusal(const FIX::FieldMap &msg);
+    /// The ExecInst (18) values the server carries out as they ask, which an order may give (#667). H, J and n
+    /// reinstate the order after a system failure, a trading halt and a lost connection, as restore, a market that
+    /// never halts and a session that keeps its orders all do. h asks for no routing elsewhere, which the server never
+    /// does.
+    static constexpr std::string_view EXEC_INST_TAKEN = "HJhn";
+    /// Every other ExecInst (18) value FIX 5.0 SP2 defines, each asking for something the server doesn't do (#667). A
+    /// test holds the two lists to the dictionary's values.
+    static constexpr std::string_view EXEC_INST_REFUSED = "0123456789ABCDEFGIKLMNOPQRSTUVWXYZabcdefgijklmopqrstuvwxyz";
+    /// Why an order is refused for an order instruction the server doesn't carry out, or nothing (#667), with the
+    /// first such field the message holds:
+    /// - an ExecInst (18) value not in EXEC_INST_TAKEN;
+    /// - a MaxFloor (111), MaxShow (210) or DisplayQty (1138) under orderQty, since the server shows an order whole;
+    /// - any other field of the display, peg, discretion or triggering instructions, a MatchIncrement (1089), a
+    ///   MaxPriceLevels (1090) or a ParticipationRate (849), whatever its value.
+    /// It walks the message's fields once, rather than looking each up.
+    static std::optional<std::string> instructionRefusal(const FIX::FieldMap &msg, double orderQty);
     /// Why a swap's leg asks for an uneven swap, which the engine doesn't trade, or nothing (#698): it trades both
     /// legs at the order's OrderQty (38), so a leg's LegOrderQty (685) and the deprecated LegQty (687) must be that
     /// quantity, compared as numbers, and its LegRatioQty (623) 1, each where it is given. Trading uneven swaps would
