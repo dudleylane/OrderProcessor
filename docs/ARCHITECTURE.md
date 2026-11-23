@@ -1145,7 +1145,8 @@ A failure stops nothing else: the caller goes on as if the event had been handle
    │     Outside the chain, never hold a book lock and an order's at       │
    │     once (#525).                                                      │
    │   • LMDBStorage's txnLock_: last, around one LMDB transaction;        │
-   │     no other lock of the engine's is taken under it.                  │
+   │     no other lock of the engine's is taken under it, but the          │
+   │     logger's, as grow() warns that the map grew (#148).               │
    │   • The incoming queue takes no lock to push or pop.                  │
    └───────────────────────────────────────────────────────────────────────┘
 
