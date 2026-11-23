@@ -1409,6 +1409,84 @@ static void BM_FixRepeatedClOrdId(benchmark::State &state)
 }
 BENCHMARK(BM_FixRepeatedClOrdId);
 
+/// A symbol the server doesn't trade, for an order the gateway refuses itself (#702)
+constexpr const char *BENCH_UNKNOWN_SYMBOL = "NOSUCH";
+
+/// Times the gateway's own refusal of a new order, msg, which it answers with an ExecutionReport refusing it for an
+/// unknown symbol (150=8, 39=8, 103=1) before the engine sees it: refuseOrder(), which every refusal a handler makes
+/// ends in, and which nothing timed (#702). Timed by hand around onMessage(), as BM_FixReplaceRequest is. The gateway
+/// keeps nothing of an order it refuses, so each iteration sends the same one. The warm-up fails it unless the session
+/// was sent the refusal, and the run unless each iteration sent one and no order reached the engine's queue.
+template <typename Message> void timeOwnRefusal(benchmark::State &state, const Message &msg, const std::string &clOrdId)
+{
+    FixBenchSetup setup;
+    RequestInQueues inQueues;
+    BenchInFlight inFlight;
+    FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    gateway.setInFlightGauge(inFlight.gauge());
+    BenchSession session(gateway);
+    if (!session.problem().empty())
+    {
+        state.SkipWithError(session.problem().c_str());
+        return;
+    }
+
+    KeptMessage kept;
+    session.sendTo(&kept);
+    gateway.onMessage(msg, session.sid());
+    session.sendTo(nullptr);
+    std::string problem;
+    if (!kept.has({ { FIX::FIELD::MsgType, FIX::MsgType_ExecutionReport },
+                    { FIX::FIELD::ExecType, "8" },
+                    { FIX::FIELD::OrdStatus, "8" },
+                    { FIX::FIELD::OrdRejReason, "1" },
+                    { FIX::FIELD::ClOrdID, clOrdId } },
+                  &problem))
+    {
+        state.SkipWithError(problem.c_str());
+        return;
+    }
+
+    const u64 before = session.sent();
+    for (auto _ : state)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        gateway.onMessage(msg, session.sid());
+        state.SetIterationTime(secondsSince(start));
+    }
+    if ((static_cast<u64>(state.iterations()) != session.sent() - before) || (0 != inQueues.orders_))
+    {
+        state.SkipWithError("the session wasn't sent a refusal on every iteration, or an order reached the engine");
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+
+/// A NewOrderSingle for a symbol the server doesn't trade, refused by the gateway itself (#702)
+static void BM_FixNewOrderRefusal(benchmark::State &state)
+{
+    FIX50SP2::NewOrderSingle nos = makeBenchNOS("UNKNOWN-1", FIX::Side_BUY, FIX::OrdType_LIMIT, 1.2650, 100);
+    nos.set(FIX::Symbol(BENCH_UNKNOWN_SYMBOL));
+    timeOwnRefusal(state, nos, "UNKNOWN-1");
+}
+BENCHMARK(BM_FixNewOrderRefusal)->UseManualTime();
+
+/// An FX swap, a NewOrderMultileg, for a symbol the server doesn't trade, refused by the gateway itself (#702): its
+/// legs name the same symbol, as a swap's do
+static void BM_FixSwapRefusal(benchmark::State &state)
+{
+    FIX50SP2::NewOrderMultileg swap = makeBenchSwap("UNKNOWN-SWAP-1");
+    swap.set(FIX::Symbol(BENCH_UNKNOWN_SYMBOL));
+    FIX50SP2::NewOrderMultileg::NoLegs leg;
+    for (int i = 1; i <= 2; ++i)
+    {
+        swap.getGroup(i, leg);
+        leg.set(FIX::LegSymbol(BENCH_UNKNOWN_SYMBOL));
+        swap.replaceGroup(i, leg);
+    }
+    timeOwnRefusal(state, swap, "UNKNOWN-SWAP-1");
+}
+BENCHMARK(BM_FixSwapRefusal)->UseManualTime();
+
 // =============================================================================
 // 5. MultiOutQueues Fan-Out Overhead
 // =============================================================================
