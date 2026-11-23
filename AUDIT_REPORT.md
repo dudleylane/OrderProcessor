@@ -283,6 +283,8 @@ The codebase now has complete implementation of all core functionality. All prev
 
 ### Code Coverage Improvement
 
+Since #592, `scripts/coverage.sh` does this, with lcov rather than gcovr, for `src/` and `app/` (README, Coverage). The recipe as the audit gave it:
+
 Run with coverage to identify untested paths:
 ```bash
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="--coverage"
