@@ -48,6 +48,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -3455,6 +3456,75 @@ TEST_F(FixtSessionTest, ACancelOrReplaceOfAnOrderTheSessionDoesntHaveIsANoteNotA
     EXPECT_EQ(1, linesWith(lines, "[Note]", "Cancel - order not found: NO\\\\SUCH")) << "a note, escaped";
     EXPECT_EQ(1, linesWith(lines, "[Note]", "Replace - order not found: NO\\\\SUCH")) << "a note, escaped";
     EXPECT_EQ(0, linesWith(lines, "[Error]", "order not found"));
+}
+
+// The gateway's corpus (#556). Each seed in test/fuzz/corpus/fix_message is a message as a counterparty might send it,
+// from its MsgType (35) on, with '|' for SOH, and without the fields the session fills in: BeginString (8), BodyLength
+// (9), SenderCompID (49), TargetCompID (56), MsgSeqNum (34), SendingTime (52) and CheckSum (10). The replay puts those
+// around its bytes and hands them to the session, which parses and validates them with its own dictionaries, as off the
+// socket, and gives the gateway what passes. A seed named *.reject.fix must draw a Reject (35=3), from the session's
+// validation or, for an ApplVerID (1128) other than 9, the gateway's own; every other seed must reach the gateway. It
+// isn't fuzzing, since nothing mutates; with the gateway in CI's ASan job, a seed that reaches memory it shouldn't
+// fails there.
+TEST_F(FixtSessionTest, TheCorpusReplaysThroughTheSessionAndTheGatewayStaysInService)
+{
+    // The orders the seeds bring reach the engine's queue, a mock here, which frees nothing: the test takes each one,
+    // as the engine would, or LeakSanitizer finds them at exit
+    std::vector<std::unique_ptr<OrderEntry>> orders;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillRepeatedly(Invoke(
+            [&orders](const std::string &, const OrderEvent &evt)
+            {
+                orders.emplace_back(evt.order_);
+            }));
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    const std::filesystem::path dir = test::sourceRoot() / "test" / "fuzz" / "corpus" / "fix_message";
+    std::vector<std::filesystem::path> seeds;
+    for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(dir))
+    {
+        seeds.push_back(entry.path());
+    }
+    std::sort(seeds.begin(), seeds.end()); // their names' numbers give their order
+    ASSERT_LE(20u, seeds.size()) << dir;
+
+    for (const std::filesystem::path &seed : seeds)
+    {
+        std::ifstream in(seed, std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        while (!text.empty() && (('\n' == text.back()) || ('\r' == text.back())))
+        {
+            text.pop_back();
+        }
+        ASSERT_EQ(0u, text.rfind("35=", 0)) << seed << " doesn't start with its MsgType";
+        const size_t afterType = text.find('|');
+        ASSERT_NE(std::string::npos, afterType) << seed;
+        std::string body = text.substr(0, afterType + 1) + "49=" + sid_.getTargetCompID().getValue() +
+                           "|56=" + sid_.getSenderCompID().getValue() + "|34=" + std::to_string(nextSeqNum_++) +
+                           "|52=" + FIX::UtcTimeStampConvertor::convert(FIX::UtcTimeStamp::now(), 3) + "|" +
+                           text.substr(afterType + 1) + "|";
+        std::replace(body.begin(), body.end(), '|', '\x01');
+        std::string wire =
+            "8=" + sid_.getBeginString().getValue() + "\x01" + "9=" + std::to_string(body.size()) + "\x01" + body;
+        unsigned sum = 0;
+        for (const char c : wire)
+        {
+            sum += static_cast<unsigned char>(c);
+        }
+        std::string checkSum = std::to_string(sum % 256);
+        checkSum.insert(0, 3 - checkSum.size(), '0');
+        wire += "10=" + checkSum + "\x01";
+        const size_t rejects = sentOfType(FIX::MsgType_Reject).size();
+        EXPECT_NO_THROW(session_->next(wire, FIX::UtcTimeStamp::now())) << seed.filename();
+        EXPECT_TRUE(session_->isLoggedOn()) << seed.filename() << " ended the session";
+        const bool refused = std::string::npos != seed.filename().string().find(".reject.");
+        EXPECT_EQ(rejects + (refused ? 1 : 0), sentOfType(FIX::MsgType_Reject).size())
+            << seed.filename() << (refused ? " drew no Reject" : " drew a Reject, so never reached the gateway");
+    }
+
+    // Every message was taken or refused, and the gateway still answers
+    const size_t rejected = sentOfType(FIX::MsgType_OrderCancelReject).size();
+    receive(makeCancelRequest("NO-SUCH-AFTER-THE-CORPUS", "CANCEL-AFTER-THE-CORPUS"));
+    EXPECT_EQ(rejected + 1, sentOfType(FIX::MsgType_OrderCancelReject).size()) << sentText();
 }
 
 /// The server itself (#553): CLIENT_A's session, from settings like config/fix.cfg's with its files under the test's
