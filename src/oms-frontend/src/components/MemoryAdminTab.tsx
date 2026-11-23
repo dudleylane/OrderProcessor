@@ -11,12 +11,6 @@ interface Props {
 
 const MIB = 1024 * 1024;
 
-const ALLOC_MODES: Record<number, string> = {
-  0: 'Default (heap)',
-  1: 'Huge Pages (2MB)',
-  2: 'NUMA Local',
-};
-
 export function MemoryAdminTab({ metricsHistory }: Props) {
   const latest = metricsHistory[metricsHistory.length - 1];
 
