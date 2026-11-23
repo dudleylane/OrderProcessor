@@ -166,6 +166,8 @@ public:
     static constexpr u32 LAST_TRADE_FORMAT_VERSION = 1;
 
 private:
+    /// onRecordLoaded()'s work, which names the record if this throws (#591)
+    void restoreRecord(const IdT &id, u32 version, const char *buf, size_t size);
     /// Whether a restored order would have traded with an order that arrived before it: one the matcher's own search
     /// finds among the orders booked so far, or one already left to match (#207)
     bool crossesAnEarlierOrder(OrderEntry *order) const;

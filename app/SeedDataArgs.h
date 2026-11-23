@@ -18,10 +18,14 @@ struct SeedDataArgs
     bool ifEmpty = false;
     /// --file FILE: load FILE's reference data, and not the test set (#585). Empty when not given.
     std::string file;
+    /// --check: restore the directory as a server's start does, read-only, and say whether every record restores
+    /// (#591). It writes no record, so it takes neither --if-empty nor --file.
+    bool check = false;
 };
 
 /// The data directory seedData seeds: `--data-dir DIR`, as orderProcessorServer takes it, or a lone DIR; "./data" when
-/// neither is given. And --if-empty, and --file FILE (#585). Anything else returns nullopt with the reason in *error.
+/// neither is given. And --if-empty, --file FILE (#585) and --check (#591). Anything else returns nullopt with the
+/// reason in *error.
 /// Before #42 any first argument was the directory, so `seedData --data-dir /data` seeded a directory named
 /// "--data-dir".
 inline std::optional<SeedDataArgs> parseSeedDataArgs(const std::vector<std::string> &args, std::string *error)
@@ -35,6 +39,11 @@ inline std::optional<SeedDataArgs> parseSeedDataArgs(const std::vector<std::stri
         if ("--if-empty" == arg)
         {
             parsed.ifEmpty = true;
+            continue;
+        }
+        if ("--check" == arg)
+        {
+            parsed.check = true;
             continue;
         }
         if ("--file" == arg)
@@ -77,6 +86,11 @@ inline std::optional<SeedDataArgs> parseSeedDataArgs(const std::vector<std::stri
         }
         parsed.dataDir = dir;
         given = true;
+    }
+    if (parsed.check && (parsed.ifEmpty || !parsed.file.empty()))
+    {
+        *error = "--check writes no record, so it takes neither --if-empty nor --file";
+        return std::nullopt;
     }
     return parsed;
 }
