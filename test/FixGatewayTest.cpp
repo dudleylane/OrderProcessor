@@ -3395,6 +3395,68 @@ TEST_F(FixtSessionTest, AReportForASessionQuickFixNoLongerHasIsLoggedNotThrown)
         << "the lost report wasn't logged";
 }
 
+namespace
+{
+/// The engine's work in flight, which each new order's handler asks first (#519), failing: each new order's handling
+/// then throws, as a fault in it would, and the gateway contains it (#616)
+class ThrowingGauge final : public InFlightGauge
+{
+public:
+    bool overBound() override
+    {
+        throw std::runtime_error("injected\x01gauge failure");
+    }
+};
+
+/// How many of the log's lines hold both texts
+long linesWith(const std::vector<std::string> &lines, const std::string &first, const std::string &second)
+{
+    return std::count_if(lines.begin(), lines.end(),
+                         [&](const std::string &line)
+                         {
+                             return (std::string::npos != line.find(first)) && (std::string::npos != line.find(second));
+                         });
+}
+} // namespace
+
+TEST_F(FixtSessionTest, ContainedExceptionsAreLoggedAtMostOnceASecondASession)
+{
+    // A counterparty could have each message it sent contain an exception, each logged as an error, which flushes the
+    // log, with its bytes (#616). Each is still answered, but a session's are logged at most once a second, escaped.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    ThrowingGauge gauge;
+    gateway_->setInFlightGauge(&gauge);
+    gateway_->setContainedLogPeriod(std::chrono::hours(1)); // three in the period however slowly they run
+    test::CapturedLog log;
+    for (int i = 0; i < 3; ++i)
+    {
+        receive(makeNewOrderSingle("ORD-T" + std::to_string(i), "AAPL", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    }
+    gateway_->setInFlightGauge(nullptr);
+    const std::vector<std::string> lines = log.lines();
+
+    EXPECT_EQ(3u, sentOfType(FIX::MsgType_BusinessMessageReject).size()) << sentText();
+    EXPECT_EQ(1, linesWith(lines, "[Error]", "contained exception #")) << "one line in the second, not three";
+    EXPECT_EQ(1, linesWith(lines, "contained exception #", "injected\\x01gauge failure")) << "the text escaped";
+    EXPECT_EQ(0, linesWith(lines, "contained exception #", "\x01")) << "a byte that isn't printable reached the log";
+}
+
+TEST_F(FixtSessionTest, ACancelOrReplaceOfAnOrderTheSessionDoesntHaveIsANoteNotAnError)
+{
+    // The mistake is the counterparty's, and its reject answers it (#616): a note, which doesn't flush the log, with
+    // the ClOrdID it named escaped, where an error flushed the log for each such message
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    test::CapturedLog log;
+    receive(makeCancelRequest("NO\\SUCH", "CANCEL-1"));
+    receive(makeLimitReplace("NO\\SUCH", "REPLACE-1"));
+    const std::vector<std::string> lines = log.lines();
+
+    EXPECT_EQ(2u, sentOfType(FIX::MsgType_OrderCancelReject).size()) << sentText();
+    EXPECT_EQ(1, linesWith(lines, "[Note]", "Cancel - order not found: NO\\\\SUCH")) << "a note, escaped";
+    EXPECT_EQ(1, linesWith(lines, "[Note]", "Replace - order not found: NO\\\\SUCH")) << "a note, escaped";
+    EXPECT_EQ(0, linesWith(lines, "[Error]", "order not found"));
+}
+
 /// The server itself (#553): CLIENT_A's session, from settings like config/fix.cfg's with its files under the test's
 /// own directory and a port the system picks, and CLIENT_A's credentials, with the fixture's data
 class FixServerTest : public FixGatewayInboundTest

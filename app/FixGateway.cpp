@@ -36,8 +36,8 @@ using namespace COP::Store;
 
 namespace
 {
-/// Exceptions contained in fromApp() since the process started. Each is logged with its number, so the
-/// count stays visible in the log.
+/// Exceptions contained in fromApp() since the process started, the alarm: each is counted, and a logged one gives its
+/// number, so the count stays visible in the log
 std::atomic<u64> containedExceptions{ 0 };
 
 /// Longest prefix of an inbound message that goes into the log.
@@ -643,6 +643,13 @@ void FixGateway::setInFlightGauge(InFlightGauge *inFlight, std::chrono::millisec
     inFlightWait_ = longestWait;
 }
 
+void FixGateway::setContainedLogPeriod(std::chrono::steady_clock::duration period)
+{
+    std::lock_guard<std::mutex> lock(containedLogsLock_);
+    containedLogPeriod_ = period;
+    containedLogs_.clear();
+}
+
 void FixGateway::waitForInFlight() const
 {
     if ((nullptr == inFlight_) || !inFlight_->overBound()) [[likely]]
@@ -778,11 +785,24 @@ void FixGateway::fromApp(const FIX::Message &msg, const FIX::SessionID &sid)
 void FixGateway::rejectContained(const FIX::Message &msg, const FIX::SessionID &sid, const char *what)
 {
     const u64 n = containedExceptions.fetch_add(1, std::memory_order_relaxed) + 1;
-    std::string text = msg.toString();
-    std::replace(text.begin(), text.end(), '\x01', '|');
-    aux::ExchLogger::instance()->error("FixGateway: contained exception #" + std::to_string(n) + " from " +
-                                       sid.toString() + ": " + what +
-                                       "; message: " + text.substr(0, MAX_LOGGED_MESSAGE));
+    // A counterparty could have each message it sent logged as an error, which flushes the log (#65), with its bytes.
+    // Each is still counted and answered, but logged at most once a second a session, escaped, as a WebSocket session's
+    // are (#547, #616).
+    const std::string session = sid.toString();
+    u64 skipped = 0;
+    bool logged = false;
+    {
+        std::lock_guard<std::mutex> lock(containedLogsLock_);
+        logged = containedLogs_.try_emplace(session, containedLogPeriod_)
+                     .first->second.allow(std::chrono::steady_clock::now(), &skipped);
+    }
+    if (logged)
+    {
+        std::string text = msg.toString();
+        std::replace(text.begin(), text.end(), '\x01', '|');
+        aux::ExchLogger::instance()->error(containedExceptionLine("FixGateway", n, "a message from " + session, what,
+                                                                  text, MAX_LOGGED_MESSAGE, skipped));
+    }
     rejectMessage(msg, sid, FIX::BusinessRejectReason_OTHER, "Internal error: message not processed");
 }
 
@@ -1418,8 +1438,10 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelRequest &msg, const FIX::S
     }
     if (!order)
     {
-        aux::ExchLogger::instance()->error("FIX: Cancel - order not found: " + origClOrdStr +
-                                           (unanswered ? ", nor answered by the engine yet (#380)" : ""));
+        // The counterparty's mistake, which its reject answers: a note, which doesn't flush the log, and the ClOrdID
+        // it named escaped (#616)
+        aux::ExchLogger::instance()->note("FIX: Cancel - order not found: " + escapeForLog(origClOrdStr) +
+                                          (unanswered ? ", nor answered by the engine yet (#380)" : ""));
         // Answered here rather than by the engine, which only rejects an unknown order id (#57): here the request's
         // own ClOrdID is known, so the reject can quote it (#73)
         Queues::CancelRejectEvent unknown; // UNKNOWN_ORDER, with no order status
@@ -1467,8 +1489,9 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
     }
     if (!existing)
     {
-        aux::ExchLogger::instance()->error("FIX: Replace - order not found: " + origClOrdStr +
-                                           (unanswered ? ", nor answered by the engine yet (#380)" : ""));
+        // As for a cancel (#616)
+        aux::ExchLogger::instance()->note("FIX: Replace - order not found: " + escapeForLog(origClOrdStr) +
+                                          (unanswered ? ", nor answered by the engine yet (#380)" : ""));
         // Answered here, as a cancel of an unknown order is (#73), quoting the request's own ClOrdIDs
         try
         {
