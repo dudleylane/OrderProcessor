@@ -1,6 +1,12 @@
 @import 'tailwindcss';
 /* Tailwind 3's colours, which the app keeps for now (#220): the file says why, and how to take Tailwind 4's */
 @import './tailwind-v3-palette.css';
+/* The tests and their config aren't the app: a word in one, such as `static`, would add a utility to its stylesheet
+   (#548) */
+@source not './**/*.test.ts';
+@source not './**/*.test.tsx';
+@source not './test';
+@source not '../vitest.config.ts';
 
 /* Tailwind 3's sans-serif fonts (#220). Tailwind 4.3's list names fonts, where 3's asked for the system's UI font,
    which differs on a Linux desktop. Its monospace list is 3's. */
