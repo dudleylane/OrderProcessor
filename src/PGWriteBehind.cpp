@@ -294,6 +294,9 @@ void PGWriteBehind::run()
     const auto maxBackoff = milliseconds(30000);
     auto backoff = firstBackoff;
     bool everConnected = false;
+    // Whether the last connection's statements were refused by the schema: the writer tries again until they're taken,
+    // and logs only the first refusal of a run (#590)
+    bool schemaRefused = false;
     // Connections lost since a write last landed. The first is replaced at once, as one a firewall dropped while it sat
     // idle would be; after that the writer waits between attempts, as it does for a database it can't reach.
     unsigned lostInARow = 0;
@@ -312,8 +315,9 @@ void PGWriteBehind::run()
             rows_.clear();
             batch.clear();
             totalDropped_.fetch_add(dropped, std::memory_order_relaxed);
-            log->error("PGWriteBehind: " + std::to_string(dropped) +
-                       " write(s) dropped at shutdown: PostgreSQL can't be reached");
+            log->error("PGWriteBehind: " + std::to_string(dropped) + " write(s) dropped at shutdown: " +
+                       (schemaRefused ? "PostgreSQL's schema refuses the server's statements"
+                                      : "PostgreSQL can't be reached"));
             return false;
         }
         wake_.wait_for(lock, backoff,
@@ -370,12 +374,36 @@ void PGWriteBehind::run()
                 conn = std::make_unique<pqxx::connection>(connString_);
                 prepareStatements(*conn);
                 log->note(std::string("PGWriteBehind: connected to PostgreSQL") + (everConnected ? " again" : ""));
+                if (schemaRefused)
+                {
+                    log->note("PGWriteBehind: PostgreSQL's schema takes the server's statements now");
+                    schemaRefused = false;
+                }
                 everConnected = true;
             }
             catch (const std::exception &e)
             {
+                // A connection that answered and then refused a statement is a schema that doesn't match the server's,
+                // not a database out of reach (#590): it was logged as "can't connect" at every retry. A connection
+                // lost while preparing is still a connection problem.
+                const bool refused = conn && !connectionLost(e);
                 conn.reset();
-                log->error(std::string("PGWriteBehind: can't connect to PostgreSQL: ") + e.what());
+                if (!refused)
+                {
+                    log->error(std::string("PGWriteBehind: can't connect to PostgreSQL: ") + e.what());
+                }
+                else
+                {
+                    totalSchemaRefusals_.fetch_add(1, std::memory_order_relaxed);
+                    if (!schemaRefused)
+                    {
+                        log->error(std::string("PGWriteBehind: PostgreSQL's schema refused a statement the server "
+                                               "sends, so nothing is written to it until the schema matches; trying "
+                                               "again, and logging this only once (docker/README.md): ") +
+                                   e.what());
+                        schemaRefused = true;
+                    }
+                }
                 if (!retryLater())
                 {
                     break;
