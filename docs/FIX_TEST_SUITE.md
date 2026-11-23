@@ -427,12 +427,12 @@ Runs `orderProcessorServer` with a certificate made for the run, and checks, on 
 
 ---
 
-## 19. FixQuantityTest, FixPriceTest, FixExpireTimeTest and FixMinQtyTest — What the Gateway Takes
+## 19. FixQuantityTest, FixPriceTest, FixExpireTimeTest, FixMinQtyTest and FixInstructionTest — What the Gateway Takes
 
 **File:** `test/FixGatewayTest.cpp`
 **Requires:** `BUILD_FIX=ON`
 
-The checks the gateway makes on a quantity, a price, an ExpireTime and a MinQty before the engine sees them (#145, #511, #516).
+The checks the gateway makes on a quantity, a price, an ExpireTime, a MinQty and the order instructions before the engine sees them (#145, #511, #516, #667).
 
 | Test | Description |
 |------|-------------|
@@ -440,6 +440,10 @@ The checks the gateway makes on a quantity, a price, an ExpireTime and a MinQty 
 | `APriceIsFiniteAndAboveZeroUnlessTheOrderIsAMarketOrder` (FixPriceTest) | `isTradablePrice()`: a limit order's or a swap's price is finite and above 0; a market order's may be 0, but not infinite |
 | `OnlyAMinQtyOfZeroIsTaken` (FixMinQtyTest) | `minQtyRefusal()`: none, 0, 0.0 and -0 are taken; 1, 50, 0.5, -5, 4294967295 and a value that isn't a number are refused with the reason, since the engine enforces no minimum quantity (#516) |
 | `AnExpireTimePastWhatTheServerCanWaitUntilIsRefused` (FixExpireTimeTest) | `expiryRefusal()`: a GTD order's ExpireTime (126) at 22620411-23:47:16.854, the last millisecond the engine's expiry thread can wait until, is taken; one a millisecond later, or at 99991231-23:59:59, is refused with the reason (#511) |
+| `EveryExecInstValueIsEitherTakenOrRefused` (FixInstructionTest) | The gateway takes the ExecInst (18) values it carries out and refuses the others (#667): every value the session's dictionary defines is in one of its two lists, and none in both |
+| `OnlyTheExecInstValuesTheServerCarriesOutAreTaken` (FixInstructionTest) | An ExecInst of the values the server carries out, separated by spaces, is taken; any other value refuses it (#667) |
+| `AnOrderIsShownWhole` (FixInstructionTest) | MaxFloor (111), MaxShow (210) and DisplayQty (1138) ask to show part of the order; one at least its quantity shows all of it, as the server does, and is taken (#667) |
+| `EveryOtherInstructionIsRefusedByItsDictionaryName` (FixInstructionTest) | The display instruction's other fields, the peg, discretion and triggering instructions', MatchIncrement, MaxPriceLevels and ParticipationRate are refused whatever their value, each named as the dictionary names it (#667) |
 
 ---
 
@@ -513,6 +517,8 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `ContainedExceptionsAreLoggedAtMostOnceASecondASession` | A counterparty could have each message it sent contain an exception, each logged as an error, which flushes the log, with its bytes (#616): each is still answered, but a session's are logged at most once a second, escaped |
 | `ACancelOrReplaceOfAnOrderTheSessionDoesntHaveIsANoteNotAnError` | A cancel or a replace of an order the session doesn't have is the counterparty's mistake, which its reject answers (#616): a note, which doesn't flush the log, with the ClOrdID it named escaped |
 | `TheCorpusReplaysThroughTheSessionAndTheGatewayStaysInService` | Each seed of `test/fuzz/corpus/fix_message` goes through the session, which parses and validates it with its own dictionaries, and on to the gateway (#556): a `*.reject.fix` seed draws a Reject (35=3), every other one reaches the gateway, and the session stays logged on. CI's ASan job runs it |
+| `AnOrderInstructionTheServerDoesntCarryOutIsRefusedOnEveryOrderMessage` | An order instruction the engine doesn't carry out is refused rather than ignored (#667), as a MinQty is (#516): a NewOrderSingle's all-or-none and a NewOrderMultileg's peg get an ExecutionReport, 150=8, and a replace's an OrderCancelReject |
+| `AnOrderInstructionTheServerCarriesOutIsTaken` | Reinstate on system failure and on connection loss, as restore and a session that keeps its orders do, and an iceberg as big as the order, which shows it whole (#667): the order reaches the engine |
 | `EachOrderAndRequestWaitsWhileTheWorkIsOverTheBoundUpToItsLongestWait` (FixtSessionInFlightTest) | While the engine's work in flight is over `--max-in-flight`, as a gauge the test holds says, a NewOrderSingle, a NewOrderMultileg, a cancel and a replace each wait on the session's thread until their longest wait, 200 ms here, is up, and then reach the engine; nothing is refused (#519) |
 | `AWaitEndsOnceTheWorkInFlightIsBackUnderTheBound` (FixtSessionInFlightTest) | A NewOrderSingle waiting on a thread of its own, as on a session's, with a minute's longest wait, reaches the engine once the work is back under, and not before |
 | `UnderTheBoundAMessageIsTakenOnOnceTheGatewayHasAsked` (FixtSessionInFlightTest) | Under the bound the gateway asks the gauge once, and the order reaches the engine |

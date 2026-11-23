@@ -1049,8 +1049,14 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
         refuseOrder(msg, sid, FIX::OrdRejReason_INCORRECT_QUANTITY, "Order refused: " + quantityRefusal());
         return;
     }
-    // A minimum quantity, which the engine doesn't enforce, as an unsupported order characteristic (#516)
+    // A minimum quantity, which the engine doesn't enforce, as an unsupported order characteristic (#516), and so an
+    // order instruction it doesn't carry out (#667)
     if (const std::optional<std::string> refusal = minQtyRefusal(msg))
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC, "Order refused: " + *refusal);
+        return;
+    }
+    if (const std::optional<std::string> refusal = instructionRefusal(msg, orderQty.getValue()))
     {
         refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC, "Order refused: " + *refusal);
         return;
@@ -1348,6 +1354,11 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
         refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC, "Order refused: " + *refusal);
         return;
     }
+    if (const std::optional<std::string> refusal = instructionRefusal(msg, orderQty.getValue()))
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_UNSUPPORTED_ORDER_CHARACTERISTIC, "Order refused: " + *refusal);
+        return;
+    }
 
     FIX::Currency currency;
     std::string ccyStr = "USD";
@@ -1640,6 +1651,12 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
     // A minimum quantity, as for a new order (#516). One of 0 is taken, and the replacement keeps its original's, as a
     // replace_order on WebSocket does: 0, but for an order stored before #516.
     if (const std::optional<std::string> refusal = minQtyRefusal(msg))
+    {
+        refuse("Replace refused: " + *refusal);
+        return;
+    }
+    // An order instruction, as for a new order (#667), against the replacement's quantity
+    if (const std::optional<std::string> refusal = instructionRefusal(msg, static_cast<double>(replacement->orderQty_)))
     {
         refuse("Replace refused: " + *refusal);
         return;
@@ -2735,6 +2752,154 @@ std::optional<std::string> FixGateway::minQtyRefusal(const FIX::FieldMap &msg)
         // Not a number: refused too, which a session's own check of the field's type does first
     }
     return std::string("MinQty (110) must be 0 or left out: the server doesn't enforce a minimum quantity");
+}
+
+namespace
+{
+/// The order instructions refused whatever their value (#667), as FIX 5.0 SP2 names them: the display instruction's
+/// fields but DisplayQty, the peg, discretion and triggering instructions', MatchIncrement, MaxPriceLevels and
+/// ParticipationRate. Nothing for any other tag.
+const char *refusedInstructionName(int tag)
+{
+    switch (tag)
+    {
+    case 211:
+        return "PegOffsetValue";
+    case 388:
+        return "DiscretionInst";
+    case 389:
+        return "DiscretionOffsetValue";
+    case 835:
+        return "PegMoveType";
+    case 836:
+        return "PegOffsetType";
+    case 837:
+        return "PegLimitType";
+    case 838:
+        return "PegRoundDirection";
+    case 840:
+        return "PegScope";
+    case 841:
+        return "DiscretionMoveType";
+    case 842:
+        return "DiscretionOffsetType";
+    case 843:
+        return "DiscretionLimitType";
+    case 844:
+        return "DiscretionRoundDirection";
+    case 846:
+        return "DiscretionScope";
+    case 849:
+        return "ParticipationRate";
+    case 1082:
+        return "SecondaryDisplayQty";
+    case 1083:
+        return "DisplayWhen";
+    case 1084:
+        return "DisplayMethod";
+    case 1085:
+        return "DisplayLowQty";
+    case 1086:
+        return "DisplayHighQty";
+    case 1087:
+        return "DisplayMinIncr";
+    case 1088:
+        return "RefreshQty";
+    case 1089:
+        return "MatchIncrement";
+    case 1090:
+        return "MaxPriceLevels";
+    case 1094:
+        return "PegPriceType";
+    case 1096:
+        return "PegSecurityIDSource";
+    case 1097:
+        return "PegSecurityID";
+    case 1098:
+        return "PegSymbol";
+    case 1099:
+        return "PegSecurityDesc";
+    case 1100:
+        return "TriggerType";
+    case 1101:
+        return "TriggerAction";
+    case 1102:
+        return "TriggerPrice";
+    case 1103:
+        return "TriggerSymbol";
+    case 1104:
+        return "TriggerSecurityID";
+    case 1105:
+        return "TriggerSecurityIDSource";
+    case 1106:
+        return "TriggerSecurityDesc";
+    case 1107:
+        return "TriggerPriceType";
+    case 1108:
+        return "TriggerPriceTypeScope";
+    case 1109:
+        return "TriggerPriceDirection";
+    case 1110:
+        return "TriggerNewPrice";
+    case 1111:
+        return "TriggerOrderType";
+    case 1112:
+        return "TriggerNewQty";
+    case 1113:
+        return "TriggerTradingSessionID";
+    case 1114:
+        return "TriggerTradingSessionSubID";
+    default:
+        return nullptr;
+    }
+}
+} // namespace
+
+std::optional<std::string> FixGateway::instructionRefusal(const FIX::FieldMap &msg, double orderQty)
+{
+    for (FIX::FieldMap::const_iterator field = msg.begin(); field != msg.end(); ++field)
+    {
+        const int tag = field->getTag();
+        if (FIX::FIELD::ExecInst == tag)
+        {
+            // Values separated by spaces, each one character
+            for (const char value : field->getString())
+            {
+                if ((' ' != value) && (std::string_view::npos == EXEC_INST_TAKEN.find(value)))
+                {
+                    return "ExecInst (18) " + escapeForLog(std::string_view(&value, 1)) +
+                           " asks for what the server doesn't do: it takes only H, J and n (reinstate) and h (no "
+                           "routing elsewhere)";
+                }
+            }
+        }
+        else if ((FIX::FIELD::MaxFloor == tag) || (FIX::FIELD::MaxShow == tag) || (FIX::FIELD::DisplayQty == tag))
+        {
+            bool whole = false;
+            try
+            {
+                whole = !(FIX::DoubleConvertor::convert(field->getString()) < orderQty);
+            }
+            catch (const FIX::FieldConvertError &)
+            {
+                // Not a number: refused, which a session's own check of the field's type does first
+            }
+            if (!whole)
+            {
+                const char *name = (FIX::FIELD::MaxFloor == tag)  ? "MaxFloor"
+                                   : (FIX::FIELD::MaxShow == tag) ? "MaxShow"
+                                                                  : "DisplayQty";
+                return std::string(name) + " (" + std::to_string(tag) +
+                       ") must be at least the order's quantity, or left out: the server shows an order whole";
+            }
+        }
+        else if (const char *name = refusedInstructionName(tag))
+        {
+            return std::string(name) + " (" + std::to_string(tag) +
+                   ") is an order instruction the server doesn't carry out";
+        }
+    }
+    return std::nullopt;
 }
 
 std::optional<std::string> FixGateway::legQuantityRefusal(const FIX::FieldMap &leg, double orderQty)
