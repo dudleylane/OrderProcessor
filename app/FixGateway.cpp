@@ -1201,10 +1201,11 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
     std::string legSymbol;
     std::string legSymbols[2]; // each leg's LegSymbol (600), empty where it gives none
 
-    FIX50SP2::NewOrderMultileg::NoLegs legGroup;
     for (int i = 1; i <= 2; ++i)
     {
-        msg.getGroup(i, legGroup);
+        // The leg as the message holds it. A NoLegs to copy it into built its field order, a table up to tag 2,900 or
+        // so, on every swap: half of this handler's instructions (#784)
+        const FIX::FieldMap &legGroup = msg.getGroupRef(i, FIX::FIELD::NoLegs);
 
         // An uneven swap is refused, before anything is stored: the engine trades both legs at OrderQty (#698)
         if (const std::optional<std::string> refusal = legQuantityRefusal(legGroup, orderQty.getValue()))
@@ -1214,9 +1215,9 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
         }
 
         FIX::LegSymbol lsym;
-        if (legGroup.isSet(lsym))
+        if (legGroup.isSetField(lsym))
         {
-            legGroup.get(lsym);
+            legGroup.getField(lsym);
             legSymbols[i - 1] = lsym.getString();
             if (legSymbol.empty())
             {
@@ -1226,9 +1227,9 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
 
         FIX::LegPrice lpx;
         double lpxVal = 0.0;
-        if (legGroup.isSet(lpx))
+        if (legGroup.isSetField(lpx))
         {
-            legGroup.get(lpx);
+            legGroup.getField(lpx);
             lpxVal = lpx.getValue();
             // Checked before anything is stored, as the quantity is below (#145)
             if (!isTradablePrice(lpxVal, FXSWAP_ORDERTYPE))
@@ -1247,9 +1248,9 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
 
         FIX::LegSide lside;
         char legSideVal = '0';
-        if (legGroup.isSet(lside))
+        if (legGroup.isSetField(lside))
         {
-            legGroup.get(lside);
+            legGroup.getField(lside);
             legSideVal = lside.getValue();
         }
 
@@ -2177,7 +2178,11 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
     // TrdMatchID so clients can correlate near+far reports for the same swap.
     if (exec->execLegType_ != SINGLE_LEG)
     {
-        FIX50SP2::ExecutionReport::NoLegs legGroup;
+        // A copy of one group made once, whose field order it shares: each NoLegs made builds its own, a table up to
+        // tag 2,900 or so, 44% of a leg report's instructions (#784). The order's count is atomic, so the engine's
+        // threads may copy it at once.
+        static const FIX50SP2::ExecutionReport::NoLegs legPrototype;
+        FIX50SP2::ExecutionReport::NoLegs legGroup(legPrototype);
 
         legGroup.set(FIX::LegSymbol(order.instrument_.get().symbol_));
 
