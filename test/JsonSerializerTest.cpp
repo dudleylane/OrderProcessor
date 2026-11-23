@@ -224,6 +224,33 @@ TEST_F(JsonSerializerTest, SetReferencesAreSerialized)
     EXPECT_EQ("TRADING-1", data.value("account", "?"));
 }
 
+TEST_F(JsonSerializerTest, AFixOrderShowsItsClientsOwnClOrdIds)
+{
+    // A FIX order's ClOrdIDs are stored under its session's key (#71), and WebSocket clients were shown the key. They
+    // are shown its client's own now, as FIX reports show them, and the source names the session (#645). Only the
+    // exact key is taken off: a client's ClOrdID may itself contain '|', and another session's key is part of it.
+    const SourceIdT fixSource = WideDataStorage::instance()->add(new StringT("FIX:CLIENT->OMS"));
+    OrderEntry replacement(fixSource, destination_, addRawData("FIX:CLIENT->OMS|C-2|b"),
+                           addRawData("FIX:CLIENT->OMS|C-1"), instrument_, SourceIdT(), SourceIdT(), SourceIdT());
+    nlohmann::json data = nlohmann::json::parse(App::serializeOrderUpdate(replacement))["data"];
+    EXPECT_EQ("C-2|b", data.value("clOrderId", "?"));
+    EXPECT_EQ("C-1", data.value("origClOrderId", "?"));
+    EXPECT_EQ("FIX:CLIENT->OMS", data.value("source", "?"));
+
+    OrderEntry other(fixSource, destination_, addRawData("FIX:OTHER->OMS|C-3"), SourceIdT(), instrument_, SourceIdT(),
+                     SourceIdT(), SourceIdT());
+    data = nlohmann::json::parse(App::serializeOrderUpdate(other))["data"];
+    EXPECT_EQ("FIX:OTHER->OMS|C-3", data.value("clOrderId", "?")) << "another session's key is the client's own text";
+
+    // A WebSocket client's replacement of a FIX order: its own ClOrdID the server's, its source the WebSocket's, and
+    // its original's ClOrdID under the FIX session's key, which comes off too
+    OrderEntry viaWebSocket(source_, destination_, addRawData("WS-1-1"), addRawData("FIX:CLIENT->OMS|C-1|b"),
+                            instrument_, SourceIdT(), SourceIdT(), SourceIdT());
+    data = nlohmann::json::parse(App::serializeOrderUpdate(viaWebSocket))["data"];
+    EXPECT_EQ("WS-1-1", data.value("clOrderId", "?"));
+    EXPECT_EQ("C-1|b", data.value("origClOrderId", "?"));
+}
+
 TEST_F(JsonSerializerTest, ASnapshotGivesEachOrderAsItsLastReportLeftIt)
 {
     // A fill is applied to its orders when it is decided, and persisted and reported after (#404). The snapshot gives

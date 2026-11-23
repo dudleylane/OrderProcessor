@@ -2,6 +2,7 @@
 
 #include "FixGateway.h"
 #include "FixStores.h"
+#include "ShownClOrdId.h"
 #include "ExchUtils.h"
 #include "WideDataStorage.h"
 #include "OrderStorage.h"
@@ -290,13 +291,8 @@ std::string FixGateway::sessionClOrdId(const std::string &source, const std::str
 
 std::string FixGateway::clientClOrdId(const std::string &stored, const std::string &source)
 {
-    // Only the exact prefix: a client's ClOrdID may itself contain '|'
-    if (!source.empty() && (stored.size() > source.size()) && ('|' == stored[source.size()]) &&
-        (0 == stored.compare(0, source.size(), source)))
-    {
-        return stored.substr(source.size() + 1);
-    }
-    return stored;
+    // WebSocket clients are shown it too, which is why it lives in a header without QuickFIX (#645)
+    return App::clientClOrdId(stored, source);
 }
 
 Queues::OrderRejectEvent FixGateway::clientView(const Queues::OrderRejectEvent &evnt, const std::string &source)

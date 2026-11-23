@@ -1,5 +1,6 @@
 #include "WsSession.h"
 #include "InFlightGauge.h"
+#include "ShownClOrdId.h"
 #include "SessionManager.h"
 #include "JsonSerializer.h"
 #include "WideDataStorage.h"
@@ -826,6 +827,18 @@ OrderEntry *WsSession::findOrder(u64 number, const std::string &clOrdId, bool *a
     {
         RawDataEntry key(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size()));
         OrderEntry *order = visible(orderStorage_->locateByClOrderId(key));
+        if ((nullptr == order) || (number != order->orderId_.id_))
+        {
+            // A FIX order is shown with its client's own ClOrdID, not the key it's stored under (#645), and another
+            // session's order may show the same one, or be stored under it. So the number names the order, if the
+            // ClOrdID given is the one that order shows; a ClOrdID no order shows still isn't looked up by number.
+            bool ambiguous = false;
+            OrderEntry *named = visible(orderStorage_->locateByOrderNumber(number, &ambiguous));
+            if (!ambiguous && (nullptr != named) && (clOrdId == shownClOrdId(*named)))
+            {
+                return named;
+            }
+        }
         if ((nullptr != order) && (number != order->orderId_.id_))
         {
             send(serializeError("Order " + std::to_string(number) + " does not have ClOrdID " + clOrdId));

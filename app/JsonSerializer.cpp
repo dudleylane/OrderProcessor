@@ -1,5 +1,6 @@
 #include "JsonSerializer.h"
 #include "EnumStrings.h"
+#include "ShownClOrdId.h"
 #include "WideDataStorage.h"
 #include "OrderStorage.h"
 
@@ -35,8 +36,11 @@ json orderToJson(const OrderEntry &order, const OrderFigures &figures)
     json j;
     j["orderId"] = order.orderId_.id_;
     j["origOrderId"] = order.origOrderId_.id_;
-    j["clOrderId"] = rawDataText(order.clOrderId_);
-    j["origClOrderId"] = rawDataText(order.origClOrderId_);
+    // A FIX order's ClOrdIDs as its client gave them, not under its session's key (#645): the source names the
+    // session. A replacement's original may be another session's, a FIX order a WebSocket client replaced.
+    const StringT source = stringOrEmpty(order.source_);
+    j["clOrderId"] = clientClOrdId(rawDataText(order.clOrderId_), source);
+    j["origClOrderId"] = shownOrigClOrdId(rawDataText(order.origClOrderId_), source);
     j["symbol"] = order.instrument_.get().symbol_;
     j["side"] = toJsonString(order.side_);
     j["ordType"] = toJsonString(order.ordType_);

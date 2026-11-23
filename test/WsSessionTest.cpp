@@ -231,6 +231,26 @@ protected:
         return order;
     }
 
+    /// Restores an order a FIX session sent, as restoreOrder() does: stored under its session's key,
+    /// `<source>|<ClOrdID>` (#71), with the session's source
+    static OrderEntry *restoreFixOrder(const IdT &id, const std::string &source, const std::string &clOrdId)
+    {
+        const std::string key = source + '|' + clOrdId;
+        SourceIdT clOrderId = WideDataStorage::instance()->add(
+            new RawDataEntry(STRING_RAWDATATYPE, key.c_str(), static_cast<u32>(key.size())));
+        SourceIdT sourceId = WideDataStorage::instance()->add(new StringT(source));
+        SourceIdT instrument = WideDataStorage::instance()->findInstrumentBySymbol("AAPL");
+        auto *order = new OrderEntry(sourceId, SourceIdT(), clOrderId, SourceIdT(), instrument, SourceIdT(),
+                                     SourceIdT(), SourceIdT());
+        order->orderId_ = id;
+        order->side_ = BUY_SIDE;
+        order->price_ = 150.0;
+        order->orderQty_ = 100;
+        order->leavesQty_ = 100;
+        OrderStorage::instance()->restore(order);
+        return order;
+    }
+
     /// Takes the replace the session queued, with a copy of its replacement, polling as takeQueuedOrder() does. Empty
     /// when nothing was queued.
     std::optional<std::pair<IdT, std::unique_ptr<OrderEntry>>>
@@ -819,6 +839,49 @@ TEST_F(WsSessionTest, CancelByAnUnknownClOrdIdGoesToTheEngineAsUnknown)
     ASSERT_TRUE(cancel.has_value()) << "no cancel queued; escaped: " << escaped();
     EXPECT_EQ(7u, cancel->id_.id_);
     EXPECT_FALSE(cancel->id_.isValid());
+}
+
+TEST_F(WsSessionTest, CancelByTheClOrdIdAFixOrderShowsNamesThatOrder)
+{
+    // A FIX order is shown with its client's own ClOrdID, not its session's key (#645), and two sessions may use one
+    // ClOrdID (#71): each order is named by its number with the ClOrdID it shows, and neither by the other's number
+    OrderEntry *first = restoreFixOrder(IdT(3, 1790000000), "FIX:A->OMS", "C-1");
+    OrderEntry *second = restoreFixOrder(IdT(7, 1790000100), "FIX:B->OMS", "C-1");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"cancel_order","data":{"orderId":7,"clOrderId":"C-1"}})");
+    auto cancel = takeQueuedCancel();
+    ASSERT_TRUE(cancel.has_value()) << "no cancel queued; escaped: " << escaped();
+    EXPECT_EQ(second->orderId_, cancel->id_);
+
+    send(client, R"({"type":"cancel_order","data":{"orderId":3,"clOrderId":"C-1"}})");
+    cancel = takeQueuedCancel();
+    ASSERT_TRUE(cancel.has_value()) << "no cancel queued; escaped: " << escaped();
+    EXPECT_EQ(first->orderId_, cancel->id_);
+
+    // The key it's stored under still names it, as before
+    send(client, R"({"type":"cancel_order","data":{"orderId":7,"clOrderId":"FIX:B->OMS|C-1"}})");
+    cancel = takeQueuedCancel();
+    ASSERT_TRUE(cancel.has_value()) << "no cancel queued; escaped: " << escaped();
+    EXPECT_EQ(second->orderId_, cancel->id_);
+}
+
+TEST_F(WsSessionTest, AFixOrdersClOrdIdThatAnotherOrderIsStoredUnderStillNamesIt)
+{
+    // A FIX client may choose a ClOrdID another order is stored under, here a WebSocket order's (#645). With its own
+    // number the FIX order is named, where the lookup found the other order and refused the cancel
+    restoreOrder(IdT(3, 1790000000), "WS-1-1");
+    OrderEntry *fix = restoreFixOrder(IdT(7, 1790000100), "FIX:A->OMS", "WS-1-1");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"cancel_order","data":{"orderId":7,"clOrderId":"WS-1-1"}})");
+    auto cancel = takeQueuedCancel();
+    ASSERT_TRUE(cancel.has_value()) << "no cancel queued; escaped: " << escaped();
+    EXPECT_EQ(fix->orderId_, cancel->id_);
 }
 
 // =============================================================================
