@@ -29,6 +29,7 @@ if(BUILD_FIX)
 endif()
 option(BUILD_FUZZ "Build fuzz targets in test/fuzz (libFuzzer with Clang, corpus replay otherwise)" OFF)
 option(WARNINGS_AS_ERRORS "Fail the build on a warning in this project's own code; CI's Release job and the pre-push hook turn it on (#167)" OFF)
+option(COVERAGE "Count line coverage in this project's own targets (--coverage), a Debug build only, as scripts/coverage.sh builds them (#592)" OFF)
 set(MARCH "native" CACHE STRING
     "The CPU a Release build targets (-march): native, this machine's, or an ISA level such as x86-64-v3 for a binary that runs on other machines; the server image uses x86-64-v3 (#170)")
 set(LTO_JOBS "auto" CACHE STRING
@@ -55,10 +56,17 @@ endif()
 
 # Warnings for this project's own targets, which the FetchContent dependencies don't get: -Wall -Wextra, -Wsuggest-override
 # (#651: an override without `override` is a warning, so with -Werror a missing one fails), and -Werror with
-# WARNINGS_AS_ERRORS (#167)
+# WARNINGS_AS_ERRORS (#167). With COVERAGE, the same targets count their lines' runs (#592), and nothing else does.
 function(op_warnings target)
-    target_compile_options(${target} PRIVATE -Wall -Wextra -Wsuggest-override $<$<BOOL:${WARNINGS_AS_ERRORS}>:-Werror>)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wsuggest-override $<$<BOOL:${WARNINGS_AS_ERRORS}>:-Werror>
+                                             $<$<BOOL:${COVERAGE}>:--coverage>)
+    target_link_options(${target} PRIVATE $<$<BOOL:${COVERAGE}>:--coverage>)
 endfunction()
+
+# An optimized build's counts don't follow its source lines, which the report is of
+if(COVERAGE AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(FATAL_ERROR "COVERAGE=ON needs CMAKE_BUILD_TYPE=Debug (#592): scripts/coverage.sh configures one")
+endif()
 
 # Compiler flags
 add_compile_options(-msse2 -fexceptions)

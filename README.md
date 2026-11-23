@@ -127,6 +127,7 @@ cmake --build . -j$(nproc)
 | `BUILD_PG` | OFF | Build the PostgreSQL write-behind (requires libpqxx 8); the server mirrors to Postgres when it's given a connection string (#151) |
 | `BUILD_FIX` | OFF | Build the FIX gateway, FIX 5.0 SP2 over FIXT.1.1 (requires QuickFIX/C++) |
 | `BUILD_FUZZ` | OFF | Build the `parseClientMessage` fuzz target (`docs/DEBUGGING.md`, Fuzzing) |
+| `COVERAGE` | OFF | Count line coverage in this project's own targets (`--coverage`), a Debug build only, for `scripts/coverage.sh` (#592) |
 | `WARNINGS_AS_ERRORS` | OFF | Fail the build on a warning in the project's own code; CI's Release job and the pre-push hook turn it on (#167) |
 | `MARCH` | `native` | The CPU a Release build targets (`-march`): `native`, this machine's, or an ISA level such as `x86-64-v3`. The server image builds for `x86-64-v3` (#170) |
 | `LTO_JOBS` | `auto` | How many LTRANS jobs a Release build's link runs at once (`-flto=`): `auto`, one per thread under Ninja, or a positive number. Each CI job gives its share of the host's threads (#738) |
@@ -308,6 +309,10 @@ cd build && ctest --output-on-failure
 ```bash
 ./orderProcessorTest --gtest_filter="ProcessorTest.*"
 ```
+
+### Coverage
+
+`scripts/coverage.sh [BUILD_DIR]` measures the suite's line coverage of `src/` and `app/` (#592). It makes a Debug build with `COVERAGE=ON` in `build-coverage/`, runs ctest, then prints lcov's summary and writes genhtml's report to `coverage-html/index.html` in the build directory. It needs lcov, and the compiler's own gcov, which gcc-toolset-15's `PATH` gives. On this branch it builds the FIX gateway too, so its lines are counted, and finds QuickFIX through `CMAKE_PREFIX_PATH` in the environment. It is information, not a gate: no CI job runs it, and no figure fails anything.
 
 ### Local pre-push gate
 
