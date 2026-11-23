@@ -111,17 +111,6 @@ CREATE TYPE settl_type AS ENUM (
     'TENOR'
 );
 
-CREATE TYPE audit_action AS ENUM (
-    'LOGIN',
-    'LOGOUT',
-    'ORDER_SUBMIT',
-    'ORDER_CANCEL',
-    'ORDER_REPLACE',
-    'USER_CREATE',
-    'USER_UPDATE',
-    'SETTINGS_CHANGE'
-);
-
 -- ----------------------------------------------------------
 -- Helper: auto-update updated_at timestamp
 -- ----------------------------------------------------------
@@ -137,22 +126,6 @@ $$ LANGUAGE plpgsql;
 -- ----------------------------------------------------------
 -- Tables
 -- ----------------------------------------------------------
-
--- Users (authentication & authorization)
-CREATE TABLE users (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username    VARCHAR(64)  NOT NULL UNIQUE,
-    email       VARCHAR(255) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    is_active   BOOLEAN NOT NULL DEFAULT TRUE,
-    is_admin    BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TRIGGER trg_users_updated_at
-    BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- Instruments (reference data — maps to C++ InstrumentEntry)
 CREATE TABLE instruments (
@@ -284,16 +257,6 @@ CREATE TABLE executions (
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
--- Audit log (append-only)
-CREATE TABLE audit_log (
-    id          BIGSERIAL PRIMARY KEY,
-    user_id     UUID REFERENCES users(id),
-    action      audit_action NOT NULL,
-    detail      JSONB,
-    ip_address  INET,
-    created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-);
-
 -- ----------------------------------------------------------
 -- Indexes (tuned for frontend blotter queries)
 -- ----------------------------------------------------------
@@ -312,10 +275,5 @@ CREATE INDEX idx_orders_active ON orders (created_at DESC)
 CREATE INDEX idx_executions_order_id   ON executions (order_id);
 CREATE INDEX idx_executions_exec_time  ON executions (exec_time DESC);
 CREATE INDEX idx_executions_exec_type  ON executions (exec_type);
-
--- Audit log: by user and time, JSONB search
-CREATE INDEX idx_audit_log_user_id    ON audit_log (user_id);
-CREATE INDEX idx_audit_log_created_at ON audit_log (created_at DESC);
-CREATE INDEX idx_audit_log_detail     ON audit_log USING GIN (detail);
 
 COMMIT;

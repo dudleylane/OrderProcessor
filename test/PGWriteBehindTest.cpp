@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <string>
@@ -22,6 +23,7 @@
 
 #include "PGWriteBehind.h"
 #include "PGWriteRequest.h"
+#include "TestAux.h"
 
 using namespace COP;
 using namespace COP::PG;
@@ -134,6 +136,27 @@ std::string withApplicationName(const std::string &connection, const std::string
         return connection + ((std::string::npos == connection.find('?')) ? "?" : "&") + "application_name=" + name;
     }
     return connection + " application_name=" + name;
+}
+
+/// connection whose search path is schema first, then public: a table of schema's hides public's table of that name
+std::string withSearchPath(const std::string &connection, const std::string &schema)
+{
+    if ((0 == connection.rfind("postgresql://", 0)) || (0 == connection.rfind("postgres://", 0)))
+    {
+        return connection + ((std::string::npos == connection.find('?')) ? "?" : "&") + "options=-csearch_path%3D" +
+               schema + "%2Cpublic";
+    }
+    return connection + " options='-csearch_path=" + schema + ",public'";
+}
+
+/// How many of lines contain text
+std::size_t linesWith(const std::vector<std::string> &lines, const std::string &text)
+{
+    return static_cast<std::size_t>(std::count_if(lines.begin(), lines.end(),
+                                                  [&text](const std::string &line)
+                                                  {
+                                                      return std::string::npos != line.find(text);
+                                                  }));
 }
 
 /// A local port nothing listens on
@@ -256,6 +279,63 @@ TEST_F(PGWriteBehindTest, APriceOfTenBillionOrMoreLands)
                              "day_avg_px = 12500000000 AND far_price = 30000000000)::text FROM orders "
                              "WHERE order_id = 151538"));
     forget(151538);
+}
+
+TEST_F(PGWriteBehindTest, AStatementTheSchemaRefusesIsLoggedOnceAndTheWritesLandOnceItMatches)
+{
+    // A schema that refused one of the writer's statements was logged as "can't connect to PostgreSQL" at every retry,
+    // and read as a database out of reach (#590). Here the writer's search path finds a schema of its own first, whose
+    // orders table lacks the order upsert's columns, so the upsert can't be prepared. Once that table is dropped, the
+    // path finds public's, and the queued writes land.
+    const std::string schema = "pgtest_590_" + std::to_string(::getpid());
+    const auto run = [this](const std::string &sql)
+    {
+        pqxx::connection conn(connection_);
+        pqxx::work txn(conn);
+        txn.exec(sql);
+        txn.commit();
+    };
+    run("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+    run("CREATE SCHEMA " + schema);
+    run("CREATE TABLE " + schema + ".orders (order_id BIGINT, order_date TIMESTAMPTZ)");
+    forget(151590);
+
+    test::CapturedLog log;
+    u64 refusals = 0;
+    {
+        PGWriteBehind writer(withSearchPath(connection_, schema));
+        writeReferenceData(writer);
+        writer.enqueue(PGWriteRequest{ makeOrder(151590) });
+        EXPECT_TRUE(eventually(
+            [&writer]
+            {
+                return 2 <= writer.totalSchemaRefusals();
+            }))
+            << "the writer didn't try again after the schema refused its statement";
+        EXPECT_EQ(0u, writer.totalWritten());
+
+        run("DROP TABLE " + schema + ".orders");
+        EXPECT_TRUE(eventually(
+            [&writer]
+            {
+                return 4 <= writer.totalWritten();
+            }))
+            << "the writes didn't land once the schema matched";
+        writer.shutdown();
+        refusals = writer.totalSchemaRefusals();
+        EXPECT_EQ(0u, writer.totalErrors());
+        EXPECT_EQ(0u, writer.totalDropped());
+    }
+    // The writer's thread has ended, so the log can be read (TestAux.h: not while a thread the test started logs)
+    const std::vector<std::string> lines = log.lines();
+    EXPECT_LE(2u, refusals);
+    EXPECT_EQ(1u, linesWith(lines, "schema refused a statement")) << "each refusal of a run was logged";
+    EXPECT_EQ(0u, linesWith(lines, "can't connect")) << "a refused statement was logged as a connection failure";
+    EXPECT_EQ(1u, linesWith(lines, "schema takes the server's statements now"));
+    EXPECT_EQ("NEW", select("SELECT status::text FROM orders WHERE order_id = 151590"));
+
+    run("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+    forget(151590);
 }
 
 TEST_F(PGWriteBehindTest, AStopsReleaseReachesItsRow)
