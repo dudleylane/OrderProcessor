@@ -64,12 +64,12 @@ public:
 
 public:
     /// reimplementeed from DataStorageRestore
-    virtual void restore(InstrumentEntry *val);
-    virtual void restore(const IdT &id, StringT *val);
-    virtual void restore(RawDataEntry *val);
-    virtual void restore(AccountEntry *val);
-    virtual void restore(ClearingEntry *val);
-    virtual void restore(const IdT &id, ExecutionsT *val);
+    void restore(InstrumentEntry *val) override;
+    void restore(const IdT &id, StringT *val) override;
+    void restore(RawDataEntry *val) override;
+    void restore(AccountEntry *val) override;
+    void restore(ClearingEntry *val) override;
+    void restore(const IdT &id, ExecutionsT *val) override;
 
 private:
     /// Reader-writer lock for read-heavy reference data access

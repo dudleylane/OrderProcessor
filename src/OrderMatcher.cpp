@@ -50,8 +50,8 @@ public:
             side_ = BUY_SIDE;
         }
     }
-    virtual SourceIdT instrument() const;
-    virtual bool match(const IdT &order, bool *stop) const;
+    SourceIdT instrument() const override;
+    bool match(const IdT &order, bool *stop) const override;
 
 private:
     OrderEntry *order_;

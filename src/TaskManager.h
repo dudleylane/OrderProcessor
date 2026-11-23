@@ -87,15 +87,15 @@ public:
 
 public:
     /// reimplemented from ExecTaskManager
-    virtual void addTask(const ACID::TransactionId &id);
+    void addTask(const ACID::TransactionId &id) override;
 
 public:
     /// reimplemented from TransactionObserver
-    virtual void onReadyToExecute();
+    void onReadyToExecute() override;
 
 public:
     /// reimplemented from InQueuesObserver
-    virtual void onNewEvent();
+    void onNewEvent() override;
 
 public:
     void taskCreated();

@@ -54,22 +54,22 @@ public:
 
 public:
     /// reimplemented from FileStorageObserver
-    virtual void startLoad();
-    virtual void onRecordLoaded(const IdT &id, u32 version, const char *buf, size_t size);
-    virtual void finishLoad();
+    void startLoad() override;
+    void onRecordLoaded(const IdT &id, u32 version, const char *buf, size_t size) override;
+    void finishLoad() override;
 
 public:
     /// reimplemented from DataSaver
-    virtual void save(const InstrumentEntry &val);
-    virtual void save(const IdT &id, const StringT &val);
-    virtual void save(const RawDataEntry &val);
-    virtual void save(const AccountEntry &val);
-    virtual void save(const ClearingEntry &val);
+    void save(const InstrumentEntry &val) override;
+    void save(const IdT &id, const StringT &val) override;
+    void save(const RawDataEntry &val) override;
+    void save(const AccountEntry &val) override;
+    void save(const ClearingEntry &val) override;
 
 public:
     /// reimplemented from OrderSaver
     u32 save(const OrderEntry &val, const OrderFigures &figures) override;
-    virtual void erase(const IdT &orderId, u32 version);
+    void erase(const IdT &orderId, u32 version) override;
     /// Persists the order with its figures as they are now. Tests call it: the engine persists the figures a decision
     /// left (#411).
     u32 save(const OrderEntry &val)
@@ -83,7 +83,7 @@ public:
 
 public:
     /// reimplemented from IdLimitSaver: one record, the newest version kept (#81)
-    virtual void saveIdLimit(u64 limit);
+    void saveIdLimit(u64 limit) override;
     /// The id limit the last load found, or 0 when the directory has none. Every id issued before is below it (#81).
     u64 restoredIdLimit() const
     {

@@ -53,21 +53,21 @@ public:
     void init(const InstrumentsT &instr);
 
 public:
-    virtual void add(const OrderEntry &order);
-    virtual void remove(const OrderEntry &order);
-    virtual IdT find(const OrderFunctor &functor) const;
-    virtual void findAll(const OrderFunctor &functor, OrdersT *result) const;
+    void add(const OrderEntry &order) override;
+    void remove(const OrderEntry &order) override;
+    IdT find(const OrderFunctor &functor) const override;
+    void findAll(const OrderFunctor &functor, OrdersT *result) const override;
 
-    virtual IdT getTop(const SourceIdT &instrument, const Side &side) const;
+    IdT getTop(const SourceIdT &instrument, const Side &side) const override;
 
-    virtual void restore(const OrderEntry &order);
+    void restore(const OrderEntry &order) override;
 
-    virtual void addStop(const OrderEntry &order);
-    virtual void removeStop(const OrderEntry &order);
-    virtual bool holdsStops(const SourceIdT &instrument) const;
-    virtual void triggeredStops(const SourceIdT &instrument, PriceT lastPx, OrdersT *result) const;
-    virtual bool markReleasePending(const OrderEntry &stop);
-    virtual void pendingReleases(const SourceIdT &instrument, std::vector<IdT> *result) const;
+    void addStop(const OrderEntry &order) override;
+    void removeStop(const OrderEntry &order) override;
+    bool holdsStops(const SourceIdT &instrument) const override;
+    void triggeredStops(const SourceIdT &instrument, PriceT lastPx, OrdersT *result) const override;
+    bool markReleasePending(const OrderEntry &stop) override;
+    void pendingReleases(const SourceIdT &instrument, std::vector<IdT> *result) const override;
 
     /// The instrument's depth as its orders' last reports give it (#404): each resting order's reported leaves, read
     /// under the order's read lock once the side's lock is released (#525). An order whose first report isn't out, or

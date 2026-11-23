@@ -43,10 +43,11 @@ if(BUILD_APP OR BUILD_TESTS OR BUILD_BENCHMARKS)
     endif()
 endif()
 
-# Warnings for this project's own targets, which the FetchContent dependencies don't get: -Wall -Wextra, and -Werror with
+# Warnings for this project's own targets, which the FetchContent dependencies don't get: -Wall -Wextra, -Wsuggest-override
+# (#651: an override without `override` is a warning, so with -Werror a missing one fails), and -Werror with
 # WARNINGS_AS_ERRORS (#167)
 function(op_warnings target)
-    target_compile_options(${target} PRIVATE -Wall -Wextra $<$<BOOL:${WARNINGS_AS_ERRORS}>:-Werror>)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wsuggest-override $<$<BOOL:${WARNINGS_AS_ERRORS}>:-Werror>)
 endfunction()
 
 # Compiler flags
