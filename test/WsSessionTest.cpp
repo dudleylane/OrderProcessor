@@ -28,6 +28,8 @@
 #include "MockQueues.h"
 #include "MockStorage.h"
 #include "TestAux.h"
+#include "SettlementDates.h"
+#include "SwapDates.h"
 #include "DataModelDef.h"
 #include "IdTGenerator.h"
 #include "IncomingQueues.h"
@@ -523,7 +525,10 @@ TEST_F(WsSessionTest, AGtdSwapCarriesItsExpireTimeAndOneWhoseTimeHasPassedIsRefu
     connect(client);
     ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
     const std::string swap = R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,)"
-                             R"("farPrice":1.087,"settlDate":1000,"farSettlDate":2000,"orderQty":1000000,)"
+                             R"("farPrice":1.087,"settlDate":)" +
+                             std::to_string(test::swapSettlementDate(2)) + R"(,"farSettlDate":)" +
+                             std::to_string(test::swapSettlementDate(33)) +
+                             R"(,"orderQty":1000000,)"
                              R"("tif":"GTD","currency":"USD","capacity":"AGENCY",)";
 
     send(client, swap + R"("expireTime":4102444800000}})"); // 2100-01-01
@@ -628,7 +633,10 @@ TEST_F(WsSessionTest, SwapOrderThatNamesNoAccountGetsTheServerDefaults)
     ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
 
     send(client, R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,"farPrice":1.087,)"
-                 R"("settlDate":1000,"farSettlDate":2000,"orderQty":1000000,"currency":"USD","capacity":"AGENCY"}})");
+                 R"("settlDate":)" +
+                     std::to_string(test::swapSettlementDate(2)) + R"(,"farSettlDate":)" +
+                     std::to_string(test::swapSettlementDate(33)) +
+                     R"(,"orderQty":1000000,"currency":"USD","capacity":"AGENCY"}})");
     std::unique_ptr<OrderEntry> order = takeQueuedOrder();
     ASSERT_NE(nullptr, order) << "no order queued; escaped: " << escaped();
     EXPECT_EQ(FXSWAP_ORDERTYPE, order->ordType_);
@@ -646,12 +654,74 @@ TEST_F(WsSessionTest, SwapOrderIsRefusedWhenTheServerHasNoClearingFirm)
     ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
 
     send(client, R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,"farPrice":1.087,)"
-                 R"("settlDate":1000,"farSettlDate":2000,"orderQty":1000000,"account":"TRADING-1","currency":"USD",)"
-                 R"("capacity":"AGENCY"}})");
+                 R"("settlDate":)" +
+                     std::to_string(test::swapSettlementDate(2)) + R"(,"farSettlDate":)" +
+                     std::to_string(test::swapSettlementDate(33)) +
+                     R"(,"orderQty":1000000,"account":"TRADING-1","currency":"USD",)"
+                     R"("capacity":"AGENCY"}})");
     auto reply = readUntil(client, "error");
     ASSERT_TRUE(reply.has_value()) << "no error reply; escaped: " << escaped();
     EXPECT_EQ("Order refused: the server has no clearing firm", reply->value("message", ""));
     EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0)));
+}
+
+TEST(SwapDatesTest, ASwapsDatesAreDatesTheFarOneAfterTheNearAndTheNearNotBeforeTheBusinessDay)
+{
+    // As ruled on #551, with no horizon: a swap dated otherwise rested, unmatched, until it expired
+    constexpr DateTimeT DAY = 86400000;
+    const DateTimeT oct15 = 1792022400000ULL; // 2026-10-15T00:00Z
+    const u32 business = 20261015;
+    EXPECT_EQ(std::nullopt, App::swapDatesRefusal(oct15, oct15 + DAY, business)) << "the near one on the business day";
+    EXPECT_EQ(std::nullopt, App::swapDatesRefusal(oct15 + 2 * DAY, oct15 + 33 * DAY, business));
+    EXPECT_EQ(std::nullopt, App::swapDatesRefusal(oct15, 253402214400000ULL, business)) << "the far one 9999-12-31";
+
+    const std::string notADate = " settlement date must be a date: midnight UTC of its day, up to 9999-12-31";
+    EXPECT_EQ("the near leg's" + notADate, App::swapDatesRefusal(1000, 2000, business));
+    EXPECT_EQ("the near leg's" + notADate, App::swapDatesRefusal(oct15 + 1, oct15 + DAY, business));
+    EXPECT_EQ("the far leg's" + notADate, App::swapDatesRefusal(oct15, oct15 + DAY + 1, business));
+    EXPECT_EQ("the far leg's" + notADate, App::swapDatesRefusal(oct15, 253402300800000ULL, business))
+        << "10000-01-01, past YYYYMMDD";
+    EXPECT_EQ(std::optional<std::string>("the far leg's settlement date must be after the near leg's"),
+              App::swapDatesRefusal(oct15 + DAY, oct15 + DAY, business));
+    EXPECT_EQ(std::optional<std::string>("the far leg's settlement date must be after the near leg's"),
+              App::swapDatesRefusal(oct15 + 2 * DAY, oct15 + DAY, business));
+    EXPECT_EQ(std::optional<std::string>("the near leg's settlement date, 20261014, is before the business day, "
+                                         "20261015"),
+              App::swapDatesRefusal(oct15 - DAY, oct15 + DAY, business));
+    EXPECT_EQ(std::optional<std::string>("the near leg's settlement date, 19700101, is before the business day, "
+                                         "20261015"),
+              App::swapDatesRefusal(0, oct15, business))
+        << "0 is a date, and long past";
+}
+
+TEST_F(WsSessionTest, ASwapWhoseDatesCantSettleIsRefusedBeforeAnythingIsStored)
+{
+    // As the FIX gateway refuses one (#551): dates that aren't dates, and a near date before the business day
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    const auto swapDated = [](const std::string &near, const std::string &far)
+    {
+        return R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,"farPrice":1.087,)"
+               R"("settlDate":)" +
+               near + R"(,"farSettlDate":)" + far + R"(,"orderQty":1000000,"currency":"USD","capacity":"AGENCY"}})";
+    };
+
+    send(client, swapDated("1000", "2000"));
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "no error reply; escaped: " << escaped();
+    EXPECT_EQ("Order refused: the near leg's settlement date must be a date: midnight UTC of its day, up to "
+              "9999-12-31",
+              reply->value("message", ""));
+    send(client, swapDated(std::to_string(test::swapSettlementDate(-1)), std::to_string(test::swapSettlementDate(30))));
+    reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "no error reply; escaped: " << escaped();
+    EXPECT_NE(std::string::npos, reply->value("message", "").find("is before the business day"))
+        << reply->value("message", "");
+    EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0)));
+
+    send(client, swapDated(std::to_string(test::swapSettlementDate(0)), std::to_string(test::swapSettlementDate(30))));
+    EXPECT_NE(nullptr, takeQueuedOrder()) << "a swap that settles on the business day; escaped: " << escaped();
 }
 
 TEST_F(WsSessionTest, AnOrderAndAReplaceWriteNoStringRecords)
@@ -688,7 +758,10 @@ TEST_F(WsSessionTest, ASwapWritesNoStringRecords)
     connect(client);
     ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
     send(client, R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,"farPrice":1.087,)"
-                 R"("settlDate":1000,"farSettlDate":2000,"orderQty":1000000,"currency":"USD","capacity":"AGENCY"}})");
+                 R"("settlDate":)" +
+                     std::to_string(test::swapSettlementDate(2)) + R"(,"farSettlDate":)" +
+                     std::to_string(test::swapSettlementDate(33)) +
+                     R"(,"orderQty":1000000,"currency":"USD","capacity":"AGENCY"}})");
     std::unique_ptr<OrderEntry> order = takeQueuedOrder();
     ASSERT_NE(nullptr, order) << "no order queued; escaped: " << escaped();
     EXPECT_EQ(FXSWAP_ORDERTYPE, order->ordType_);
@@ -728,7 +801,10 @@ TEST_F(WsSessionTest, SwapClOrdIdsCarryASequenceNumber)
     ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
 
     const std::string swap = R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,)"
-                             R"("farPrice":1.087,"settlDate":1000,"farSettlDate":2000,"orderQty":1000000,)"
+                             R"("farPrice":1.087,"settlDate":)" +
+                             std::to_string(test::swapSettlementDate(2)) + R"(,"farSettlDate":)" +
+                             std::to_string(test::swapSettlementDate(33)) +
+                             R"(,"orderQty":1000000,)"
                              R"("currency":"USD","capacity":"AGENCY"}})";
     send(client, swap);
     send(client, swap);
@@ -1012,7 +1088,10 @@ TEST_F(WsSessionTest, SwapOrderWithAFieldTheServerDoesNotKnowIsRefusedBeforeAnyt
     // currency or capacity was unknown, parsed to INVALID and was stored to be rejected. It must be refused at once,
     // with nothing queued. A swap that gives no time in force is GTC (ClientMessageParser), so that one is accepted.
     const std::string swap = R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,)"
-                             R"("farPrice":1.087,"settlDate":1000,"farSettlDate":2000,"orderQty":1000000,"tif":"GTC",)"
+                             R"("farPrice":1.087,"settlDate":)" +
+                             std::to_string(test::swapSettlementDate(2)) + R"(,"farSettlDate":)" +
+                             std::to_string(test::swapSettlementDate(33)) +
+                             R"(,"orderQty":1000000,"tif":"GTC",)"
                              R"("currency":"USD","capacity":"AGENCY"}})";
     struct Field
     {

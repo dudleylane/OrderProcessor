@@ -44,6 +44,7 @@
 #include "Logger.h"
 
 #include "TestAux.h"
+#include "SettlementDates.h"
 
 using namespace COP;
 using namespace COP::Store;
@@ -458,13 +459,13 @@ protected:
         nearLeg.set(FIX::LegSymbol("EURUSD"));
         nearLeg.set(FIX::LegSide(FIX::Side_BUY));
         nearLeg.set(FIX::LegPrice(1.0850));
-        nearLeg.set(FIX::LegSettlDate("20261015"));
+        nearLeg.set(FIX::LegSettlDate(test::swapLocalMktDate(2)));
         msg.addGroup(nearLeg);
         FIX50SP2::NewOrderMultileg::NoLegs farLeg;
         farLeg.set(FIX::LegSymbol("EURUSD"));
         farLeg.set(FIX::LegSide(FIX::Side_SELL));
         farLeg.set(FIX::LegPrice(1.0880));
-        farLeg.set(FIX::LegSettlDate("20261115"));
+        farLeg.set(FIX::LegSettlDate(test::swapLocalMktDate(33)));
         msg.addGroup(farLeg);
         return msg;
     }

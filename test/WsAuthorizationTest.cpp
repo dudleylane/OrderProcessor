@@ -30,6 +30,7 @@
 #include "OrderStorage.h"
 #include "SessionManager.h"
 #include "TestAux.h"
+#include "SettlementDates.h"
 #include "WideDataStorage.h"
 #include "WsAuth.h"
 #include "WsCredentials.h"
@@ -537,7 +538,9 @@ TEST_F(WsAuthorizationTest, ASwapTradesOnlyTheIdentitysAccountsAndIsRecordedAsIt
     std::unique_ptr<Client> a = connect(TOKEN_A);
     const std::string swap =
         R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":150.0,"farPrice":150.5,)"
-        R"("settlDate":1000,"farSettlDate":2000,"orderQty":10,"currency":"USD","capacity":"AGENCY")";
+        R"("settlDate":)" +
+        std::to_string(test::swapSettlementDate(2)) + R"(,"farSettlDate":)" +
+        std::to_string(test::swapSettlementDate(33)) + R"(,"orderQty":10,"currency":"USD","capacity":"AGENCY")";
 
     a->ws.write(net::buffer(swap + "}}"));
     std::optional<Queued> queued = takeQueued();

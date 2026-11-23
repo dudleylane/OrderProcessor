@@ -10,6 +10,7 @@
 #include "Logger.h"
 #include "EnumStrings.h"
 #include "ExpiryScheduler.h"
+#include "SwapDates.h"
 #include "InFlightGauge.h"
 
 #include <algorithm>
@@ -1376,10 +1377,19 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
         tifVal = tif.getValue();
     }
 
-    // As for NewOrderSingle: a GTD swap's ExpireTime (126) (#240)
+    // As for NewOrderSingle: a GTD swap's ExpireTime (126) (#240). One read of the clock, which the swap's dates and
+    // its creation take too (#551).
+    const DateTimeT now = aux::currentDateTime();
     DateTimeT expireTimeVal = 0;
-    if (const std::optional<std::string> refusal =
-            expiryRefusal(msg, toTif(tifVal), aux::currentDateTime(), &expireTimeVal))
+    if (const std::optional<std::string> refusal = expiryRefusal(msg, toTif(tifVal), now, &expireTimeVal))
+    {
+        refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION, "Order refused: " + *refusal);
+        return;
+    }
+    // Its settlement dates: dates, the far one after the near one, and the near one not before the business day, where
+    // a swap no counterparty can settle rested, unmatched, until it expired (#551)
+    if (const std::optional<std::string> refusal = swapDatesRefusal(
+            nearSettlDate, farSettlDate, Proc::ExpiryScheduler::tradeDateOf(Proc::ExpiryScheduler::dayStartOf(now))))
     {
         refuseOrder(msg, sid, ORD_REJ_REASON_BROKER_OPTION, "Order refused: " + *refusal);
         return;
@@ -1417,9 +1427,7 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
     order->capacity_ = AGENCY_CAPACITY;
     order->settlType_ = _2_SETTLTYPE;
     order->status_ = RECEIVEDNEW_ORDSTATUS;
-    order->creationTime_ = static_cast<DateTimeT>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
-            .count());
+    order->creationTime_ = now;
     order->lastUpdateTime_ = order->creationTime_;
 
     Queues::OrderEvent evt(order);

@@ -37,6 +37,7 @@
 
 #include "TestFixtures.h"
 #include "TestAux.h"
+#include "SettlementDates.h"
 #include "MockQueues.h"
 #include "MockStorage.h"
 
@@ -241,8 +242,9 @@ protected:
 
     /// An FX swap built as NewOrderMultileg_FxSwap_PushesToQueue builds it; it names no account. Its legs settle on
     /// these LocalMktDates (#198).
-    FIX50SP2::NewOrderMultileg makeFxSwap(const std::string &clOrdId, const std::string &nearDate = "20261015",
-                                          const std::string &farDate = "20261115")
+    FIX50SP2::NewOrderMultileg makeFxSwap(const std::string &clOrdId,
+                                          const std::string &nearDate = test::swapLocalMktDate(2),
+                                          const std::string &farDate = test::swapLocalMktDate(33))
     {
         FIX::UtcTimeStamp now = FIX::UtcTimeStamp::now();
         FIX50SP2::NewOrderMultileg msg;
@@ -869,7 +871,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_PushesToQueue)
     nearLeg.set(FIX::LegSymbol("aaa"));
     nearLeg.set(FIX::LegSide(FIX::Side_BUY));
     nearLeg.set(FIX::LegPrice(1.2650));
-    nearLeg.set(FIX::LegSettlDate("20261015"));
+    nearLeg.set(FIX::LegSettlDate(test::swapLocalMktDate(2)));
     msg.addGroup(nearLeg);
 
     // Far leg: SELL at 1.2680, settl T+92
@@ -877,7 +879,7 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_PushesToQueue)
     farLeg.set(FIX::LegSymbol("aaa"));
     farLeg.set(FIX::LegSide(FIX::Side_SELL));
     farLeg.set(FIX::LegPrice(1.2680));
-    farLeg.set(FIX::LegSettlDate("20261115"));
+    farLeg.set(FIX::LegSettlDate(test::swapLocalMktDate(33)));
     msg.addGroup(farLeg);
 
     gateway_->onMessage(msg, TEST_SID);
@@ -885,10 +887,10 @@ TEST_F(FixGatewayInboundTest, NewOrderMultileg_FxSwap_PushesToQueue)
     ASSERT_NE(nullptr, capturedOrder);
     EXPECT_EQ(FXSWAP_ORDERTYPE, capturedOrder->ordType_);
     EXPECT_EQ(BUY_SIDE, capturedOrder->side_);
-    EXPECT_DOUBLE_EQ(1.2650, capturedOrder->price_);           // near (matches root side)
-    EXPECT_DOUBLE_EQ(1.2680, capturedOrder->farPrice_);        // far (opposite side)
-    EXPECT_EQ(1792022400000ULL, capturedOrder->settlDate_);    // 2026-10-15, midnight UTC (#198)
-    EXPECT_EQ(1794700800000ULL, capturedOrder->farSettlDate_); // 2026-11-15
+    EXPECT_DOUBLE_EQ(1.2650, capturedOrder->price_);                       // near (matches root side)
+    EXPECT_DOUBLE_EQ(1.2680, capturedOrder->farPrice_);                    // far (opposite side)
+    EXPECT_EQ(test::swapSettlementDate(2), capturedOrder->settlDate_);     // midnight UTC (#198)
+    EXPECT_EQ(test::swapSettlementDate(33), capturedOrder->farSettlDate_); // dates that don't pass (#551)
     EXPECT_EQ(1000000u, capturedOrder->orderQty_);
 
     delete capturedOrder;
@@ -3033,13 +3035,14 @@ TEST(FixLocalMktDateTest, AnythingElseIsNotADate)
 
 TEST_F(FixGatewayInboundTest, ASwapWithADateThatIsntOneIsNotQueued)
 {
-    // Refused to the sender before anything is stored (#190); there is no session here to send that to
+    // Refused to the sender before anything is stored (#190); there is no session here to send that to. The other
+    // leg's date is one the gateway takes, so that only the bad one can refuse the swap (#551)
     EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
     int n = 0;
     for (const char *bad : { "-5", "abc", "123456789012345678901", "20261301" })
     {
-        gateway_->onMessage(makeFxSwap("SWAP-BAD-" + std::to_string(++n), bad, "20261115"), TEST_SID);
-        gateway_->onMessage(makeFxSwap("SWAP-BAD-" + std::to_string(++n), "20261015", bad), TEST_SID);
+        gateway_->onMessage(makeFxSwap("SWAP-BAD-" + std::to_string(++n), bad, test::swapLocalMktDate(33)), TEST_SID);
+        gateway_->onMessage(makeFxSwap("SWAP-BAD-" + std::to_string(++n), test::swapLocalMktDate(2), bad), TEST_SID);
     }
 }
 
@@ -4151,6 +4154,38 @@ TEST_F(FixtSessionTest, AnOrderInstructionTheServerDoesntCarryOutIsRefusedOnEver
                       .find("Replace refused: DisplayQty (1138) must be at least the order's quantity"))
         << fieldOf(rejects[0], FIX::FIELD::Text);
     expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, ASwapWhoseDatesCantSettleIsRefused)
+{
+    // A swap's near date mustn't be before the business day, and its far date must follow it (#551): a swap dated
+    // otherwise rested, unmatched, until it expired. One that settles on the business day is taken.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    OrderEntry *taken = nullptr;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&taken](const std::string &, const OrderEvent &evt)
+            {
+                taken = evt.order_;
+            }));
+    receive(makeFxSwap("SWAP-PAST", test::swapLocalMktDate(-1), test::swapLocalMktDate(30)));
+    receive(makeFxSwap("SWAP-BACKWARDS", test::swapLocalMktDate(30), test::swapLocalMktDate(2)));
+    receive(makeFxSwap("SWAP-TODAY", test::swapLocalMktDate(0), test::swapLocalMktDate(30)));
+    const std::unique_ptr<OrderEntry> today(taken); // the queue owns the order it's handed, and the mock is the queue
+    ASSERT_NE(nullptr, today) << sentText();
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(2u, reports.size()) << sentText();
+    EXPECT_EQ("SWAP-PAST", fieldOf(reports[0], FIX::FIELD::ClOrdID));
+    EXPECT_NE(std::string::npos, fieldOf(reports[0], FIX::FIELD::Text).find("is before the business day"))
+        << fieldOf(reports[0], FIX::FIELD::Text);
+    EXPECT_EQ("SWAP-BACKWARDS", fieldOf(reports[1], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("Order refused: the far leg's settlement date must be after the near leg's",
+              fieldOf(reports[1], FIX::FIELD::Text));
+    for (const FIX::Message &report : reports)
+    {
+        EXPECT_EQ(std::string(1, FIX::OrdStatus_REJECTED), fieldOf(report, FIX::FIELD::OrdStatus));
+    }
 }
 
 TEST_F(FixtSessionTest, AnOrderInstructionTheServerCarriesOutIsTaken)

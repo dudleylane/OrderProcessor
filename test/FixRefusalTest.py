@@ -12,6 +12,7 @@ usage: FixRefusalTest.py <orderProcessorServer> <seedData> <config/fix.cfg> <con
 """
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 sys.dont_write_bytecode = True  # no __pycache__ in the source tree, which the pre-push hook would find untracked
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves the script's own directory off the path
@@ -19,7 +20,16 @@ from fix_client import Client, Server, expect, now, problems  # noqa: E402
 
 COUNTERPARTIES = [('CLIENT_A', 'client_a', 'password-a', 'TRADING-1'),
                   ('CLIENT_B', 'client_b', 'password-b', 'TRADING-1')]
-TWO_LEGS = [('1', '1.0850', '20261015'), ('2', '1.0872', '20261115')]
+
+
+def settl_date(days):
+    """A LegSettlDate (588) days after today's UTC date, YYYYMMDD. The gateway refuses a swap whose near date is before
+    the business day's date (#551), which is never more than a day after the UTC date: a fixed date would pass, and
+    a swap be refused for its date where a case means another reason."""
+    return (datetime.now(timezone.utc).date() + timedelta(days=days)).strftime('%Y%m%d')
+
+
+TWO_LEGS = [('1', '1.0850', settl_date(2)), ('2', '1.0872', settl_date(33))]
 
 
 def single(clordid, symbol):
