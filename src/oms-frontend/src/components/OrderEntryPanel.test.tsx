@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { NewOrderRequest, NewSwapOrderRequest } from '../types';
+import type { Account, NewOrderRequest, NewSwapOrderRequest } from '../types';
+import { AccountType } from '../types/enums';
 import { OrderEntryPanel } from './OrderEntryPanel';
 
 // The order entry panel's cases from #521 and #601 (#548), with a stubbed send
@@ -81,6 +82,45 @@ describe('OrderEntryPanel', () => {
     submitSwap();
     expect(screen.getByText('Not sent: not connected').className).toContain('text-red-400');
     expect(screen.queryByText('Sent')).toBeNull();
+  });
+
+  it('drops an instrument a list sent again lacks, rather than send what it no longer shows (#686)', () => {
+    const sendOrder = vi.fn<(req: NewOrderRequest) => boolean>(() => true);
+    const sendSwapOrder = vi.fn<(req: NewSwapOrderRequest) => boolean>(() => true);
+    const panel = render(
+      <OrderEntryPanel instruments={INSTRUMENTS} accounts={[]} sendOrder={sendOrder} sendSwapOrder={sendSwapOrder} connected={true} />,
+    );
+    submitOrder();
+    expect(sendOrder).toHaveBeenCalledTimes(1);
+    const others = [{ id: 2, symbol: 'BBB', securityId: 'BBB', securityIdSource: '8' }];
+    panel.rerender(<OrderEntryPanel instruments={others} accounts={[]} sendOrder={sendOrder} sendSwapOrder={sendSwapOrder} connected={true} />);
+    expect((screen.getAllByRole('combobox')[0] as HTMLSelectElement).value).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Submit BUY Order' }));
+    expect(sendOrder).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Select an instrument')).toBeTruthy();
+  });
+
+  it('drops an account a list sent again lacks, and sends the default instead (#686)', () => {
+    const accounts: Account[] = [
+      { id: 1, account: 'ACC1', firm: 'FIRM', type: AccountType.AGENCY },
+      { id: 2, account: 'ACC2', firm: 'FIRM', type: AccountType.AGENCY },
+    ];
+    const sendOrder = vi.fn<(req: NewOrderRequest) => boolean>(() => true);
+    const sendSwapOrder = vi.fn<(req: NewSwapOrderRequest) => boolean>(() => true);
+    const panel = render(
+      <OrderEntryPanel instruments={INSTRUMENTS} accounts={accounts} sendOrder={sendOrder} sendSwapOrder={sendSwapOrder} connected={true} />,
+    );
+    const account = screen
+      .getAllByRole('combobox')
+      .find(select => within(select).queryByRole('option', { name: 'Default' })) as HTMLSelectElement;
+    fireEvent.change(account, { target: { value: 'ACC1' } });
+    panel.rerender(
+      <OrderEntryPanel instruments={INSTRUMENTS} accounts={[accounts[1]]} sendOrder={sendOrder} sendSwapOrder={sendSwapOrder} connected={true} />,
+    );
+    expect(account.value).toBe('');
+    submitOrder();
+    expect(sendOrder).toHaveBeenCalledTimes(1);
+    expect(sendOrder.mock.calls[0][0].account).toBeUndefined();
   });
 
   it('offers DAY, GTD, GTC, FOK and IOC, in that order, the times in force the server takes (#601)', () => {

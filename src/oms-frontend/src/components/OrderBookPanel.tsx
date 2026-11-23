@@ -22,7 +22,10 @@ export function OrderBookPanel({
   subscribeBook,
   unsubscribeBook,
 }: OrderBookPanelProps) {
-  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [heldSymbol, setSelectedSymbol] = useState<string | null>(null);
+  // The instrument chosen, while the server's list has it: a reconnect's session sends the list again, and one that
+  // lacks it drops it, which unsubscribes its book, so the hook stops subscribing it at each reconnect (#686)
+  const selectedSymbol = heldSymbol !== null && instruments.some(i => i.symbol === heldSymbol) ? heldSymbol : null;
   const [, setTick] = useState(0);
 
   // Re-render every 2s to update staleness indicator
