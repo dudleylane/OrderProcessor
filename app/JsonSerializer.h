@@ -63,6 +63,9 @@ struct SystemMetrics
     size_t activeOrders;
     size_t storageMapSize; ///< LMDB's map in bytes, which doubles when a write finds it full (#148)
     size_t storageMapUsed; ///< bytes of the map in use: the high-water mark of its pages
+    /// When this server started, in ms since the epoch: the same in every sample one start sends, so a client can tell
+    /// a restarted server's first sample, its counters from 0 again, from a counter that went down (#677)
+    u64 serverStart;
     u64 timestamp;
 };
 

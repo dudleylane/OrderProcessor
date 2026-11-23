@@ -377,6 +377,19 @@ TEST(JsonSerializerMetricsTest, MetricsUpdateCarriesThePoolsAllocations)
     EXPECT_EQ(3u, msg["data"].value("poolCacheMisses", size_t(0)));
 }
 
+// The metrics carry the server's start, so that the UI can tell a restarted server's first sample, its counters from 0
+// again, from a counter that went down (#677)
+TEST(JsonSerializerMetricsTest, MetricsUpdateCarriesTheServersStart)
+{
+    App::SystemMetrics metrics{};
+    metrics.serverStart = 1763856000000ULL;
+    metrics.timestamp = 1763856123456ULL;
+
+    nlohmann::json msg = nlohmann::json::parse(App::serializeMetricsUpdate(metrics));
+    EXPECT_EQ(1763856000000ULL, msg["data"].value("serverStart", uint64_t(0)));
+    EXPECT_EQ(1763856123456ULL, msg["data"].value("timestamp", uint64_t(0)));
+}
+
 // The metrics count the transactions that failed, which nothing reported (#514)
 TEST(JsonSerializerMetricsTest, MetricsUpdateCarriesTheFailedTransactions)
 {

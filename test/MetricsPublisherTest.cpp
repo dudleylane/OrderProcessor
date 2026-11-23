@@ -74,6 +74,10 @@ public:
     void rollback(const Context &) override {}
 };
 
+/// A server's start, which the publisher is given and every sample carries (#677): a day long past, so that it can't
+/// be taken for a sample's own time
+constexpr u64 SERVER_START = 1763856000000; // 2025-11-23T00:00:00Z
+
 u64 nowMs()
 {
     return static_cast<u64>(
@@ -167,8 +171,9 @@ TEST_F(MetricsPublisherTest, EachFigureComesFromItsSource)
     storage.load(storageDir_, &observer);
     App::SessionManager sessions;
     boost::asio::io_context ioc;
-    auto publisher = std::make_shared<App::MetricsPublisher>(
-        ioc, &sessions, manager.get(), inQueues_.get(), transMgr_.get(), OrderStorage::instance(), pools_, &storage);
+    auto publisher =
+        std::make_shared<App::MetricsPublisher>(ioc, &sessions, manager.get(), inQueues_.get(), transMgr_.get(),
+                                                OrderStorage::instance(), pools_, &storage, SERVER_START);
 
     // One order through the engine, which rests: every counter moves from 0
     auto order = createCorrectOrder(instrumentId1_);
@@ -225,6 +230,7 @@ TEST_F(MetricsPublisherTest, EachFigureComesFromItsSource)
     EXPECT_LT(0u, m.storageMapSize);
     EXPECT_EQ(storage.mapUsed(), m.storageMapUsed);
 
+    EXPECT_EQ(SERVER_START, m.serverStart);
     EXPECT_LE(before, m.timestamp);
     EXPECT_GE(after, m.timestamp);
 }
@@ -234,8 +240,9 @@ TEST_F(MetricsPublisherTest, AFailedTransactionIsCounted)
     std::unique_ptr<TaskManager> manager = createTaskManager();
     App::SessionManager sessions;
     boost::asio::io_context ioc;
-    auto publisher = std::make_shared<App::MetricsPublisher>(
-        ioc, &sessions, manager.get(), inQueues_.get(), transMgr_.get(), OrderStorage::instance(), pools_, nullptr);
+    auto publisher =
+        std::make_shared<App::MetricsPublisher>(ioc, &sessions, manager.get(), inQueues_.get(), transMgr_.get(),
+                                                OrderStorage::instance(), pools_, nullptr, SERVER_START);
     const u64 failedBefore = publisher->collect().transactionsFailed;
 
     TransactionScope scope;
@@ -272,7 +279,7 @@ TEST_F(MetricsPublisherTest, TheQueueAndTheWaitingTransactionsAreTheirSourcesSiz
     App::SessionManager sessions;
     boost::asio::io_context ioc;
     auto publisher = std::make_shared<App::MetricsPublisher>(ioc, &sessions, manager.get(), &waiting, &holding,
-                                                             OrderStorage::instance(), pools_, nullptr);
+                                                             OrderStorage::instance(), pools_, nullptr, SERVER_START);
     const App::SystemMetrics m = publisher->collect();
     EXPECT_EQ(2u, m.queueDepth);
     EXPECT_EQ(1u, m.pendingTransactions);

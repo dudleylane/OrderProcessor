@@ -309,6 +309,7 @@ std::string App::serializeMetricsUpdate(const SystemMetrics &m)
     data["activeOrders"] = m.activeOrders;
     data["storageMapSize"] = m.storageMapSize;
     data["storageMapUsed"] = m.storageMapUsed;
+    data["serverStart"] = m.serverStart;
     data["timestamp"] = m.timestamp;
     j["data"] = data;
     return j.dump();
