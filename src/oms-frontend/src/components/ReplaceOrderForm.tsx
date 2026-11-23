@@ -63,8 +63,6 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
     problem = 'Stop price must be above 0';
   } else if (!(newQty > 0)) {
     problem = 'Quantity must be above 0';
-  } else if (newQty <= order.cumQty) {
-    problem = `Quantity must be above the ${order.cumQty} already filled`;
   } else if (!TAKEN_TIFS.includes(tif)) {
     problem = `The server no longer takes ${tif} orders: choose another time in force`;
   } else if (tif === TimeInForce.GTD && Number.isNaN(newExpireTime)) {
@@ -78,6 +76,10 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
       ? 'Change the price, stop price, quantity or time in force'
       : 'Change the price, quantity or time in force';
   }
+
+  // A quantity at or below what the order has filled is taken: since #381 the engine amends the replacement to the filled
+  // quantity, filled, which ends the order, as FIX's replace does (#544)
+  const endsOrder = problem === '' && qtyChanged && newQty <= order.cumQty;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -178,6 +180,11 @@ export function ReplaceOrderForm({ order, replaceOrder, onClose }: ReplaceOrderF
         Close
       </button>
       {problem && <span className="text-xs text-gray-500">{problem}</span>}
+      {endsOrder && (
+        <span className="text-xs text-amber-400">
+          At or below the {order.cumQty} already filled: the order ends, filled at {order.cumQty}
+        </span>
+      )}
       {!problem && notSent && <span className="text-xs text-red-400">Not sent: not connected</span>}
     </form>
   );
