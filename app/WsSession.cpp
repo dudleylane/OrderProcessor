@@ -1,6 +1,8 @@
 #include "WsSession.h"
 #include "InFlightGauge.h"
 #include "ShownClOrdId.h"
+#include "SwapDates.h"
+#include "ExpiryScheduler.h"
 #include "SessionManager.h"
 #include "JsonSerializer.h"
 #include "WideDataStorage.h"
@@ -551,10 +553,20 @@ void WsSession::handleMessage(const std::string &msgStr)
             return;
         }
 
-        // As for new_order: a GTD swap expires at its expireTime, which must be ahead of it (#240)
-        if ((GTD_TIF == so.tif) && (so.expireTime <= nowMillis()))
+        // As for new_order: a GTD swap expires at its expireTime, which must be ahead of it (#240). One read of the
+        // clock, which the swap's dates and its creation take too (#551).
+        const DateTimeT now = nowMillis();
+        if ((GTD_TIF == so.tif) && (so.expireTime <= now))
         {
             send(serializeError("Order refused: expireTime has passed"));
+            return;
+        }
+        // Its settlement dates, as the FIX gateway checks them (#551)
+        if (const std::optional<std::string> refusal =
+                swapDatesRefusal(so.settlDate, so.farSettlDate,
+                                 Proc::ExpiryScheduler::tradeDateOf(Proc::ExpiryScheduler::dayStartOf(now))))
+        {
+            send(serializeError("Order refused: " + *refusal));
             return;
         }
 
@@ -596,9 +608,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         order->farSettlDate_ = so.farSettlDate;
         order->settlType_ = _2_SETTLTYPE;
         order->status_ = RECEIVEDNEW_ORDSTATUS;
-        order->creationTime_ = static_cast<DateTimeT>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
-                .count());
+        order->creationTime_ = now;
         order->lastUpdateTime_ = order->creationTime_;
 
         Queues::OrderEvent evt(order);
