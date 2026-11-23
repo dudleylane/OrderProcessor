@@ -323,6 +323,8 @@ The schema is initialized automatically on first boot from `init-db/001_schema.s
 
 **Indexes:** active orders (a partial index), executions by order and time, and the audit log's JSONB detail (GIN). The frontend doesn't query Postgres: it gets everything from the server over WebSocket.
 
+Prices are `NUMERIC` with no precision, so they hold any price the engine accepts (#538), and read back with the places they were written with: `101.25`, where `NUMERIC(18,8)` gave `101.25000000`.
+
 ### An `oms-pgdata` volume from before #151
 
 Postgres runs `init-db/` only on a new volume, so an older one keeps the schema it was made with, whose quantity columns are INTEGER, whose ClOrdID columns hold 64 characters, and which has no column for an FX swap's far leg. The server's writes then fail for an order above 2147483647 or with a longer ClOrdID, and it logs each. Nothing wrote to Postgres before #151, so starting over loses nothing: `docker compose down -v` deletes every volume, the server's data too. To keep the server's data, change just the columns:
@@ -351,6 +353,14 @@ A volume made before #244 lacks `orders.day_start`, with the same symptom. Add i
 ```bash
 docker compose exec oms-db psql -U oms -d oms -c "
   ALTER TABLE orders ADD COLUMN IF NOT EXISTS day_start TIMESTAMPTZ;"
+```
+
+A volume made before #538 holds the prices in `NUMERIC(18,8)`, which refuses 1e10 or more: Postgres refuses such an order's write, which the server logs and counts. Widen them:
+
+```bash
+docker compose exec oms-db psql -U oms -d oms -c "
+  ALTER TABLE orders ALTER COLUMN price TYPE NUMERIC, ALTER COLUMN stop_px TYPE NUMERIC,
+    ALTER COLUMN avg_px TYPE NUMERIC, ALTER COLUMN day_avg_px TYPE NUMERIC, ALTER COLUMN far_price TYPE NUMERIC;"
 ```
 
 ## Troubleshooting

@@ -14,6 +14,10 @@
 #include "PGEnumStrings.h"
 #include "WideDataLazyRef.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+
 namespace COP::PG
 {
 
@@ -111,7 +115,10 @@ OrderWrite PGRequestBuilder::fromOrder(const OrderEntry &val, const OrderFigures
     w.dayOrderQty = figures.dayOrderQty_;
     w.dayCumQty = figures.dayCumQty_;
 
-    w.expireTime = val.expireTime_;
+    // The column is a BIGINT, and a u64 past its largest was written negative (#538). The edge refuses an expiry past
+    // ExpiryScheduler::LATEST_TIME (#511), but an order stored before then may hold one, which restore keeps and
+    // never expires: the largest BIGINT says so too.
+    w.expireTime = std::min<u64>(val.expireTime_, static_cast<u64>(std::numeric_limits<int64_t>::max()));
     w.settlDate = val.settlDate_;
     // A swap's far leg; the engine keeps the fields on every order, so only a swap's are written
     if (FXSWAP_ORDERTYPE == val.ordType_)
