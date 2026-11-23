@@ -7,6 +7,8 @@
 */
 
 #include <gtest/gtest.h>
+#include <cstdint>
+#include <limits>
 #include "PGRequestBuilder.h"
 #include "PGEnumStrings.h"
 #include "TestFixtures.h"
@@ -202,4 +204,20 @@ TEST_F(PGRequestBuilderTest, FromOrderCheckAllQuantities)
     EXPECT_DOUBLE_EQ(1.40, w.stopPx);
     EXPECT_TRUE(w.stopTriggered);            // #236
     EXPECT_EQ(1792098000000ULL, w.dayStart); // #244
+}
+
+TEST_F(PGRequestBuilderTest, AnExpiryPastWhatABigintHoldsIsWrittenAsItsLargest)
+{
+    // An order stored before #511 may hold an expiry the edge now refuses, and the write cast it to a BIGINT, which
+    // made it negative (#538)
+    const u64 largest = static_cast<u64>(std::numeric_limits<int64_t>::max());
+    auto order = test::createCorrectOrder();
+    order->expireTime_ = std::numeric_limits<u64>::max();
+    EXPECT_EQ(largest, PGRequestBuilder::fromOrder(*order).expireTime);
+    order->expireTime_ = largest + 1;
+    EXPECT_EQ(largest, PGRequestBuilder::fromOrder(*order).expireTime);
+    order->expireTime_ = largest;
+    EXPECT_EQ(largest, PGRequestBuilder::fromOrder(*order).expireTime);
+    order->expireTime_ = 175;
+    EXPECT_EQ(175u, PGRequestBuilder::fromOrder(*order).expireTime);
 }

@@ -54,6 +54,31 @@ std::map<std::string, std::set<std::string>> schemaEnums()
     return types;
 }
 
+/// The column definitions of table in docker/init-db/001_schema.sql: each column's name, and the rest of its line. The
+/// comments go first: a table's body is read up to its first ");", and a comment can hold one, as #244's in orders
+/// does, which hid every column after it.
+std::map<std::string, std::string> schemaColumns(const std::string &table)
+{
+    std::ifstream in(test::sourceRoot() / "docker" / "init-db" / "001_schema.sql");
+    std::stringstream text;
+    text << in.rdbuf();
+    const std::string sql = std::regex_replace(text.str(), std::regex("--[^\n]*"), "");
+    std::map<std::string, std::string> columns;
+    const std::regex block("CREATE TABLE " + table + R"( \(([^;]*)\);)");
+    std::smatch found;
+    if (!std::regex_search(sql, found, block))
+    {
+        return columns;
+    }
+    const std::string body = found[1].str();
+    static const std::regex column(R"(\n\s*([a-z_]+)\s+([^\n]*))");
+    for (auto it = std::sregex_iterator(body.begin(), body.end(), column); std::sregex_iterator() != it; ++it)
+    {
+        columns[(*it)[1].str()] = (*it)[2].str();
+    }
+    return columns;
+}
+
 /// Expects every value of E from 1 to last that PGEnumStrings maps to be one the schema's type has
 template <typename E>
 void expectInSchema(const std::map<std::string, std::set<std::string>> &schema, const std::string &type, E last)
@@ -86,3 +111,18 @@ TEST(PGSchemaTest, EveryEnumStringIsOneTheSchemasTypeHas)
 }
 
 } // namespace
+
+TEST(PGSchemaTest, ThePriceColumnsHoldAnyPriceTheEngineAccepts)
+{
+    // NUMERIC(18,8) refused a price of 1e10 or more, though the engine accepts any finite price (#538): a precision on
+    // any of them brings that back
+    const auto columns = schemaColumns("orders");
+    ASSERT_FALSE(columns.empty()) << "001_schema.sql creates no orders table";
+    for (const char *name : { "price", "stop_px", "avg_px", "day_avg_px", "far_price" })
+    {
+        const auto it = columns.find(name);
+        ASSERT_NE(columns.end(), it) << "orders has no column " << name;
+        EXPECT_EQ(0u, it->second.rfind("NUMERIC", 0)) << name << " is " << it->second;
+        EXPECT_EQ(std::string::npos, it->second.find('(')) << name << " has a precision: " << it->second;
+    }
+}
