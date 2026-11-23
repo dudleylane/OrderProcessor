@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { SystemMetrics } from '../types';
-import type { AlertRule, Alert, AlertSeverity } from '../types/alerts';
+import type { AlertRule, Alert } from '../types/alerts';
 
 const STORAGE_KEY = 'oms-alert-rules';
 const MAX_ALERTS = 500;

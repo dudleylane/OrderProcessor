@@ -8,7 +8,6 @@ import type {
   Account,
   NewOrderRequest,
   NewSwapOrderRequest,
-  CancelOrderRequest,
   ReplaceOrderRequest,
   SystemMetrics,
 } from '../types';
