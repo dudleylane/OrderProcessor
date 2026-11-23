@@ -39,7 +39,8 @@ namespace COP
  * AddressSanitizer sees a chunk as one allocation, so it can't catch a node used after the map freed it.
  *
  * Not synchronised: every allocation and deallocation must run under the lock that guards changes to the map, as the
- * stores' write locks do.
+ * stores' write locks do. A copy of the map allocates from the same pool, so it runs under that lock too. That is a
+ * convention, as ruled on #629: TSan reports a change made without the lock whenever two run at once.
  */
 class NodePool
 {
@@ -206,7 +207,8 @@ private:
     NodePool *pool_;
 };
 
-/// A std::map whose nodes come from a NodePool, given to its constructor (#467)
+/// A std::map whose nodes come from a NodePool, given to its constructor (#467). Its pool isn't synchronised, so every
+/// change to the map, and every copy of it, runs under the write lock of the store that owns it (#629).
 template <typename K, typename V, typename Compare = std::less<K>>
 using PooledMap = std::map<K, V, Compare, NodeAllocator<std::pair<const K, V>>>;
 
