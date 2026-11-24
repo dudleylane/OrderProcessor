@@ -5456,6 +5456,29 @@ TEST_F(FixtSessionTest, TheEnginesRefusalOfADuplicateCarriesTheStateOfTheOrderTh
     expectEverythingSentIsTaken();
 }
 
+TEST_F(FixtSessionTest, AnOrderTheEngineRefusedUnstoredIsReportedWithTheEnginesExecutionId)
+{
+    // Since #545 the engine draws the refusal's execution id itself, as it draws a stored order's reports': the gateway
+    // reports it as R<id>, so the counterparty and the WebSocket clients that see the refusal number it alike
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    const std::string source = FixGateway::makeSourceString(sid_);
+    Queues::OrderRejectEvent refusal; // as Processor::rejectUnstoredOrder() makes it, by the stored ClOrdID
+    refusal.clOrderId_ = FixGateway::sessionClOrdId(source, "N");
+    refusal.symbol_ = "aaa";
+    refusal.side_ = BUY_SIDE;
+    refusal.orderQty_ = 100;
+    refusal.reason_ = "Order refused: no auction runs for OPG";
+    refusal.execId_ = IdT(4242, 1);
+    gateway_->sendOrderReject(refusal, source);
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(1u, reports.size()) << sentText();
+    EXPECT_EQ("R4242", fieldOf(reports[0], FIX::FIELD::ExecID));
+    EXPECT_EQ("N", fieldOf(reports[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ(std::string(1, FIX::OrdStatus_REJECTED), fieldOf(reports[0], FIX::FIELD::OrdStatus));
+    expectEverythingSentIsTaken();
+}
+
 TEST_F(FixtSessionTest, AReplaceWhoseClOrdIdIsInUseIsRefusedBeforeTheEngine)
 {
     // Replace (Y,X) with a Y the session already uses, for an order stored or still on its way, or X's own, is refused

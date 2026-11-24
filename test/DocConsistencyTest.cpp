@@ -52,6 +52,7 @@
 #include <boost/mpl/size.hpp>
 #include <nlohmann/json.hpp>
 
+#include "ClientMessageParser.h"
 #include "DataModelDef.h"
 #include "ExpiryScheduler.h"
 #include "JsonSerializer.h"
@@ -287,6 +288,8 @@ TEST_F(DocConsistencyTest, WebSocketLimits)
     expectDocEq("ws_max_connections", COP::App::DEFAULT_MAX_CONNECTIONS);
     expectDocEq("ws_max_session_queue_mb", COP::App::DEFAULT_MAX_SESSION_QUEUE_MB);
     expectDocEq("ws_max_client_message_kib", COP::App::MAX_CLIENT_MESSAGE_BYTES / 1024);
+    // The longest id a client may give a request, which the answers refusing it echo (#683)
+    expectDocEq("ws_max_request_id", COP::App::MAX_REQUEST_ID);
     // Connections whose upgrade isn't decided yet, and how long each has to send it (#541)
     expectDocEq("ws_max_handshakes", COP::App::WsLimits().maxHandshakes);
     expectDocEq("ws_handshake_timeout_s", COP::App::WsLimits().handshakeTimeout.count());

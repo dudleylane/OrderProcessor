@@ -1,6 +1,7 @@
 #include "ClientMessageParser.h"
 #include "EnumStrings.h"
 #include "ExpiryScheduler.h"
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <nlohmann/json.hpp>
@@ -25,6 +26,35 @@ bool requireObject(const json &data, ParsedClientMessage *msg)
         return true;
     }
     markInvalid(msg, "data must be an object");
+    return false;
+}
+
+/// A client's id of its request (#683), optional, read before any other field so that an error the message gets for
+/// another names it. Every session an answer reaches sees it, so its length and characters are bounded: an id that
+/// breaks the rule is refused, and isn't echoed.
+bool readRequestId(const json &data, ParsedClientMessage *msg)
+{
+    json::const_iterator it = data.find("requestId");
+    if (data.end() == it)
+    {
+        return true;
+    }
+    const auto allowed = [](char c)
+    {
+        return ((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')) || ((c >= '0') && (c <= '9')) || ('_' == c) ||
+               ('-' == c);
+    };
+    if (it->is_string())
+    {
+        const std::string &id = it->get_ref<const std::string &>();
+        if (!id.empty() && (id.size() <= MAX_REQUEST_ID) && std::all_of(id.begin(), id.end(), allowed))
+        {
+            msg->requestId = id;
+            return true;
+        }
+    }
+    markInvalid(msg,
+                "invalid requestId: expected 1 to " + std::to_string(MAX_REQUEST_ID) + " of A-Z, a-z, 0-9, _ and -");
     return false;
 }
 
@@ -124,7 +154,7 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
             const json &d = j["data"];
             u64 orderQty = 0;
             u64 minQty = 0;
-            if (requireObject(d, &msg) && readPrice(d, "price", &msg.newOrder.price, &msg) &&
+            if (requireObject(d, &msg) && readRequestId(d, &msg) && readPrice(d, "price", &msg.newOrder.price, &msg) &&
                 readPrice(d, "stopPx", &msg.newOrder.stopPx, &msg) &&
                 readQuantity(d, "orderQty", maxQty, &orderQty, &msg) && readMinQty(d, maxQty, &minQty, &msg) &&
                 readUnsigned(d, "expireTime", maxId, &msg.newOrder.expireTime, &msg))
@@ -175,7 +205,8 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
             // an absent one was a swap for nothing
             const json &d = j["data"];
             u64 orderQty = 0;
-            if (requireObject(d, &msg) && readPrice(d, "nearPrice", &msg.swapOrder.nearPrice, &msg) &&
+            if (requireObject(d, &msg) && readRequestId(d, &msg) &&
+                readPrice(d, "nearPrice", &msg.swapOrder.nearPrice, &msg) &&
                 readPrice(d, "farPrice", &msg.swapOrder.farPrice, &msg) &&
                 readUnsigned(d, "settlDate", maxDate, &msg.swapOrder.settlDate, &msg) &&
                 readUnsigned(d, "farSettlDate", maxDate, &msg.swapOrder.farSettlDate, &msg) &&
@@ -208,7 +239,8 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
         else if (msg.type == "cancel_order")
         {
             const json &d = j["data"];
-            if (requireObject(d, &msg) && readUnsigned(d, "orderId", maxId, &msg.cancelOrder.orderId, &msg))
+            if (requireObject(d, &msg) && readRequestId(d, &msg) &&
+                readUnsigned(d, "orderId", maxId, &msg.cancelOrder.orderId, &msg))
             {
                 msg.cancelOrder.clOrderId = d.value("clOrderId", "");
             }
@@ -217,7 +249,8 @@ ParsedClientMessage App::parseClientMessage(const std::string &jsonStr)
         {
             const json &d = j["data"];
             u64 orderQty = 0;
-            if (requireObject(d, &msg) && readUnsigned(d, "orderId", maxId, &msg.replaceOrder.orderId, &msg) &&
+            if (requireObject(d, &msg) && readRequestId(d, &msg) &&
+                readUnsigned(d, "orderId", maxId, &msg.replaceOrder.orderId, &msg) &&
                 readPrice(d, "price", &msg.replaceOrder.price, &msg) &&
                 readPrice(d, "stopPx", &msg.replaceOrder.stopPx, &msg) &&
                 readUnsigned(d, "expireTime", maxId, &msg.replaceOrder.expireTime, &msg) &&

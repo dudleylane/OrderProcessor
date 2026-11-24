@@ -70,6 +70,73 @@ TEST(ClientMessageParserTest, CancelOrderParsesId)
     EXPECT_EQ("WS-1", msg.cancelOrder.clOrderId);
 }
 
+TEST(ClientMessageParserTest, EachRequestTakesItsClientsRequestId)
+{
+    // The client's id of its request (#683), which the answers that refuse it echo: up to 36 of A-Z, a-z, 0-9, _ and -,
+    // a UUID among them
+    const std::string order = R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
+                              R"("orderQty":100,"tif":"DAY","currency":"USD","capacity":"AGENCY","price":150.25,)";
+    auto msg = parse(order + R"("requestId":"r3Kf9_x-Lq2A"}})");
+    EXPECT_EQ("new_order", msg.type) << msg.error;
+    EXPECT_EQ("r3Kf9_x-Lq2A", msg.requestId);
+    msg = parse(R"({"type":"cancel_order","data":{"orderId":7,"requestId":"c-1"}})");
+    EXPECT_EQ("cancel_order", msg.type) << msg.error;
+    EXPECT_EQ("c-1", msg.requestId);
+    msg = parse(R"({"type":"replace_order","data":{"orderId":7,"price":10.5,)"
+                R"("requestId":"123e4567-e89b-12d3-a456-426614174000"}})");
+    EXPECT_EQ("replace_order", msg.type) << msg.error;
+    EXPECT_EQ("123e4567-e89b-12d3-a456-426614174000", msg.requestId);
+    msg = parse(order + R"("account":"ACC1"}})");
+    EXPECT_EQ("new_order", msg.type) << msg.error;
+    EXPECT_EQ("", msg.requestId) << "it is optional";
+}
+
+TEST(ClientMessageParserTest, ARequestIdThatBreaksTheRuleIsRefusedAndNotEchoed)
+{
+    // Every session an answer reaches sees the id (#683), so its length and characters are bounded
+    for (const char *id : { R"("")", R"("1234567890123456789012345678901234567")", R"("has space")", R"("a\"b")",
+                            R"("caf\u00e9")", "7", "null", R"(["x"])" })
+    {
+        auto msg = parse(std::string(R"({"type":"cancel_order","data":{"orderId":7,"requestId":)") + id + "}}");
+        EXPECT_EQ("error", msg.type) << id;
+        EXPECT_EQ("invalid requestId: expected 1 to 36 of A-Z, a-z, 0-9, _ and -", msg.error) << id;
+        EXPECT_EQ("", msg.requestId) << id;
+    }
+}
+
+TEST(ClientMessageParserTest, ARequestIdIsKeptWhenAnotherFieldIsInvalid)
+{
+    // So the error the message gets names the request (#683): a field the parser checks, and one nlohmann refuses
+    auto msg = parse(R"({"type":"new_order","data":{"requestId":"n-1","orderQty":0}})");
+    EXPECT_EQ("error", msg.type);
+    EXPECT_EQ("n-1", msg.requestId);
+    msg = parse(R"({"type":"replace_order","data":{"requestId":"r-1","orderId":7,"price":-1}})");
+    EXPECT_EQ("error", msg.type);
+    EXPECT_EQ("r-1", msg.requestId);
+    msg = parse(R"({"type":"new_order","data":{"requestId":"n-2","orderQty":5,"symbol":5}})");
+    EXPECT_EQ("error", msg.type) << "a symbol that isn't a string";
+    EXPECT_EQ("n-2", msg.requestId);
+}
+
+TEST(ClientMessageParserTest, ASwapTakesItsClientsRequestIdAsANewOrderDoes)
+{
+    // On FX a swap is a request of its own (#683): its id is read first, refused when it breaks the rule, and kept when
+    // another field is invalid
+    const std::string swap = R"({"type":"new_swap_order","data":{"symbol":"EURUSD","side":"BUY","nearPrice":1.085,)"
+                             R"("farPrice":1.087,"settlDate":1792022400000,"farSettlDate":1794700800000,)"
+                             R"("orderQty":1000000,"currency":"USD","capacity":"AGENCY",)";
+    auto msg = parse(swap + R"("requestId":"s-1"}})");
+    EXPECT_EQ("new_swap_order", msg.type) << msg.error;
+    EXPECT_EQ("s-1", msg.requestId);
+    msg = parse(swap + R"("requestId":"has space"}})");
+    EXPECT_EQ("error", msg.type);
+    EXPECT_EQ("invalid requestId: expected 1 to 36 of A-Z, a-z, 0-9, _ and -", msg.error);
+    EXPECT_EQ("", msg.requestId);
+    msg = parse(R"({"type":"new_swap_order","data":{"requestId":"s-2","orderQty":0}})");
+    EXPECT_EQ("error", msg.type);
+    EXPECT_EQ("s-2", msg.requestId);
+}
+
 TEST(ClientMessageParserTest, ReplaceOrderReportsWhichFieldsArePresent)
 {
     auto msg = parse(R"({"type":"replace_order","data":{"orderId":7,"price":10.5}})");

@@ -389,6 +389,72 @@ TEST_F(ProcessorTest, AReplaceRefusalKeepsWhatItCanResolve)
     EXPECT_TRUE(refusal.symbol_.empty());
 }
 
+TEST_F(ProcessorTest, AnUnstoredRefusalNamesItsRequestAndHasAnExecutionIdOfItsOwn)
+{
+    // The engine's refusal of an order or a replacement it never stored names the request by the id its WebSocket
+    // client gave (#683), and has an execution id of its own (#545): each was a REJECT report with execId 0. All three
+    // kinds: a new order whose ClOrdID is in use, decided as it arrives; a replace of an order the engine doesn't have,
+    // the same; and a replace the transaction worker refuses, here of an order already canceled.
+    RefusalRecorder out;
+    ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), orderBook_.get(), inQueues_.get(), &out,
+                           inQueues_.get(), transMgr_.get());
+    Processor processor;
+    processor.init(params);
+    auto *const proc = transMgr_->proc_;
+    transMgr_->proc_ = &processor;
+
+    auto first = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    const RawDataEntry clOrdId = first->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(first.release()));
+    processor.process();
+    OrderEntry *stored = OrderStorage::instance()->locateByClOrderId(clOrdId);
+    ASSERT_NE(nullptr, stored);
+
+    auto duplicate = createTestOrder(instrId1_, SELL_SIDE, 10.0, 50);
+    duplicate->clOrderId_ = stored->clOrderId_;
+    OrderEvent order(duplicate.release());
+    order.requestId_ = "r-order";
+    inQueues_->push("test", order);
+    processor.process();
+
+    OrderReplaceEvent unknown(IdT(987654321, 1), createTestOrder(instrId1_, BUY_SIDE, 11.0, 100).release());
+    unknown.requestId_ = "r-unknown";
+    inQueues_->push("test", unknown);
+    processor.process();
+
+    inQueues_->push("test", OrderCancelEvent(stored->orderId_));
+    processor.process();
+    ASSERT_EQ(CANCELED_ORDSTATUS, stored->status_);
+    OrderEntry *replacement = stored->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = stored->clOrderId_;
+    replacement->price_ = 11.0;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    OrderReplaceEvent tooLate(stored->orderId_, replacement);
+    tooLate.requestId_ = "r-too-late";
+    inQueues_->push("test", tooLate);
+    processor.process();
+    transMgr_->proc_ = proc;
+
+    ASSERT_EQ(3u, out.refusals_.size());
+    EXPECT_TRUE(out.refusals_[0].duplicateClOrderId_);
+    EXPECT_FALSE(out.refusals_[0].replacement_);
+    EXPECT_EQ(Queues::CancelRejectEvent::UNKNOWN_ORDER, out.refusals_[1].refusal_);
+    EXPECT_EQ(Queues::CancelRejectEvent::TOO_LATE, out.refusals_[2].refusal_);
+    EXPECT_EQ(std::string(clOrdId.data_, clOrdId.length_), out.refusals_[2].origClOrderId_);
+    std::vector<std::string> requests;
+    std::set<u64> execIds;
+    for (const OrderRejectEvent &refusal : out.refusals_)
+    {
+        requests.push_back(refusal.requestId_);
+        EXPECT_TRUE(refusal.execId_.isValid()) << refusal.reason_;
+        execIds.insert(refusal.execId_.id_);
+    }
+    EXPECT_EQ((std::vector<std::string>{ "r-order", "r-unknown", "r-too-late" }), requests);
+    EXPECT_EQ(3u, execIds.size()) << "each refusal has an execution id of its own";
+}
+
 TEST_F(ProcessorTest, CreateProcessor)
 {
     ASSERT_NE(nullptr, processor_);

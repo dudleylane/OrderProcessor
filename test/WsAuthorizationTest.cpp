@@ -604,6 +604,25 @@ TEST_F(WsAuthorizationTest, WithoutIdentitiesEverySessionSeesEverythingAsBefore)
     EXPECT_EQ(std::vector<std::string>{ "execution_report" }, typesBeforeMarker(*two));
 }
 
+TEST_F(WsAuthorizationTest, WithoutIdentitiesAFixOrdersUnstoredRefusalShowsItsClientsOwnClOrdId)
+{
+    // A server with no credentials sends the refusal of a FIX order it never stored, by the FIX session's source, to
+    // every session (SessionManager::sendToSource()): the REJECT names the order by the FIX client's own ClOrdID, as a
+    // stored FIX order is shown (#645), not by the session's key it would be stored under
+    start(false);
+    std::unique_ptr<Client> one = connect("");
+    Queues::OrderRejectEvent reject;
+    reject.clOrderId_ = "FIX:CLIENT_A->OMS|NEW-1";
+    reject.reason_ = "Order refused: no auction runs for OPG";
+    reject.execId_ = IdT(4243, 1);
+    out_->push(reject, "FIX:CLIENT_A->OMS");
+    std::optional<nlohmann::json> msg = next(*one);
+    ASSERT_TRUE(msg.has_value());
+    EXPECT_EQ("execution_report", msg->value("type", ""));
+    EXPECT_EQ("NEW-1", (*msg)["data"].value("clOrderId", ""));
+    EXPECT_EQ(4243u, (*msg)["data"].value("execId", 0ULL));
+}
+
 // A report builds its instrument's depth only when a session subscribes to the book (#525): every report walked the
 // book, under each side's lock, and the broadcast then dropped what it built. With nobody subscribed, the push doesn't
 // wait for a side's lock.

@@ -150,7 +150,7 @@ public:
     void process(OrdState::onExecCancel &evnt, OrderEntry *order, const std::string &requester,
                  const ACID::Context &cnxt) override;
     void process(OrdState::onReplace &evnt, OrderEntry *original, OrderEntry &replacement, const std::string &requester,
-                 const ACID::Context &cnxt) override;
+                 const std::string &requestId, const ACID::Context &cnxt) override;
     void process(OrderStateChange change, OrderEntry *order, ACID::Scope *scope, const ACID::Context &cnxt) override;
 
 public:
@@ -179,12 +179,15 @@ private:
     /// that never rests, a market, IOC or FOK order, is expired without booking.
     void expireRestored(OrderEntry *order, const ACID::Context &cntxt);
     void clearDeferedEvents();
-    /// Tells the sender that its new order or replacement was refused without being stored (#67)
-    void rejectUnstoredOrder(const std::string &source, const OrderEntry &order, bool replacement);
-    /// What tells a client its replace was refused, and why (#74); original is null when it is unknown
-    static Queues::OrderRejectEvent makeReplaceRefusal(const OrderEntry &replacement, const OrderEntry *original,
-                                                       Queues::CancelRejectEvent::Reason refusal,
-                                                       const std::string &reason);
+    /// Tells the sender that its new order or replacement was refused without being stored (#67), naming its request by
+    /// requestId when its client gave one (#683)
+    void rejectUnstoredOrder(const std::string &source, const OrderEntry &order, bool replacement,
+                             const std::string &requestId);
+    /// What tells a client its replace was refused, and why (#74); original is null when it is unknown. It names the
+    /// request by requestId when its client gave one (#683), and has an execution id of its own (#545).
+    Queues::OrderRejectEvent makeReplaceRefusal(const OrderEntry &replacement, const OrderEntry *original,
+                                                Queues::CancelRejectEvent::Reason refusal, const std::string &reason,
+                                                const std::string &requestId);
 
 private:
     IdTValueGenerator *generator_;

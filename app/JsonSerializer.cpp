@@ -235,6 +235,37 @@ std::string App::serializeExecReport(const ExecutionEntry *exec)
     return j.dump();
 }
 
+std::string App::serializeUnstoredReject(const Queues::OrderRejectEvent &evnt, DateTimeT transactTime,
+                                         const std::string &source)
+{
+    RejectExecEntry report;
+    report.type_ = REJECT_EXECTYPE;
+    report.orderStatus_ = REJECTED_ORDSTATUS;
+    report.execId_ = evnt.execId_;
+    report.transactTime_ = transactTime;
+    report.market_ = INTERNAL_EXECUTION;
+    report.rejectReason_ = evnt.reason_;
+    json data = execToJson(&report);
+    // What the client knows its request by (#545): the order's ClOrdID, and a replacement's original's, which the
+    // client named the order by; and its own id of the request, when it gave one (#683). Each as its client gave it, as
+    // orderToJson() shows an order's (#645), not the session's key a FIX ClOrdID is stored under: a server with no
+    // credentials sends a FIX order's refusal to every session (SessionManager::sendToSource()), and a WebSocket client
+    // may replace a FIX order.
+    data["clOrderId"] = clientClOrdId(evnt.clOrderId_, source);
+    if (evnt.replacement_)
+    {
+        data["origClOrderId"] = shownOrigClOrdId(evnt.origClOrderId_, source);
+    }
+    if (!evnt.requestId_.empty())
+    {
+        data["requestId"] = evnt.requestId_;
+    }
+    json j;
+    j["type"] = "execution_report";
+    j["data"] = std::move(data);
+    return j.dump();
+}
+
 std::string App::serializeBookUpdate(const std::string &symbol, const BookSnapshot &snap)
 {
     json j;
@@ -281,11 +312,15 @@ std::string App::cancelRejectReason(const Queues::CancelRejectEvent &evnt)
     }
 }
 
-std::string App::serializeError(const std::string &message)
+std::string App::serializeError(const std::string &message, const std::string &requestId)
 {
     json j;
     j["type"] = "error";
     j["message"] = message;
+    if (!requestId.empty())
+    {
+        j["requestId"] = requestId;
+    }
     return j.dump();
 }
 

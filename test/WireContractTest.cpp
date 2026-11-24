@@ -1393,8 +1393,6 @@ std::vector<Message> WireContractTest::serverMessages()
     trade.lastPx_ = 10.25;
     trade.currency_ = USD_CURRENCY;
     trade.tradeDate_ = 20261124;
-    RejectExecEntry refusedOrder; // refused before it was stored, so with no order id, as WsOutQueues makes it (#67)
-    refusedOrder.rejectReason_ = "Order refused: no market";
     RejectExecEntry refusedReplace; // of type REPLACE (#179)
     refusedReplace.rejectReason_ = "Replace refused: the order is filled";
     ReplaceExecEntry replacement;
@@ -1432,7 +1430,6 @@ std::vector<Message> WireContractTest::serverMessages()
     for (const Report &report : {
              Report{ &orderCancel, "ExecutionEntry", CANCEL_EXECTYPE, CANCELED_ORDSTATUS, IdT(2, 1) },
              Report{ &trade, "TradeExecEntry", TRADE_EXECTYPE, PARTFILL_ORDSTATUS, IdT(2, 1) },
-             Report{ &refusedOrder, "RejectExecEntry", REJECT_EXECTYPE, REJECTED_ORDSTATUS, IdT() },
              Report{ &refusedReplace, "RejectExecEntry", REPLACE_EXECTYPE, FILLED_ORDSTATUS, IdT(2, 1) },
              Report{ &replacement, "ReplaceExecEntry", REPLACE_EXECTYPE, NEW_ORDSTATUS, IdT(2, 1) },
              Report{ &correction, "ExecCorrectExecEntry", CORRECT_EXECTYPE, PARTFILL_ORDSTATUS, IdT(2, 1) },
@@ -1456,13 +1453,27 @@ std::vector<Message> WireContractTest::serverMessages()
                              REPORT_INTERFACES.at(report.cppClass) });
     }
 
+    // A replacement refused before it was stored, with no order id, as WsOutQueues reports one (#67): its own
+    // execution id and its ClOrdIDs (#545), and its request's id (#683), every field set
+    Queues::OrderRejectEvent refused;
+    refused.replacement_ = true;
+    refused.clOrderId_ = "WS-1700000000000000-2";
+    refused.origClOrderId_ = "WS-1700000000000000-1";
+    refused.reason_ = "Replace refused: too late, the order is no longer in the book";
+    refused.requestId_ = "r3Kf9_x-Lq2A";
+    refused.execId_ = IdT(5, 1);
+    messages.push_back({ "execution_report (RejectExecEntry, REJECT, never stored)",
+                         App::serializeUnstoredReject(refused, DAY_START + 3000), "RejectExecEntry",
+                         REPORT_INTERFACES.at("RejectExecEntry") });
+
     BookSnapshot book;
     book.bids.push_back(BookLevel{ 10.25, 100, 2 });
     book.asks.push_back(BookLevel{ 10.5, 50, 1 });
     messages.push_back({ "book_update", App::serializeBookUpdate("AAPL", book), "", "" });
     messages.push_back(
         { "cancel_reject", App::serializeCancelReject(2, "Cancel rejected: too late, the order is FILLED"), "", "" });
-    messages.push_back({ "error", App::serializeError("Unknown message type: hello"), "", "" });
+    // An error answering a request, which names it (#683)
+    messages.push_back({ "error", App::serializeError("Unknown instrument: XYZ", "r3Kf9_x-Lq2A"), "", "" });
     // Each field is written whatever its value
     messages.push_back({ "metrics_update", App::serializeMetricsUpdate(App::SystemMetrics{}), "", "" });
     return messages;

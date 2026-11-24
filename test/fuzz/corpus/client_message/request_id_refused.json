@@ -1,0 +1,1 @@
+{"type": "cancel_order", "data": {"orderId": 7, "requestId": "has space\u0000caf\u00e9-0123456789012345678901234567890"}}
