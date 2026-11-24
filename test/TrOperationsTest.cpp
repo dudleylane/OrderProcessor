@@ -691,6 +691,35 @@ TEST_F(MatchOrderOperationTest, CancelExecReport_CarriesTheRequestsClOrdId)
     EXPECT_EQ("CXL-3", out.reports_[0].first.requestClOrdId_);
 }
 
+TEST_F(MatchOrderOperationTest, CorrectionReportGivesTheLeavesTheDecisionLeftTheOrderWith)
+{
+    // A correction's report gives the order's leaves, which its decision set, not the correction's: a correction of a
+    // closed order leaves it with none (#386), however many the correction says it has (#777)
+    buyOrder_->leavesQty_ = 0;
+    buyOrder_->cumQty_ = 30;
+    ExecCorrectExecEntry correction;
+    correction.cumQty_ = 30;
+    correction.leavesQty_ = 70;
+    correction.lastQty_ = 20;
+    correction.lastPx_ = 10.0;
+    correction.currency_ = buyOrder_->currency_;
+    RecordingOutQueues out;
+    CreateCorrectExecReportTrOperation op(&correction, EXPIRED_ORDSTATUS, *buyOrder_);
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, &out, matcher_.get(), IdTGenerator::instance(),
+                &deferedContainer_);
+
+    op.execute(ctx);
+
+    ASSERT_EQ(1u, out.reports_.size());
+    const auto *report = dynamic_cast<const ExecCorrectExecEntry *>(out.reports_[0].first.exec_);
+    ASSERT_NE(nullptr, report);
+    EXPECT_EQ(CORRECT_EXECTYPE, report->type_);
+    EXPECT_EQ(EXPIRED_ORDSTATUS, report->orderStatus_);
+    EXPECT_EQ(0u, report->leavesQty_);
+    EXPECT_EQ(30u, report->cumQty_);
+    EXPECT_EQ(20u, report->lastQty_);
+}
+
 TEST_F(MatchOrderOperationTest, CancelReject_WithoutARequesterGoesToTheOrdersSource)
 {
     // The bug this covers: the reject named no order, and went to the made-up target "tgt" (#73)

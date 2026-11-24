@@ -103,6 +103,7 @@ public:
     bool complete(onTradeExecution const &);
     void corrected(onTradeCrctCncl const &);
     void correctedWithoutRestore(onTradeCrctCncl const &);
+    void correctedClosed(onTradeCrctCncl const &);
     void expire(onRplOrderExpired const &);
     void expire(onExpired const &);
     void cancel(onCanceled const &);
@@ -228,9 +229,9 @@ public:
 		// Filled orders only allow trade corrections (not Expired/DoneForDay/Suspended
 		// which could lead to re-activation via onNewDay/onContinue)
 
-		// update orderentry according to tradecorrect
+		// a closed order's fills, and no leaves (#386, #777)
 		// create ExecReport TradeCorrect
-		a_row< Expired,		 onTradeCrctCncl,   Expired,	  &os::correctedWithoutRestore       >,
+		a_row< Expired,		 onTradeCrctCncl,   Expired,	  &os::correctedClosed               >,
 
 		// NB: called if notexecuted(onNewDay) returns false
 		// add to OrderBook
@@ -240,9 +241,9 @@ public:
 		// add to OrderBook
 		// create ExecReport New
 		row  < DoneForDay,	 onNewDay,			New,		  &os::restored,   &os::notexecuted	 >,
-		// update orderentry according to tradecorrect
+		// a closed order's fills, and no leaves (#386, #777)
 		// create ExecReport TradeCorrect
-		a_row< DoneForDay,   onTradeCrctCncl,	DoneForDay,   &os::correctedWithoutRestore       >,
+		a_row< DoneForDay,   onTradeCrctCncl,	DoneForDay,   &os::correctedClosed               >,
 		// create ExecReport Suspended
 		a_row< DoneForDay,   onSuspended,		Suspended,    &os::suspended	                 >,
 		// A DAY order ends with its day, done for it or not (#535)
@@ -293,9 +294,9 @@ public:
 		// create ExecReport Canceled
 		a_row< GoingReplace, onExecCancel,		CnclReplaced, &os::canceled						 >,
 
-		// update orderentry according to tradecorrect
+		// a closed order's fills, and no leaves (#386); zone 1, still New or PartFill, is handed it too (#777)
 		// create ExecReport TradeCorrect
-		a_row< CnclReplaced, onTradeCrctCncl,	CnclReplaced, &os::correctedWithoutRestore      >
+		a_row< CnclReplaced, onTradeCrctCncl,	CnclReplaced, &os::correctedClosed              >
 		//    +-------------+------------------+-------------+----------------+------------------+
 	> {};
     // clang-format on

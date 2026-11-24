@@ -341,8 +341,11 @@ CreateCorrectExecReportTrOperation::CreateCorrectExecReportTrOperation(const Exe
     : Operation(CREATE_CORRECT_EXECREPORT_TROPERATION, order.orderId_), status_(status)
 {
     assert(nullptr != correct);
-    cumQty_ = correct->cumQty_;
-    leavesQty_ = correct->leavesQty_;
+    // The order's figures, which the correction's decision has just set, not the correction's own: a correction of a
+    // closed order leaves it no leaves, whatever the correction says (#386, #777). The decision's whole figures
+    // (OrderFigures, #411) aren't handed to the reports of #580's latent features yet.
+    cumQty_ = order.cumQty_;
+    leavesQty_ = order.leavesQty_;
     lastQty_ = correct->lastQty_;
     lastPx_ = correct->lastPx_;
     currency_ = correct->currency_;

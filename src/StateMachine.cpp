@@ -52,6 +52,7 @@ static_assert(stateId<NoCnlReplace> == 8, "NoCnlReplace's id is persisted");
 static_assert(stateId<GoingCancel> == 9, "GoingCancel's id is persisted");
 static_assert(stateId<GoingReplace> == 10, "GoingReplace's id is persisted");
 static_assert(stateId<CnclReplaced> == 11, "CnclReplaced's id is persisted");
+static_assert(stateId<CnclReplaced> == CNCL_REPLACED_STATE_ID, "closedInZone2() reads CnclReplaced's id");
 static_assert(stateId<Rejected> == 12, "Rejected's id is persisted");
 // Each region's states, as restore checks a record's pair against them (#600): the first region is the one
 // initial_state starts at Rcvd_New, the second the one it starts at NoCnlReplace
@@ -452,7 +453,16 @@ void OrderState_::corrected(onTradeCrctCncl const &evnt)
         return;
     }
 
-    OrdStateImpl::processCorrected(orderData_, evnt);
+    // Zone 2 owns a correction of an order it holds canceled or replaced (#777): here, zone 1 still New or PartFill,
+    // it books nothing and gives no leaves
+    if (closedInZone2(static_cast<const OrderState &>(*this).current_state()))
+    {
+        OrdStateImpl::processCorrectedClosed(orderData_, evnt);
+    }
+    else
+    {
+        OrdStateImpl::processCorrected(orderData_, evnt);
+    }
     evnt.order4StateMachine_ = orderData_;
 }
 
@@ -463,7 +473,26 @@ void OrderState_::correctedWithoutRestore(onTradeCrctCncl const &evnt)
         return;
     }
 
-    OrdStateImpl::processCorrectedWithoutRestore(orderData_, evnt);
+    // A suspended order keeps its leaves by design, unless zone 2 holds it canceled or replaced (#777)
+    if (closedInZone2(static_cast<const OrderState &>(*this).current_state()))
+    {
+        OrdStateImpl::processCorrectedClosed(orderData_, evnt);
+    }
+    else
+    {
+        OrdStateImpl::processCorrectedWithoutRestore(orderData_, evnt);
+    }
+    evnt.order4StateMachine_ = orderData_;
+}
+
+void OrderState_::correctedClosed(onTradeCrctCncl const &evnt)
+{
+    if (evnt.testStateMachine_)
+    {
+        return;
+    }
+
+    OrdStateImpl::processCorrectedClosed(orderData_, evnt);
     evnt.order4StateMachine_ = orderData_;
 }
 
