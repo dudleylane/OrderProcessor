@@ -1994,6 +1994,23 @@ template <typename T> T makeReport(ExecType type, OrderStatus status)
     return report;
 }
 
+TEST_F(FixGatewayInboundTest, ExecutionReport_TransactTimeIsTheDecisionsToTheMillisecond)
+{
+    // TransactTime (60) is when the engine decided what the report tells, the report's transactTime, as its WebSocket
+    // report gives it (#546, #612), to the millisecond: it was the clock as the report was built, to the second
+    auto order = createCorrectOrder(instrumentId1_);
+    assignClOrderId(order.get());
+    auto trade = makeReport<TradeExecEntry>(TRADE_EXECTYPE, PARTFILL_ORDSTATUS);
+    trade.lastQty_ = 10;
+    trade.lastPx_ = 1.0850;
+    trade.transactTime_ = 1792022400999ULL; // 2026-10-15 00:00:00.999 UTC
+
+    FIX50SP2::ExecutionReport report = FixGateway::buildExecutionReport(&trade, *order);
+
+    ASSERT_TRUE(report.isSetField(FIX::FIELD::TransactTime));
+    EXPECT_EQ("20261015-00:00:00.999", report.getField(FIX::FIELD::TransactTime));
+}
+
 TEST_F(FixGatewayInboundTest, ExecutionReport_RejectCarriesOrdRejReasonAndText)
 {
     // A rejected order's report says why: 150=8, 39=8, OrdRejReason 103=0 (broker / exchange option, since the

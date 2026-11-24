@@ -649,6 +649,43 @@ TEST_F(OrderCodecTest, AnOrderIsWrittenWithTheFiguresGiven)
     EXPECT_NE(own, written);
 }
 
+TEST_F(OrderCodecTest, AnOrderIsWrittenWithItsDecisionsTime)
+{
+    // Each decision sets the order's lastUpdateTime_ (#546), and a later one can set it again before the earlier one's
+    // record is written. Both encoders write the decision's, in the place the field has always had: no format change.
+    SourceIdT instrId = addInstrument("instrument");
+    OrderEntry val(SourceIdT(1, 1), SourceIdT(2, 2), SourceIdT(3, 3), SourceIdT(4, 4), instrId, SourceIdT(6, 6),
+                   SourceIdT(7, 7), SourceIdT(8, 8));
+    val.orderId_ = IdT(4444, 4445);
+    val.side_ = SELL_SIDE;
+    val.ordType_ = LIMIT_ORDERTYPE;
+    val.price_ = 22.22;
+    val.orderQty_ = 100;
+    val.status_ = PARTFILL_ORDSTATUS;
+    val.leavesQty_ = 70;
+    val.cumQty_ = 30;
+    val.stateMachinePersistance_.stateZone1Id_ = 3; // PartFill
+    val.stateMachinePersistance_.stateZone2Id_ = 8; // NoCnlReplace
+    val.creationTime_ = 1792098000000ULL;
+    val.lastUpdateTime_ = 1792098000000ULL + 1000; // a fill's
+    const OrderFigures filled(val);
+    val.lastUpdateTime_ = 1792098000000ULL + 2000; // the next decision's, before the fill's record is written
+
+    std::string written;
+    IdT id;
+    u32 version = 0;
+    OrderCodec::encode(val, filled, &written, &id, &version);
+    std::vector<char> buf(4096);
+    const char *end = OrderCodec::encode(val, filled, buf.data(), &id, &version);
+    EXPECT_EQ(written, std::string(buf.data(), static_cast<size_t>(end - buf.data())));
+
+    auto decVal =
+        std::unique_ptr<OrderEntry>(OrderCodec::decode(id, OrderCodec::FORMAT_VERSION, written.data(), written.size()));
+    ASSERT_NE(nullptr, decVal.get());
+    EXPECT_EQ(1792098000000ULL + 1000, decVal->lastUpdateTime_);
+    EXPECT_EQ(1792098000000ULL, decVal->creationTime_) << "what no decision changes comes from the order";
+}
+
 // Since format version 3 a record carries the order's strings, each under its field's id (#192). A string given for a
 // field that names nothing could never be restored: the encoder refuses it, and so does the decoder, in a record.
 TEST_F(OrderCodecTest, AStringForAFieldThatNamesNothingIsRefused)

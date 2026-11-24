@@ -64,8 +64,11 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
     assert(nullptr != cnxt.idGenerator_);
     const u64 contraLink = cnxt.idGenerator_->getId().id_;
     const u64 baseLink = cnxt.idGenerator_->getId().id_;
-    // Both sides' near legs trade in one business day (#244), as an outright match's sides do: the clock is read once
-    const DateTimeT dayStart = ExpiryScheduler::dayStartOf(cnxt.now());
+    // Both sides' near legs trade in one business day (#244), at one time (#546, #612), as an outright match's sides
+    // do: the clock is read once, and each near fill, its stored trade, its record and its report, and the far leg's
+    // report that takes the fill's figures, say that time
+    const DateTimeT now = cnxt.now();
+    const DateTimeT dayStart = ExpiryScheduler::dayStartOf(now);
     // And on its date, as an outright trade does (#258): both legs, on both sides. The legs settle on different dates,
     // but they trade on one. Every swap leg's trade said 1 (#445).
     const DateTimeT tradeDate = ExpiryScheduler::tradeDateOf(dayStart);
@@ -81,7 +84,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
         nearTradeEntry.currency_ = nearTrade_.order_->currency_;
         nearTradeEntry.tradeDate_ = tradeDate;
         nearTradeEntry.type_ = TRADE_EXECTYPE;
-        nearTradeEntry.transactTime_ = 1;
+        nearTradeEntry.transactTime_ = now; // it was 1, which read as 1970-01-01 (#612)
         nearTradeEntry.orderId_ = nearTrade_.order_->orderId_;
         nearTradeEntry.execLegType_ = NEAR_LEG;
         nearTradeEntry.tradeLink_ = contraLink;
@@ -125,7 +128,7 @@ void SwapExecutionDeferedEvent::execute(DeferedEventFunctor *func, const Context
             baseNearTradeEntry.currency_ = baseOrder_->currency_;
             baseNearTradeEntry.tradeDate_ = tradeDate;
             baseNearTradeEntry.type_ = TRADE_EXECTYPE;
-            baseNearTradeEntry.transactTime_ = 1;
+            baseNearTradeEntry.transactTime_ = now;
             baseNearTradeEntry.orderId_ = baseOrder_->orderId_;
             baseNearTradeEntry.execLegType_ = NEAR_LEG;
             baseNearTradeEntry.tradeLink_ = baseLink;

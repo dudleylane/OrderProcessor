@@ -30,7 +30,7 @@ namespace COP
 namespace ACID
 {
 
-void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, const ExecutionEntry &exec,
+void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, ExecutionEntry &exec,
                                     const std::string &requestClOrdId = std::string(),
                                     const OrderFigures *decided = nullptr)
 {
@@ -45,6 +45,10 @@ void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, con
 
     StringT src = ord->source_.get();
 
+    // The report's time is its decision's, which the figures it carries say (#546, #612), as its record and a fill's
+    // stored trade do. Stamped as it was built, it said a later time than its record, as late as its transaction ran.
+    // A report of #580's features, handed no figures (below), says the time of its order's last decision.
+    exec.transactTime_ = (nullptr != decided) ? decided->lastUpdateTime_ : ord->lastUpdateTime_;
     ExecutionEntry *execReport = cnxt.orderStorage_->save(exec, cnxt.idGenerator_);
     assert(nullptr != execReport);
 
@@ -77,7 +81,6 @@ void executeEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const C
     execReport.origOrderId_ = event_.replId_;
     execReport.orderId_ = event_.orderId_;
     execReport.type_ = PEND_REPLACE_EXECTYPE;
-    execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     execReport.orderStatus_ = PENDINGREPLACE_ORDSTATUS;
     execReport.market_ = INTERNAL_EXECUTION;
@@ -95,7 +98,6 @@ void executeEnqueueOrderEvent(const OrdState::onExecReplace &event_, const Conte
     execReport.origOrderId_ = event_.replId_;
     execReport.orderId_ = event_.orderId_;
     execReport.type_ = REPLACE_EXECTYPE;
-    execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     execReport.orderStatus_ = REPLACED_ORDSTATUS;
     execReport.market_ = INTERNAL_EXECUTION;
@@ -112,7 +114,6 @@ void executeEnqueueOrderEvent(const OrdState::onReplaceRejected &event_, const C
     RejectExecEntry execReport;
     execReport.orderId_ = event_.orderId_;
     execReport.type_ = REPLACE_EXECTYPE;
-    execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     execReport.orderStatus_ = REJECTED_ORDSTATUS;
     execReport.market_ = INTERNAL_EXECUTION;
@@ -143,7 +144,6 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
         ExecutionEntry execReport;
         execReport.orderId_ = getObjectId();
         execReport.type_ = execType_;
-        execReport.transactTime_ = aux::currentDateTime();
         execReport.execId_ = IdT(); /// will be assigned when saved into the storage
         execReport.orderStatus_ = status_;
         execReport.market_ = INTERNAL_EXECUTION;
@@ -155,7 +155,6 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
         ExecutionEntry execReport;
         execReport.orderId_ = getObjectId();
         execReport.type_ = execType_;
-        execReport.transactTime_ = aux::currentDateTime();
         execReport.execId_ = IdT();        /// will be assigned when saved into the storage
         execReport.orderStatus_ = status_; //DFD_ORDSTATUS;
         execReport.market_ = INTERNAL_EXECUTION;
@@ -167,7 +166,6 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
         ExecutionEntry execReport;
         execReport.orderId_ = getObjectId();
         execReport.type_ = execType_;
-        execReport.transactTime_ = aux::currentDateTime();
         execReport.execId_ = IdT(); /// will be assigned when saved into the storage
         execReport.orderStatus_ = status_;
         execReport.market_ = INTERNAL_EXECUTION;
@@ -179,7 +177,6 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
         ExecutionEntry execReport;
         execReport.orderId_ = getObjectId();
         execReport.type_ = execType_;
-        execReport.transactTime_ = aux::currentDateTime();
         execReport.execId_ = IdT(); /// will be assigned when saved into the storage
         execReport.orderStatus_ = status_;
         execReport.market_ = INTERNAL_EXECUTION;
@@ -191,7 +188,6 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
         ExecutionEntry execReport;
         execReport.orderId_ = getObjectId();
         execReport.type_ = execType_;
-        execReport.transactTime_ = aux::currentDateTime();
         execReport.execId_ = IdT();        /// will be assigned when saved into the storage
         execReport.orderStatus_ = status_; //EXPIRED_ORDSTATUS;
         execReport.market_ = INTERNAL_EXECUTION;
@@ -203,7 +199,6 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
         ExecutionEntry execReport;
         execReport.orderId_ = getObjectId();
         execReport.type_ = execType_;
-        execReport.transactTime_ = aux::currentDateTime();
         execReport.execId_ = IdT();        /// will be assigned when saved into the storage
         execReport.orderStatus_ = status_; //SUSPENDED_ORDSTATUS;
         execReport.market_ = INTERNAL_EXECUTION;
@@ -215,7 +210,6 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
         ExecutionEntry execReport;
         execReport.orderId_ = getObjectId();
         execReport.type_ = execType_;
-        execReport.transactTime_ = aux::currentDateTime();
         execReport.execId_ = IdT(); /// will be assigned when saved into the storage
         execReport.orderStatus_ = status_;
         execReport.market_ = INTERNAL_EXECUTION;
@@ -227,7 +221,6 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
         ExecutionEntry execReport;
         execReport.orderId_ = getObjectId();
         execReport.type_ = execType_;
-        execReport.transactTime_ = aux::currentDateTime();
         execReport.execId_ = IdT(); /// will be assigned when saved into the storage
         execReport.orderStatus_ = status_;
         execReport.market_ = INTERNAL_EXECUTION;
@@ -239,7 +232,6 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
         ExecutionEntry execReport;
         execReport.orderId_ = getObjectId();
         execReport.type_ = execType_;
-        execReport.transactTime_ = aux::currentDateTime();
         execReport.execId_ = IdT(); /// will be assigned when saved into the storage
         execReport.orderStatus_ = status_;
         execReport.market_ = INTERNAL_EXECUTION;
@@ -251,7 +243,6 @@ void CreateExecReportTrOperation::execute(const Context &cnxt)
         ExecutionEntry execReport;
         execReport.orderId_ = getObjectId();
         execReport.type_ = execType_;
-        execReport.transactTime_ = aux::currentDateTime();
         execReport.execId_ = IdT(); /// will be assigned when saved into the storage
         execReport.orderStatus_ = status_;
         execReport.market_ = INTERNAL_EXECUTION;
@@ -283,7 +274,6 @@ void CreateCancelExecReportTrOperation::execute(const Context &cnxt)
     ExecutionEntry execReport;
     execReport.orderId_ = getObjectId();
     execReport.type_ = CANCEL_EXECTYPE;
-    execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     execReport.orderStatus_ = CANCELED_ORDSTATUS;
     execReport.market_ = INTERNAL_EXECUTION;
@@ -338,7 +328,6 @@ void CreateTradeExecReportTrOperation::execute(const Context &cnxt)
 
     execReport.orderId_ = getObjectId();
     execReport.type_ = TRADE_EXECTYPE;
-    execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     execReport.orderStatus_ = status_;
     execReport.market_ = INTERNAL_EXECUTION;
@@ -382,7 +371,6 @@ void CreateCorrectExecReportTrOperation::execute(const Context &cnxt)
 
     execReport.orderId_ = getObjectId();
     execReport.type_ = CORRECT_EXECTYPE;
-    execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     execReport.orderStatus_ = status_;
     execReport.market_ = INTERNAL_EXECUTION;
@@ -410,7 +398,6 @@ void CreateRejectExecReportTrOperation::execute(const Context &cnxt)
 
     execReport.orderId_ = getObjectId();
     execReport.type_ = REJECT_EXECTYPE;
-    execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     execReport.orderStatus_ = status_;
     execReport.market_ = INTERNAL_EXECUTION;
@@ -438,7 +425,6 @@ void CreateReplaceExecReportTrOperation::execute(const Context &cnxt)
 
     execReport.orderId_ = getObjectId();
     execReport.type_ = REPLACE_EXECTYPE;
-    execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     execReport.orderStatus_ = status_;
     execReport.market_ = INTERNAL_EXECUTION;
@@ -756,6 +742,8 @@ void ReleaseStopTrOperation::execute(const Context &cnxt)
         assert(!order_->bookingPending_.load());
         cnxt.orderBook_->removeStop(*order_);
         order_->stopTriggered_ = true;
+        updatedBefore_ = order_->lastUpdateTime_;
+        order_->lastUpdateTime_ = cnxt.now(); // the release's time (#546)
         // What the release decided, for its persist and its report (#411, #627). Its fills are decided after this
         // transaction's operations, each persisted and reported by a transaction of its own.
         decided_.emplace(*order_);
@@ -794,6 +782,7 @@ void ReleaseStopTrOperation::rollback(const Context &cnxt)
     order_->stopTriggered_ = false;
     // Held again, and nothing queues this release again: the stop is no longer reached (#517)
     order_->stopReached_ = false;
+    order_->lastUpdateTime_ = updatedBefore_; // the release decided nothing that stands (#546)
     cnxt.orderBook_->addStop(*order_);
 }
 
@@ -813,7 +802,6 @@ void ReportReleaseTrOperation::execute(const Context &cnxt)
     ExecutionEntry execReport;
     execReport.orderId_ = getObjectId();
     execReport.type_ = TRIGGERED_EXECTYPE;
-    execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     // NEW: a held stop has no fills, and the release's own trades are applied after this transaction's operations
     execReport.orderStatus_ = decided->status_;
@@ -833,7 +821,6 @@ void ReportTriggerTrOperation::execute(const Context &cnxt)
     ExecutionEntry execReport;
     execReport.orderId_ = getObjectId();
     execReport.type_ = TRIGGERED_EXECTYPE;
-    execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     execReport.orderStatus_ = figures_.status_;
     execReport.market_ = INTERNAL_EXECUTION;
@@ -852,7 +839,6 @@ void ReportRestatementTrOperation::execute(const Context &cnxt)
     ExecutionEntry execReport;
     execReport.orderId_ = getObjectId();
     execReport.type_ = RESTATED_EXECTYPE;
-    execReport.transactTime_ = aux::currentDateTime();
     execReport.execId_ = IdT(); /// will be assigned when saved into the storage
     execReport.orderStatus_ = figures_.status_;
     execReport.market_ = INTERNAL_EXECUTION;

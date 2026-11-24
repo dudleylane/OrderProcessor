@@ -871,6 +871,31 @@ TEST_F(MatchOrderOperationTest, ReleaseStop_RollbackClearsTheMarkOfTheTradeThatR
     EXPECT_TRUE(orderBook_->holdsStops(instrumentId_));
 }
 
+TEST_F(MatchOrderOperationTest, ReleaseStop_TakesTheClocksTimeAndItsRollbackGivesTheOrderItsLastDecisionsBack)
+{
+    // The release decides as it executes, at its one read of the engine's clock, which the figures its persist and its
+    // report carry have (#546). Rolled back, it decided nothing that stands: the order has its last decision's time.
+    orderBook_->add(*sellOrder_);
+    holdAsStopLimit(buyOrder_, orderBook_.get());
+    buyOrder_->lastUpdateTime_ = 1792098000000ULL; // its acceptance's
+    const std::function<DateTimeT()> clock = []
+    {
+        return 1792098000000ULL + 1000;
+    };
+    Context ctx = createContext();
+    ctx.clock_ = &clock;
+    ReleaseStopTrOperation op(buyOrder_);
+
+    op.execute(ctx);
+    ASSERT_TRUE(buyOrder_->stopTriggered_);
+    EXPECT_EQ(1792098000000ULL + 1000, buyOrder_->lastUpdateTime_);
+    ASSERT_NE(nullptr, op.decided());
+    EXPECT_EQ(1792098000000ULL + 1000, op.decided()->lastUpdateTime_);
+    op.rollback(ctx);
+    EXPECT_FALSE(buyOrder_->stopTriggered_);
+    EXPECT_EQ(1792098000000ULL, buyOrder_->lastUpdateTime_) << "the rolled-back release's time stayed";
+}
+
 TEST_F(MatchOrderOperationTest, ReleaseStop_EndsTheStopsPendingMarkAndItsRollbackDoesNotSetItAgain)
 {
     // The trade that queued the release marked it pending, and the instrument's last trade names it until it runs

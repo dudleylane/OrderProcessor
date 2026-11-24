@@ -301,6 +301,8 @@ private:
     OrderEntry *order_;
     size_t eventCountBefore_ = 0;
     std::optional<OrderFigures> decided_;
+    /// The order's lastUpdateTime_ before the release set its own, which a rollback puts back (#546)
+    DateTimeT updatedBefore_ = 0;
     bool booked_ = false;
 };
 
