@@ -50,6 +50,8 @@ bool processNotExecuted(OrderEntry *orderData, OrdState::onContinue const &evnt)
 bool processComplete(OrderEntry *orderData, OrdState::onTradeExecution const &evnt);
 void processCorrected(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt);
 void processCorrectedWithoutRestore(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt);
+/// A correction of a closed order: its fills change, and it keeps no leaves (#386, #777)
+void processCorrectedClosed(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt);
 void processExpire(OrderEntry *orderData, OrdState::onExpired const &evnt);
 void processCancel(OrderEntry *orderData, OrdState::onCanceled const &evnt);
 void processRestored(OrderEntry *orderData, OrdState::onNewDay const &evnt);

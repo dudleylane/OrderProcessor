@@ -317,9 +317,15 @@ template <class FSM> void DoneForDay::on_entry(onFinished const &evnt, FSM &)
     evnt.transaction_->addOperation(op);
 }
 
-template <class FSM> void New::on_entry(onTradeCrctCncl const &evnt, FSM &)
+template <class FSM> void New::on_entry(onTradeCrctCncl const &evnt, FSM &fsm)
 {
     if (evnt.testStateMachine_)
+    {
+        return;
+    }
+    // Zone 2 reports a correction of an order it holds canceled or replaced, and this zone leaves its status alone
+    // (#777)
+    if (closedInZone2(fsm.current_state()))
     {
         return;
     }
@@ -345,9 +351,15 @@ template <class FSM> void PartFill::on_entry(onTradeExecution const &evnt, FSM &
     evnt.transaction_->addOperation(op);
 }
 
-template <class FSM> void PartFill::on_entry(onTradeCrctCncl const &evnt, FSM &)
+template <class FSM> void PartFill::on_entry(onTradeCrctCncl const &evnt, FSM &fsm)
 {
     if (evnt.testStateMachine_)
+    {
+        return;
+    }
+    // Zone 2 reports a correction of an order it holds canceled or replaced, and this zone leaves its status alone
+    // (#777)
+    if (closedInZone2(fsm.current_state()))
     {
         return;
     }
@@ -416,9 +428,15 @@ template <class FSM> void Filled::on_entry(onReplace const &evnt, FSM &)
     evnt.transaction_->addOperation(op);
 }
 
-template <class FSM> void Suspended::on_entry(onTradeCrctCncl const &evnt, FSM &)
+template <class FSM> void Suspended::on_entry(onTradeCrctCncl const &evnt, FSM &fsm)
 {
     if (evnt.testStateMachine_)
+    {
+        return;
+    }
+    // Zone 2 reports a correction of an order it holds canceled or replaced, and this zone leaves its status alone
+    // (#777)
+    if (closedInZone2(fsm.current_state()))
     {
         return;
     }
@@ -436,12 +454,24 @@ template <class FSM> void CnclReplaced::on_entry(onTradeCrctCncl const &evnt, FS
     {
         return;
     }
-    // Nothing to do, onTradeCrctCncl will be processed in seperate state's zone
+    // This zone owns a correction of an order it holds canceled or replaced, and reports it with the order's own status
+    // and no leaves: zone 1, still New or PartFill, is handed it too and reports nothing, and with New it has no row
+    // for it at all (#777)
+    assert(nullptr != evnt.order4StateMachine_);
+    std::unique_ptr<Operation> op(new CreateCorrectExecReportTrOperation(
+        evnt.correct(), evnt.order4StateMachine_->status_, *evnt.order4StateMachine_));
+    evnt.transaction_->addOperation(op);
 }
 
-template <class FSM> void Expired::on_entry(onTradeCrctCncl const &evnt, FSM &)
+template <class FSM> void Expired::on_entry(onTradeCrctCncl const &evnt, FSM &fsm)
 {
     if (evnt.testStateMachine_)
+    {
+        return;
+    }
+    // Zone 2 reports a correction of an order it holds canceled or replaced, and this zone leaves its status alone
+    // (#777)
+    if (closedInZone2(fsm.current_state()))
     {
         return;
     }
@@ -453,9 +483,15 @@ template <class FSM> void Expired::on_entry(onTradeCrctCncl const &evnt, FSM &)
     evnt.transaction_->addOperation(op);
 }
 
-template <class FSM> void DoneForDay::on_entry(onTradeCrctCncl const &evnt, FSM &)
+template <class FSM> void DoneForDay::on_entry(onTradeCrctCncl const &evnt, FSM &fsm)
 {
     if (evnt.testStateMachine_)
+    {
+        return;
+    }
+    // Zone 2 reports a correction of an order it holds canceled or replaced, and this zone leaves its status alone
+    // (#777)
+    if (closedInZone2(fsm.current_state()))
     {
         return;
     }
