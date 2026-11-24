@@ -33,6 +33,28 @@ const std::string REPLACE_ORDER = R"({"type":"replace_order","data":{"orderId":4
 /// A cancel as the blotter sends one: the order's number
 const std::string CANCEL_ORDER = R"({"type":"cancel_order","data":{"orderId":42}})";
 
+/// The same three messages with a request id of the length the UI sends, 12 characters (#683). A parser that doesn't
+/// read the id passes over it as over any key it doesn't know, so a build from before #683 parses these too.
+const std::string NEW_ORDER_WITH_ID = R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
+                                      R"("orderQty":100,"tif":"DAY","currency":"USD","capacity":"AGENCY",)"
+                                      R"("price":150.25,"account":"ACC1","requestId":"r3Kf9_x-Lq2A"}})";
+const std::string REPLACE_ORDER_WITH_ID = R"({"type":"replace_order","data":{"orderId":42,"price":150.5,)"
+                                          R"("orderQty":200,"tif":"GTD","expireTime":1792022400000,)"
+                                          R"("requestId":"r3Kf9_x-Lq2A"}})";
+const std::string CANCEL_ORDER_WITH_ID = R"({"type":"cancel_order","data":{"orderId":42,"requestId":"r3Kf9_x-Lq2A"}})";
+/// A swap as the order entry panel sends one, good till canceled. Its dates are numbers here: the session, not the
+/// parser, holds them to the business day (#551). Its expiry is checked as a new order's is, #511's latest time too.
+const std::string NEW_SWAP_ORDER = R"({"type":"new_swap_order","data":{"symbol":"EURUSD","side":"BUY",)"
+                                   R"("nearPrice":1.085,"farPrice":1.087,"settlDate":1792022400000,)"
+                                   R"("farSettlDate":1794700800000,"orderQty":1000000,"tif":"GTC","currency":"USD",)"
+                                   R"("capacity":"AGENCY","account":"ACC1"}})";
+/// The same swap with the id the UI gives it (#683)
+const std::string NEW_SWAP_ORDER_WITH_ID = R"({"type":"new_swap_order","data":{"symbol":"EURUSD","side":"BUY",)"
+                                           R"("nearPrice":1.085,"farPrice":1.087,"settlDate":1792022400000,)"
+                                           R"("farSettlDate":1794700800000,"orderQty":1000000,"tif":"GTC",)"
+                                           R"("currency":"USD","capacity":"AGENCY","account":"ACC1",)"
+                                           R"("requestId":"r3Kf9_x-Lq2A"}})";
+
 /// The IO thread's parse of a message as it arrives, timed: nlohmann's parse, then the parser's reads and checks. The
 /// message must be one the parser accepts, as nearly every client's is: a refusal ends the checks early.
 void parseEach(benchmark::State &state, const std::string &message, const char *type)
@@ -82,3 +104,35 @@ static void BM_ParseCancelOrder(benchmark::State &state)
     parseEach(state, CANCEL_ORDER, "cancel_order");
 }
 BENCHMARK(BM_ParseCancelOrder);
+
+/// Each request with the id the UI gives it (#683): the parse of the id, and its checks
+static void BM_ParseNewOrderWithRequestId(benchmark::State &state)
+{
+    parseEach(state, NEW_ORDER_WITH_ID, "new_order");
+}
+BENCHMARK(BM_ParseNewOrderWithRequestId);
+
+static void BM_ParseReplaceOrderWithRequestId(benchmark::State &state)
+{
+    parseEach(state, REPLACE_ORDER_WITH_ID, "replace_order");
+}
+BENCHMARK(BM_ParseReplaceOrderWithRequestId);
+
+static void BM_ParseCancelOrderWithRequestId(benchmark::State &state)
+{
+    parseEach(state, CANCEL_ORDER_WITH_ID, "cancel_order");
+}
+BENCHMARK(BM_ParseCancelOrderWithRequestId);
+
+/// A swap's parse, without and with the UI's id: no benchmark parsed one until #683 gave a swap the id too
+static void BM_ParseNewSwapOrder(benchmark::State &state)
+{
+    parseEach(state, NEW_SWAP_ORDER, "new_swap_order");
+}
+BENCHMARK(BM_ParseNewSwapOrder);
+
+static void BM_ParseNewSwapOrderWithRequestId(benchmark::State &state)
+{
+    parseEach(state, NEW_SWAP_ORDER_WITH_ID, "new_swap_order");
+}
+BENCHMARK(BM_ParseNewSwapOrderWithRequestId);
