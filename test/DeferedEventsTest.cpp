@@ -40,6 +40,7 @@ public:
     std::vector<std::pair<OrderEntry *, std::string>> cancelRequests;
     std::vector<std::string> cancelRequestClOrdIds;
     std::vector<std::pair<OrderEntry *, std::string>> replaceRequests;
+    std::vector<std::string> replaceRequestIds;
     std::vector<OrderEntry *> replacements;
     std::vector<std::pair<OrderEntry *, OrderStateChange>> stateChanges;
 
@@ -61,9 +62,10 @@ public:
     }
 
     void process(OrdState::onReplace & /*ev*/, OrderEntry *original, OrderEntry &replacement,
-                 const std::string &requester, const Context & /*cnxt*/) override
+                 const std::string &requester, const std::string &requestId, const Context & /*cnxt*/) override
     {
         replaceRequests.emplace_back(original, requester);
+        replaceRequestIds.push_back(requestId);
         replacements.push_back(&replacement);
     }
 
@@ -79,6 +81,7 @@ public:
         cancelRequests.clear();
         cancelRequestClOrdIds.clear();
         replaceRequests.clear();
+        replaceRequestIds.clear();
         replacements.clear();
         stateChanges.clear();
     }
@@ -407,7 +410,7 @@ TEST_F(DeferedEventsTest, ReplaceRequestHandsTheOriginalReplacementAndRequesterT
     OrderEntry *original = createTestOrder(instrId_, BUY_SIDE, 100.0, 100);
     std::unique_ptr<OrderEntry> replacement(createTestOrder(instrId_, BUY_SIDE, 101.0, 100));
     OrderEntry *replacementPtr = replacement.get();
-    ReplaceRequestDeferedEvent event(original, std::move(replacement), "WebSocket");
+    ReplaceRequestDeferedEvent event(original, std::move(replacement), "WebSocket", "r-42");
     Context context;
 
     event.execute(&functor, context, nullptr);
@@ -415,6 +418,7 @@ TEST_F(DeferedEventsTest, ReplaceRequestHandsTheOriginalReplacementAndRequesterT
     ASSERT_EQ(1u, functor.replaceRequests.size());
     EXPECT_EQ(original, functor.replaceRequests[0].first);
     EXPECT_EQ("WebSocket", functor.replaceRequests[0].second);
+    EXPECT_EQ(std::vector<std::string>{ "r-42" }, functor.replaceRequestIds) << "its client's id of the request (#683)";
     ASSERT_EQ(1u, functor.replacements.size());
     EXPECT_EQ(replacementPtr, functor.replacements[0]);
     EXPECT_EQ(replacementPtr, event.replacement_.get()) << "the event keeps the replacement";

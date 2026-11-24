@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include "DataModelDef.h"
 
@@ -11,6 +12,9 @@ namespace COP
 {
 namespace App
 {
+
+/// The longest requestId a client may give (#683): a UUID's 36 characters
+constexpr std::size_t MAX_REQUEST_ID = 36;
 
 struct ParsedNewOrder
 {
@@ -55,6 +59,10 @@ struct ParsedClientMessage
     std::string type;
     // Why the message was rejected; set only when type == "error"
     std::string error;
+    // The client's id of its new_order, cancel_order or replace_order (#683), which the answers to it echo: 1 to 36 of
+    // A-Z, a-z, 0-9, _ and -. It is kept when another field makes the message invalid, so that the error answering it
+    // names it; empty when the client gave none, or gave one that breaks the rule.
+    std::string requestId;
     // For subscribe/unsubscribe
     std::string symbol;
     // Parsed data (only one is valid depending on type)

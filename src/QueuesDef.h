@@ -36,6 +36,9 @@ struct EventBase
 struct OrderEvent : public EventBase
 {
     OrderEntry *order_;
+    /// The WebSocket client's id of the request that sent the order (#683), which the engine hands back on a refusal of
+    /// it that stores nothing (OrderRejectEvent). Empty from FIX, whose ClOrdID names its order, and from the engine.
+    std::string requestId_;
 
     OrderEvent() : order_(nullptr) {}
     explicit OrderEvent(OrderEntry *ord) : order_(ord) {}
@@ -64,6 +67,8 @@ struct OrderReplaceEvent : public EventBase
 {
     /// Owned by the queue once pushed, which frees it after dispatch; the processor works on a copy (#74)
     OrderEntry *replacementOrder_;
+    /// The WebSocket client's id of the replace request (#683), handed back on a refusal of it, as OrderEvent's is
+    std::string requestId_;
 
     OrderReplaceEvent() : replacementOrder_(nullptr) {}
     explicit OrderReplaceEvent(const IdT &origOrderId, OrderEntry *replacement = nullptr)
@@ -138,6 +143,11 @@ struct OrderRejectEvent : public EventBase
     /// the original is known (FIX OrdStatus 39) (#74)
     CancelRejectEvent::Reason refusal_ = CancelRejectEvent::OTHER;
     OrderStatus origStatus_ = INVALID_ORDSTATUS;
+    /// The id of the request it refuses, as a WebSocket client gave it (#683); empty for FIX's, whose ClOrdIDs name it
+    std::string requestId_;
+    /// An execution id of its own, drawn by the engine, so that each refusal is a report with an id, as a stored
+    /// order's are, and its gateways number it alike: until #545 a WebSocket client got every one with execId 0
+    IdT execId_;
 };
 
 struct ProcessEvent : public EventBase
