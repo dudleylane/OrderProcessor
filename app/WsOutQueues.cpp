@@ -3,17 +3,23 @@
 #include "JsonSerializer.h"
 #include "WideDataStorage.h"
 #include "OrderStorage.h"
-#include "OrderBookImpl.h"
 #include "Logger.h"
 #include "ExchUtils.h"
 
 using namespace COP;
 using namespace COP::App;
 
-WsOutQueues::WsOutQueues(SessionManager *sessionMgr, Store::WideParamsDataStorage *wideData,
-                         Store::OrderDataStorage *orderStorage, OrderBookImpl *orderBook)
-    : sessionMgr_(sessionMgr), wideData_(wideData), orderStorage_(orderStorage), orderBook_(orderBook)
+WsOutQueues::WsOutQueues(boost::asio::io_context &ioc, SessionManager *sessionMgr,
+                         Store::WideParamsDataStorage *wideData, Store::OrderDataStorage *orderStorage,
+                         OrderBookImpl *orderBook, std::chrono::milliseconds bookInterval)
+    : sessionMgr_(sessionMgr), wideData_(wideData), orderStorage_(orderStorage),
+      books_(BookPublisher::create(ioc, sessionMgr, orderBook, orderStorage, bookInterval))
 {
+}
+
+void WsOutQueues::stop()
+{
+    books_->stop();
 }
 
 void WsOutQueues::push(const Queues::ExecReportEvent &evnt, const std::string &target)
@@ -39,17 +45,16 @@ void WsOutQueues::push(const Queues::ExecReportEvent &evnt, const std::string &t
     sessionMgr_->broadcastToAccount(account, serializeExecReport(evnt.exec_));
     sessionMgr_->broadcastToAccount(account, serializeOrderUpdate(*order, *figures));
 
-    // 3. The book, to its subscribers, whatever their accounts: it shows no account (#225). Built only when a session
+    // 3. The book, to its subscribers, whatever their accounts: it shows no account (#225). Marked only when a session
     // subscribes to it: every report walked the instrument's book, and the broadcast then dropped it unless one did
-    // (#525). A session that subscribes meanwhile gets the book as it subscribes.
+    // (#525). The IO thread builds and sends it, at most once an interval, where every report built it here, walking
+    // the whole book (#694). The report's figures are published, and every change it reports is in the book, before
+    // this push, so a build after it shows them. A session that subscribes meanwhile gets the book as it subscribes.
     const std::string &symbol = order->instrument_.get().symbol_;
-    if (!sessionMgr_->hasBookSubscribers(symbol))
+    if (sessionMgr_->hasBookSubscribers(symbol))
     {
-        return;
+        books_->changed(order->instrument_.getId(), symbol);
     }
-    BookSnapshot snap = orderBook_->getSnapshot(order->instrument_.getId(), orderStorage_);
-    std::string bookJson = serializeBookUpdate(symbol, snap);
-    sessionMgr_->broadcastBookUpdate(symbol, bookJson);
 }
 
 void WsOutQueues::push(const Queues::CancelRejectEvent &evnt, const std::string &target)
