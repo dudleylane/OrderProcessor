@@ -52,6 +52,7 @@
 #include <boost/mpl/size.hpp>
 #include <nlohmann/json.hpp>
 
+#include "BookPublisher.h"
 #include "ClientMessageParser.h"
 #include "DataModelDef.h"
 #include "ExpiryScheduler.h"
@@ -241,6 +242,8 @@ TEST_F(DocConsistencyTest, WebSocketLimits)
     // Connections whose upgrade isn't decided yet, and how long each has to send it (#541)
     expectDocEq("ws_max_handshakes", COP::App::WsLimits().maxHandshakes);
     expectDocEq("ws_handshake_timeout_s", COP::App::WsLimits().handshakeTimeout.count());
+    // How often, at most, a watched book's depth goes out (#694)
+    expectDocEq("book_update_interval_ms", COP::App::BOOK_UPDATE_INTERVAL.count());
 }
 
 // The engine's work in flight at which the WebSocket sessions stop reading their clients' messages (#519)

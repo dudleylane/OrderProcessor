@@ -1148,6 +1148,9 @@ A failure stops nothing else: the caller goes on as if the event had been handle
    │     no other lock of the engine's is taken under it, but the          │
    │     logger's, as grow() warns that the map grew (#148).               │
    │   • The incoming queue takes no lock to push or pop.                  │
+   │   • BookPublisher's lock_ (app/): a leaf, held only to mark a         │
+   │     book changed or to take the changed ones, never while a book      │
+   │     is built, its subscribers asked or anything posted (#694).        │
    └───────────────────────────────────────────────────────────────────────┘
 
 3. Lock-Free Where Possible
@@ -1167,6 +1170,7 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 | `CacheAlignedAtomicTest.cpp` | `CacheAlignedAtomicTest.*` | Cache-aligned atomics |
 | `CpuAffinityTest.cpp` | `CpuAffinityTest.*`, `ScopedCpuAffinityTest.*` | CPU pinning |
 | `NodePoolTest.cpp` | `NodePoolTest.*` | A map's nodes in a pool of their own (#467) |
+| `BookPublisherTest.cpp` | `BookPublisherTest.*` | A worker's change, sent from the IO thread (#694) |
 
 ---
 
@@ -1616,7 +1620,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 
 | Category | Files |
 |----------|-------|
-| **Google Test** | `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EnumCouplingTest.cpp`, `ExpirySchedulerTest.cpp`, `IdTGeneratorTest.cpp`, `InFlightGaugeTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `MetricsPublisherTest.cpp`, `NLinkTreeTest.cpp`, `NodePoolTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `ReferenceDataFileTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WireContractTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
+| **Google Test** | `BookPublisherTest.cpp`, `CacheAlignedAtomicTest.cpp`, `ClientMessageParserTest.cpp`, `CodecsTest.cpp`, `CpuAffinityTest.cpp`, `DeferedEventsTest.cpp`, `DocConsistencyTest.cpp`, `EnumCouplingTest.cpp`, `ExpirySchedulerTest.cpp`, `IdTGeneratorTest.cpp`, `InFlightGaugeTest.cpp`, `IncomingQueuesTest.cpp`, `IntegrationTest.cpp`, `JsonSerializerTest.cpp`, `LMDBStorageTest.cpp`, `LoggerTest.cpp`, `MetricsPublisherTest.cpp`, `NLinkTreeTest.cpp`, `NodePoolTest.cpp`, `OrderBookTest.cpp`, `OrderMatcherTest.cpp`, `OrderStorageTest.cpp`, `OutgoingQueuesTest.cpp`, `PGEnumStringsTest.cpp`, `PGRequestBuilderTest.cpp`, `PGSchemaTest.cpp`, `PGWriteBehindTest.cpp`, `ProcessorTest.cpp`, `ReferenceDataFileTest.cpp`, `SeedDataArgsTest.cpp`, `ServerArgsTest.cpp`, `ServerDataTest.cpp`, `StateMachineTest.cpp`, `StatesTest.cpp`, `StorageRecordDispatcherTest.cpp`, `TaskManagerTest.cpp`, `TransactionMgrTest.cpp`, `TransactionScopePoolTest.cpp`, `TransactionScopeTest.cpp`, `TrOperationsTest.cpp`, `WideDataStorageTest.cpp`, `WireContractTest.cpp`, `WsAuthTest.cpp`, `WsAuthorizationTest.cpp`, `WsCredentialsTest.cpp`, `WsServerLimitsTest.cpp`, `WsSessionTest.cpp` |
 | **Utilities** | `TestAux.h/cpp`, `DummyOrderSaver.h`, `StateMachineHelper.h/cpp`, `TestFixtures.h`, `TestMain.cpp` |
 | **Mock Objects** | `mocks/MockDefered.h`, `mocks/MockOrderBook.h`, `mocks/MockQueues.h`, `mocks/MockStorage.h`, `mocks/MockTasks.h`, `mocks/MockTransaction.h` |
 | **ctest scripts** | `ServerStartupTest.sh`, `SeedDataIfEmptyTest.sh`, `SeedDataFileTest.sh`, `SeedDataCheckTest.sh`, `JobStartedHookTest.sh`, `CiTestedTreeTest.sh`, `MemoryCapTest.sh`, `CiBuildsCappedTest.sh`, `CiNamesTest.sh`, `CiJobsTest.sh`, `CpuBusyTest.sh`, `BenchmarkBaselineTest.sh`, `BenchmarkBusyStartTest.sh`, `LineEndingsTest.sh`, `CtestSkipsTest.sh`, `LineLengthTest.sh`, `SanitizerReportsTest.sh` |
@@ -1632,7 +1636,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 | `TransactionScopePoolBench.cpp` | Lock-free object pool allocation |
 | `OrderParamsLayoutBench.cpp` | Field layout optimization |
 | `ProcessorBench.cpp` | The real path: new order, match, cancel and replace (#457) through a `Processor`, an IOC's remainder and an expiry (#426), a restatement (#451), the reject of an order `isValid()` refuses and of a market order with no market (#435), a match whose records are encoded as the server's dispatcher encodes them (#442), and `TaskManager` throughput, with orders that don't trade (#25) and with orders that do (#290), each reporting into a queue that keeps nothing, as production's keep none (#447), and running a chain's transactions as production does, each after the one draining it, in id order (#486); each per-order benchmark makes its incoming order in its loop, just before its event, as a session makes one as it arrives, and times the push and the processing by hand (#503) |
-| `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159), and a fill's report pushed through `WsOutQueues` (#442) |
+| `SessionManagerBench.cpp` | WebSocket broadcast and book-update fan-out (#159), a fill's report pushed through `WsOutQueues` (#442), and the IO thread's send of a watched book's depth (#694) |
 | `ClientMessageParserBench.cpp` | The IO thread's parse of each request the order entry panel sends: a `new_order` (#516), a GTD one, a `replace_order` and a `cancel_order` (#668), each also with the UI's request id (#683) |
 | `WsSessionBench.cpp` | The IO thread's work for each message a flooding client sends: a served session's read, parse and push of a burst of cancels (#519), and its own answer to each of a burst it answers itself, through `send()` and `onWrite()` (#668) |
 | `nogtest/gtest/gtest.h` | Not a benchmark: an `#error`, first on the benchmarks' include path, so that a benchmark that includes GoogleTest, directly or through a test header, fails to build on every host (#530) |

@@ -8,5 +8,6 @@ target_sources(orderProcessorServer PRIVATE
     JsonSerializer.cpp
     ClientMessageParser.cpp
     WsOutQueues.cpp
+    BookPublisher.cpp
     SessionManager.cpp
     MetricsPublisher.cpp)

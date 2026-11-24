@@ -10,10 +10,12 @@
 #include <benchmark/benchmark.h>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "BookPublisher.h"
 #include "IdTGenerator.h"
 #include "Logger.h"
 #include "OrderBookImpl.h"
@@ -313,12 +315,13 @@ BENCHMARK(BM_SessionManagerBookUpdate)->Arg(1)->Arg(8)->Arg(64);
 
 // WsOutQueues::push as a transaction worker calls it for a fill's report, with K clients: the execution report and the
 // order, each serialized and sent to the clients that may see the order's account (all of them, without identities),
-// then the book, serialized and offered to its subscribers, of which there are none
+// then the check for a session that subscribes to the book, of which there is none
 static void BM_WsOutQueuesPushTradeReport(benchmark::State &state)
 {
     Clients clients(static_cast<int>(state.range(0)));
     ReportedOrder reported;
-    App::WsOutQueues out(&clients.manager(), Store::WideDataStorage::instance(), Store::OrderStorage::instance(),
+    boost::asio::io_context books; // the IO thread's, from which a watched book's depth would go out (#694)
+    App::WsOutQueues out(books, &clients.manager(), Store::WideDataStorage::instance(), Store::OrderStorage::instance(),
                          reported.book());
 
     TradeExecEntry trade;
@@ -359,14 +362,19 @@ static void BM_WsOutQueuesPushTradeReport(benchmark::State &state)
 BENCHMARK(BM_WsOutQueuesPushTradeReport)->Arg(1)->Arg(8);
 
 // BM_WsOutQueuesPushTradeReport with one client subscribed to the instrument's book, which holds D resting orders over
-// eight price levels on each side: the push builds the book's depth and offers it to the client (#525)
+// eight price levels on each side: the push marks the book changed, for the IO thread to build and send once its
+// interval ends (#694). Until #694 the push built the depth here, walking the whole book for every report (#525: ~21
+// and ~46 us at 8 and 256, which no longer describe this), and BM_BookPublisherSend times that build now. The IO
+// thread's context never runs here, so the first push posts the send and every later one finds it due: a push's work
+// within an interval.
 static void BM_WsOutQueuesPushTradeReportWatched(benchmark::State &state)
 {
     const int depth = static_cast<int>(state.range(0));
     Clients clients(1, false, "AAPL");
     ReportedOrder reported;
     reported.rest(depth);
-    App::WsOutQueues out(&clients.manager(), Store::WideDataStorage::instance(), Store::OrderStorage::instance(),
+    boost::asio::io_context books;
+    App::WsOutQueues out(books, &clients.manager(), Store::WideDataStorage::instance(), Store::OrderStorage::instance(),
                          reported.book());
 
     TradeExecEntry trade;
@@ -419,3 +427,47 @@ static void BM_WsOutQueuesPushTradeReportWatched(benchmark::State &state)
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_WsOutQueuesPushTradeReportWatched)->Arg(8)->Arg(256);
+
+// The IO thread's send of one changed book of D resting orders over eight price levels on each side (#694): its depth
+// built as #525 builds it (each side copied under its lock, then each order's published leaves read under its own),
+// serialized, and offered to the one client that subscribes to it. Until #694 a transaction worker did this for every
+// report on a watched instrument. The interval is 0, so each change's send runs at once, on this thread.
+static void BM_BookPublisherSend(benchmark::State &state)
+{
+    const int depth = static_cast<int>(state.range(0));
+    Clients clients(1, false, "AAPL");
+    ReportedOrder reported;
+    reported.rest(depth);
+    boost::asio::io_context io;
+    std::shared_ptr<App::BookPublisher> books = App::BookPublisher::create(
+        io, &clients.manager(), reported.book(), Store::OrderStorage::instance(), std::chrono::milliseconds(0));
+    if (!clients.watching("AAPL"))
+    {
+        state.SkipWithError("the client doesn't subscribe to the instrument's book");
+        return;
+    }
+    // A change's send is two handlers: the IO thread arms the send, and the send runs
+    books->changed(reported.instrument(), "AAPL");
+    if (2 != io.run())
+    {
+        state.SkipWithError("a change's send didn't run as two handlers");
+        return;
+    }
+
+    std::int64_t sinceReset = 0;
+    for (auto _ : state)
+    {
+        books->changed(reported.instrument(), "AAPL");
+        io.restart();
+        io.run();
+        if (++sinceReset == RESET_EVERY)
+        {
+            state.PauseTiming();
+            clients.reset();
+            sinceReset = 0;
+            state.ResumeTiming();
+        }
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_BookPublisherSend)->Arg(8)->Arg(256);

@@ -85,6 +85,9 @@ target_sources(orderProcessorTest
         WsAuthorizationTest.cpp
         ${CMAKE_SOURCE_DIR}/app/WsCredentials.cpp
         ${CMAKE_SOURCE_DIR}/app/WsOutQueues.cpp
+        # A watched book's depth, sent from the IO thread at most once an interval (#694)
+        BookPublisherTest.cpp
+        ${CMAKE_SOURCE_DIR}/app/BookPublisher.cpp
 
         # The server's load of its data directory (#165)
         ServerDataTest.cpp
