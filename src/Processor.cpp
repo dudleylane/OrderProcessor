@@ -101,6 +101,14 @@ public:
 private:
     Store::PublishGuard *previous_;
 };
+
+/// Whether a run of the state machine moved the order out of the state it was in, in either zone: whether it decided
+/// something. One the machine refuses, with no row for its event, leaves both, and the order is persisted unchanged
+/// (#432), so its time stays its last decision's (#546).
+bool moved(const OrderStatePersistence &before, const OrderStatePersistence &after)
+{
+    return !before.compare(after);
+}
 } // namespace
 
 Processor::Processor(void)
@@ -136,6 +144,11 @@ void Processor::init(const ProcessorParams &params)
     assert(nullptr != transactMgr_);
 
     matcher_.init(this);
+}
+
+DateTimeT Processor::clockNow() const
+{
+    return clock_ ? clock_() : aux::currentDateTime();
 }
 
 bool Processor::process()
@@ -202,6 +215,8 @@ void Processor::onEvent(const std::string &source, const OrderEvent &evnt)
     // Its day figures are for the business day it was created in, which a DAY order ends with (#240, #244)
     smState.orderData_->dayStart_ = ExpiryScheduler::dayStartOf(smState.orderData_->creationTime_);
     smState.orderData_->dayOrderQty_ = smState.orderData_->orderQty_;
+    // Accepted, or stored and rejected, now: its record and its report say when (#546)
+    smState.orderData_->lastUpdateTime_ = clockNow();
     // Persist the order as part of this transaction (#20), ahead of the operations that publish
     // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(scope.get(), *smState.orderData_);
@@ -340,6 +355,7 @@ void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt
 
     // write lock on the order for state machine processing
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
+    const OrderStatePersistence before = ord->stateMachinePersistance();
 
     switch (evnt.type_)
     {
@@ -393,6 +409,10 @@ void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    if (moved(before, smState))
+    {
+        smState.orderData_->lastUpdateTime_ = clockNow(); // the decision's time (#546)
+    }
     // Persist the order as part of this transaction (#20), ahead of the operations that publish
     // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(scope.get(), *smState.orderData_);
@@ -593,7 +613,7 @@ void Processor::process(onTradeExecution &evnt, OrderEntry *order, const ACID::C
     persistOrder(evnt.transaction_, *smState.orderData_);
 }
 
-void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, const ACID::Context & /*cnxt*/)
+void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, const ACID::Context &cnxt)
 {
     evnt.generator_ = generator_;
     evnt.orderStorage_ = orderStorage_;
@@ -601,19 +621,24 @@ void Processor::process(OrdState::onInternalCancel &evnt, OrderEntry *order, con
     // write lock on the order for state machine processing
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order->entryMutex_, true);
 
-    threadState().stateMachine->setPersistance(order->stateMachinePersistance());
+    const OrderStatePersistence before = order->stateMachinePersistance();
+    threadState().stateMachine->setPersistance(before);
     threadState().stateMachine->process_event(evnt);
 
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    if (moved(before, smState))
+    {
+        smState.orderData_->lastUpdateTime_ = cnxt.now(); // the cancel's time (#546)
+    }
     // Persist the order as part of this transaction (#20), ahead of the operations that publish
     // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(evnt.transaction_, *smState.orderData_);
 }
 
 void Processor::process(OrdState::onExecCancel &evnt, OrderEntry *order, const std::string &requester,
-                        const ACID::Context & /*cnxt*/)
+                        const ACID::Context &cnxt)
 {
     evnt.generator_ = generator_;
     evnt.orderStorage_ = orderStorage_;
@@ -648,6 +673,7 @@ void Processor::process(OrdState::onExecCancel &evnt, OrderEntry *order, const s
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    smState.orderData_->lastUpdateTime_ = cnxt.now(); // the cancel's time (#546)
     // Persist the order as part of this transaction (#20), ahead of the operations that publish
     // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(evnt.transaction_, *smState.orderData_);
@@ -681,8 +707,11 @@ void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope 
         {
             return;
         }
+        // One read of the clock: the day it begins, and the restatement's time, which its record and report carry
+        // (#546)
         const DateTimeT now = cnxt.now();
         order->startDay(ExpiryScheduler::dayStartOf(now));
+        order->lastUpdateTime_ = now;
         persistOrder(scope, *order);
         // The report takes what the restatement left now, as the persist does: the transaction names the order
         // alone, so a booking on the instrument can fill the order before it runs (#441)
@@ -710,7 +739,8 @@ void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope 
     }
 
     assert(nullptr != threadState().stateMachine);
-    threadState().stateMachine->setPersistance(order->stateMachinePersistance());
+    const OrderStatePersistence before = order->stateMachinePersistance();
+    threadState().stateMachine->setPersistance(before);
     auto run = [&](auto evnt2Proc)
     {
         evnt2Proc.generator_ = generator_;
@@ -746,6 +776,10 @@ void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope 
     OrderStatePersistence smState = threadState().stateMachine->getPersistence();
     assert(nullptr != smState.orderData_);
     smState.orderData_->setStateMachinePersistance(smState);
+    if (moved(before, smState))
+    {
+        smState.orderData_->lastUpdateTime_ = cnxt.now(); // the change's time (#546)
+    }
     // Persist the order as part of this transaction (#20), ahead of the operations that publish
     // execution reports, so an acknowledged change is already durable (#28).
     persistOrder(scope, *smState.orderData_);
@@ -769,7 +803,7 @@ bool noCancelOrReplacePending(const OrderEntry &order)
 } // namespace
 
 void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEntry &replacement,
-                        const std::string &requester, const ACID::Context & /*cnxt*/)
+                        const std::string &requester, const ACID::Context &cnxt)
 {
     evnt.generator_ = generator_;
     evnt.orderStorage_ = orderStorage_;
@@ -924,6 +958,11 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
     {
         aux::ExchLogger::instance()->error("Processor: a replace that passed its checks did not complete");
     }
+    // One time for both, the replace's (#546): their records and reports carry it, and a DAY replacement's day is the
+    // one it falls in (ExpiryScheduler::expiryOf())
+    const DateTimeT now = cnxt.now();
+    stored->lastUpdateTime_ = now;
+    original->lastUpdateTime_ = now;
 
     // Persist both as part of this transaction (#20), ahead of the operations that publish their reports (#28)
     persistOrder(evnt.transaction_, *stored);

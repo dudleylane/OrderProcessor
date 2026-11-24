@@ -2173,7 +2173,11 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
     }
 
     report.set(FIX::Symbol(order.instrument_.get().symbol_));
-    report.set(FIX::TransactTime(FIX::UtcTimeStamp::now()));
+    // When the engine made the decision the report tells, as its WebSocket report's transactTime gives it (#546, #612):
+    // FIX's TransactTime is the time the business transaction occurred. It was the clock as the report was built, to
+    // the second, which said when the report's transaction ran. The gateway's own answers (a status, the refusal of
+    // an order never stored) still read the clock: no decision of the engine's is theirs.
+    report.set(FIX::TransactTime(toUtcTimeStamp(exec->transactTime_), 3));
     // A restatement at a business day's start (#244): FIX's GT renewal / restatement, with no corporate action
     if (RESTATED_EXECTYPE == exec->type_)
     {
@@ -2262,8 +2266,8 @@ FIX50SP2::ExecutionReport FixGateway::buildExecutionReport(const ExecutionEntry 
         report.addGroup(legGroup);
 
         // TrdMatchID (880): the same on a side's near and far reports, so a client pairs them (#199). It was
-        // "<orderId>-<transactTime>", and each report stamps its own time. FIX defines 880 as the trade's id, which
-        // both sides would share; each side keeps its own here, as #199's link did, by the maintainer's ruling
+        // "<orderId>-<transactTime>", and each report stamped its own time then. FIX defines 880 as the trade's id,
+        // which both sides would share; each side keeps its own here, as #199's link did, by the maintainer's ruling
         // (2026-10-26). Until #378 it was TradeLinkID (820), which neither FIX 4.4's ExecutionReport nor 5.0 SP2's
         // has, so a client checking a swap's report against its dictionary refused it.
         report.set(FIX::TrdMatchID(std::to_string(exec->tradeLink_)));

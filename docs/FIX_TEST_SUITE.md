@@ -190,6 +190,7 @@ FIX message translation, `fromApp()` dispatch, and the ExecutionReports the gate
 | `ExecutionReport_RejectCarriesOrdRejReasonAndText` | Reject → 150=8, 39=8, OrdRejReason 103=0, the reason in Text (58) |
 | `ExecutionReport_AcknowledgementCarriesNoRejectFields` | A new order's acknowledgement → 150=0, 39=0, no 103 |
 | `ExecutionReport_CancelAckNamesTheCancelRequest` | A cancel's acknowledgement → 11 the request's ClOrdID, 41 the order's; a cancel no request asked for keeps the order's in 11 (#98) |
+| `ExecutionReport_TransactTimeIsTheDecisionsToTheMillisecond` | TransactTime (60) is when the engine decided what the report tells, the report's own transactTime, as its WebSocket report gives it (#546, #612), to the millisecond: it was the clock as the report was built, to the second |
 | `ExecutionReport_TradeCarriesLastQtyAndLastPx` | Trade → 150=F, LastQty (32), LastPx (31) |
 | `ExecutionReport_CarriesTheOrdersAvgPx` | The order's AvgPx (6), which FIX 5.0 SP2 doesn't require and FIX 4.4 did (#377) |
 | `ExecutionReport_CarriesTheOrdersOrderQty` | The order's OrderQty (38) on its acknowledgement, a trade, a cancel, a reject and an expiry, closed with LeavesQty 0 as well as open, written as a whole number, the bytes QuickFIX writes for the double, up to the largest quantity; a replacement's report, the replacement's own quantity (#384) |

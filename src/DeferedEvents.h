@@ -109,8 +109,9 @@ struct ExecutionDeferedEvent : public DeferedEventBase
     static bool takesTrade(const OrderEntry &base, QuantityT qty, QuantityT *leaves);
 
 private:
+    /// Fills one side of the match, at the match's time, now, in the business day that starts at dayStart
     void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope, const TradeParams &param,
-                 DateTimeT dayStart);
+                 DateTimeT now, DateTimeT dayStart);
 };
 
 struct MatchOrderDeferedEvent : public DeferedEventBase
