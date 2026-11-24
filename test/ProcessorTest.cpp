@@ -5577,6 +5577,64 @@ TEST_F(ProcessorTest, AnExpiryOfAnOrderNoLongerLiveDecidesNothing)
     }
 }
 
+TEST_F(ProcessorTest, ASuspendResumeFinishOrDayStartOfACanceledOrReplacedOrderDecidesNothing)
+{
+    // A cancel or a replace closes an order in zone 2 alone, its zone 1 still New or PartFill, which has rows for a
+    // suspend and a finish: they reopened it, and a resume booked it to trade again (#787). Nothing produces these
+    // changes yet (#580); a timer's are refused by the order's status already.
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());
+    OrderEntry *canceled = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 10.0, 100), GTC_TIF));
+    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 40), IOC_TIF));
+    ASSERT_EQ(PARTFILL_ORDSTATUS, canceled->status_);
+    engine.request(OrderCancelEvent(canceled->orderId_));
+    ASSERT_EQ(CANCELED_ORDSTATUS, canceled->status_);
+
+    OrderEntry *original = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 9.0, 50), GTC_TIF));
+    OrderEntry *replacement = original->clone();
+    replacement->orderId_ = IdT();
+    test::assignClOrderId(replacement);
+    replacement->origClOrderId_ = original->clOrderId_;
+    replacement->price_ = 9.5;
+    replacement->status_ = RECEIVEDNEW_ORDSTATUS;
+    engine.request(OrderReplaceEvent(original->orderId_, replacement));
+    ASSERT_EQ(REPLACED_ORDSTATUS, original->status_);
+
+    // A suspended order can be canceled too, its zone 1 left at Suspended, whose row for a resume books the order: one
+    // event would have put a canceled order back in the book
+    OrderEntry *suspended = engine.submit(withTif(createTestOrder(instrId1_, BUY_SIDE, 8.0, 20), GTC_TIF));
+    engine.request(OrderChangeStateEvent(suspended->orderId_, OrderChangeStateEvent::SUSPEND));
+    ASSERT_EQ(SUSPENDED_ORDSTATUS, suspended->status_);
+    engine.request(OrderCancelEvent(suspended->orderId_));
+    ASSERT_EQ(CANCELED_ORDSTATUS, suspended->status_);
+
+    const uint64_t failed = OrdState::OrderState::failedCount();
+    engine.request(OrderChangeStateEvent(suspended->orderId_, OrderChangeStateEvent::RESUME));
+    EXPECT_EQ(CANCELED_ORDSTATUS, suspended->status_) << "a resume reopened a canceled order";
+    EXPECT_EQ(0u, suspended->leavesQty_);
+    for (OrderEntry *closed : { canceled, original })
+    {
+        const OrderStatus status = closed->status_;
+        const size_t reported = engine.reports_.reportTypesOf(closed->orderId_).size();
+        for (const OrderChangeStateEvent::StateChangeType change :
+             { OrderChangeStateEvent::SUSPEND, OrderChangeStateEvent::RESUME, OrderChangeStateEvent::FINISH })
+        {
+            engine.request(OrderChangeStateEvent(closed->orderId_, change));
+            EXPECT_EQ(status, closed->status_) << "change " << change;
+        }
+        engine.request(TimerEvent(closed->orderId_, TimerEvent::DAY_START));
+        EXPECT_EQ(status, closed->status_) << "a day's start";
+        EXPECT_EQ(0u, closed->leavesQty_);
+        EXPECT_EQ(reported, engine.reports_.reportTypesOf(closed->orderId_).size()) << "a closed order was reported";
+    }
+    EXPECT_EQ(failed, OrdState::OrderState::failedCount()) << "a change reached the state machine and failed there";
+
+    // The book holds the replacement alone
+    const BookSnapshot book = orderBook_->getSnapshot(instrId1_, OrderStorage::instance());
+    ASSERT_EQ(1u, book.bids.size());
+    EXPECT_DOUBLE_EQ(9.5, book.bids[0].price);
+    EXPECT_EQ(50u, book.bids[0].totalQty);
+}
+
 TEST_F(ProcessorTest, ADayEndDecidesNothingForAnOrderThatIsntADayOrder)
 {
     StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get());

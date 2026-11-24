@@ -737,6 +737,16 @@ void Processor::process(OrderStateChange change, OrderEntry *order, ACID::Scope 
             return; // the day's end expires a DAY order, and starts another done-for-day one's next day; nothing else
         }
     }
+    // A cancel or a replace closes an order in zone 2 alone, and zone 1, still New or PartFill, has rows for a suspend
+    // and a finish: they would reopen the order, and a resume would then book it to trade again (#787). The changes
+    // above are refused by the order's status; these, which nothing produces yet (#580), by the zone that closed it,
+    // which owns a correction of it too (#777).
+    const OrdState::OrderStatePersistence persisted = order->stateMachinePersistance();
+    const int states[] = { persisted.stateZone1Id_, persisted.stateZone2Id_ };
+    if (OrdState::closedInZone2(states))
+    {
+        return;
+    }
 
     assert(nullptr != threadState().stateMachine);
     const OrderStatePersistence before = order->stateMachinePersistance();
