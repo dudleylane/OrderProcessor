@@ -12,9 +12,11 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/websocket.hpp>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "IdTGenerator.h"
 #include "InFlightGauge.h"
@@ -46,6 +48,10 @@ const u32 BURST = 64;
 /// in an empty store, the push), and one that leaves nothing behind, where a new order's strings and execution list
 /// stay in WideDataStorage. The session answers it with nothing: the engine's cancel_reject would.
 const std::string CANCEL = R"({"type":"cancel_order","data":{"orderId":987654321}})";
+
+/// A message of a type the protocol doesn't have, which the session answers itself, with an error, and doesn't hand to
+/// the engine: the lightest message whose answer goes through the session's send() and its write's completion
+const std::string UNKNOWN = R"({"type":"no_such_request","data":{}})";
 
 /// How long a step may wait before the benchmark gives up, so a broken session fails it instead of hanging
 const std::chrono::seconds STEP_TIMEOUT(5);
@@ -106,13 +112,13 @@ public:
         return connected_;
     }
 
-    /// Sends a burst of cancels, each a message of its own
-    void sendBurst()
+    /// Sends a burst of the message, cancels unless told otherwise, each a message of its own
+    void sendBurst(const std::string &message = CANCEL)
     {
         client_.text(true);
         for (u32 i = 0; i < BURST; ++i)
         {
-            client_.write(net::buffer(CANCEL));
+            client_.write(net::buffer(message));
         }
     }
 
@@ -127,6 +133,25 @@ public:
             }
         }
         return true;
+    }
+
+    /// Runs the server, and the client's reads, until the client has read an answer to each message of a burst: true,
+    /// unless a read failed or the step's time ran out first
+    bool serveAnswers()
+    {
+        answers_ = 0;
+        readFailed_ = false;
+        // The client's context ran out of work once its handshake was done, and a context out of work is stopped: it
+        // runs nothing more until it is restarted
+        clientIoc_.restart();
+        readAnswer();
+        const auto deadline = std::chrono::steady_clock::now() + STEP_TIMEOUT;
+        while ((answers_ < BURST) && !readFailed_ && (std::chrono::steady_clock::now() < deadline))
+        {
+            serverIoc_.poll();
+            clientIoc_.poll();
+        }
+        return (BURST == answers_) && !readFailed_;
     }
 
     /// How many events wait in the engine's queue
@@ -144,8 +169,28 @@ public:
     }
 
 private:
+    /// Reads the client's next answer, and once it has, the one after, until a burst's are read
+    void readAnswer()
+    {
+        client_.async_read(answer_,
+                           [this](beast::error_code ec, std::size_t)
+                           {
+                               if (ec)
+                               {
+                                   readFailed_ = true;
+                                   return;
+                               }
+                               answer_.clear();
+                               if (++answers_ < BURST)
+                               {
+                                   readAnswer();
+                               }
+                           });
+    }
+
     /// Connects the client and completes its handshake, then lets the server send the state a client gets as it
-    /// connects, so that none of the session's own writes is left for the timed spans
+    /// connects, and has the client read it, so that none of the session's own writes is left for the timed spans and
+    /// the first answer a span reads is its own burst's
     bool connect()
     {
         beast::error_code ec;
@@ -173,7 +218,57 @@ private:
         while (0 != serverIoc_.poll())
         {
         }
-        return true;
+        return skipConnectState();
+    }
+
+    /// Reads, and drops, the state the session sends a client as it connects (WsSession::onAccept()), and then the
+    /// answer to one message the session answers itself, which comes after it. Unread, that state's messages would be
+    /// counted as the first burst's answers, and every span would then end that many answers before its own burst's
+    /// last. False unless the state ended with the order snapshot, so that one cut short by an error fails here.
+    bool skipConnectState()
+    {
+        client_.text(true);
+        client_.write(net::buffer(UNKNOWN));
+        bool snapshot = false;
+        bool answered = false;
+        bool failed = false;
+        std::function<void()> next = [&]
+        {
+            client_.async_read(answer_,
+                               [&](beast::error_code ec, std::size_t)
+                               {
+                                   if (ec)
+                                   {
+                                       failed = true;
+                                       return;
+                                   }
+                                   const std::string_view text(static_cast<const char *>(answer_.data().data()),
+                                                               answer_.size());
+                                   if (std::string_view::npos != text.find(R"("type":"order_snapshot")"))
+                                   {
+                                       snapshot = true;
+                                   }
+                                   else if (std::string_view::npos != text.find(R"("type":"error")"))
+                                   {
+                                       answered = true;
+                                   }
+                                   answer_.clear();
+                                   if (!answered)
+                                   {
+                                       next();
+                                   }
+                               });
+        };
+        // The handshake's poll left the client's context out of work, and so stopped
+        clientIoc_.restart();
+        next();
+        const auto deadline = std::chrono::steady_clock::now() + STEP_TIMEOUT;
+        while (!answered && !failed && (std::chrono::steady_clock::now() < deadline))
+        {
+            serverIoc_.poll();
+            clientIoc_.poll();
+        }
+        return snapshot && answered && !failed;
     }
 
     Singletons singletons_;
@@ -186,6 +281,9 @@ private:
     OrderBookImpl book_;
     std::shared_ptr<App::WsServer> server_;
     websocket::stream<beast::tcp_stream> client_{ clientIoc_ };
+    beast::flat_buffer answer_;
+    u32 answers_ = 0;
+    bool readFailed_ = false;
     bool connected_ = false;
 };
 
@@ -229,3 +327,40 @@ static void BM_WsSessionReadFlood(benchmark::State &state)
     state.SetItemsProcessed(state.iterations() * BURST);
 }
 BENCHMARK(BM_WsSessionReadFlood)->UseManualTime();
+
+/// The IO thread's work for each message a client sends that the session answers itself: the read and the parse, the
+/// answer's serialization and send(), and its write, whose completion, onWrite(), starts the next. The span is one
+/// burst's (manual time), until the client has read every answer, so the client's reads are in it, the same in any
+/// build. Nothing ran a session's send() in a benchmark until #668 needed one for #512's checks there.
+static void BM_WsSessionAnswerFlood(benchmark::State &state)
+{
+    ServedClient served;
+    if (!served.connected())
+    {
+        state.SkipWithError("the client couldn't connect");
+        return;
+    }
+    // Each message must be answered by the session itself: one that reached the engine's queue would time another path
+    served.sendBurst(UNKNOWN);
+    if (!served.serveAnswers() || (0 != served.queued()))
+    {
+        state.SkipWithError("the session didn't answer each message of a burst itself");
+        return;
+    }
+
+    for (auto _ : state)
+    {
+        served.sendBurst(UNKNOWN);
+        const auto start = std::chrono::steady_clock::now();
+        const bool ok = served.serveAnswers();
+        const auto end = std::chrono::steady_clock::now();
+        if (!ok)
+        {
+            state.SkipWithError("the session stopped answering the burst");
+            break;
+        }
+        state.SetIterationTime(std::chrono::duration<double>(end - start).count());
+    }
+    state.SetItemsProcessed(state.iterations() * BURST);
+}
+BENCHMARK(BM_WsSessionAnswerFlood)->UseManualTime();
