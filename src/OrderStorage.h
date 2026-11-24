@@ -15,7 +15,6 @@
 #include "Singleton.h"
 #include "TypesDef.h"
 #include <oneapi/tbb/spin_rw_mutex.h>
-#include <oneapi/tbb/concurrent_hash_map.h>
 #include <map>
 #include "NodePool.h"
 #include "DataModelDef.h"
@@ -23,7 +22,6 @@
 namespace COP
 {
 struct OrderEntry;
-struct ExecutionEntry;
 class IdTValueGenerator;
 
 namespace Store
@@ -169,10 +167,6 @@ public:
         return ordersById_.size();
     }
 
-    ExecutionEntry *locateByExecId(const IdT &execId) const;
-    void save(const ExecutionEntry *exec);
-    ExecutionEntry *save(const ExecutionEntry &exec, IdTValueGenerator *idGenerator);
-
 private:
     /// Reader-writer lock for order maps (dual-map inserts require atomicity)
     /// Allows concurrent reads, exclusive writes
@@ -193,26 +187,6 @@ private:
 
     typedef PooledMap<RawDataEntry, OrderEntry *> OrdersByClientIDT;
     OrdersByClientIDT ordersByClId_;
-
-    /// Hash functor for SourceIdT in concurrent_hash_map
-    struct SourceIdTHash
-    {
-        size_t hash(const SourceIdT &key) const
-        {
-            // The id alone (#505): every execution id comes from IdTGenerator, whose ids never repeat (#58, #81), so
-            // date_, the second the id was drawn in, added nothing to the key but the clock: which bucket an insert
-            // reached, and the lazy rehashing that took, moved with it. equal() still compares both.
-            return std::hash<u64>()(key.id_);
-        }
-        bool equal(const SourceIdT &a, const SourceIdT &b) const
-        {
-            return a == b;
-        }
-    };
-
-    /// Lock-free concurrent hash map for executions (single-map operations)
-    typedef oneapi::tbb::concurrent_hash_map<SourceIdT, ExecutionEntry *, SourceIdTHash> ExecByIDT;
-    ExecByIDT executionsById_;
 
     OrderSaver *saver_;
 };

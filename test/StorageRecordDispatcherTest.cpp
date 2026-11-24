@@ -1445,12 +1445,12 @@ TEST_F(StorageRecordDispatcherTest, RestoredOrderCanRecordAnExecution)
 
         OrderEntry *restored = storageAfter.locateByOrderId(orderId);
         ASSERT_NE(nullptr, restored);
-        EXPECT_NO_THROW(restored->addExecution(IdT(9001, 1)));
+        EXPECT_NO_THROW(restored->executions_.get()) << "the restored order's list isn't registered";
 
         ExecutionsT *list = nullptr;
         EXPECT_NO_THROW(WideDataStorage::instance()->get(listId, &list));
         ASSERT_NE(nullptr, list);
-        EXPECT_EQ(1u, list->size());
+        EXPECT_TRUE(list->empty()) << "nothing adds to an order's list since #708";
     }
 
     std::error_code ec;
@@ -1720,11 +1720,8 @@ TEST_F(StorageRecordDispatcherTest, ExecutionIdsContinueAfterACrash)
         dispatcher_->save(*saved); // persisted, as PersistOrderTrOperation does
         for (int i = 0; i < 5; ++i)
         {
-            // its fills' reports, which aren't persisted
-            ExecutionEntry exec;
-            exec.orderId_ = saved->orderId_;
-            exec.type_ = TRADE_EXECTYPE;
-            lastExecId = orderStorage_->save(exec, &generator)->execId_.id_;
+            // its fills' reports, which aren't persisted, each drawing its id (#708)
+            lastExecId = generator.getId().id_;
         }
         // stops without releasing the reservation, as a crash does
     }

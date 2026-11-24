@@ -441,7 +441,9 @@ public:
 
     /// Fails the benchmark unless the order was restated as the timed path restates its orders: a day later than
     /// restedIn, the one it rested in, begun, and a RESTATED report sent. A restatement of an order no longer working
-    /// decides nothing, and one that finds its day begun only reports it.
+    /// decides nothing, and one that finds its day begun only reports it. The report is seen in what it published, the
+    /// figures its order's readers outside a transaction give (#404): nothing keeps a report past its push (#708), and
+    /// counting reports would put work in DiscardingOutQueues::push(), inside every benchmark's timed span.
     bool restated(benchmark::State &state, const IdT &orderId, DateTimeT restedIn)
     {
         const OrderEntry *order = OrderStorage::instance()->locateByOrderId(orderId);
@@ -450,17 +452,14 @@ public:
             state.SkipWithError("engine did not store the warm-up order");
             return false;
         }
-        const ExecutionsT *executions = order->executions_.get();
-        const ExecutionEntry *last =
-            executions->empty() ? nullptr : OrderStorage::instance()->locateByExecId(executions->back().eventId_);
-        if ((nullptr == last) || (RESTATED_EXECTYPE != last->type_))
-        {
-            state.SkipWithError("the warm-up order's last report is not a RESTATED one");
-            return false;
-        }
         if (order->dayStart_ <= restedIn)
         {
             state.SkipWithError("the warm-up order's restatement did not begin its next day");
+            return false;
+        }
+        if (!order->published_ || (order->published_->dayStart_ <= restedIn))
+        {
+            state.SkipWithError("the warm-up order's restatement wasn't reported");
             return false;
         }
         return true;

@@ -5243,23 +5243,6 @@ TEST_F(ProcessorTest, ATradesDateIsTheBusinessDayItCountsIn)
     EXPECT_EQ((std::vector<DateTimeT>{ 20261015, 20261016 }), engine.reports_.tradeDatesOf(buy->orderId_));
     EXPECT_EQ(std::vector<DateTimeT>{ 20261015 }, engine.reports_.tradeDatesOf(sell->orderId_));
     EXPECT_EQ(std::vector<DateTimeT>{ 20261016 }, engine.reports_.tradeDatesOf(late->orderId_));
-    // The stored trades have it too. Each trade is in the order's executions twice, as the match stored it and as it
-    // was reported, so compare the dates they hold.
-    auto storedDates = [](OrderEntry &order)
-    {
-        std::set<DateTimeT> dates;
-        for (const EventData &event : *order.executions_.get())
-        {
-            const ExecutionEntry *exec = OrderStorage::instance()->locateByExecId(event.eventId_);
-            if ((nullptr != exec) && (TRADE_EXECTYPE == exec->type_))
-            {
-                dates.insert(static_cast<const TradeExecEntry *>(exec)->tradeDate_);
-            }
-        }
-        return dates;
-    };
-    EXPECT_EQ((std::set<DateTimeT>{ 20261015, 20261016 }), storedDates(*buy));
-    EXPECT_EQ(std::set<DateTimeT>{ 20261016 }, storedDates(*late));
 }
 
 TEST_F(ProcessorTest, BothSidesOfATradeCountItInTheSameDay)
@@ -5485,11 +5468,6 @@ TEST_F(ProcessorTest, AnOrdersLifeWritesNoNote)
             engine.storage_.restore(order.release());
             engine.book_.restore(restored);
 
-            // The other way an execution is stored, which only the store's own callers use
-            ExecutionEntry exec;
-            exec.execId_ = IdT(1000001, 20261106);
-            engine.storage_.save(&exec);
-
             aux::ExchLogger::instance()->note(ends);
         }
         lines = log.lines();
@@ -5585,31 +5563,16 @@ private:
     COP::u32 version_ = 0;
 };
 
-/// The times of the trades stored for the order: each is there twice, as its fill stored it and as it was reported
-std::vector<DateTimeT> storedTradeTimesOf(OrderEntry &order)
-{
-    std::vector<DateTimeT> times;
-    for (const EventData &event : *order.executions_.get())
-    {
-        const ExecutionEntry *exec = OrderStorage::instance()->locateByExecId(event.eventId_);
-        if ((nullptr != exec) && (TRADE_EXECTYPE == exec->type_))
-        {
-            times.push_back(exec->transactTime_);
-        }
-    }
-    return times;
-}
-
 /// What reports said of their time: each one's TransactTime and its figures' lastUpdateTime_
 using ReportTimes = std::vector<std::pair<DateTimeT, DateTimeT>>;
 } // namespace
 
-TEST_F(ProcessorTest, BothSidesOfATradeTheirRecordsReportsAndStoredTradesHaveTheMatchsTime)
+TEST_F(ProcessorTest, BothSidesOfATradeTheirRecordsAndReportsHaveTheMatchsTime)
 {
     // An order's lastUpdateTime_ never changed once it was stored (#546), and a fill's stored trade had transactTime 1,
     // 1970-01-01 (#612). A decision reads the engine's clock once, and the order, its record and its report have that
-    // time: a match's both sides, and each side's stored trades. The fills' transaction waits an hour to run, and its
-    // reports still say when the match was made.
+    // time: a match's both sides. A fill stores no trade of its own now (#708). The fills' transaction waits an hour to
+    // run, and its reports still say when the match was made.
     UpdateTimeLog saver;
     OrderStorage::instance()->attach(&saver);
     SteppingClock clock(OCT15 + 13 * HOUR);
@@ -5643,8 +5606,6 @@ TEST_F(ProcessorTest, BothSidesOfATradeTheirRecordsReportsAndStoredTradesHaveThe
         EXPECT_EQ(traded, side->lastUpdateTime_);
         EXPECT_EQ(traded, saver.recordsOf(side->orderId_).back());
         EXPECT_EQ((ReportTimes{ { traded, traded } }), engine.reports_.timesOf(side->orderId_, TRADE_EXECTYPE));
-        EXPECT_EQ((std::vector<DateTimeT>{ traded, traded }), storedTradeTimesOf(*side))
-            << "as its fill stored it and as it was reported";
     }
 }
 

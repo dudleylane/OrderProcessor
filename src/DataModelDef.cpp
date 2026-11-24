@@ -253,8 +253,6 @@ void OrderParams::applyTrade(const TradeExecEntry *trade, DateTimeT dayStart)
         dayAvgPx_ = (dayAvgPx_ * dayCumBefore + trade->lastPx_ * trade->lastQty_) / dayCumQty_;
     }
     dayOrderQty_ = orderQty_ - (cumQty_ - dayCumQty_);
-
-    executions_.get()->push_back(EventData(trade->execId_));
 }
 
 bool OrderParams::startDay(DateTimeT dayStart) noexcept
@@ -276,11 +274,6 @@ void OrderParams::waitUntilBookingEnqueued() const noexcept
     {
         std::this_thread::yield();
     }
-}
-
-void OrderParams::addExecution(const IdT &execId)
-{
-    executions_.get()->push_back(EventData(execId));
 }
 
 OrderEntry::OrderEntry(const SourceIdT &source, const SourceIdT &dest, const SourceIdT &clOrderId,

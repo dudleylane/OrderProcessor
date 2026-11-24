@@ -1051,7 +1051,7 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
 │   │                      OrderDataStorage                                │   │
 │   │                                                                      │   │
-│   │   orderRwLock_ [RW] ─── the order maps and the executions map       │   │
+│   │   orderRwLock_ [RW] ─── the order maps                              │   │
 │   │   (readers share it; a change takes it for write, #467)             │   │
 │   │   Each OrderEntry has its own entryMutex_ [RW], for its figures     │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
@@ -1387,7 +1387,7 @@ So after a failure, memory, disk and clients can disagree. #659 holds the struct
 │   │   │ "CLIENT-002" │ ─► OrderEntry (ID 002)                           │ │ │
 │   │   └──────────────┴──────────────────────────────────────────────────┘ │ │
 │   │                                                                        │ │
-│   │   Lock: orderRwLock_ (spin_rw_mutex), the executions map's too       │ │
+│   │   Lock: orderRwLock_ (spin_rw_mutex)                                 │ │
 │   └───────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
 
