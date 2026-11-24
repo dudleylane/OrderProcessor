@@ -1709,6 +1709,8 @@ The record is keyed (0,1), and only its newest version is kept. A data directory
 | `DummyOrderSaver` | `DummyOrderSaver.h`, which `TestAux.h` includes | No-op order persistence, for the tests and, without GoogleTest, the benchmarks (#530) |
 | `check()` | `TestAux.h/cpp` | Assertion with error messages |
 | `uniqueTestPath()` | `TestAux.h` | A per-test-case path, so tests can run in parallel (#10) |
+| `CapturedLog` | `TestAux.h/cpp` | The log sent to a file of the test's own, read once the logger is closed (#514); not for a test whose other threads log |
+| `LogTap` | `TestAux.h/cpp` | Each line the logger takes while it lives, from any thread, as it is logged, through `aux::LogObserver` (#783): for a test whose server or workers log |
 | `swapSettlementDate()`, `swapLocalMktDate()` | `SettlementDates.h` | A swap's settlement date some days after the business day's, which the entries take (#551), for the tests and, without GoogleTest, the benchmarks, that send a swap |
 | `SingletonFixture`, `OrderStorageFixture`, ... | `TestFixtures.h` | Create and destroy the singletons per test |
 | `OrderStateWrapper` | `StateMachineHelper.h/cpp` | State machine event processing |

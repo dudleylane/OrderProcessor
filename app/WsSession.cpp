@@ -80,7 +80,7 @@ WsSession::WsSession(tcp::socket &&socket, SessionManager *sessionMgr, Store::Wi
     : ws_(std::move(socket)), auth_(auth), sessionMgr_(sessionMgr), wideData_(wideData), orderStorage_(orderStorage),
       inQueues_(inQueues), idGen_(idGen), orderBook_(orderBook), defaultClearingId_(defaultClearingId),
       defaultAccountId_(defaultAccountId), limits_(limits), connections_(std::move(connections)), inFlight_(inFlight),
-      readTimer_(ws_.get_executor())
+      readTimer_(ws_.get_executor()), containedLog_(limits.containedLogPeriod)
 {
 }
 
