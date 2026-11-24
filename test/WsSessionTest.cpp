@@ -77,10 +77,13 @@ protected:
                 if (!ec)
                 {
                     serverFd_ = socket.native_handle(); // for the kernel's word on its options (#653)
-                    std::make_shared<App::WsSession>(
-                        std::move(socket), &sessionMgr_, WideDataStorage::instance(), OrderStorage::instance(),
-                        sessionQueues_.load(), IdTGenerator::instance(), nullptr,
-                        useDefaultClearing_ ? clearingId_ : SourceIdT(), useDefaultAccount_ ? accountId_ : SourceIdT())
+                    App::WsLimits limits;
+                    limits.containedLogPeriod = containedLogPeriod_.load();
+                    std::make_shared<App::WsSession>(std::move(socket), &sessionMgr_, WideDataStorage::instance(),
+                                                     OrderStorage::instance(), sessionQueues_.load(),
+                                                     IdTGenerator::instance(), nullptr,
+                                                     useDefaultClearing_ ? clearingId_ : SourceIdT(),
+                                                     useDefaultAccount_ ? accountId_ : SourceIdT(), limits)
                         ->run();
                 }
             });
@@ -282,6 +285,8 @@ protected:
     testing::NiceMock<test::MockInQueues> failingQueues_;
     std::atomic<bool> useDefaultClearing_{ true };
     std::atomic<bool> useDefaultAccount_{ true };
+    /// The period the session logs one contained exception in (#783), read as the session is made
+    std::atomic<std::chrono::steady_clock::duration> containedLogPeriod_{ App::WsLimits().containedLogPeriod };
 
     std::mutex escapedLock_;
     std::string escaped_;
@@ -312,9 +317,9 @@ TEST_F(WsSessionTest, RequestThatThrowsIsAnsweredAndTheSessionKeepsReading)
 TEST_F(WsSessionTest, ThrowingRequestsInARowAreEachAnswered)
 {
     // A client could make its session contain an exception for every message it sent, each logged at error level with
-    // its bytes (#547). The log is throttled and escaped now (LogThrottleTest checks the line); here, each of three
-    // throwing requests in a row, with bytes that aren't ASCII, is still answered, and the session reads on. The log
-    // isn't read here: the server's thread writes it, which CapturedLog doesn't allow.
+    // its bytes (#547). The log is throttled and escaped now (LogThrottleTest checks the line, and
+    // ThrowingRequestsWithinThePeriodAreLoggedOnceEscaped the session's use of it); here, each of three throwing
+    // requests in a row, with bytes that aren't ASCII, is still answered, and the session reads on.
     ON_CALL(failingQueues_, push(testing::_, testing::An<const Queues::OrderCancelEvent &>()))
         .WillByDefault(testing::Throw(std::runtime_error("injected\x01"
                                                          "failure\xff")));
@@ -332,6 +337,37 @@ TEST_F(WsSessionTest, ThrowingRequestsInARowAreEachAnswered)
     }
     EXPECT_EQ("", escaped());
     EXPECT_TRUE(stillAnswers(client));
+}
+
+TEST_F(WsSessionTest, ThrowingRequestsWithinThePeriodAreLoggedOnceEscaped)
+{
+    // A session logs at most one of its contained exceptions a period, a second unless set, escaped (#547). The
+    // server's thread writes the log, which no test read until a LogTap could see each line as it is logged (#783).
+    // With the period an hour, three throwing requests make one error line, which holds the exception's and the
+    // request's bytes escaped. That the next line names the ones left out is LogThrottleTest's.
+    test::LogTap tap;
+    containedLogPeriod_ = std::chrono::hours(1);
+    ON_CALL(failingQueues_, push(testing::_, testing::An<const Queues::OrderCancelEvent &>()))
+        .WillByDefault(testing::Throw(std::runtime_error("injected\x01"
+                                                         "failure\xff")));
+    sessionQueues_ = &failingQueues_;
+
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    for (int i = 0; i < 3; ++i)
+    {
+        send(client, "{\"type\":\"cancel_order\",\"data\":{\"orderId\":1,\"clOrderId\":\"caf\xc3\xa9\"}}");
+        ASSERT_TRUE(readUntil(client, "error").has_value()) << "no error reply; escaped: " << escaped();
+    }
+    // The session logs before it answers, and the tap takes each line as it is logged
+    const std::vector<std::string> lines = tap.linesWith("WsSession: contained exception");
+    ASSERT_EQ(1u, lines.size()) << "each throwing request logged, the throttle bypassed";
+    EXPECT_NE(std::string::npos, lines[0].find("[Error]")) << lines[0];
+    EXPECT_NE(std::string::npos, lines[0].find("injected\\x01failure\\xFF")) << lines[0];
+    EXPECT_NE(std::string::npos, lines[0].find("caf\\xC3\\xA9")) << lines[0];
+    EXPECT_EQ(std::string::npos, lines[0].find_first_of("\x01\xc3\xff")) << "a raw byte reached the log: " << lines[0];
+    EXPECT_EQ("", escaped());
 }
 
 TEST_F(WsSessionTest, ABinaryFrameClosesTheSessionWith1003)
