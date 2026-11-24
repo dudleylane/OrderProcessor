@@ -39,6 +39,18 @@ constexpr bool isZone2StateId(int id)
     return (8 <= id) && (id <= 11);
 }
 
+/// CnclReplaced's id: the second region's state for an order canceled or replaced. StateMachine.cpp pins it.
+constexpr int CNCL_REPLACED_STATE_ID = 11;
+
+/// Whether a machine's states, its current_state(), have the second region holding the order canceled or replaced
+/// (#777). A cancel or a replace moves that region alone, so the first is still New or PartFill then, and the machine
+/// hands an event to both regions: the second owns a correction of such an order, and the first books nothing for it,
+/// leaves its leaves and status alone and reports nothing.
+constexpr bool closedInZone2(const int *states)
+{
+    return CNCL_REPLACED_STATE_ID == states[1];
+}
+
 struct OrderStatePersistence
 {
     OrderEntry *orderData_;

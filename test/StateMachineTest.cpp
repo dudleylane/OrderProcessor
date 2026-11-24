@@ -13,6 +13,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -26,6 +27,7 @@
 #include "TransactionScope.h"
 #include "OrderStorage.h"
 #include "Logger.h"
+#include "QueuesDef.h"
 
 using namespace COP;
 using namespace COP::Store;
@@ -1068,6 +1070,266 @@ TEST(OrderStateIdTest, ARestoredIdThatIsNoStateIsRefused)
     EXPECT_EQ(buf.data() + buf.size(), restored.restore(buf.data(), buf.size()));
     EXPECT_EQ(2, restored.stateZone1Id_);
     EXPECT_EQ(8, restored.stateZone2Id_);
+}
+
+// =============================================================================
+// Corrections of closed and suspended orders (#777)
+// =============================================================================
+//
+// A correction of an order the machine has closed leaves it closed: no leaves (#386), its status, and one report saying
+// so. A cancel or a replace closes an order in zone 2 alone, so zone 1 is still New or PartFill there, and MSM gives a
+// correction to both regions; zone 2 owns it then. Nothing produces a correction yet (#580): these keep the path right
+// for whatever does. A suspended order keeps its leaves, by design.
+
+namespace
+{
+
+/// Brings order to New, then fills `filled` of its 100, if any: PartFill. Returns the order as stored.
+OrderEntry *receiveAndFill(OrderStateWrapper &p, TestTransactionContext &trCntxt, OrderEntry *order, QuantityT filled,
+                           std::unique_ptr<TradeExecEntry> *trade)
+{
+    onOrderReceived recvevnt;
+    recvevnt.order_ = order;
+    recvevnt.order_->side_ = BUY_SIDE;
+    recvevnt.generator_ = IdTGenerator::instance();
+    recvevnt.transaction_ = &trCntxt;
+    recvevnt.orderStorage_ = OrderStorage::instance();
+    p.processEvent(recvevnt);
+    OrderEntry *ord = OrderStorage::instance()->locateByClOrderId(order->clOrderId_.get());
+    if (nullptr == ord)
+    {
+        return nullptr;
+    }
+    ord->orderQty_ = 100;
+    ord->leavesQty_ = 100;
+    if (0 < filled)
+    {
+        *trade = createTradeExec(*order, IdT(101, 5));
+        (*trade)->lastQty_ = filled;
+        onTradeExecution fill(trade->get());
+        fill.orderId_ = ord->orderId_;
+        fill.generator_ = IdTGenerator::instance();
+        fill.transaction_ = &trCntxt;
+        fill.orderStorage_ = OrderStorage::instance();
+        p.processEvent(fill);
+    }
+    trCntxt.clear();
+    return ord;
+}
+
+/// Hands the machine evnt, about ord, as the processor would
+template <class Event>
+void processAbout(OrderStateWrapper &p, TestTransactionContext &trCntxt, OrderEntry *ord, Event evnt)
+{
+    evnt.orderId_ = ord->orderId_;
+    evnt.generator_ = IdTGenerator::instance();
+    evnt.transaction_ = &trCntxt;
+    evnt.orderStorage_ = OrderStorage::instance();
+    p.processEvent(evnt);
+}
+
+/// Corrects a trade of ord as a bust of 20 of its 50 filled would: 30 filled, and 70 the correction says are left
+void correctTo30(OrderStateWrapper &p, TestTransactionContext &trCntxt, OrderEntry *order, OrderEntry *ord,
+                 std::unique_ptr<ExecCorrectExecEntry> *correction)
+{
+    *correction = createCorrectExec(*order, IdT(100, 5));
+    (*correction)->cumQty_ = 30;
+    (*correction)->leavesQty_ = 70;
+    (*correction)->lastQty_ = 20;
+    onTradeCrctCncl crct(correction->get());
+    crct.orderId_ = ord->orderId_;
+    crct.generator_ = IdTGenerator::instance();
+    crct.transaction_ = &trCntxt;
+    crct.orderStorage_ = OrderStorage::instance();
+    p.processEvent(crct);
+}
+
+/// How many of the transaction's operations are of type
+size_t operationsOf(const TestTransactionContext &trCntxt, OperationType type)
+{
+    return static_cast<size_t>(std::count_if(trCntxt.op_.begin(), trCntxt.op_.end(),
+                                             [type](const Operation *op)
+                                             {
+                                                 return type == op->type();
+                                             }));
+}
+
+/// What a correction must leave an order it found closed with: no leaves, its status, the correction's fills, one
+/// report, and nothing booked or matched
+void expectStillClosed(const TestTransactionContext &trCntxt, const OrderEntry &ord, OrderStatus status)
+{
+    EXPECT_EQ(0u, ord.leavesQty_) << "a closed order has no leaves (#386)";
+    EXPECT_EQ(status, ord.status_);
+    EXPECT_EQ(30u, ord.cumQty_) << "the correction's fills";
+    EXPECT_EQ(1u, operationsOf(trCntxt, CREATE_CORRECT_EXECREPORT_TROPERATION)) << "one report of the correction";
+    EXPECT_EQ(0u, operationsOf(trCntxt, ADD_ORDERBOOK_TROPERATION)) << "booked again";
+    EXPECT_EQ(0u, operationsOf(trCntxt, MATCH_ORDER_TROPERATION)) << "matched again";
+}
+
+/// Keeps the execution reports pushed to it
+class KeptReports final : public Queues::OutQueues
+{
+public:
+    void push(const Queues::ExecReportEvent &evnt, const std::string &) override
+    {
+        reports_.push_back(evnt);
+    }
+    void push(const Queues::CancelRejectEvent &, const std::string &) override {}
+    void push(const Queues::OrderRejectEvent &, const std::string &) override {}
+
+    std::vector<Queues::ExecReportEvent> reports_;
+};
+
+} // namespace
+
+TEST_F(StateMachineTest, ACorrectionOfAnExpiredOrderLeavesItClosed)
+{
+    TestTransactionContext trCntxt;
+    OrderStateWrapper p;
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+    p.start();
+    std::unique_ptr<TradeExecEntry> trade;
+    OrderEntry *ord = receiveAndFill(p, trCntxt, order.get(), 50, &trade);
+    ASSERT_NE(nullptr, ord);
+    processAbout(p, trCntxt, ord, onExpired());
+    p.checkStates("Expired", "NoCnlReplace");
+    trCntxt.clear();
+
+    std::unique_ptr<ExecCorrectExecEntry> correction;
+    correctTo30(p, trCntxt, order.get(), ord, &correction);
+    p.checkStates("Expired", "NoCnlReplace");
+    expectStillClosed(trCntxt, *ord, EXPIRED_ORDSTATUS);
+}
+
+TEST_F(StateMachineTest, ACorrectionOfAnOrderDoneForTheDayLeavesItClosed)
+{
+    TestTransactionContext trCntxt;
+    OrderStateWrapper p;
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+    p.start();
+    std::unique_ptr<TradeExecEntry> trade;
+    OrderEntry *ord = receiveAndFill(p, trCntxt, order.get(), 50, &trade);
+    ASSERT_NE(nullptr, ord);
+    processAbout(p, trCntxt, ord, onFinished());
+    p.checkStates("DoneForDay", "NoCnlReplace");
+    trCntxt.clear();
+
+    std::unique_ptr<ExecCorrectExecEntry> correction;
+    correctTo30(p, trCntxt, order.get(), ord, &correction);
+    p.checkStates("DoneForDay", "NoCnlReplace");
+    expectStillClosed(trCntxt, *ord, DFD_ORDSTATUS);
+}
+
+TEST_F(StateMachineTest, ACorrectionOfASuspendedOrderGivesItTheCorrectionsLeaves)
+{
+    // A suspended order keeps its leaves by design, so a correction gives it the correction's, as before #777
+    TestTransactionContext trCntxt;
+    OrderStateWrapper p;
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+    p.start();
+    std::unique_ptr<TradeExecEntry> trade;
+    OrderEntry *ord = receiveAndFill(p, trCntxt, order.get(), 50, &trade);
+    ASSERT_NE(nullptr, ord);
+    processAbout(p, trCntxt, ord, onSuspended());
+    p.checkStates("Suspended", "NoCnlReplace");
+    trCntxt.clear();
+
+    std::unique_ptr<ExecCorrectExecEntry> correction;
+    correctTo30(p, trCntxt, order.get(), ord, &correction);
+    p.checkStates("Suspended", "NoCnlReplace");
+    EXPECT_EQ(70u, ord->leavesQty_);
+    EXPECT_EQ(30u, ord->cumQty_);
+    EXPECT_EQ(SUSPENDED_ORDSTATUS, ord->status_);
+    EXPECT_EQ(1u, operationsOf(trCntxt, CREATE_CORRECT_EXECREPORT_TROPERATION));
+    EXPECT_EQ(0u, operationsOf(trCntxt, ADD_ORDERBOOK_TROPERATION));
+}
+
+TEST_F(StateMachineTest, ACorrectionOfACanceledPartlyFilledOrderLeavesItCanceledOutOfTheBook)
+{
+    // Zone 1 is still PartFill: its row booked the order again and reported it PARTFILL, and zone 2's gave it the
+    // correction's leaves (#777). The one report, zone 2's, gives the order as canceled, with no leaves.
+    TestTransactionContext trCntxt;
+    OrderStateWrapper p;
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+    p.start();
+    std::unique_ptr<TradeExecEntry> trade;
+    OrderEntry *ord = receiveAndFill(p, trCntxt, order.get(), 50, &trade);
+    ASSERT_NE(nullptr, ord);
+    processAbout(p, trCntxt, ord, onExecCancel());
+    p.checkStates("PartFill", "CnclReplaced");
+    ASSERT_EQ(CANCELED_ORDSTATUS, ord->status_);
+    trCntxt.clear();
+
+    std::unique_ptr<ExecCorrectExecEntry> correction;
+    correctTo30(p, trCntxt, order.get(), ord, &correction);
+    p.checkStates("PartFill", "CnclReplaced");
+    expectStillClosed(trCntxt, *ord, CANCELED_ORDSTATUS);
+
+    KeptReports out;
+    Context cnxt(OrderStorage::instance(), nullptr, nullptr, &out, nullptr, IdTGenerator::instance(), nullptr);
+    for (Operation *op : trCntxt.op_)
+    {
+        if (CREATE_CORRECT_EXECREPORT_TROPERATION == op->type())
+        {
+            op->execute(cnxt);
+        }
+    }
+    ASSERT_EQ(1u, out.reports_.size());
+    const auto *report = dynamic_cast<const ExecCorrectExecEntry *>(out.reports_[0].exec_);
+    ASSERT_NE(nullptr, report);
+    EXPECT_EQ(CANCELED_ORDSTATUS, report->orderStatus_);
+    EXPECT_EQ(0u, report->leavesQty_);
+    EXPECT_EQ(30u, report->cumQty_);
+}
+
+TEST_F(StateMachineTest, ACorrectionOfACanceledOrderWithNoFillsIsReported)
+{
+    // Zone 1 is New, which has no correction row: zone 2's was the only one, and it reported nothing (#777)
+    TestTransactionContext trCntxt;
+    OrderStateWrapper p;
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+    p.start();
+    std::unique_ptr<TradeExecEntry> trade;
+    OrderEntry *ord = receiveAndFill(p, trCntxt, order.get(), 0, &trade);
+    ASSERT_NE(nullptr, ord);
+    processAbout(p, trCntxt, ord, onExecCancel());
+    p.checkStates("New", "CnclReplaced");
+    trCntxt.clear();
+
+    std::unique_ptr<ExecCorrectExecEntry> correction;
+    correctTo30(p, trCntxt, order.get(), ord, &correction);
+    p.checkStates("New", "CnclReplaced");
+    expectStillClosed(trCntxt, *ord, CANCELED_ORDSTATUS);
+}
+
+TEST_F(StateMachineTest, ACorrectionOfAReplacedOriginalLeavesItReplacedOutOfTheBook)
+{
+    TestTransactionContext trCntxt;
+    OrderStateWrapper p;
+    std::unique_ptr<OrderEntry> order(createCorrectOrder());
+    assignClOrderId(order.get());
+    p.start();
+    std::unique_ptr<TradeExecEntry> trade;
+    OrderEntry *ord = receiveAndFill(p, trCntxt, order.get(), 50, &trade);
+    ASSERT_NE(nullptr, ord);
+    onExecReplace replaced(IdTGenerator::instance()->getId());
+    replaced.generator_ = IdTGenerator::instance();
+    replaced.transaction_ = &trCntxt;
+    replaced.orderStorage_ = OrderStorage::instance();
+    p.processEvent(replaced);
+    p.checkStates("PartFill", "CnclReplaced");
+    ASSERT_EQ(REPLACED_ORDSTATUS, ord->status_);
+    trCntxt.clear();
+
+    std::unique_ptr<ExecCorrectExecEntry> correction;
+    correctTo30(p, trCntxt, order.get(), ord, &correction);
+    p.checkStates("PartFill", "CnclReplaced");
+    expectStillClosed(trCntxt, *ord, REPLACED_ORDSTATUS);
 }
 
 // =============================================================================

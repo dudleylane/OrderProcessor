@@ -560,6 +560,20 @@ void OrdStateImpl::processCorrectedWithoutRestore(OrderEntry *orderData, OrdStat
     orderData->currency_ = crct->currency_;
 }
 
+void OrdStateImpl::processCorrectedClosed(OrderEntry *orderData, OrdState::onTradeCrctCncl const &evnt)
+{
+    const ExecCorrectExecEntry *crct = evnt.correct();
+    if (nullptr == crct)
+    {
+        throw std::runtime_error("Invalid onTradeCrctCncl event - correctExecution is nullptr!");
+    }
+
+    // A closed order has no leaves, whatever closed it (#386): a correction changes its fills, and books nothing (#777)
+    orderData->leavesQty_ = 0;
+    orderData->cumQty_ = crct->cumQty_;
+    orderData->currency_ = crct->currency_;
+}
+
 void OrdStateImpl::processRejectNew(OrderEntry *orderData, OrdState::onOrderRejected const &evnt)
 {
     assert(nullptr != orderData);
