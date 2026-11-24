@@ -67,6 +67,8 @@ struct LoggerImpl
     char buf_[BUFFER_SIZE + 1];
     mutable oneapi::tbb::mutex lock_;
     std::shared_ptr<spdlog::logger> logger_;
+    /// Sees each line too, under lock_ (#783)
+    LogObserver *observer_ = nullptr;
 
     enum LoggingMask
     {
@@ -206,6 +208,10 @@ struct LoggerImpl
 
         oneapi::tbb::mutex::scoped_lock lock(lock_);
         logger_->log(levelOf(flag), "{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg);
+        if (nullptr != observer_) [[unlikely]]
+        {
+            observer_->onLine(prefix, msg);
+        }
     }
 
     void logMessage(const char *msg, char flag, const std::string &prefix)
@@ -217,6 +223,10 @@ struct LoggerImpl
 
         oneapi::tbb::mutex::scoped_lock lock(lock_);
         logger_->log(levelOf(flag), "{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg);
+        if (nullptr != observer_) [[unlikely]]
+        {
+            observer_->onLine(prefix, msg);
+        }
     }
 
     void logMessage(int val, char flag, const std::string &prefix)
@@ -228,6 +238,10 @@ struct LoggerImpl
 
         oneapi::tbb::mutex::scoped_lock lock(lock_);
         logger_->log(levelOf(flag), "{}{}{}] {}", getTimestamp(), prefix, getThreadId(), val);
+        if (nullptr != observer_) [[unlikely]]
+        {
+            observer_->onLine(prefix, std::to_string(val));
+        }
     }
 
     void logMessage(LogMessage &msg, char flag, const std::string &prefix)
@@ -241,6 +255,10 @@ struct LoggerImpl
 
         oneapi::tbb::mutex::scoped_lock lock(lock_);
         logger_->log(levelOf(flag), "{}{}{}] {}", getTimestamp(), prefix, getThreadId(), msg.getMessage());
+        if (nullptr != observer_) [[unlikely]]
+        {
+            observer_->onLine(prefix, msg.getMessage());
+        }
     }
 };
 } // namespace aux
@@ -423,6 +441,13 @@ bool Logger::isFatalOn() const
 {
     assert(nullptr != impl_);
     return impl_->isFlag(LoggerImpl::FATAL_ON_FLAG);
+}
+
+void Logger::setObserver(LogObserver *observer)
+{
+    assert(nullptr != impl_);
+    oneapi::tbb::mutex::scoped_lock lock(impl_->lock_);
+    impl_->observer_ = observer;
 }
 
 void Logger::debug(const std::string &msg)

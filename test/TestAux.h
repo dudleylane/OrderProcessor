@@ -15,6 +15,7 @@
 #include <string>
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <filesystem>
 #include <optional>
 #include <vector>
@@ -29,6 +30,7 @@
 #include "WideDataStorage.h"
 #include "OrderStorage.h"
 #include "IdTGenerator.h"
+#include "Logger.h"
 
 namespace test
 {
@@ -87,6 +89,30 @@ private:
     const std::string path_;
     std::optional<std::string> before_; ///< EXCHANGE_LOG as it was
     bool restored_ = false;
+};
+
+/**
+ * The lines the engine's logger takes while this lives, from any thread, each as it is logged (#783): for a test whose
+ * server or workers log, which CapturedLog can't serve. Each line is its level prefix, ": [Error][" and the like, then
+ * its text, as the logger took it, and is held whether or not spdlog has written it yet. One at a time, and only
+ * while the logger it was made with lives. Defined in TestAux.cpp.
+ */
+class LogTap final : public aux::LogObserver
+{
+public:
+    LogTap();
+    ~LogTap() override;
+    LogTap(const LogTap &) = delete;
+    LogTap &operator=(const LogTap &) = delete;
+
+    void onLine(const std::string &prefix, const std::string &text) override;
+
+    /// Every line taken so far that holds part
+    std::vector<std::string> linesWith(const std::string &part) const;
+
+private:
+    mutable std::mutex lock_;
+    std::vector<std::string> lines_;
 };
 
 // =============================================================================

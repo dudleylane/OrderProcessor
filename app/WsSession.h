@@ -170,8 +170,8 @@ private:
     bool dropped_ = false;
     /// Set once the session closes for a binary frame (#547): it reads on, discarding, until the close is answered
     bool closing_ = false;
-    /// Contained exceptions logged, at most one a second (#547)
-    LogThrottle containedLog_{ std::chrono::seconds(1) };
+    /// Contained exceptions logged, at most one a limits_.containedLogPeriod, a second unless a test says (#547, #783)
+    LogThrottle containedLog_;
 };
 
 } // namespace App
