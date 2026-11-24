@@ -467,25 +467,14 @@ void OrdStateImpl::processFill(OrderEntry *orderData, OrdState::onTradeExecution
 {
     //update order according executed trade
     assert(nullptr != orderData);
-    assert(nullptr != evnt.generator_);
-    assert(nullptr != evnt.orderStorage_);
 
     const TradeExecEntry *trade = evnt.trade();
     assert(nullptr != trade);
 
-    ExecutionEntry ex;
-    ex.type_ = TRADE_EXECTYPE;
-    // When it was matched, the same for every side of the match: it was 1, which read as 1970-01-01 (#612)
-    ex.transactTime_ = trade->transactTime_;
-    ex.orderId_ = orderData->orderId_;
-
-    // The trade's date comes with it: the business day its match counts in (#258)
-    TradeExecEntry tradeEntry(ex, *trade);
-
-    ExecutionEntry *tr = evnt.orderStorage_->save(tradeEntry, evnt.generator_);
-    assert(nullptr != tr);
-
-    orderData->applyTrade(static_cast<TradeExecEntry *>(tr), evnt.dayStart_);
+    // The trade applied to the order's figures, and its day's (#239, #244). The fill stored an entry of its own, kept
+    // for the run with its id on the order's list, which nothing read (#708): the fill's report carries an entry of its
+    // own, with the trade's time (#612) and its business day's date (#258).
+    orderData->applyTrade(trade, evnt.dayStart_);
     // The fill's time, once it applied, set before the state's entry takes the figures its report carries, as its
     // record does (#546)
     orderData->lastUpdateTime_ = trade->transactTime_;
@@ -499,11 +488,6 @@ void OrdStateImpl::processFill(OrderEntry *orderData, OrdState::onTradeExecution
             assert(nullptr != evnt.orderBook_);
             evnt.orderBook_->remove(*orderData);
         }
-        tr->orderStatus_ = FILLED_ORDSTATUS;
-    }
-    else
-    {
-        tr->orderStatus_ = PARTFILL_ORDSTATUS;
     }
 }
 

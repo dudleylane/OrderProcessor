@@ -47,7 +47,7 @@ A single test that submits two FIX orders (sell + buy limit) through the entire 
 | **TransactionScopePool** | `cacheMisses() == 0` | No acquire found every slot in use. Each transaction's scope is still a heap allocation (#515) |
 | **TransactionMgr** | Orders reach terminal state | Transaction dependency tracking + execution |
 | **DeferedEvents** | Both orders filled from single match | ExecutionDeferedEvent chain completed |
-| **TrOperations** | `executions_` contains TRADE_EXECTYPE entry | CreateTradeExecReportTrOperation ran |
+| **TrOperations** | The sell's trade is reported with an execution id of its own, and neither order's `executions_` keeps a report (#708) | CreateTradeExecReportTrOperation ran |
 | **MultiOutQueues** | `recordingOut.count == countingOut.count` | Fan-out to both delegates |
 | **OutQueues** | `tradeReports >= 2` | Execution reports delivered to both sides |
 | **IdTGenerator** | `orderId_.isValid()` and unique per order | Unique ID assignment |

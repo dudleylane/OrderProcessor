@@ -41,7 +41,7 @@ public:
 private:
     /// Unified event type using std::variant for lock-free queue
     using OutEventVariant = std::variant<std::monostate, // Default state for empty initialization
-                                         ExecReportEvent, CancelRejectEvent>;
+                                         KeptExecReport, CancelRejectEvent>;
 
     /// Queued outgoing event with target
     struct QueuedOutEvent

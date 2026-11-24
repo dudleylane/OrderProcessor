@@ -139,7 +139,6 @@ std::unique_ptr<TradeExecEntry> createTradeExec(const OrderEntry &order, const I
     ptr->currency_ = order.currency_;
     ptr->tradeDate_ = 1;
 
-    OrderStorage::instance()->save(ptr.get());
     return ptr;
 }
 
@@ -162,7 +161,6 @@ std::unique_ptr<ExecCorrectExecEntry> createCorrectExec(const OrderEntry &order,
     ptr->currency_ = order.currency_;
     ptr->tradeDate_ = 1;
 
-    OrderStorage::instance()->save(ptr.get());
     return ptr;
 }
 
@@ -1166,18 +1164,18 @@ void expectStillClosed(const TestTransactionContext &trCntxt, const OrderEntry &
     EXPECT_EQ(0u, operationsOf(trCntxt, MATCH_ORDER_TROPERATION)) << "matched again";
 }
 
-/// Keeps the execution reports pushed to it
+/// Keeps the execution reports pushed to it, each with a copy of its execution, which ends with the push (#708)
 class KeptReports final : public Queues::OutQueues
 {
 public:
     void push(const Queues::ExecReportEvent &evnt, const std::string &) override
     {
-        reports_.push_back(evnt);
+        reports_.emplace_back(evnt);
     }
     void push(const Queues::CancelRejectEvent &, const std::string &) override {}
     void push(const Queues::OrderRejectEvent &, const std::string &) override {}
 
-    std::vector<Queues::ExecReportEvent> reports_;
+    std::vector<Queues::KeptExecReport> reports_;
 };
 
 } // namespace
@@ -1279,7 +1277,7 @@ TEST_F(StateMachineTest, ACorrectionOfACanceledPartlyFilledOrderLeavesItCanceled
         }
     }
     ASSERT_EQ(1u, out.reports_.size());
-    const auto *report = dynamic_cast<const ExecCorrectExecEntry *>(out.reports_[0].exec_);
+    const auto *report = dynamic_cast<const ExecCorrectExecEntry *>(out.reports_[0].exec_.get());
     ASSERT_NE(nullptr, report);
     EXPECT_EQ(CANCELED_ORDSTATUS, report->orderStatus_);
     EXPECT_EQ(0u, report->leavesQty_);
