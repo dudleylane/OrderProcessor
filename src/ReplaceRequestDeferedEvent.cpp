@@ -16,8 +16,8 @@ using namespace COP::ACID;
 using namespace COP::OrdState;
 
 ReplaceRequestDeferedEvent::ReplaceRequestDeferedEvent(OrderEntry *original, std::unique_ptr<OrderEntry> replacement,
-                                                       const std::string &requester)
-    : original_(original), replacement_(std::move(replacement)), requester_(requester)
+                                                       const std::string &requester, const std::string &requestId)
+    : original_(original), replacement_(std::move(replacement)), requester_(requester), requestId_(requestId)
 {
     assert(nullptr != original_);
     assert(nullptr != replacement_);
@@ -35,5 +35,5 @@ void ReplaceRequestDeferedEvent::execute(DeferedEventFunctor *func, const Contex
     evnt4Proc.transaction_ = scope;
     evnt4Proc.origOrderId_ = original_->orderId_;
 
-    func->process(evnt4Proc, original_, *replacement_, requester_, cnxt);
+    func->process(evnt4Proc, original_, *replacement_, requester_, requestId_, cnxt);
 }

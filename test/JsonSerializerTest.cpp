@@ -116,6 +116,75 @@ TEST_F(JsonSerializerTest, RejectedReplaceReportCarriesItsReason)
     EXPECT_FALSE(msg["data"].contains("origOrderId"));
 }
 
+TEST_F(JsonSerializerTest, AnErrorNamesTheRequestItAnswers)
+{
+    // By the client's requestId (#683), and only when the request gave one
+    const nlohmann::json named = nlohmann::json::parse(App::serializeError("Unknown instrument: XYZ", "r-1"));
+    EXPECT_EQ("error", named.value("type", ""));
+    EXPECT_EQ("Unknown instrument: XYZ", named.value("message", ""));
+    EXPECT_EQ("r-1", named.value("requestId", ""));
+    EXPECT_FALSE(nlohmann::json::parse(App::serializeError("Unknown message type: hello")).contains("requestId"));
+}
+
+TEST_F(JsonSerializerTest, AnUnstoredRejectHasItsOwnExecutionIdItsClOrdIdsAndItsRequestId)
+{
+    // A replacement the engine refused without storing it: orderId 0, an execution id of its own and its ClOrdIDs
+    // (#545), and the client's id of the request (#683)
+    Queues::OrderRejectEvent refused;
+    refused.replacement_ = true;
+    refused.clOrderId_ = "WS-2";
+    refused.origClOrderId_ = "WS-1";
+    refused.reason_ = "Replace refused: too late";
+    refused.requestId_ = "r-1";
+    refused.execId_ = IdT(77, 1);
+    nlohmann::json j = nlohmann::json::parse(App::serializeUnstoredReject(refused, 1792022400999ULL));
+    EXPECT_EQ("execution_report", j.value("type", ""));
+    const nlohmann::json &data = j["data"];
+    EXPECT_EQ(77u, data.value("execId", 0ULL));
+    EXPECT_EQ(0u, data.value("orderId", 1ULL));
+    EXPECT_EQ("REJECT", data.value("type", ""));
+    EXPECT_EQ("REJECTED", data.value("orderStatus", ""));
+    EXPECT_EQ(1792022400999ULL, data.value("transactTime", 0ULL));
+    EXPECT_EQ("Replace refused: too late", data.value("rejectReason", ""));
+    EXPECT_EQ("WS-2", data.value("clOrderId", ""));
+    EXPECT_EQ("WS-1", data.value("origClOrderId", ""));
+    EXPECT_EQ("r-1", data.value("requestId", ""));
+
+    // A new order's names no original, and one whose request gave no id names no request
+    refused.replacement_ = false;
+    refused.requestId_.clear();
+    j = nlohmann::json::parse(App::serializeUnstoredReject(refused, 1792022400999ULL));
+    EXPECT_EQ("WS-2", j["data"].value("clOrderId", ""));
+    EXPECT_FALSE(j["data"].contains("origClOrderId"));
+    EXPECT_FALSE(j["data"].contains("requestId"));
+}
+
+TEST_F(JsonSerializerTest, AnUnstoredRejectShowsEachClOrdIdAsItsClientGaveIt)
+{
+    // On FX a FIX order's ClOrdID is stored under its session's key, which a WebSocket client isn't shown (#645). A
+    // WebSocket replace of a FIX order, refused unstored, names the original by the FIX client's own ClOrdID, which may
+    // itself hold '|', and its replacement by the ClOrdID the session made
+    Queues::OrderRejectEvent refused;
+    refused.replacement_ = true;
+    refused.clOrderId_ = "WS-2";
+    refused.origClOrderId_ = "FIX:CLIENT_A->OMS|ORD|1";
+    refused.reason_ = "Replace refused: too late";
+    refused.execId_ = IdT(78, 1);
+    nlohmann::json j = nlohmann::json::parse(App::serializeUnstoredReject(refused, 1792022400999ULL, "WebSocket"));
+    EXPECT_EQ("WS-2", j["data"].value("clOrderId", ""));
+    EXPECT_EQ("ORD|1", j["data"].value("origClOrderId", ""));
+
+    // The engine's refusal of a FIX order, which a server with no credentials sends every session, by the client's own
+    // ClOrdID, as its session's source names the key
+    refused.replacement_ = false;
+    refused.clOrderId_ = "FIX:CLIENT_A->OMS|NEW|1";
+    j = nlohmann::json::parse(App::serializeUnstoredReject(refused, 1792022400999ULL, "FIX:CLIENT_A->OMS"));
+    EXPECT_EQ("NEW|1", j["data"].value("clOrderId", ""));
+    // Another session's key stays, as orderToJson() leaves it
+    j = nlohmann::json::parse(App::serializeUnstoredReject(refused, 1792022400999ULL, "FIX:CLIENT_B->OMS"));
+    EXPECT_EQ("FIX:CLIENT_A->OMS|NEW|1", j["data"].value("clOrderId", ""));
+}
+
 TEST_F(JsonSerializerTest, CancelRejectSaysWhy)
 {
     // Each reason the engine gives for refusing a cancel reads differently in cancel_reject (#73)

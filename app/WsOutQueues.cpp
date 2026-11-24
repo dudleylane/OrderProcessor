@@ -69,13 +69,9 @@ void WsOutQueues::push(const Queues::CancelRejectEvent &evnt, const std::string 
 
 void WsOutQueues::push(const Queues::OrderRejectEvent &evnt, const std::string &target)
 {
-    // The order was never stored, so it has no id: a REJECT report with orderId 0, and the reason (#67)
-    RejectExecEntry report;
-    report.type_ = REJECT_EXECTYPE;
-    report.orderStatus_ = REJECTED_ORDSTATUS;
-    report.transactTime_ = aux::currentDateTime();
-    report.market_ = INTERNAL_EXECUTION;
-    report.rejectReason_ = evnt.reason_;
+    // The order was never stored, so it has no id: a REJECT report with orderId 0, and the reason (#67), its own
+    // execution id and the ClOrdIDs (#545), and the request's id (#683). Its time is the clock's: it has no stored
+    // order whose decision it reports (#546).
     // To whoever sent it: nothing was stored, and the report names no order (#225)
-    sessionMgr_->sendToSource(target, serializeExecReport(&report));
+    sessionMgr_->sendToSource(target, serializeUnstoredReject(evnt, aux::currentDateTime(), target));
 }

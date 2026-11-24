@@ -1,4 +1,5 @@
 #include "WsSession.h"
+#include "ClientMessageParser.h"
 #include "InFlightGauge.h"
 #include "ShownClOrdId.h"
 #include "SwapDates.h"
@@ -312,20 +313,23 @@ void WsSession::onRead(beast::error_code ec, std::size_t /*bytesTransferred*/)
     buffer_.consume(buffer_.size());
 
     // One client's request must not take the server down (#36). Without this, an exception would leave
-    // io_context::run() and terminate the process, and this session would stop reading.
+    // io_context::run() and terminate the process, and this session would stop reading. The message is parsed here,
+    // so that the error answering a request the session couldn't handle names it by its requestId (#683).
+    ParsedClientMessage parsed;
     try
     {
-        handleMessage(msg);
+        parsed = parseClientMessage(msg);
+        handleMessage(parsed);
     }
     catch (const std::exception &ex)
     {
         logContained("request", msg, ex.what());
-        send(serializeError("Internal error: request not processed"));
+        send(serializeError("Internal error: request not processed", parsed.requestId));
     }
     catch (...)
     {
         logContained("request", msg, "unknown exception");
-        send(serializeError("Internal error: request not processed"));
+        send(serializeError("Internal error: request not processed", parsed.requestId));
     }
     readWhenUnderBound();
 }
@@ -348,13 +352,13 @@ void WsSession::refuseBinary()
     doRead();
 }
 
-void WsSession::handleMessage(const std::string &msgStr)
+void WsSession::handleMessage(const ParsedClientMessage &msg)
 {
-    auto msg = parseClientMessage(msgStr);
-
+    // Each error that answers a new_order, cancel_order or replace_order names it by its requestId, when the client
+    // gave one (#683), an invalid message's too
     if (msg.type == "error")
     {
-        send(serializeError("Invalid message: " + msg.error));
+        send(serializeError("Invalid message: " + msg.error, msg.requestId));
         return;
     }
 
@@ -389,14 +393,14 @@ void WsSession::handleMessage(const std::string &msgStr)
         }
         if (nullptr != unknown)
         {
-            send(serializeError(std::string("Order refused: ") + unknown +
-                                " is missing, or isn't one the server knows"));
+            send(serializeError(std::string("Order refused: ") + unknown + " is missing, or isn't one the server knows",
+                                msg.requestId));
             return;
         }
         // A GTD order expires at its expireTime (#240), which must be ahead of it
         if ((GTD_TIF == no.tif) && (no.expireTime <= nowMillis()))
         {
-            send(serializeError("Order refused: expireTime has passed"));
+            send(serializeError("Order refused: expireTime has passed", msg.requestId));
             return;
         }
 
@@ -404,7 +408,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         SourceIdT instrId = wideData_->findInstrumentBySymbol(no.symbol);
         if (!instrId.isValid())
         {
-            send(serializeError("Unknown instrument: " + no.symbol));
+            send(serializeError("Unknown instrument: " + no.symbol, msg.requestId));
             return;
         }
 
@@ -416,7 +420,8 @@ void WsSession::handleMessage(const std::string &msgStr)
             acctId = no.account.empty() ? identity_->defaultAccount : wideData_->findAccountByName(no.account);
             if (!acctId.isValid() || !identity_->mayUse(acctId))
             {
-                send(serializeError("Order refused: account " + no.account + " isn't one this connection may trade"));
+                send(serializeError("Order refused: account " + no.account + " isn't one this connection may trade",
+                                    msg.requestId));
                 return;
             }
         }
@@ -426,20 +431,21 @@ void WsSession::handleMessage(const std::string &msgStr)
             acctId = wideData_->findAccountByName(no.account);
             if (!acctId.isValid())
             {
-                send(serializeError("Unknown account: " + no.account));
+                send(serializeError("Unknown account: " + no.account, msg.requestId));
                 return;
             }
         }
         else if (!acctId.isValid())
         {
-            send(serializeError("Order refused: it names no account, and the server has no default account"));
+            send(serializeError("Order refused: it names no account, and the server has no default account",
+                                msg.requestId));
             return;
         }
 
         // Every order clears through the server's clearing firm (#34)
         if (!defaultClearingId_.isValid())
         {
-            send(serializeError("Order refused: the server has no clearing firm"));
+            send(serializeError("Order refused: the server has no clearing firm", msg.requestId));
             return;
         }
 
@@ -481,6 +487,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         order->lastUpdateTime_ = order->creationTime_;
 
         Queues::OrderEvent evt(order);
+        evt.requestId_ = msg.requestId; // which the engine's refusal of it, unstored, hands back (#683)
         inQueues_->push(srcStr, evt);
     }
     else if (msg.type == "new_swap_order")
@@ -509,15 +516,15 @@ void WsSession::handleMessage(const std::string &msgStr)
         }
         if (nullptr != unknown)
         {
-            send(serializeError(std::string("Order refused: ") + unknown +
-                                " is missing, or isn't one the server knows"));
+            send(serializeError(std::string("Order refused: ") + unknown + " is missing, or isn't one the server knows",
+                                msg.requestId));
             return;
         }
 
         SourceIdT instrId = wideData_->findInstrumentBySymbol(so.symbol);
         if (!instrId.isValid())
         {
-            send(serializeError("Unknown instrument: " + so.symbol));
+            send(serializeError("Unknown instrument: " + so.symbol, msg.requestId));
             return;
         }
 
@@ -529,7 +536,8 @@ void WsSession::handleMessage(const std::string &msgStr)
             acctId = so.account.empty() ? identity_->defaultAccount : wideData_->findAccountByName(so.account);
             if (!acctId.isValid() || !identity_->mayUse(acctId))
             {
-                send(serializeError("Order refused: account " + so.account + " isn't one this connection may trade"));
+                send(serializeError("Order refused: account " + so.account + " isn't one this connection may trade",
+                                    msg.requestId));
                 return;
             }
         }
@@ -538,18 +546,19 @@ void WsSession::handleMessage(const std::string &msgStr)
             acctId = wideData_->findAccountByName(so.account);
             if (!acctId.isValid())
             {
-                send(serializeError("Unknown account: " + so.account));
+                send(serializeError("Unknown account: " + so.account, msg.requestId));
                 return;
             }
         }
         else if (!acctId.isValid())
         {
-            send(serializeError("Order refused: it names no account, and the server has no default account"));
+            send(serializeError("Order refused: it names no account, and the server has no default account",
+                                msg.requestId));
             return;
         }
         if (!defaultClearingId_.isValid())
         {
-            send(serializeError("Order refused: the server has no clearing firm"));
+            send(serializeError("Order refused: the server has no clearing firm", msg.requestId));
             return;
         }
 
@@ -558,7 +567,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         const DateTimeT now = nowMillis();
         if ((GTD_TIF == so.tif) && (so.expireTime <= now))
         {
-            send(serializeError("Order refused: expireTime has passed"));
+            send(serializeError("Order refused: expireTime has passed", msg.requestId));
             return;
         }
         // Its settlement dates, as the FIX gateway checks them (#551)
@@ -566,7 +575,7 @@ void WsSession::handleMessage(const std::string &msgStr)
                 swapDatesRefusal(so.settlDate, so.farSettlDate,
                                  Proc::ExpiryScheduler::tradeDateOf(Proc::ExpiryScheduler::dayStartOf(now))))
         {
-            send(serializeError("Order refused: " + *refusal));
+            send(serializeError("Order refused: " + *refusal, msg.requestId));
             return;
         }
 
@@ -612,6 +621,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         order->lastUpdateTime_ = order->creationTime_;
 
         Queues::OrderEvent evt(order);
+        evt.requestId_ = msg.requestId; // as for new_order: the engine's refusal of it, unstored, hands it back (#683)
         inQueues_->push(srcStr, evt);
     }
     else if (msg.type == "cancel_order")
@@ -620,7 +630,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         // number, so the client gets a cancel_reject naming it (#58)
         const u64 number = msg.cancelOrder.orderId;
         bool answered = false;
-        OrderEntry *order = findOrder(number, msg.cancelOrder.clOrderId, &answered);
+        OrderEntry *order = findOrder(number, msg.cancelOrder.clOrderId, msg.requestId, &answered);
         if (answered)
         {
             return;
@@ -633,24 +643,25 @@ void WsSession::handleMessage(const std::string &msgStr)
         const auto &ro = msg.replaceOrder;
         if (!ro.hasPrice && !ro.hasStopPx && !ro.hasQty && !ro.hasTif && !ro.hasExpireTime)
         {
-            send(serializeError("replace_order changes nothing: give price, stopPx, orderQty, tif or expireTime"));
+            send(serializeError("replace_order changes nothing: give price, stopPx, orderQty, tif or expireTime",
+                                msg.requestId));
             return;
         }
         // As for a new order (#166): a tif the server doesn't know would reach every client as "INVALID"
         if (ro.hasTif && (INVALID_TIF == ro.tif))
         {
-            send(serializeError("Replace refused: tif isn't one the server knows"));
+            send(serializeError("Replace refused: tif isn't one the server knows", msg.requestId));
             return;
         }
         bool answered = false;
-        OrderEntry *original = findOrder(ro.orderId, ro.clOrderId, &answered);
+        OrderEntry *original = findOrder(ro.orderId, ro.clOrderId, msg.requestId, &answered);
         if (answered)
         {
             return;
         }
         if (nullptr == original)
         {
-            send(serializeError("Order not found for replace: " + std::to_string(ro.orderId)));
+            send(serializeError("Order not found for replace: " + std::to_string(ro.orderId), msg.requestId));
             return;
         }
 
@@ -666,7 +677,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         // release can run before the replace does.
         if (ro.hasStopPx && (STOP_ORDERTYPE != replacement->ordType_) && (STOPLIMIT_ORDERTYPE != replacement->ordType_))
         {
-            send(serializeError("Replace refused: stopPx is only for a STOP or STOPLIMIT order"));
+            send(serializeError("Replace refused: stopPx is only for a STOP or STOPLIMIT order", msg.requestId));
             return;
         }
         // A GTD replacement expires at its expireTime, the original's or a new one ahead of it, and only a GTD order
@@ -690,7 +701,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         }
         if (nullptr != expiryRefusal)
         {
-            send(serializeError(expiryRefusal));
+            send(serializeError(expiryRefusal, msg.requestId));
             return;
         }
         replacement->expireTime_ = (GTD_TIF != tif) ? 0 : (ro.hasExpireTime ? ro.expireTime : replacement->expireTime_);
@@ -717,6 +728,7 @@ void WsSession::handleMessage(const std::string &msgStr)
         replacement->lastUpdateTime_ = nowMillis();
 
         Queues::OrderReplaceEvent evt(original->orderId_, replacement.release());
+        evt.requestId_ = msg.requestId; // which the engine's refusal of it hands back (#683)
         inQueues_->push(source(), evt);
     }
     else if (msg.type == "subscribe_book")
@@ -823,7 +835,7 @@ bool WsSession::maySee(const SourceIdT &account) const
     return !identity_ || identity_->mayUse(account);
 }
 
-OrderEntry *WsSession::findOrder(u64 number, const std::string &clOrdId, bool *answered)
+OrderEntry *WsSession::findOrder(u64 number, const std::string &clOrdId, const std::string &requestId, bool *answered)
 {
     *answered = false;
     // Another identity's order is one this session can't name (#225): as if there were none, so the client learns
@@ -851,7 +863,7 @@ OrderEntry *WsSession::findOrder(u64 number, const std::string &clOrdId, bool *a
         }
         if ((nullptr != order) && (number != order->orderId_.id_))
         {
-            send(serializeError("Order " + std::to_string(number) + " does not have ClOrdID " + clOrdId));
+            send(serializeError("Order " + std::to_string(number) + " does not have ClOrdID " + clOrdId, requestId));
             *answered = true;
             return nullptr;
         }
@@ -861,8 +873,8 @@ OrderEntry *WsSession::findOrder(u64 number, const std::string &clOrdId, bool *a
     OrderEntry *order = orderStorage_->locateByOrderNumber(number, &ambiguous);
     if (ambiguous)
     {
-        send(serializeError("More than one order has number " + std::to_string(number) +
-                            ": name it by clOrderId as well"));
+        send(serializeError(
+            "More than one order has number " + std::to_string(number) + ": name it by clOrderId as well", requestId));
         *answered = true;
     }
     return visible(order);

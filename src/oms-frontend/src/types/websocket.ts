@@ -18,7 +18,7 @@ export type ServerMessage =
   | { type: 'account_list'; data: Account[] }
   | { type: 'cancel_reject'; data: { orderId: number; reason: string } }
   | { type: 'metrics_update'; data: SystemMetrics }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; requestId?: string };
 
 /** Client → Server messages */
 export type ClientMessage =

@@ -2352,10 +2352,12 @@ void FixGateway::sendOrderReject(const Queues::OrderRejectEvent &evnt, const std
         }
         else
         {
-            // The order was never stored, so its reject has no execution of its own. Its ExecID still comes from the
-            // shared id generator, whose saved limit keeps it from repeating after a restart, as execution ids don't
-            // (#81); a counter of the gateway's own started again at R1 in every run.
-            const u64 execId = IdTGenerator::instance()->getId().id_;
+            // The order was never stored, so its reject has no execution of its own. Its ExecID is the id the engine
+            // drew for the refusal (#545), so the WebSocket clients that see it and the counterparty number it alike:
+            // from the shared id generator, whose saved limit keeps it from repeating after a restart (#81), where a
+            // counter of the gateway's own started again at R1 in every run. A refusal made without one, as only a
+            // test makes it, draws one here.
+            const u64 execId = evnt.execId_.isValid() ? evnt.execId_.id_ : IdTGenerator::instance()->getId().id_;
             // A duplicate's reject carries the status of the order that has its ClOrdID, as EP284's F.1.a combines them
             // (#382). The gateway answers its sessions' duplicates before the engine sees them (answerRepeatedOrder()),
             // so this is for one it didn't: that order is read from the store alone, since the gateway's record of

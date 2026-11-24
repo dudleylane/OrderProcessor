@@ -49,9 +49,10 @@ public:
     /// A client's cancel of the order; a refusal goes to the requester (#73)
     virtual void process(OrdState::onExecCancel &evnt, OrderEntry *order, const std::string &requester,
                          const ACID::Context &cnxt) = 0;
-    /// A client's replace of the original; the caller keeps the replacement, and a refusal goes to the requester (#74)
+    /// A client's replace of the original; the caller keeps the replacement, and a refusal goes to the requester (#74),
+    /// naming the request by requestId when its client gave one (#683)
     virtual void process(OrdState::onReplace &evnt, OrderEntry *original, OrderEntry &replacement,
-                         const std::string &requester, const ACID::Context &cnxt) = 0;
+                         const std::string &requester, const std::string &requestId, const ACID::Context &cnxt) = 0;
     /// A state change of the order, decided into scope (#96)
     virtual void process(OrderStateChange change, OrderEntry *order, ACID::Scope *scope, const ACID::Context &cnxt) = 0;
 };
@@ -175,9 +176,10 @@ struct ReplaceRequestDeferedEvent : public DeferedEventBase
     OrderEntry *original_;
     std::unique_ptr<OrderEntry> replacement_;
     std::string requester_;
+    std::string requestId_; // the WebSocket client's id of the replace request, if it gave one (#683)
 
     ReplaceRequestDeferedEvent(OrderEntry *original, std::unique_ptr<OrderEntry> replacement,
-                               const std::string &requester);
+                               const std::string &requester, const std::string &requestId = std::string());
     ~ReplaceRequestDeferedEvent();
 
     void execute(DeferedEventFunctor *func, const ACID::Context &cnxt, ACID::Scope *scope) override;

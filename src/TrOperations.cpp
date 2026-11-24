@@ -584,9 +584,9 @@ void CancelRejectTrOperation::execute(const Context &cnxt)
 void CancelRejectTrOperation::rollback(const Context &) {}
 
 ReplaceOrderTrOperation::ReplaceOrderTrOperation(OrderEntry *original, std::unique_ptr<OrderEntry> replacement,
-                                                 const std::string &requester)
+                                                 const std::string &requester, const std::string &requestId)
     : BookOperation(REPLACE_ORDER_TROPERATION, *original), original_(original), replacement_(std::move(replacement)),
-      requester_(requester), eventCountBefore_(0)
+      requester_(requester), requestId_(requestId), eventCountBefore_(0)
 {
 }
 
@@ -600,7 +600,7 @@ void ReplaceOrderTrOperation::execute(const Context &cnxt)
     }
     eventCountBefore_ = cnxt.deferedEvents_->deferedEventCount();
     cnxt.deferedEvents_->addDeferedEvent(
-        new ReplaceRequestDeferedEvent(original_, std::move(replacement_), requester_));
+        new ReplaceRequestDeferedEvent(original_, std::move(replacement_), requester_, requestId_));
 }
 
 void ReplaceOrderTrOperation::rollback(const Context &cnxt)

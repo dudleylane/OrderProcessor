@@ -35,7 +35,7 @@ public:
                 (override));
     MOCK_METHOD(void, process,
                 (COP::OrdState::onReplace & evnt, COP::OrderEntry *original, COP::OrderEntry &replacement,
-                 const std::string &requester, const COP::ACID::Context &cnxt),
+                 const std::string &requester, const std::string &requestId, const COP::ACID::Context &cnxt),
                 (override));
     MOCK_METHOD(void, process,
                 (COP::Proc::OrderStateChange change, COP::OrderEntry *order, COP::ACID::Scope *scope,

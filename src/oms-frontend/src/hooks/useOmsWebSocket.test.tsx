@@ -159,7 +159,9 @@ describe('notices (#521)', () => {
       taken = hook.result.current.sendSwapOrder(SWAP);
     });
     expect(taken).toBe(true);
-    expect(live().messages()).toEqual([{ type: 'new_swap_order', data: SWAP }]);
+    expect(live().messages()).toEqual([
+      { type: 'new_swap_order', data: { ...SWAP, requestId: expect.stringMatching(REQUEST_ID) } },
+    ]);
     expect(hook.result.current.notices).toEqual([]);
   });
 
@@ -171,8 +173,142 @@ describe('notices (#521)', () => {
       taken = hook.result.current.cancelOrder(7, 'cl-7');
     });
     expect(taken).toBe(true);
-    expect(live().messages()).toEqual([{ type: 'cancel_order', data: { orderId: 7, clOrderId: 'cl-7' } }]);
+    expect(live().messages()).toEqual([
+      { type: 'cancel_order', data: { orderId: 7, clOrderId: 'cl-7', requestId: expect.stringMatching(REQUEST_ID) } },
+    ]);
     expect(hook.result.current.notices).toEqual([]);
+  });
+});
+
+/** What the hook's request ids look like (#683): 12 of A-Z a-z 0-9 _ - */
+const REQUEST_ID = /^[A-Za-z0-9_-]{12}$/;
+
+/** The requestId of each message the hook sent, in order */
+function requestIds(): string[] {
+  return live()
+    .messages()
+    .map(m => (m as { data: { requestId: string } }).data.requestId);
+}
+
+describe('request ids (#683)', () => {
+  it('gives each request an id of its own, and names the request in the notice of a refusal that echoes it', () => {
+    const hook = renderOms();
+    act(() => live().open());
+    act(() => {
+      hook.result.current.sendOrder(ORDER);
+      hook.result.current.cancelOrder(7);
+      hook.result.current.replaceOrder({ orderId: 8, price: 11 });
+    });
+    const [order, cancel, replace] = requestIds();
+    for (const id of [order, cancel, replace]) expect(id).toMatch(REQUEST_ID);
+    expect(new Set([order, cancel, replace]).size).toBe(3);
+
+    act(() => live().receive({ type: 'error', message: 'Unknown instrument: AAA', requestId: order }));
+    const reject = rejectReport(0, 'Replace refused: too late');
+    act(() => live().receive({ ...reject, data: { ...reject.data, requestId: replace } }));
+    act(() => live().receive({ type: 'error', message: 'More than one order has number 7', requestId: cancel }));
+    expect(hook.result.current.notices.map(n => [n.kind, n.text])).toEqual([
+      ['error', 'Cancel of order 7: More than one order has number 7'],
+      ['reject', 'Replace of order 8: Replace refused: too late'],
+      ['error', 'New order (BUY 10 AAA): Unknown instrument: AAA'],
+    ]);
+  });
+
+  it('gives a swap an id too, and names it in the notice of a refusal that echoes it (FX)', () => {
+    const hook = renderOms();
+    act(() => live().open());
+    act(() => {
+      hook.result.current.sendSwapOrder(SWAP);
+    });
+    const [swap] = requestIds();
+    expect(swap).toMatch(REQUEST_ID);
+    act(() =>
+      live().receive({ type: 'error', message: 'Order refused: farSettlDate must follow settlDate', requestId: swap }),
+    );
+    expect(hook.result.current.notices.map(n => [n.kind, n.text])).toEqual([
+      ['error', 'New swap (BUY 100 AAA): Order refused: farSettlDate must follow settlDate'],
+    ]);
+  });
+
+  it("names no request for an id it didn't send, nor for one already answered", () => {
+    const hook = renderOms();
+    act(() => live().open());
+    act(() => {
+      hook.result.current.sendOrder(ORDER);
+    });
+    const [order] = requestIds();
+    act(() => live().receive({ type: 'error', message: 'first', requestId: order }));
+    act(() => live().receive({ type: 'error', message: 'again', requestId: order }));
+    act(() => live().receive({ type: 'error', message: "another tab's", requestId: 'zzzzzzzzzzzz' }));
+    expect(hook.result.current.notices.map(n => n.text)).toEqual([
+      "another tab's",
+      'again',
+      'New order (BUY 10 AAA): first',
+    ]);
+  });
+
+  it("names a cancel in the engine's cancel_reject, which names its order, and forgets one the engine accepted", () => {
+    const hook = renderOms();
+    act(() => live().open());
+    act(() => {
+      hook.result.current.cancelOrder(7);
+      hook.result.current.cancelOrder(9);
+    });
+    act(() => live().receive({ type: 'cancel_reject', data: { orderId: 7, reason: 'Cancel rejected: too late' } }));
+    act(() =>
+      live().receive({
+        type: 'execution_report',
+        data: { execId: 3, orderId: 9, type: ExecType.CANCEL, orderStatus: OrderStatus.CANCELED, market: '', transactTime: 0 },
+      }),
+    );
+    act(() => live().receive({ type: 'cancel_reject', data: { orderId: 9, reason: 'Cancel rejected: too late' } }));
+    expect(hook.result.current.notices.map(n => n.text)).toEqual([
+      'Order 9: Cancel rejected: too late',
+      'Cancel of order 7: Cancel rejected: too late',
+    ]);
+  });
+
+  it('forgets every request when its socket closes: nothing answers one on the next connection', () => {
+    const hook = renderOms();
+    act(() => live().open());
+    act(() => {
+      hook.result.current.sendOrder(ORDER);
+    });
+    const [order] = requestIds();
+    act(() => live().drop());
+    advance(RECONNECT_DELAY);
+    act(() => live().open());
+    act(() => live().receive({ type: 'error', message: 'late', requestId: order }));
+    expect(hook.result.current.notices.map(n => n.text)).toEqual(['late']);
+  });
+
+  it('remembers the newest 100 requests, none older than ten minutes', () => {
+    const hook = renderOms();
+    act(() => live().open());
+    act(() => {
+      for (let i = 0; i < 101; i++) hook.result.current.cancelOrder(i + 1);
+    });
+    const ids = requestIds();
+    advance(9 * 60 * 1000);
+    act(() => {
+      hook.result.current.sendOrder(ORDER);
+    });
+    advance(2 * 60 * 1000); // the cancels are 11 minutes old, the order 2
+    act(() => {
+      hook.result.current.cancelOrder(500);
+    });
+    const [order, last] = requestIds().slice(101);
+    // The first cancel went when the 101st came, the third when the cancels were over ten minutes old
+    act(() => live().receive({ type: 'error', message: 'first cancel', requestId: ids[0] }));
+    act(() => live().receive({ type: 'error', message: 'third cancel', requestId: ids[2] }));
+    act(() => live().receive({ type: 'error', message: 'order', requestId: order }));
+    act(() => live().receive({ type: 'error', message: 'last', requestId: last }));
+    expect(hook.result.current.notices.map(n => n.text)).toEqual([
+      'Cancel of order 500: last',
+      'New order (BUY 10 AAA): order',
+      'third cancel',
+      'first cancel',
+    ]);
   });
 });
 
