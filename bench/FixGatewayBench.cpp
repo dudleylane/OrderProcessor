@@ -377,6 +377,48 @@ static void BM_FixNewOrderSingleTranslation(benchmark::State &state)
 }
 BENCHMARK(BM_FixNewOrderSingleTranslation)->UseManualTime();
 
+/// BM_FixNewOrderSingleTranslation for a GTD order, whose ExpireTime (126) the gateway checks in expiryRefusal(): ahead
+/// of now, and no later than the latest time the server can wait until, #511's check, which went in untimed (#668). A
+/// DAY order, as the benchmark above sends, never reaches it. Each order must reach the engine's queue, or the
+/// benchmark fails: a refusal times another path.
+static void BM_FixNewOrderSingleTranslationGtd(benchmark::State &state)
+{
+    FixBenchSetup setup;
+    IncomingQueues inQueues;
+    BenchInFlight inFlight;
+    FixGateway gateway(&inQueues, WideDataStorage::instance(), OrderStorage::instance(), setup.clearingId_);
+    gateway.setInFlightGauge(inFlight.gauge());
+    const std::string source = FixGateway::makeSourceString(BENCH_SID);
+    // A day ahead, made once a run, outside every timed span
+    const DateTimeT now = static_cast<DateTimeT>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count());
+    const FIX::UtcTimeStamp expiry = FixGateway::toUtcTimeStamp(now + 24ULL * 60 * 60 * 1000);
+
+    int ordNum = 0;
+    for (auto _ : state)
+    {
+        std::string clOrdId = "GTD-" + std::to_string(++ordNum);
+        auto msg = makeBenchNOS(clOrdId, FIX::Side_BUY, FIX::OrdType_LIMIT, 1.2650, 100);
+        msg.set(FIX::TimeInForce(FIX::TimeInForce_GOOD_TILL_DATE));
+        msg.set(FIX::ExpireTime(expiry));
+        const auto start = std::chrono::steady_clock::now();
+        gateway.onMessage(msg, BENCH_SID);
+        state.SetIterationTime(secondsSince(start));
+
+        OrderRejectEvent answer;
+        answer.clOrderId_ = FixGateway::sessionClOrdId(source, clOrdId); // as the engine names it, stored (#71)
+        gateway.sendOrderReject(answer, source);
+    }
+    // The queue has no processor, so it holds every order it was handed
+    if (inQueues.size() != static_cast<u32>(ordNum))
+    {
+        state.SkipWithError("the gateway didn't hand every GTD order to the engine's queue");
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_FixNewOrderSingleTranslationGtd)->UseManualTime();
+
 /// The gateway's handling of an FX swap, a NewOrderMultileg, timed and answered as BM_FixNewOrderSingleTranslation
 /// times and answers a NewOrderSingle. Every swap a counterparty sends enters here, and nothing timed it until #516,
 /// which checks one more field in it. Each swap must reach the engine's queue, or the benchmark fails: a refusal times
