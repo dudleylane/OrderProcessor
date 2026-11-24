@@ -17,6 +17,7 @@
 #include <utility>
 #include "Processor.h"
 #include "ExpiryScheduler.h"
+#include "IdTGenerator.h"
 #include "TransactionDef.h"
 #include "StateMachine.h"
 #include "TransactionScope.h"
@@ -208,7 +209,7 @@ void Processor::onEvent(const std::string &source, const OrderEvent &evnt)
     if (smState.orderData_ == evnt.order_) [[unlikely]]
     {
         publishGuard.release();
-        rejectUnstoredOrder(source, *evnt.order_, false);
+        rejectUnstoredOrder(source, *evnt.order_, false, evnt.requestId_);
         return;
     }
     smState.orderData_->setStateMachinePersistance(smState);
@@ -283,11 +284,14 @@ void Processor::onEvent(const std::string &source, const OrderReplaceEvent &evnt
         {
             refusal.replacement_ = true;
             refusal.reason_ = "Replace refused: it carries no replacement order";
+            refusal.requestId_ = evnt.requestId_;
+            assert(nullptr != generator_);
+            refusal.execId_ = generator_->getId();
         }
         else
         {
             refusal = makeReplaceRefusal(*evnt.replacementOrder_, nullptr, CancelRejectEvent::UNKNOWN_ORDER,
-                                         "Replace refused: unknown order");
+                                         "Replace refused: unknown order", evnt.requestId_);
         }
         assert(nullptr != outQueues_);
         outQueues_->push(refusal, source);
@@ -300,8 +304,8 @@ void Processor::onEvent(const std::string &source, const OrderReplaceEvent &evnt
     // The queue frees the event's replacement after dispatch, so the operation keeps a copy
     PooledTransactionScope scope(scopePool_.get());
     ScopeArenaGuard arenaGuard(scope.get());
-    std::unique_ptr<Operation> op(
-        new ReplaceOrderTrOperation(original, std::unique_ptr<OrderEntry>(evnt.replacementOrder_->clone()), source));
+    std::unique_ptr<Operation> op(new ReplaceOrderTrOperation(
+        original, std::unique_ptr<OrderEntry>(evnt.replacementOrder_->clone()), source, evnt.requestId_));
     scope->addOperation(op);
 
     // enqueue transaction
@@ -813,7 +817,7 @@ bool noCancelOrReplacePending(const OrderEntry &order)
 } // namespace
 
 void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEntry &replacement,
-                        const std::string &requester, const ACID::Context &cnxt)
+                        const std::string &requester, const std::string &requestId, const ACID::Context &cnxt)
 {
     evnt.generator_ = generator_;
     evnt.orderStorage_ = orderStorage_;
@@ -821,7 +825,7 @@ void Processor::process(OrdState::onReplace &evnt, OrderEntry *original, OrderEn
     // A refusal goes out through this transaction, in order with the original's other reports
     auto refuse = [&](CancelRejectEvent::Reason refusal, const std::string &reason, bool duplicate)
     {
-        OrderRejectEvent event = makeReplaceRefusal(replacement, original, refusal, reason);
+        OrderRejectEvent event = makeReplaceRefusal(replacement, original, refusal, reason, requestId);
         event.duplicateClOrderId_ = duplicate;
         std::unique_ptr<Operation> op(new RefuseReplaceTrOperation(*original, event, requester));
         evnt.transaction_->addOperation(op);
@@ -1231,7 +1235,8 @@ bool Processor::claimStopRelease(const IdT &order)
     return threadState().stopReleases.insert(order).second;
 }
 
-void Processor::rejectUnstoredOrder(const std::string &source, const OrderEntry &order, bool replacement)
+void Processor::rejectUnstoredOrder(const std::string &source, const OrderEntry &order, bool replacement,
+                                    const std::string &requestId)
 {
     clearDeferedEvents();
     auto text = [](const RawDataEntry &raw)
@@ -1240,6 +1245,11 @@ void Processor::rejectUnstoredOrder(const std::string &source, const OrderEntry 
     };
     OrderRejectEvent reject;
     reject.replacement_ = replacement;
+    reject.requestId_ = requestId;
+    // An execution id of its own, as each report of a stored order has (#545), drawn on this event worker: never on a
+    // WebSocket session's thread, since a draw can save the generator's next limit (#81)
+    assert(nullptr != generator_);
+    reject.execId_ = generator_->getId();
     reject.side_ = order.side_;
     reject.orderQty_ = order.orderQty_;
     try
@@ -1265,7 +1275,8 @@ void Processor::rejectUnstoredOrder(const std::string &source, const OrderEntry 
 }
 
 OrderRejectEvent Processor::makeReplaceRefusal(const OrderEntry &replacement, const OrderEntry *original,
-                                               CancelRejectEvent::Reason refusal, const std::string &reason)
+                                               CancelRejectEvent::Reason refusal, const std::string &reason,
+                                               const std::string &requestId)
 {
     auto text = [](const RawDataEntry &raw)
     {
@@ -1277,6 +1288,10 @@ OrderRejectEvent Processor::makeReplaceRefusal(const OrderEntry &replacement, co
     event.side_ = replacement.side_;
     event.orderQty_ = replacement.orderQty_;
     event.reason_ = reason;
+    event.requestId_ = requestId;
+    // An execution id of its own (#545), drawn on this engine worker, as rejectUnstoredOrder() draws a new order's
+    assert(nullptr != generator_);
+    event.execId_ = generator_->getId();
     // Each reference is resolved on its own, so that one that can't be resolved costs only its own field (#611). In one
     // try, the symbol's lookup, second, threw past the original's ClOrdID and status, and the client got a refusal that
     // didn't say which order it refused to replace, or in what state.

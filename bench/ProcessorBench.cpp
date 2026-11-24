@@ -702,7 +702,11 @@ static void BM_ProcessReplaceOrder(benchmark::State &state)
     size_t next = 0;
     for (auto _ : state)
     {
-        engine.timeEvent(state, OrderReplaceEvent(resting[next], engine.replacementOf(resting[next], 101.0)));
+        // With a request id of the length the UI sends (#683), which the event carries to the replace's decision on the
+        // transaction worker: an empty one would time only the path no client of the UI takes
+        OrderReplaceEvent replace(resting[next], engine.replacementOf(resting[next], 101.0));
+        replace.requestId_ = "r3Kf9_x-Lq2A";
+        engine.timeEvent(state, replace);
         ++next;
     }
     state.SetItemsProcessed(state.iterations());

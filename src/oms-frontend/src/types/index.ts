@@ -97,6 +97,12 @@ export interface TradeExecution extends ExecutionReport {
 export interface RejectExecution extends ExecutionReport {
   type: ExecType.REJECT | ExecType.REPLACE | ExecType.PEND_REPLACE;
   rejectReason: string;
+  /** An order or replacement the server never stored (orderId 0): its ClOrdID (#545) */
+  clOrderId?: string;
+  /** A replacement the server never stored: the ClOrdID of the order it was to replace (#545) */
+  origClOrderId?: string;
+  /** An order or replacement the server never stored: the requestId its request gave (#683) */
+  requestId?: string;
 }
 
 /** Maps to C++ ReplaceExecEntry */
@@ -171,16 +177,22 @@ export interface NewOrderRequest {
   // Required by the server, which refuses an order without them (#166)
   currency: Currency;
   capacity: Capacity;
+  /** The client's id of the request, which the answers that refuse it echo (#683): 1 to 36 of A-Z a-z 0-9 _ - */
+  requestId?: string;
 }
 
 export interface CancelOrderRequest {
   orderId: number;
   clOrderId?: string;
+  /** The client's id of the request, which the server's own errors answering it echo (#683) */
+  requestId?: string;
 }
 
 export interface ReplaceOrderRequest {
   orderId: number;
   clOrderId?: string;
+  /** The client's id of the request, which the answers that refuse it echo (#683) */
+  requestId?: string;
   price?: number;
   /** A held STOP or STOPLIMIT order's new stop (#238) */
   stopPx?: number;

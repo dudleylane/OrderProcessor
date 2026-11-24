@@ -173,17 +173,22 @@ protected:
     }
 
     /// Takes a copy of the order the session queued, polling until the timeout, since the session runs on its own
-    /// thread. A zero timeout polls once. Returns null when nothing was queued.
-    std::unique_ptr<OrderEntry> takeQueuedOrder(std::chrono::milliseconds timeout = REPLY_TIMEOUT)
+    /// thread. A zero timeout polls once. Returns null when nothing was queued. requestId, if given, gets the event's.
+    std::unique_ptr<OrderEntry> takeQueuedOrder(std::chrono::milliseconds timeout = REPLY_TIMEOUT,
+                                                std::string *requestId = nullptr)
     {
         std::unique_ptr<OrderEntry> order;
         testing::NiceMock<test::MockInQueueProcessor> processor;
         // pop() deletes the event's order after dispatch, so keep a copy
         ON_CALL(processor, onEvent(testing::_, testing::An<const Queues::OrderEvent &>()))
             .WillByDefault(
-                [&order](const std::string &, const Queues::OrderEvent &evnt)
+                [&order, requestId](const std::string &, const Queues::OrderEvent &evnt)
                 {
                     order.reset(evnt.order_->clone());
+                    if (nullptr != requestId)
+                    {
+                        *requestId = evnt.requestId_;
+                    }
                 });
         const auto deadline = std::chrono::steady_clock::now() + timeout;
         while (!inQueues_.pop(&processor) && std::chrono::steady_clock::now() < deadline)
@@ -237,18 +242,22 @@ protected:
     /// Takes the replace the session queued, with a copy of its replacement, polling as takeQueuedOrder() does. Empty
     /// when nothing was queued.
     std::optional<std::pair<IdT, std::unique_ptr<OrderEntry>>>
-    takeQueuedReplace(std::chrono::milliseconds timeout = REPLY_TIMEOUT)
+    takeQueuedReplace(std::chrono::milliseconds timeout = REPLY_TIMEOUT, std::string *requestId = nullptr)
     {
         std::optional<std::pair<IdT, std::unique_ptr<OrderEntry>>> replace;
         testing::NiceMock<test::MockInQueueProcessor> processor;
         // pop() frees the event's replacement after dispatch, so keep a copy (#74)
         ON_CALL(processor, onEvent(testing::_, testing::An<const Queues::OrderReplaceEvent &>()))
             .WillByDefault(
-                [&replace](const std::string &, const Queues::OrderReplaceEvent &evnt)
+                [&replace, requestId](const std::string &, const Queues::OrderReplaceEvent &evnt)
                 {
                     replace.emplace(evnt.id_, std::unique_ptr<OrderEntry>(nullptr != evnt.replacementOrder_
                                                                               ? evnt.replacementOrder_->clone()
                                                                               : nullptr));
+                    if (nullptr != requestId)
+                    {
+                        *requestId = evnt.requestId_;
+                    }
                 });
         const auto deadline = std::chrono::steady_clock::now() + timeout;
         while (!inQueues_.pop(&processor) && std::chrono::steady_clock::now() < deadline)
@@ -337,6 +346,24 @@ TEST_F(WsSessionTest, ThrowingRequestsInARowAreEachAnswered)
     }
     EXPECT_EQ("", escaped());
     EXPECT_TRUE(stillAnswers(client));
+}
+
+TEST_F(WsSessionTest, TheErrorForARequestTheSessionCouldntHandleNamesItsRequestId)
+{
+    // The session parses a message before it handles it, so the error for an exception it contains names the request by
+    // the id its client gave (#683)
+    ON_CALL(failingQueues_, push(testing::_, testing::An<const Queues::OrderCancelEvent &>()))
+        .WillByDefault(testing::Throw(std::runtime_error("injected failure")));
+    sessionQueues_ = &failingQueues_;
+
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    send(client, R"({"type":"cancel_order","data":{"orderId":1,"requestId":"t-1"}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "no error reply; escaped: " << escaped();
+    EXPECT_EQ("Internal error: request not processed", reply->value("message", ""));
+    EXPECT_EQ("t-1", reply->value("requestId", ""));
 }
 
 TEST_F(WsSessionTest, ThrowingRequestsWithinThePeriodAreLoggedOnceEscaped)
@@ -554,6 +581,53 @@ TEST_F(WsSessionTest, AGtdOrderCarriesItsExpireTimeAndOneWhoseTimeHasPassedIsRef
     ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
     EXPECT_EQ("Order refused: expireTime has passed", reply->value("message", ""));
     EXPECT_EQ(nullptr, takeQueuedOrder(std::chrono::milliseconds(0)));
+}
+
+TEST_F(WsSessionTest, EachErrorAnsweringARequestNamesItsRequestId)
+{
+    // The session's own refusals of a new order, a cancel and a replace name the request by the id its client gave
+    // (#683), an invalid message's too. An id that breaks the rule is refused, and not echoed. The engine's events for
+    // a new order and a replace carry the id, which the engine's refusal of either, unstored, hands back.
+    restoreOrder(IdT(7, 1790000100), "CL-7");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    const auto answer = [&](const std::string &message) -> nlohmann::json
+    {
+        send(client, message);
+        auto reply = readUntil(client, "error");
+        EXPECT_TRUE(reply.has_value()) << message << "; escaped: " << escaped();
+        return reply.value_or(nlohmann::json::object());
+    };
+    const std::string order = R"({"type":"new_order","data":{"side":"BUY","ordType":"LIMIT","price":150.5,)"
+                              R"("orderQty":10,"tif":"DAY","currency":"USD","capacity":"AGENCY",)";
+
+    nlohmann::json reply = answer(order + R"("symbol":"NOPE","requestId":"n-1"}})");
+    EXPECT_EQ("Unknown instrument: NOPE", reply.value("message", ""));
+    EXPECT_EQ("n-1", reply.value("requestId", ""));
+    reply = answer(R"({"type":"new_order","data":{"requestId":"n-2","orderQty":0}})");
+    EXPECT_EQ("Invalid message: invalid orderQty: expected an integer from 1 to 4294967295",
+              reply.value("message", ""));
+    EXPECT_EQ("n-2", reply.value("requestId", ""));
+    reply = answer(R"({"type":"cancel_order","data":{"orderId":8,"clOrderId":"CL-7","requestId":"c-1"}})");
+    EXPECT_EQ("Order 8 does not have ClOrdID CL-7", reply.value("message", ""));
+    EXPECT_EQ("c-1", reply.value("requestId", ""));
+    reply = answer(R"({"type":"replace_order","data":{"orderId":7,"requestId":"r-1"}})");
+    EXPECT_EQ("replace_order changes nothing: give price, stopPx, orderQty, tif or expireTime",
+              reply.value("message", ""));
+    EXPECT_EQ("r-1", reply.value("requestId", ""));
+    reply = answer(R"({"type":"cancel_order","data":{"orderId":7,"requestId":"has space"}})");
+    EXPECT_EQ("Invalid message: invalid requestId: expected 1 to 36 of A-Z, a-z, 0-9, _ and -",
+              reply.value("message", ""));
+    EXPECT_FALSE(reply.contains("requestId"));
+
+    std::string requestId;
+    send(client, order + R"("symbol":"AAPL","requestId":"n-3"}})");
+    ASSERT_NE(nullptr, takeQueuedOrder(REPLY_TIMEOUT, &requestId)) << "escaped: " << escaped();
+    EXPECT_EQ("n-3", requestId);
+    send(client, R"({"type":"replace_order","data":{"orderId":7,"price":151,"requestId":"r-2"}})");
+    ASSERT_TRUE(takeQueuedReplace(REPLY_TIMEOUT, &requestId).has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("r-2", requestId);
 }
 
 TEST_F(WsSessionTest, AReplaceToGtdNeedsAnExpireTime)

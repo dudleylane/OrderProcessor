@@ -34,11 +34,16 @@ std::string serializeOrderUpdate(const OrderEntry &order);
 /// The order with the figures a report gives it (#411), in place of its own
 std::string serializeOrderUpdate(const OrderEntry &order, const OrderFigures &figures);
 std::string serializeExecReport(const ExecutionEntry *exec);
+/// The REJECT report of a new order or a replacement the engine refused without storing it (#67), sent at
+/// transactTime: orderId 0, as no order was stored, and an execution id of its own (#545), with the ClOrdIDs the event
+/// names (a replacement's original too) and the client's requestId when it gave one (#683)
+std::string serializeUnstoredReject(const Queues::OrderRejectEvent &evnt, DateTimeT transactTime);
 std::string serializeBookUpdate(const std::string &symbol, const BookSnapshot &snap);
 std::string serializeCancelReject(u64 orderId, const std::string &reason);
 /// Why a cancel was refused, in words for a cancel_reject's reason (#73)
 std::string cancelRejectReason(const Queues::CancelRejectEvent &evnt);
-std::string serializeError(const std::string &message);
+/// An error answering a client's message; requestId, when the request gave one, names the request it answers (#683)
+std::string serializeError(const std::string &message, const std::string &requestId = std::string());
 
 struct SystemMetrics
 {

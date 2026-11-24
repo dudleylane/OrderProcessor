@@ -407,8 +407,8 @@ private:
 class ReplaceOrderTrOperation final : public BookOperation
 {
 public:
-    ReplaceOrderTrOperation(OrderEntry *original, std::unique_ptr<OrderEntry> replacement,
-                            const std::string &requester);
+    ReplaceOrderTrOperation(OrderEntry *original, std::unique_ptr<OrderEntry> replacement, const std::string &requester,
+                            const std::string &requestId = std::string());
     ~ReplaceOrderTrOperation();
 
     void execute(const Context &cnxt) override;
@@ -418,6 +418,7 @@ private:
     OrderEntry *original_;
     std::unique_ptr<OrderEntry> replacement_;
     std::string requester_;
+    std::string requestId_; // the WebSocket client's id of the request, which a refusal hands back (#683)
     size_t eventCountBefore_;
 };
 
