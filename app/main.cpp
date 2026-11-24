@@ -277,10 +277,13 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    // 6. Create SessionManager and WsOutQueues
+    // 6. Create SessionManager and WsOutQueues, and the io_context the WebSocket server runs on (step 10), from whose
+    // thread WsOutQueues sends the books' depth (#694). Nothing runs on it before step 12, and no session can watch a
+    // book before then, so the restart's reports (step 9) mark none.
     auto sessionMgr = std::make_unique<App::SessionManager>();
     auto inQueues = std::make_unique<Queues::IncomingQueues>();
-    auto wsOutQueues = std::make_unique<App::WsOutQueues>(sessionMgr.get(), Store::WideDataStorage::instance(),
+    boost::asio::io_context ioc{ 1 };
+    auto wsOutQueues = std::make_unique<App::WsOutQueues>(ioc, sessionMgr.get(), Store::WideDataStorage::instance(),
                                                           Store::OrderStorage::instance(), orderBook.get());
 
     // 6b. Create FIX gateway (if configured), with its sessions. From here each session stores what the engine reports
@@ -382,10 +385,9 @@ int main(int argc, char *argv[])
         "Expiry and restatement timers set for restored orders: " + std::to_string(restart.timers) + ", " +
         std::to_string(restart.fired) + " of them due while the server was down, and fired before taking orders");
 
-    // 10. Create Beast io_context and WsServer. The sessions read their clients' messages only while the engine's work
-    // in flight is under --max-in-flight (#519).
+    // 10. Create the WsServer, on step 6's io_context. The sessions read their clients' messages only while the
+    // engine's work in flight is under --max-in-flight (#519).
     App::EngineInFlightGauge inFlight(inQueues.get(), transactMgr.get(), cfg.maxInFlight);
-    boost::asio::io_context ioc{ 1 };
 
     auto server = std::make_shared<App::WsServer>(
         ioc, boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address(cfg.bindAddress), cfg.port), sessionMgr.get(),
@@ -486,6 +488,9 @@ int main(int argc, char *argv[])
 
     metricsPublisher->stop();
     metricsPublisher.reset();
+    // No book's depth goes out from now on. WsOutQueues, and its publisher with it, is freed only after the TaskManager
+    // below: the workers still push reports through it while their transactions finish (#694).
+    wsOutQueues->stop();
     server.reset();
     // No timer fires from now on. The scheduler itself outlives the processors, which set timers on it (#240).
     expiry->stop();

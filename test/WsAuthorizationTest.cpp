@@ -88,8 +88,10 @@ protected:
             {
                 return WideDataStorage::instance()->findAccountByName(name);
             });
-        out_ = std::make_unique<WsOutQueues>(&sessionMgr_, WideDataStorage::instance(), OrderStorage::instance(),
-                                             &orderBook_);
+        // The server's io_context, from whose thread the books' depth goes out, at most once an interval: a short one
+        // here, so that a report's book update arrives within a read (#694)
+        out_ = std::make_unique<WsOutQueues>(ioc_, &sessionMgr_, WideDataStorage::instance(), OrderStorage::instance(),
+                                             &orderBook_, std::chrono::milliseconds(10));
     }
 
     void TearDown() override
@@ -672,7 +674,8 @@ TEST_F(WsAuthorizationTest, TheSessionManagerSaysWhetherABookHasASubscriber)
 }
 
 // A report's book update goes to every session that subscribes to the book, whatever its identity, since the book shows
-// no account (#225), with each resting order's leaves as its last report gave them (#525)
+// no account (#225), with each resting order's leaves as its last report gave them (#525), sent by the server's IO
+// thread once the report's interval ends (#694)
 TEST_F(WsAuthorizationTest, AReportsBookUpdateGoesToEverySubscriberWithTheReportedLeaves)
 {
     OrderEntry *resting = storeOrder(1, tradingId_, "A-1");
