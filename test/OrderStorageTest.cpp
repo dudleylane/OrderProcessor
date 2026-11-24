@@ -10,6 +10,7 @@
 */
 
 #include <gtest/gtest.h>
+#include <memory>
 #include <thread>
 #include <vector>
 #include <atomic>
@@ -17,6 +18,7 @@
 #include "TestFixtures.h"
 #include "TestAux.h"
 #include "OrderStorage.h"
+#include "QueuesDef.h"
 
 using namespace COP;
 using namespace COP::Store;
@@ -234,80 +236,6 @@ TEST_F(OrderStorageTest, MaxOrderNumberIsTheLargestStored)
 }
 
 // =============================================================================
-// Execution Save Tests
-// =============================================================================
-
-TEST_F(OrderStorageTest, SaveExecutionAssignsId)
-{
-    auto order = createCorrectOrder();
-    OrderEntry *savedOrder = storage()->save(*order, IdTGenerator::instance());
-    ASSERT_NE(nullptr, savedOrder);
-
-    ExecutionEntry exec;
-    exec.orderId_ = savedOrder->orderId_;
-    exec.type_ = NEW_EXECTYPE;
-
-    ExecutionEntry *savedExec = storage()->save(exec, IdTGenerator::instance());
-
-    ASSERT_NE(nullptr, savedExec);
-    EXPECT_TRUE(savedExec->execId_.isValid());
-}
-
-TEST_F(OrderStorageTest, SaveAndLocateExecution)
-{
-    auto order = createCorrectOrder();
-    OrderEntry *savedOrder = storage()->save(*order, IdTGenerator::instance());
-    ASSERT_NE(nullptr, savedOrder);
-
-    // Use the reference version which assigns the ID
-    ExecutionEntry exec;
-    exec.orderId_ = savedOrder->orderId_;
-    exec.type_ = NEW_EXECTYPE;
-
-    ExecutionEntry *savedExec = storage()->save(exec, IdTGenerator::instance());
-
-    ASSERT_NE(nullptr, savedExec);
-    EXPECT_TRUE(savedExec->execId_.isValid());
-
-    // Verify by locating
-    ExecutionEntry *found = storage()->locateByExecId(savedExec->execId_);
-    ASSERT_NE(nullptr, found);
-    EXPECT_EQ(savedExec->execId_, found->execId_);
-}
-
-// =============================================================================
-// Execution Lookup Tests
-// =============================================================================
-
-TEST_F(OrderStorageTest, LocateByExecIdFindsExecution)
-{
-    auto order = createCorrectOrder();
-    OrderEntry *savedOrder = storage()->save(*order, IdTGenerator::instance());
-    ASSERT_NE(nullptr, savedOrder);
-
-    ExecutionEntry exec;
-    exec.orderId_ = savedOrder->orderId_;
-    exec.type_ = NEW_EXECTYPE;
-
-    ExecutionEntry *savedExec = storage()->save(exec, IdTGenerator::instance());
-    ASSERT_NE(nullptr, savedExec);
-
-    ExecutionEntry *found = storage()->locateByExecId(savedExec->execId_);
-
-    ASSERT_NE(nullptr, found);
-    EXPECT_EQ(savedExec->execId_, found->execId_);
-}
-
-TEST_F(OrderStorageTest, LocateByExecIdReturnsNullForMissing)
-{
-    IdT nonExistentId(8888, 8888);
-
-    ExecutionEntry *found = storage()->locateByExecId(nonExistentId);
-
-    EXPECT_EQ(nullptr, found);
-}
-
-// =============================================================================
 // Concurrent Order Save Tests
 // =============================================================================
 
@@ -390,54 +318,6 @@ TEST_F(OrderStorageTest, ConcurrentOrderLookups)
 }
 
 // =============================================================================
-// Concurrent Execution Save/Lookup Tests
-// =============================================================================
-
-TEST_F(OrderStorageTest, ConcurrentExecutionOperations)
-{
-    // Create orders first
-    std::vector<IdT> orderIds;
-    for (int i = 0; i < 10; ++i)
-    {
-        auto order = createCorrectOrder();
-        assignClOrderId(order.get());
-        OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
-        ASSERT_NE(nullptr, saved);
-        orderIds.push_back(saved->orderId_);
-    }
-
-    const int numThreads = 4;
-    const int numExecsPerThread = 25;
-    std::atomic<int> totalSaved{ 0 };
-
-    std::vector<std::thread> threads;
-    for (int t = 0; t < numThreads; ++t)
-    {
-        threads.emplace_back(
-            [this, &orderIds, &totalSaved, numExecsPerThread]()
-            {
-                for (int i = 0; i < numExecsPerThread; ++i)
-                {
-                    ExecutionEntry exec;
-                    exec.orderId_ = orderIds[i % orderIds.size()];
-                    exec.type_ = TRADE_EXECTYPE;
-
-                    ExecutionEntry *saved = storage()->save(exec, IdTGenerator::instance());
-                    EXPECT_NE(nullptr, saved);
-                    ++totalSaved;
-                }
-            });
-    }
-
-    for (auto &thread : threads)
-    {
-        thread.join();
-    }
-
-    EXPECT_EQ(numThreads * numExecsPerThread, totalSaved.load());
-}
-
-// =============================================================================
 // Mixed Concurrent Operations Tests
 // =============================================================================
 
@@ -503,12 +383,13 @@ TEST_F(OrderStorageTest, MixedConcurrentWritesAndReads)
 }
 
 // =============================================================================
-// Saved execution reports keep their fields (#56)
+// A report kept past its push keeps its fields (#56, #708)
 // =============================================================================
 
-/// Sets every ExecParams field but the execId, so a test can check that the saved copy kept all of them
+/// Sets every ExecParams field, so a test can check that the kept copy has all of them
 void fillReport(ExecutionEntry &report, ExecType type, OrderStatus status)
 {
+    report.execId_ = IdT(7, 1);
     report.type_ = type;
     report.transactTime_ = 12345;
     report.orderId_ = IdT(42, 1);
@@ -516,10 +397,17 @@ void fillReport(ExecutionEntry &report, ExecType type, OrderStatus status)
     report.market_ = "XNAS";
 }
 
+/// The copy of its execution that a report kept past its push holds: the report's own ends with the push (#708). Until
+/// #708 the store saved a copy of each report, which its clients read.
+std::shared_ptr<const ExecutionEntry> keptCopyOf(ExecutionEntry &report)
+{
+    return Queues::KeptExecReport(Queues::ExecReportEvent(&report)).exec_;
+}
+
 void expectReport(const ExecutionEntry *saved, ExecType type, OrderStatus status)
 {
     ASSERT_NE(nullptr, saved);
-    EXPECT_TRUE(saved->execId_.isValid());
+    EXPECT_EQ(IdT(7, 1), saved->execId_);
     EXPECT_EQ(type, saved->type_);
     EXPECT_EQ(12345u, saved->transactTime_);
     EXPECT_EQ(IdT(42, 1), saved->orderId_);
@@ -527,43 +415,45 @@ void expectReport(const ExecutionEntry *saved, ExecType type, OrderStatus status
     EXPECT_EQ("XNAS", saved->market_);
 }
 
-TEST_F(OrderStorageTest, SavedReportKeepsItsFields)
+TEST_F(OrderStorageTest, KeptReportKeepsItsFields)
 {
     // The bug this covers: save() stored a default-constructed copy of every report except a trade, so the report
-    // pushed to clients had no type, status, order id, time or market (#56).
+    // pushed to clients had no type, status, order id, time or market (#56). A kept report's copy is the same clone.
     ExecutionEntry report;
     fillReport(report, NEW_EXECTYPE, NEW_ORDSTATUS);
 
-    expectReport(storage()->save(report, IdTGenerator::instance()), NEW_EXECTYPE, NEW_ORDSTATUS);
+    expectReport(keptCopyOf(report).get(), NEW_EXECTYPE, NEW_ORDSTATUS);
 }
 
-TEST_F(OrderStorageTest, SavedRejectReportKeepsItsReason)
+TEST_F(OrderStorageTest, KeptRejectReportKeepsItsReason)
 {
     RejectExecEntry report;
     fillReport(report, REJECT_EXECTYPE, REJECTED_ORDSTATUS);
     report.rejectReason_ = "Invalid value of the side!";
 
-    ExecutionEntry *saved = storage()->save(report, IdTGenerator::instance());
+    std::shared_ptr<const ExecutionEntry> kept = keptCopyOf(report);
+    const ExecutionEntry *saved = kept.get();
     expectReport(saved, REJECT_EXECTYPE, REJECTED_ORDSTATUS);
-    auto *reject = dynamic_cast<RejectExecEntry *>(saved);
+    auto *reject = dynamic_cast<const RejectExecEntry *>(saved);
     ASSERT_NE(nullptr, reject);
     EXPECT_EQ("Invalid value of the side!", reject->rejectReason_);
 }
 
-TEST_F(OrderStorageTest, SavedReplaceReportKeepsTheOriginalOrder)
+TEST_F(OrderStorageTest, KeptReplaceReportKeepsTheOriginalOrder)
 {
     ReplaceExecEntry report;
     fillReport(report, REPLACE_EXECTYPE, REPLACED_ORDSTATUS);
     report.origOrderId_ = IdT(77, 1);
 
-    ExecutionEntry *saved = storage()->save(report, IdTGenerator::instance());
+    std::shared_ptr<const ExecutionEntry> kept = keptCopyOf(report);
+    const ExecutionEntry *saved = kept.get();
     expectReport(saved, REPLACE_EXECTYPE, REPLACED_ORDSTATUS);
-    auto *replace = dynamic_cast<ReplaceExecEntry *>(saved);
+    auto *replace = dynamic_cast<const ReplaceExecEntry *>(saved);
     ASSERT_NE(nullptr, replace);
     EXPECT_EQ(IdT(77, 1), replace->origOrderId_);
 }
 
-TEST_F(OrderStorageTest, SavedCorrectReportKeepsItsFields)
+TEST_F(OrderStorageTest, KeptCorrectReportKeepsItsFields)
 {
     ExecCorrectExecEntry report;
     fillReport(report, CORRECT_EXECTYPE, PARTFILL_ORDSTATUS);
@@ -576,9 +466,10 @@ TEST_F(OrderStorageTest, SavedCorrectReportKeepsItsFields)
     report.origOrderId_ = IdT(5, 1);
     report.execRefId_ = IdT(9, 1);
 
-    ExecutionEntry *saved = storage()->save(report, IdTGenerator::instance());
+    std::shared_ptr<const ExecutionEntry> kept = keptCopyOf(report);
+    const ExecutionEntry *saved = kept.get();
     expectReport(saved, CORRECT_EXECTYPE, PARTFILL_ORDSTATUS);
-    auto *correct = dynamic_cast<ExecCorrectExecEntry *>(saved);
+    auto *correct = dynamic_cast<const ExecCorrectExecEntry *>(saved);
     ASSERT_NE(nullptr, correct);
     EXPECT_EQ(40u, correct->cumQty_);
     EXPECT_EQ(60u, correct->leavesQty_);
@@ -590,20 +481,21 @@ TEST_F(OrderStorageTest, SavedCorrectReportKeepsItsFields)
     EXPECT_EQ(IdT(9, 1), correct->execRefId_);
 }
 
-TEST_F(OrderStorageTest, SavedTradeCancelReportKeepsItsReference)
+TEST_F(OrderStorageTest, KeptTradeCancelReportKeepsItsReference)
 {
     TradeCancelExecEntry report;
     fillReport(report, CANCEL_EXECTYPE, NEW_ORDSTATUS);
     report.execRefId_ = IdT(9, 1);
 
-    ExecutionEntry *saved = storage()->save(report, IdTGenerator::instance());
+    std::shared_ptr<const ExecutionEntry> kept = keptCopyOf(report);
+    const ExecutionEntry *saved = kept.get();
     expectReport(saved, CANCEL_EXECTYPE, NEW_ORDSTATUS);
-    auto *cancel = dynamic_cast<TradeCancelExecEntry *>(saved);
+    auto *cancel = dynamic_cast<const TradeCancelExecEntry *>(saved);
     ASSERT_NE(nullptr, cancel);
     EXPECT_EQ(IdT(9, 1), cancel->execRefId_);
 }
 
-TEST_F(OrderStorageTest, SavedTradeReportKeepsItsMarket)
+TEST_F(OrderStorageTest, KeptTradeReportKeepsItsMarket)
 {
     // Trades were always copied, but the ExecParams copy constructor dropped market_ (#56)
     TradeExecEntry report;
@@ -613,9 +505,10 @@ TEST_F(OrderStorageTest, SavedTradeReportKeepsItsMarket)
     report.currency_ = USD_CURRENCY;
     report.tradeDate_ = 20261002;
 
-    ExecutionEntry *saved = storage()->save(report, IdTGenerator::instance());
+    std::shared_ptr<const ExecutionEntry> kept = keptCopyOf(report);
+    const ExecutionEntry *saved = kept.get();
     expectReport(saved, TRADE_EXECTYPE, FILLED_ORDSTATUS);
-    auto *trade = dynamic_cast<TradeExecEntry *>(saved);
+    auto *trade = dynamic_cast<const TradeExecEntry *>(saved);
     ASSERT_NE(nullptr, trade);
     EXPECT_EQ(40u, trade->lastQty_);
     EXPECT_DOUBLE_EQ(10.5, trade->lastPx_);

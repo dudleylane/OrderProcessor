@@ -358,7 +358,6 @@ std::unique_ptr<TradeExecEntry> test::createTradeExec(const OrderEntry &order, c
     ptr->currency_ = order.currency_;
     ptr->tradeDate_ = 1;
 
-    OrderStorage::instance()->save(ptr.get());
     return ptr;
 }
 
@@ -381,7 +380,6 @@ std::unique_ptr<ExecCorrectExecEntry> test::createCorrectExec(const OrderEntry &
     ptr->currency_ = order.currency_;
     ptr->tradeDate_ = 1;
 
-    OrderStorage::instance()->save(ptr.get());
     return ptr;
 }
 

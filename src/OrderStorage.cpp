@@ -50,14 +50,6 @@ OrderDataStorage::~OrderDataStorage(void)
         delete it->second;
     }
 
-    // Clean up executions - iterate through concurrent_hash_map
-    // No lock needed for iteration during destruction (single-threaded)
-    for (ExecByIDT::iterator it = executionsById_.begin(); it != executionsById_.end(); ++it)
-    {
-        delete it->second;
-    }
-    executionsById_.clear();
-
     aux::ExchLogger::instance()->note("OrderDataStorage destroyed");
 }
 
@@ -323,62 +315,4 @@ void OrderDataStorage::abortPersistGroup() noexcept
     {
         saver_->abortGroup();
     }
-}
-
-// ============================================================================
-// Execution operations - use concurrent_hash_map for fine-grained locking
-// ============================================================================
-
-ExecutionEntry *OrderDataStorage::locateByExecId(const IdT &execId) const
-{
-    // Lock-free lookup using concurrent_hash_map accessor
-    ExecByIDT::const_accessor accessor;
-    if (executionsById_.find(accessor, execId))
-    {
-        return accessor->second;
-    }
-    return nullptr;
-}
-
-void OrderDataStorage::save(const ExecutionEntry *exec)
-{
-    if (aux::ExchLogger::instance()->isDebugOn())
-    {
-        aux::ExchLogger::instance()->debug("OrderDataStorage saving execution");
-    }
-
-    // Use accessor to check and insert atomically
-    ExecByIDT::accessor accessor;
-    if (!executionsById_.insert(accessor, exec->execId_))
-    {
-        // Key already exists
-        throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
-    }
-    accessor->second = exec->clone();
-}
-
-ExecutionEntry *OrderDataStorage::save(const ExecutionEntry &exec, IdTValueGenerator *idGenerator)
-{
-    if (aux::ExchLogger::instance()->isDebugOn())
-    {
-        aux::ExchLogger::instance()->debug("OrderDataStorage saving execution 2");
-    }
-
-    assert(nullptr != idGenerator);
-
-    std::unique_ptr<ExecutionEntry> cp(exec.clone());
-    if (!cp->execId_.isValid())
-    {
-        cp->execId_ = idGenerator->getId();
-    }
-
-    // Use accessor to check and insert atomically
-    ExecByIDT::accessor accessor;
-    if (!executionsById_.insert(accessor, cp->execId_))
-    {
-        // Key already exists
-        throw std::runtime_error("Unable to save execution - execution with same ExecId already exists.");
-    }
-    accessor->second = cp.get();
-    return cp.release();
 }

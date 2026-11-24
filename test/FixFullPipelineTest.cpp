@@ -330,23 +330,19 @@ TEST(FixFullPipelineTest, EveryComponentTouched)
     OrderEntry *sellByClId = OrderStorage::instance()->locateByClOrderId(sellKey);
     EXPECT_EQ(sellOrder, sellByClId) << "[OrderStorage] locateByClOrderId works";
 
-    // --- [TrOperations] Execution entries created ---
-    EXPECT_GT(sellOrder->executions_.get()->size(), 0u) << "[TrOperations] sell has execution entries";
-    EXPECT_GT(buyOrder->executions_.get()->size(), 0u) << "[TrOperations] buy has execution entries";
-
-    // Verify at least one execution entry is a TRADE in OrderStorage
+    // --- [TrOperations] Each side's trade reported, with an execution id of its own; nothing keeps it (#708) ---
+    EXPECT_TRUE(sellOrder->executions_.get()->empty()) << "[TrOperations] the sell's list kept a report";
+    EXPECT_TRUE(buyOrder->executions_.get()->empty()) << "[TrOperations] the buy's list kept a report";
     bool foundTradeExec = false;
-    for (const auto &ev : *sellOrder->executions_.get())
+    for (const CapturedReport &r : recordingOut->getReports())
     {
-        ExecutionEntry *ex = OrderStorage::instance()->locateByExecId(ev.eventId_);
-        if (ex && ex->type_ == TRADE_EXECTYPE)
+        if ((r.orderId == sellOrder->orderId_) && (TRADE_EXECTYPE == r.execType))
         {
             foundTradeExec = true;
-            EXPECT_TRUE(ex->execId_.isValid()) << "[TrOperations] trade execution has valid execId";
-            break;
+            EXPECT_TRUE(r.execId.isValid()) << "[TrOperations] trade execution has valid execId";
         }
     }
-    EXPECT_TRUE(foundTradeExec) << "[TrOperations] sell order has TRADE execution in storage";
+    EXPECT_TRUE(foundTradeExec) << "[TrOperations] the sell's trade wasn't reported";
 
     // --- [OrderBookImpl] Orders removed from book after fill ---
     IdT topBid = orderBook->getTop(instrId, BUY_SIDE);
