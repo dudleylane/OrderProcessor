@@ -33,7 +33,7 @@ void OutgoingQueues::clear()
     QueuedOutEvent event;
     while (eventQueue_.try_pop(event))
     {
-        // Events don't own heap memory, no cleanup needed
+        // A kept report's copy of its execution goes with it
     }
     aux::ExchLogger::instance()->note("OutgoingQueues cleared.");
 }
@@ -45,8 +45,8 @@ void OutgoingQueues::push(const ExecReportEvent &evnt, const std::string &target
         aux::ExchLogger::instance()->note("OutgoingQueues push new ExecReportEvent.");
     }
 
-    // Lock-free push to concurrent queue
-    eventQueue_.push(QueuedOutEvent(target, evnt));
+    // Lock-free push to concurrent queue, of a copy of the execution: the report's own ends with its push (#708)
+    eventQueue_.push(QueuedOutEvent(target, KeptExecReport(evnt)));
 
     if (aux::ExchLogger::instance()->isNoteOn())
     {

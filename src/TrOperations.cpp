@@ -17,6 +17,7 @@
 #include "OrderStorage.h"
 #include "ExchUtils.h"
 #include "DeferedEvents.h"
+#include "IdTGenerator.h"
 
 using namespace std;
 using namespace COP;
@@ -40,7 +41,7 @@ void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, Exe
     OrderEntry *ord = cnxt.orderStorage_->locateByOrderId(orderId);
     assert(nullptr != ord);
 
-    // write lock on the order during source read + addExecution
+    // write lock on the order during source read, and while the report's figures are published
     oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(ord->entryMutex_, true);
 
     StringT src = ord->source_.get();
@@ -49,10 +50,15 @@ void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, Exe
     // stored trade do. Stamped as it was built, it said a later time than its record, as late as its transaction ran.
     // A report of #580's features, handed no figures (below), says the time of its order's last decision.
     exec.transactTime_ = (nullptr != decided) ? decided->lastUpdateTime_ : ord->lastUpdateTime_;
-    ExecutionEntry *execReport = cnxt.orderStorage_->save(exec, cnxt.idGenerator_);
-    assert(nullptr != execReport);
-
-    ord->addExecution(execReport->execId_);
+    // The report's own id, from the generator every order and execution id comes from. The report points at this
+    // entry, which its operation owns, for its push alone: its consumers read it only while it is pushed (#708). Until
+    // #708 a copy of every report stayed in the store, and its id in its order's list, for as long as the server ran,
+    // and nothing read either.
+    if (!exec.execId_.isValid())
+    {
+        assert(nullptr != cnxt.idGenerator_);
+        exec.execId_ = cnxt.idGenerator_->getId();
+    }
 
     // What the report says the order has (#411): what its decision left, for a report handed it, and otherwise the
     // order as it is now. The two are the same only if nothing can decide about the order between its decision and
@@ -61,7 +67,7 @@ void processEvent_GenerateExecution(const Context &cnxt, const IdT &orderId, Exe
     // report is handed its decision's figures, as a fill's, a release's, a replacement's TRIGGERED and a
     // restatement's are (#627). The reports of #580's features, which only tests reach, aren't yet: whatever produces
     // one must hand them theirs. Readers outside a transaction give the order as this from now on (#404).
-    ExecReportEvent report(execReport);
+    ExecReportEvent report(&exec);
     report.figures_ = (nullptr != decided) ? *decided : OrderFigures(*ord);
     ord->published_ = report.figures_;
 

@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -96,9 +97,16 @@ struct OrderChangeStateEvent : public EventBase
     }
 };
 
+/// An execution report on its way out. It points at the report's execution for its push alone: the operation that
+/// pushes it owns the execution, which ends with the operation, and nothing keeps it (#708). So a report can't be
+/// copied or moved, and whatever keeps one past its push keeps a KeptExecReport, which owns a copy of the execution.
 struct ExecReportEvent : public EventBase
 {
-    ExecReportEvent(ExecutionEntry *exec) : exec_(exec) {}
+    explicit ExecReportEvent(ExecutionEntry *exec) : exec_(exec) {}
+    ExecReportEvent(const ExecReportEvent &) = delete;
+    ExecReportEvent &operator=(const ExecReportEvent &) = delete;
+    ExecReportEvent(ExecReportEvent &&) = delete;
+    ExecReportEvent &operator=(ExecReportEvent &&) = delete;
 
     ExecutionEntry *exec_;
     /// On a cancel's acknowledgement, the ClOrdID of the cancel request (OrderCancelEvent::requestClOrdId_); empty on
@@ -107,6 +115,21 @@ struct ExecReportEvent : public EventBase
     /// What the report says the order has (#411), which a gateway writes rather than reading the order: a fill's
     /// report can go out after a later fill of the order was applied. The engine sets them on every report; one built
     /// without them, as a test may build one, is written from the order.
+    std::optional<OrderFigures> figures_;
+};
+
+/// An execution report kept past its push, by a queue or a test that reads it later: it owns a copy of the execution,
+/// since the report's own pointer doesn't outlive the push (#708)
+struct KeptExecReport
+{
+    explicit KeptExecReport(const ExecReportEvent &report)
+        : exec_((nullptr != report.exec_) ? report.exec_->clone() : nullptr), requestClOrdId_(report.requestClOrdId_),
+          figures_(report.figures_)
+    {
+    }
+
+    std::shared_ptr<const ExecutionEntry> exec_;
+    std::string requestClOrdId_;
     std::optional<OrderFigures> figures_;
 };
 

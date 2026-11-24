@@ -88,13 +88,14 @@ public:
     std::vector<DeferedEventBase *> events_;
 };
 
-/// Records the cancel rejects pushed to it, each with its target
+/// Records what is pushed to it, each with its target: a report with a copy of its execution, which ends with the push
+/// (#708)
 class RecordingOutQueues : public Queues::OutQueues
 {
 public:
     void push(const Queues::ExecReportEvent &evnt, const std::string &target) override
     {
-        reports_.emplace_back(evnt, target);
+        reports_.emplace_back(Queues::KeptExecReport(evnt), target);
     }
     void push(const Queues::CancelRejectEvent &evnt, const std::string &target) override
     {
@@ -105,7 +106,7 @@ public:
         refusals_.emplace_back(evnt, target);
     }
 
-    std::vector<std::pair<Queues::ExecReportEvent, std::string>> reports_;
+    std::vector<std::pair<Queues::KeptExecReport, std::string>> reports_;
     std::vector<std::pair<Queues::CancelRejectEvent, std::string>> rejects_;
     std::vector<std::pair<Queues::OrderRejectEvent, std::string>> refusals_;
 };
@@ -691,6 +692,28 @@ TEST_F(MatchOrderOperationTest, CancelExecReport_CarriesTheRequestsClOrdId)
     EXPECT_EQ("CXL-3", out.reports_[0].first.requestClOrdId_);
 }
 
+// A report's execution is its operation's, for its push alone: it has an id of its own from the generator, and neither
+// the store nor its order keeps it. Until #708 each report's copy stayed in the store, its id on the order's list.
+TEST_F(MatchOrderOperationTest, EachReportHasAnIdOfItsOwnAndIsKeptNowhere)
+{
+    RecordingOutQueues out;
+    Context ctx(OrderStorage::instance(), orderBook_.get(), nullptr, &out, matcher_.get(), IdTGenerator::instance(),
+                &deferedContainer_);
+    CreateCancelExecReportTrOperation first(*buyOrder_, "CXL-1");
+    CreateCancelExecReportTrOperation second(*buyOrder_, "CXL-2");
+
+    first.execute(ctx);
+    second.execute(ctx);
+
+    ASSERT_EQ(2u, out.reports_.size());
+    const IdT firstId = out.reports_[0].first.exec_->execId_;
+    const IdT secondId = out.reports_[1].first.exec_->execId_;
+    EXPECT_TRUE(firstId.isValid());
+    EXPECT_TRUE(secondId.isValid());
+    EXPECT_NE(firstId, secondId);
+    EXPECT_TRUE(buyOrder_->executions_.get()->empty()) << "the order's list kept a report";
+}
+
 TEST_F(MatchOrderOperationTest, CorrectionReportGivesTheLeavesTheDecisionLeftTheOrderWith)
 {
     // A correction's report gives the order's leaves, which its decision set, not the correction's: a correction of a
@@ -711,7 +734,7 @@ TEST_F(MatchOrderOperationTest, CorrectionReportGivesTheLeavesTheDecisionLeftThe
     op.execute(ctx);
 
     ASSERT_EQ(1u, out.reports_.size());
-    const auto *report = dynamic_cast<const ExecCorrectExecEntry *>(out.reports_[0].first.exec_);
+    const auto *report = dynamic_cast<const ExecCorrectExecEntry *>(out.reports_[0].first.exec_.get());
     ASSERT_NE(nullptr, report);
     EXPECT_EQ(CORRECT_EXECTYPE, report->type_);
     EXPECT_EQ(EXPIRED_ORDSTATUS, report->orderStatus_);
@@ -998,7 +1021,7 @@ TEST_F(MatchOrderOperationTest, ReportRelease_ReportsTheReleaseToTheOrdersSource
     report.execute(ctx);
 
     ASSERT_EQ(1u, out.reports_.size());
-    const ExecutionEntry *exec = out.reports_[0].first.exec_;
+    const ExecutionEntry *exec = out.reports_[0].first.exec_.get();
     ASSERT_NE(nullptr, exec);
     EXPECT_EQ(TRIGGERED_EXECTYPE, exec->type_);
     EXPECT_EQ(NEW_ORDSTATUS, exec->orderStatus_);
@@ -1023,7 +1046,7 @@ TEST_F(MatchOrderOperationTest, ReportTrigger_ReportsTheReplacementAsItsReplaceL
     report.execute(ctx);
 
     ASSERT_EQ(1u, out.reports_.size());
-    const Queues::ExecReportEvent &sent = out.reports_[0].first;
+    const Queues::KeptExecReport &sent = out.reports_[0].first;
     ASSERT_NE(nullptr, sent.exec_);
     EXPECT_EQ(TRIGGERED_EXECTYPE, sent.exec_->type_);
     EXPECT_EQ(NEW_ORDSTATUS, sent.exec_->orderStatus_);
@@ -1070,7 +1093,7 @@ TEST_F(MatchOrderOperationTest, ReportRelease_ReportsWhatTheReleaseLeftTheOrder)
     report.execute(ctx);
 
     ASSERT_EQ(1u, out.reports_.size());
-    const Queues::ExecReportEvent &sent = out.reports_[0].first;
+    const Queues::KeptExecReport &sent = out.reports_[0].first;
     ASSERT_NE(nullptr, sent.exec_);
     EXPECT_EQ(TRIGGERED_EXECTYPE, sent.exec_->type_);
     EXPECT_EQ(NEW_ORDSTATUS, sent.exec_->orderStatus_);
