@@ -68,6 +68,37 @@ std::vector<std::string> CapturedLog::lines()
     return read;
 }
 
+LogTap::LogTap()
+{
+    aux::ExchLogger::instance()->setObserver(this);
+}
+
+LogTap::~LogTap()
+{
+    // Once this returns, no thread is in onLine(): the logger hands lines over under the lock this takes
+    aux::ExchLogger::instance()->setObserver(nullptr);
+}
+
+void LogTap::onLine(const std::string &prefix, const std::string &text)
+{
+    std::lock_guard<std::mutex> lock(lock_);
+    lines_.push_back(prefix + text);
+}
+
+std::vector<std::string> LogTap::linesWith(const std::string &part) const
+{
+    std::lock_guard<std::mutex> lock(lock_);
+    std::vector<std::string> found;
+    for (const std::string &line : lines_)
+    {
+        if (std::string::npos != line.find(part))
+        {
+            found.push_back(line);
+        }
+    }
+    return found;
+}
+
 void CapturedLog::restore()
 {
     if (restored_)

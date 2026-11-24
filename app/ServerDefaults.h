@@ -55,6 +55,9 @@ struct WsLimits
     /// session when nothing, the answer included, has come by the end. Beast's suggested 300 s. A session that waits
     /// for the engine's work in flight to drain (#519) reads nothing, so the time doesn't run while it waits.
     std::chrono::seconds idleTimeout{ 300 };
+    /// A session logs at most one of its contained exceptions in this long; the next line it logs says how many it
+    /// left out (#547). A test sets it long, to see the throttle hold, without waiting on the clock (#783).
+    std::chrono::steady_clock::duration containedLogPeriod{ std::chrono::seconds(1) };
 };
 
 } // namespace App

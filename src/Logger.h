@@ -71,11 +71,26 @@ protected:
     std::string msg;
 };
 
+/// Sees each line the logger takes, as it takes it, from whichever thread logs it (#783): what a test reads of what
+/// another thread logs, a server's or a worker's, which CapturedLog, by closing and reopening the logger, can't serve.
+/// onLine() is called under the logger's lock with the line's level prefix, ": [Error][" and the like, and its text:
+/// keep it short, and log nothing from it.
+class LogObserver
+{
+public:
+    virtual ~LogObserver() = default;
+    virtual void onLine(const std::string &prefix, const std::string &text) = 0;
+};
+
 class Logger
 {
 public:
     Logger(void);
     ~Logger(void);
+
+    /// Hands each line logged from now on to observer as well, or to none with nullptr; one observer at a time (#783).
+    /// Once this returns nullptr's way, no line is in the old observer's hands.
+    void setObserver(LogObserver *observer);
 
     void debug(const std::string &msg);
     void debug(const char *msg);
