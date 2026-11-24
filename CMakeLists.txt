@@ -261,7 +261,7 @@ if(BUILD_TESTS)
     set_tests_properties(JobStartedHookDecides CiTestedTreeDecides MemoryCapStopsARunaway CiNamesKeepRunnersApart
                          CiJobsTakeTheirShare CiBuildsRunCapped CpuBusyDecides BenchmarkBaselineKeepsItsConfig
                          BenchmarkBusyStartIsInconclusive LineEndingsAreChecked CtestSkipsAreRefused LineLengthIsChecked
-                         PROPERTIES LABELS tooling)
+                         SanitizerReportsAreRefused PROPERTIES LABELS tooling)
 endif()
 
 if(BUILD_BENCHMARKS)
