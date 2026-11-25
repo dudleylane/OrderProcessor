@@ -15,12 +15,16 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
+#include <functional>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include <pqxx/pqxx>
 
+#include "PGRequestBuilder.h"
 #include "PGWriteBehind.h"
 #include "PGWriteRequest.h"
 #include "TestAux.h"
@@ -307,6 +311,203 @@ TEST_F(PGWriteBehindTest, AStatementTheSchemaRefusesIsLoggedOnceAndTheWritesLand
 
     run("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
     forget(151590);
+}
+
+TEST_F(PGWriteBehindTest, ASchemaOfAnotherVersionIsRefusedOnceAndTheWritesLandOnceItIsMigrated)
+{
+    // The writer reads the schema's version as it connects (#590), and refuses one of another version than its
+    // statements are written for, as it refuses a statement the schema refuses: logged once, counted, tried again. Here
+    // its search path finds a schema of its own first, whose schema_version is one ahead; once it reads the server's,
+    // the queued writes land.
+    const std::string schema = "pgtest_590v_" + std::to_string(::getpid());
+    const std::string ahead = std::to_string(COP::PG::SCHEMA_VERSION + 1);
+    const auto run = [this](const std::string &sql)
+    {
+        pqxx::connection conn(connection_);
+        pqxx::work txn(conn);
+        txn.exec(sql);
+        txn.commit();
+    };
+    run("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+    run("CREATE SCHEMA " + schema);
+    run("CREATE TABLE " + schema + ".schema_version (version INTEGER PRIMARY KEY)");
+    run("INSERT INTO " + schema + ".schema_version VALUES (" + ahead + ")");
+    forget(151591);
+
+    test::CapturedLog log;
+    u64 refusals = 0;
+    {
+        PGWriteBehind writer(withSearchPath(connection_, schema));
+        writeReferenceData(writer);
+        writer.enqueue(PGWriteRequest{ makeOrder(151591) });
+        EXPECT_TRUE(eventually(
+            [&writer]
+            {
+                return 2 <= writer.totalSchemaRefusals();
+            }))
+            << "the writer didn't try again after refusing the schema's version";
+        EXPECT_EQ(0u, writer.totalWritten());
+
+        run("UPDATE " + schema + ".schema_version SET version = " + std::to_string(COP::PG::SCHEMA_VERSION));
+        EXPECT_TRUE(eventually(
+            [&writer]
+            {
+                return 4 <= writer.totalWritten();
+            }))
+            << "the writes didn't land once the schema was at the server's version";
+        writer.shutdown();
+        refusals = writer.totalSchemaRefusals();
+        EXPECT_EQ(0u, writer.totalErrors());
+        EXPECT_EQ(0u, writer.totalDropped());
+    }
+    const std::vector<std::string> lines = log.lines();
+    EXPECT_LE(2u, refusals);
+    EXPECT_EQ(1u, linesWith(lines, "schema is version " + ahead + ", and the server's statements are written for"))
+        << "each refusal of a run was logged";
+    EXPECT_EQ(0u, linesWith(lines, "can't connect"));
+    EXPECT_EQ(1u, linesWith(lines, "schema takes the server's statements now"));
+    EXPECT_EQ("NEW", select("SELECT status::text FROM orders WHERE order_id = 151591"));
+
+    run("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+    forget(151591);
+}
+
+TEST_F(PGWriteBehindTest, ASchemaMadeBeforeVersioningIsMirroredWithAWarning)
+{
+    // A volume made before the schema was versioned has no schema_version (#590): the writer warns, and mirrors to it
+    // as before, since refusing would stop every existing mirror at the upgrade. It does so on every connection, with
+    // the warning once a run: the writer's backend is terminated between two writes, and the second lands on a new
+    // connection with no second warning. public's table is renamed for the case, and named back after it.
+    const std::string hidden = "schema_version_590_" + std::to_string(::getpid());
+    const auto run = [this](const std::string &sql)
+    {
+        pqxx::connection conn(connection_);
+        pqxx::work txn(conn);
+        txn.exec(sql);
+        txn.commit();
+    };
+    run("ALTER TABLE schema_version RENAME TO " + hidden);
+    // Named back however the case ends: an assertion that stops it, or an exception, would otherwise leave the cases
+    // after it, which share the database, with no schema_version
+    struct AtExit
+    {
+        std::function<void()> fn_;
+        ~AtExit()
+        {
+            fn_();
+        }
+    };
+    const AtExit nameBack{ [&]
+                           {
+                               try
+                               {
+                                   run("ALTER TABLE " + hidden + " RENAME TO schema_version");
+                               }
+                               catch (const std::exception &e)
+                               {
+                                   ADD_FAILURE() << "public's schema_version wasn't named back: " << e.what();
+                               }
+                           } };
+    forget(151592);
+
+    test::CapturedLog log;
+    {
+        const std::string writers = "SELECT count(*) FROM pg_stat_activity WHERE application_name = 'pgwb_151592'";
+        PGWriteBehind writer(withApplicationName(connection_, "pgwb_151592"));
+        writeReferenceData(writer);
+        writer.enqueue(PGWriteRequest{ makeOrder(151592) });
+        EXPECT_TRUE(eventually(
+            [&writer]
+            {
+                return 4 <= writer.totalWritten();
+            }))
+            << "the writes didn't land on a schema made before versioning";
+        ASSERT_EQ("t", select("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                              "WHERE application_name = 'pgwb_151592'"));
+        ASSERT_TRUE(eventually(
+            [&]
+            {
+                return "0" == select(writers);
+            }));
+        OrderWrite filled = makeOrder(151592);
+        filled.status = "FILLED";
+        filled.cumQty = 500;
+        filled.leavesQty = 0;
+        writer.enqueue(PGWriteRequest{ std::move(filled) });
+        writer.shutdown();
+        EXPECT_EQ(5u, writer.totalWritten()) << "the write after the reconnect didn't land";
+        EXPECT_EQ(0u, writer.totalSchemaRefusals());
+        EXPECT_EQ(0u, writer.totalErrors());
+    }
+    const std::vector<std::string> lines = log.lines();
+    EXPECT_EQ(1u, linesWith(lines, "schema has no version"))
+        << "the writer didn't warn of an unversioned schema, or warned again as it reconnected";
+    EXPECT_EQ("FILLED", select("SELECT status::text FROM orders WHERE order_id = 151592"));
+    forget(151592);
+}
+
+TEST_F(PGWriteBehindTest, TheFirstMigrationBringsAVolumeMadeBeforeVersioningToVersionOne)
+{
+    // docker/migrations' first migration (#590), applied in one transaction as scripts/pg-migrate.sh applies it, to the
+    // tables of a volume made before #151: quantities INTEGER, ClOrdIDs of 64 characters, prices NUMERIC(18,8), and no
+    // stop_triggered or day_start. A search path that finds a schema of the case's own first stands for that volume.
+    // After it the columns are init-db's and the schema is at version 1; applied again, it changes nothing.
+    const std::string schema = "pgtest_590m_" + std::to_string(::getpid());
+    const auto run = [this](const std::string &sql)
+    {
+        pqxx::connection conn(connection_);
+        pqxx::work txn(conn);
+        txn.exec(sql);
+        txn.commit();
+    };
+    run("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+    run("CREATE SCHEMA " + schema);
+    run("CREATE TABLE " + schema +
+        ".orders (order_qty INTEGER, min_qty INTEGER, leaves_qty INTEGER, cum_qty INTEGER, day_order_qty INTEGER, "
+        "day_cum_qty INTEGER, cl_order_id VARCHAR(64), orig_cl_order_id VARCHAR(64), source VARCHAR(64), "
+        "destination VARCHAR(64), price NUMERIC(18,8), stop_px NUMERIC(18,8), avg_px NUMERIC(18,8), "
+        "day_avg_px NUMERIC(18,8))");
+    run("CREATE TABLE " + schema + ".executions (last_qty INTEGER, new_qty INTEGER)");
+    std::ifstream in(test::sourceRoot() / "docker/migrations/001_version_the_schema.sql");
+    ASSERT_TRUE(in) << "can't read docker/migrations/001_version_the_schema.sql";
+    const std::string migration((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto migrate = [&]
+    {
+        pqxx::connection conn(withSearchPath(connection_, schema));
+        pqxx::work txn(conn);
+        txn.exec(migration);
+        txn.commit();
+    };
+    const auto column = [&](const std::string &table, const std::string &name, const std::string &field)
+    {
+        return select("SELECT coalesce(" + field +
+                      "::text, 'none') FROM information_schema.columns WHERE table_schema = '" + schema +
+                      "' AND table_name = '" + table + "' AND column_name = '" + name + "'");
+    };
+
+    ASSERT_NO_THROW(migrate());
+    for (const char *qty : { "order_qty", "min_qty", "leaves_qty", "cum_qty", "day_order_qty", "day_cum_qty" })
+    {
+        EXPECT_EQ("bigint", column("orders", qty, "data_type")) << qty;
+    }
+    for (const char *text : { "cl_order_id", "orig_cl_order_id", "source", "destination" })
+    {
+        EXPECT_EQ("text", column("orders", text, "data_type")) << text;
+    }
+    for (const char *price : { "price", "stop_px", "avg_px", "day_avg_px" })
+    {
+        EXPECT_EQ("none", column("orders", price, "numeric_precision")) << price << " still has a precision";
+    }
+    EXPECT_EQ("boolean", column("orders", "stop_triggered", "data_type"));
+    EXPECT_EQ("timestamp with time zone", column("orders", "day_start", "data_type"));
+    EXPECT_EQ("bigint", column("executions", "last_qty", "data_type"));
+    EXPECT_EQ("bigint", column("executions", "new_qty", "data_type"));
+    EXPECT_EQ("1", select("SELECT max(version)::text FROM " + schema + ".schema_version"));
+
+    ASSERT_NO_THROW(migrate()) << "applied again";
+    EXPECT_EQ("1", select("SELECT count(*)::text FROM " + schema + ".schema_version"));
+
+    run("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
 }
 
 TEST_F(PGWriteBehindTest, AStopsReleaseReachesItsRow)

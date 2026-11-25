@@ -308,47 +308,34 @@ The schema is initialized automatically on first boot from `init-db/001_schema.s
 | `clearing_firms` | Reference data — clearing firm names |
 | `orders` | Order archive with full order parameters |
 | `executions` | Unused: nothing writes execution reports to Postgres, which mirrors orders and reference data alone (#575, #599) |
+| `schema_version` | The versions the schema has been at, a row a migration (#590): the server reads the highest as it connects |
 
 **Indexes:** active orders (a partial index), and executions by order and time. The frontend doesn't query Postgres: it gets everything from the server over WebSocket.
 
 Prices are `NUMERIC` with no precision, so they hold any price the engine accepts (#538), and read back with the places they were written with: `101.25`, where `NUMERIC(18,8)` gave `101.25000000`. Since #590 a new volume has no `users` or `audit_log` table and no `audit_action` type, which nothing read or wrote; a volume made before keeps them, and nothing drops them.
 
-### An `oms-pgdata` volume from before #151
+### Schema versions and migrations (#590)
 
-Postgres runs `init-db/` only on a new volume, so an older one keeps the schema it was made with, whose quantity columns are INTEGER and whose ClOrdID columns hold 64 characters. The server's writes then fail for an order above 2147483647 or with a longer ClOrdID, and it logs each. Nothing wrote to Postgres before #151, so starting over loses nothing: `docker compose down -v` deletes every volume, the server's data too. To keep the server's data, change just the columns:
+Postgres runs `init-db/` only on a new volume, so an older one keeps the schema it was made with. Since #590 the schema has a version: `init-db` makes a new volume at the one the server's statements are written for, in `schema_version`, and each change to the schema comes with a numbered migration in `docker/migrations/` that brings an older volume up to it. The server never changes the schema itself. As it connects to Postgres, its writer reads the version:
+- **No `schema_version`:** a volume made before #590. The writer warns once, and mirrors to it as before.
+- **Another version:** the writer refuses it, as it refuses a statement the schema refuses: it logs once that the schema is at another version, counts each refusal, writes nothing, and tries again on its backoff, so a volume migrated meanwhile is taken at the next attempt.
 
-```bash
-docker compose exec oms-db psql -U oms -d oms -c "
-  ALTER TABLE orders ALTER COLUMN order_qty TYPE BIGINT, ALTER COLUMN min_qty TYPE BIGINT,
-    ALTER COLUMN leaves_qty TYPE BIGINT, ALTER COLUMN cum_qty TYPE BIGINT,
-    ALTER COLUMN day_order_qty TYPE BIGINT, ALTER COLUMN day_cum_qty TYPE BIGINT,
-    ALTER COLUMN cl_order_id TYPE TEXT, ALTER COLUMN orig_cl_order_id TYPE TEXT,
-    ALTER COLUMN source TYPE TEXT, ALTER COLUMN destination TYPE TEXT;
-  ALTER TABLE executions ALTER COLUMN last_qty TYPE BIGINT, ALTER COLUMN new_qty TYPE BIGINT;"
-```
-
-A volume made before #236 also lacks `orders.stop_triggered`. The server then can't prepare its order write, so it writes nothing to Postgres: since #590 it logs once that PostgreSQL's schema refused a statement, naming the missing column, and tries again until the schema matches, where it had logged `can't connect to PostgreSQL` at each retry. Add the column and the `TRIGGERED` execution type:
+To bring a volume up to date, run the migrations as the database's owner, with the stack up, from the repository's root:
 
 ```bash
-docker compose exec oms-db psql -U oms -d oms -c "
-  ALTER TABLE orders ADD COLUMN IF NOT EXISTS stop_triggered BOOLEAN NOT NULL DEFAULT false;
-  ALTER TYPE exec_type ADD VALUE IF NOT EXISTS 'TRIGGERED';"
+scripts/pg-migrate.sh            # applies each migration above the volume's version, each in one transaction
+scripts/pg-migrate.sh --check    # checks the migrations alone: numbered from 001 with no gap, and none holding DROP
 ```
 
-A volume made before #244 lacks `orders.day_start`, with the same symptom. Add it:
+It runs `psql` through compose (`docker compose exec -T oms-db psql -U oms -d oms`), or the command `PSQL` names. A migration holds no `DROP`, so nothing a volume holds is lost: a volume made before #590 keeps its `users` and `audit_log` tables, which nothing reads or writes.
 
-```bash
-docker compose exec oms-db psql -U oms -d oms -c "
-  ALTER TABLE orders ADD COLUMN IF NOT EXISTS day_start TIMESTAMPTZ;"
-```
+The first migration versions a volume made before #590, whatever it was made with. It does what this section once gave as statements to run by hand, each of which leaves a volume that already has what it makes as it was:
+- the quantity columns BIGINT and the ClOrdID columns TEXT, where a volume from before #151 held INTEGER and 64 characters (an order above 2147483647, or a longer ClOrdID, failed its write);
+- `orders.stop_triggered` and the `TRIGGERED` execution type (#236), and `orders.day_start` (#244), without which the server couldn't prepare its order write and wrote nothing;
+- the prices `NUMERIC` with no precision, where `NUMERIC(18,8)` refused 1e10 or more (#538);
+- `schema_version` at version 1, which the server's role may read where the volume has the role (#568).
 
-A volume made before #538 holds the prices in `NUMERIC(18,8)`, which refuses 1e10 or more: Postgres refuses such an order's write, which the server logs and counts. Widen them:
-
-```bash
-docker compose exec oms-db psql -U oms -d oms -c "
-  ALTER TABLE orders ALTER COLUMN price TYPE NUMERIC, ALTER COLUMN stop_px TYPE NUMERIC,
-    ALTER COLUMN avg_px TYPE NUMERIC, ALTER COLUMN day_avg_px TYPE NUMERIC;"
-```
+Starting over loses nothing that LMDB doesn't hold: `docker compose down -v` deletes every volume, the server's data too.
 
 ## Troubleshooting
 
