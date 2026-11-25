@@ -12,6 +12,7 @@
 
 #include <stdexcept>
 #include "TrOperations.h"
+#include "ClosedOrderSweep.h"
 #include "QueuesDef.h"
 #include "OrderMatcher.h"
 #include "OrderStorage.h"
@@ -836,6 +837,64 @@ void ReportRestatementTrOperation::execute(const Context &cnxt)
 }
 
 void ReportRestatementTrOperation::rollback(const Context &) {}
+
+DropClosedOrderTrOperation::DropClosedOrderTrOperation(OrderEntry *order, DateTimeT keptFrom, DateTimeT day,
+                                                       ClosedOrderSweep *sweep)
+    : Operation(DROP_ORDER_TROPERATION, order->orderId_), order_(order), keptFrom_(keptFrom), day_(day), sweep_(sweep)
+{
+}
+
+void DropClosedOrderTrOperation::execute(const Context &cnxt)
+{
+    assert(nullptr != order_);
+    assert(nullptr != cnxt.orderStorage_);
+    removed_ = false;
+    erased_ = false;
+    // Tested again where nothing else about the order runs: the sweep tested it as the day began, and a transaction
+    // enqueued since may have changed what its last report published (#722)
+    bool droppable = false;
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock ordLock(order_->entryMutex_, false);
+        droppable = ClosedOrderSweep::droppable(*order_, keptFrom_);
+    }
+    if (droppable)
+    {
+        // Out of the lookups first, which the rollback undoes, and the record's versions last, which nothing does
+        removed_ = cnxt.orderStorage_->drop(order_, day_);
+        if (removed_)
+        {
+            cnxt.orderStorage_->eraseRecord(order_->orderId_);
+            erased_ = true;
+        }
+    }
+    finished(removed_);
+}
+
+void DropClosedOrderTrOperation::rollback(const Context &cnxt)
+{
+    assert(nullptr != cnxt.orderStorage_);
+    // An erase that threw erased nothing, since LMDB aborted its transaction, so the order goes back. One that returned
+    // stands: the order is gone from storage, and stays gone from memory.
+    if (removed_ && !erased_)
+    {
+        cnxt.orderStorage_->undrop(order_);
+        removed_ = false;
+    }
+    finished(removed_);
+}
+
+void DropClosedOrderTrOperation::finished(bool dropped) noexcept
+{
+    if (told_)
+    {
+        return;
+    }
+    told_ = true;
+    if (nullptr != sweep_)
+    {
+        sweep_->dropFinished(dropped);
+    }
+}
 
 void MatchOrderTrOperation::execute(const Context &cnxt)
 {

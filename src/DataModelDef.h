@@ -184,6 +184,25 @@ constexpr bool holdsNoLeaves(OrderStatus status) noexcept
            (EXPIRED_ORDSTATUS == status) || (REPLACED_ORDSTATUS == status) || (DFD_ORDSTATUS == status);
 }
 
+/// An order that will never trade again (#597): filled, canceled, rejected, expired, or replaced by another. In any
+/// other status it is open, held, suspended, done for the day or still pending, and may.
+constexpr bool closedForGood(OrderStatus status) noexcept
+{
+    return (FILLED_ORDSTATUS == status) || (CANCELED_ORDSTATUS == status) || (REJECTED_ORDSTATUS == status) ||
+           (EXPIRED_ORDSTATUS == status) || (REPLACED_ORDSTATUS == status);
+}
+
+/// Whether --keep-closed-days drops an order of these figures: closed for good, in a business day that began before
+/// keptFrom, the start of the earliest day kept, 0 keeping every day. A start reads them from the order's record
+/// (#597), and a running server from what its last report published (#722). The day is the one the day figures are
+/// for (#244), which a fill in a later day and each day's restatement move on, so a closed order's is the day it
+/// closed. A record from before format 4 has none, and its creation's time stands for it: a time compares with a day's
+/// start as the day it is in does.
+constexpr bool closedBefore(OrderStatus status, DateTimeT dayStart, DateTimeT creationTime, DateTimeT keptFrom) noexcept
+{
+    return (0 != keptFrom) && closedForGood(status) && (((0 != dayStart) ? dayStart : creationTime) < keptFrom);
+}
+
 enum Instructions
 {
     INVALID_INSTRUCTION = 0,
@@ -597,6 +616,9 @@ public:
     }
     /// Erases one version of it, undoing a saveLastTrade()
     virtual void eraseLastTrade(const SourceIdT & /*instrument*/, u32 /*version*/) {}
+    /// Erases every version of the order's record, as a running server's drop of a closed order does (#722). Nothing
+    /// restores them, so the drop does this last. A saver that keeps none erases nothing.
+    virtual void eraseOrder(const IdT & /*orderId*/) {}
 };
 
 } // namespace COP

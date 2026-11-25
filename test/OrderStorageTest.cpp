@@ -645,3 +645,78 @@ TEST_F(OrderStorageTest, SaveWithoutPublishGuardLeavesOrderUnmarked)
     ASSERT_NE(nullptr, saved);
     EXPECT_FALSE(saved->bookingPending_.load());
 }
+
+// =============================================================================
+// Orders a running server drops (#722)
+// =============================================================================
+
+TEST_F(OrderStorageTest, ADroppedOrderIsFoundByNoLookupAndKeptUntilALaterDaysFree)
+{
+    // A running server drops each closed order of a day before the kept ones (#722): no lookup finds it, forEachOrder()
+    // passes it by, and its entry stays allocated until a later business day's freeDropped(), for a reader that took
+    // its pointer before
+    auto keptOrder = createCorrectOrder();
+    assignClOrderId(keptOrder.get());
+    OrderEntry *kept = storage()->save(*keptOrder, IdTGenerator::instance());
+    auto droppedOrder = createCorrectOrder();
+    assignClOrderId(droppedOrder.get());
+    OrderEntry *dropped = storage()->save(*droppedOrder, IdTGenerator::instance());
+    ASSERT_NE(nullptr, kept);
+    ASSERT_NE(nullptr, dropped);
+    const RawDataEntry clOrdId = dropped->clOrderId_.get();
+    EXPECT_EQ(0u, storage()->droppedMaxOrderNumber());
+
+    const DateTimeT day = 1792011600000ULL; // 2026-10-14 17:00 New York, 21:00 UTC
+    ASSERT_TRUE(storage()->drop(dropped, day));
+    EXPECT_EQ(nullptr, storage()->locateByOrderId(dropped->orderId_));
+    EXPECT_EQ(nullptr, storage()->locateByClOrderId(clOrdId));
+    EXPECT_EQ(nullptr, storage()->locateByOrderNumber(dropped->orderId_.id_));
+    EXPECT_EQ(1u, storage()->orderCount());
+    std::vector<const OrderEntry *> walked;
+    storage()->forEachOrder(
+        [&walked](const IdT &, const OrderEntry &order)
+        {
+            walked.push_back(&order);
+        });
+    EXPECT_EQ(std::vector<const OrderEntry *>{ kept }, walked);
+    EXPECT_EQ(1u, storage()->droppedHeld());
+    EXPECT_EQ(dropped->orderId_.id_, storage()->droppedMaxOrderNumber());
+    EXPECT_EQ(std::string(clOrdId.data_, clOrdId.length_),
+              std::string(dropped->clOrderId_.get().data_, dropped->clOrderId_.get().length_))
+        << "the dropped order can't be read";
+    EXPECT_FALSE(storage()->drop(dropped, day)) << "an order was dropped twice";
+
+    EXPECT_EQ(0u, storage()->freeDropped(day)) << "an order was freed on the day it was dropped";
+    EXPECT_EQ(1u, storage()->droppedHeld());
+    EXPECT_EQ(1u, storage()->freeDropped(day + 1));
+    EXPECT_EQ(0u, storage()->droppedHeld());
+    EXPECT_EQ(0u, storage()->freeDropped(day + 1));
+    EXPECT_EQ(kept, storage()->locateByOrderId(kept->orderId_));
+
+    // One dropped and not yet freed goes with the store, as the orders it holds do: LeakSanitizer sees one left
+    ASSERT_TRUE(storage()->drop(kept, day + 1));
+    EXPECT_EQ(0u, storage()->orderCount());
+    EXPECT_EQ(1u, storage()->droppedHeld());
+}
+
+TEST_F(OrderStorageTest, AnOrderPutBackAfterItsDropIsFoundAgain)
+{
+    // A drop whose record can't be erased rolls back, and puts the order back (#722)
+    auto order = createCorrectOrder();
+    assignClOrderId(order.get());
+    OrderEntry *saved = storage()->save(*order, IdTGenerator::instance());
+    ASSERT_NE(nullptr, saved);
+    const RawDataEntry clOrdId = saved->clOrderId_.get();
+    EXPECT_FALSE(storage()->undrop(saved)) << "an order the store holds was put back";
+
+    const DateTimeT day = 1792011600000ULL; // 2026-10-14 17:00 New York, 21:00 UTC
+    ASSERT_TRUE(storage()->drop(saved, day));
+    ASSERT_TRUE(storage()->undrop(saved));
+    EXPECT_EQ(saved, storage()->locateByOrderId(saved->orderId_));
+    EXPECT_EQ(saved, storage()->locateByClOrderId(clOrdId));
+    EXPECT_EQ(1u, storage()->orderCount());
+    EXPECT_EQ(0u, storage()->droppedHeld());
+    EXPECT_FALSE(storage()->undrop(saved)) << "an order was put back twice";
+    EXPECT_EQ(0u, storage()->freeDropped(day + 1)) << "an order put back was freed";
+    EXPECT_EQ(saved, storage()->locateByOrderId(saved->orderId_));
+}

@@ -1147,6 +1147,8 @@ A failure stops nothing else: the caller goes on as if the event had been handle
    │   • LMDBStorage's txnLock_: last, around one LMDB transaction;        │
    │     no other lock of the engine's is taken under it, but the          │
    │     logger's, as grow() warns that the map grew (#148).               │
+   │   • ClosedOrderSweep's lock_: a leaf, held only to take the next      │
+   │     drop or count one done; nothing is locked under it (#722).        │
    │   • The incoming queue takes no lock to push or pop.                  │
    │   • BookPublisher's lock_ (app/): a leaf, held only to mark a         │
    │     book changed or to take the changed ones, never while a book      │
@@ -1325,6 +1327,7 @@ A failure stops nothing else: the caller goes on as if the event had been handle
 | `RemoveFromOrderBookTrOperation` | Remove order from book | Re-add to book |
 | `EnqueueEventTrOperation` | Queue deferred event | Dequeue event |
 | `MatchOrderTrOperation` | Initiate order matching | Cancel match |
+| `DropClosedOrderTrOperation` | Drop a closed order a running server keeps no longer (#722): out of the store, then its record erased | Put the order back in the store, unless its record's erase returned |
 
 **Associated Test Cases:**
 
@@ -1454,15 +1457,37 @@ A copy of a map takes its nodes from the same pool, so it too must be made under
 Nodes are not all a walk touches: a ClOrdID key's bytes (`RawDataEntry`'s own allocation), the objects a lookup finds,
 and the book's own maps still lie among the orders.
 
-**Closed orders (#597).** Nothing removes an order while the server runs. A start given `--keep-closed-days N` drops
-each closed order (FILLED, CANCELED, REJECTED, EXPIRED or REPLACED) whose business day began before the last N, the
-current one counted. Its day is its `dayStart_` (#244), and its creation's time for a record from before format 4.
-`StorageRecordDispatcher::finishLoad()` doesn't restore it, and erases every version of its record with
-`FileSaver::eraseVersions()`, `LMDBStorage::ERASE_BATCH` to a transaction. The load's first pass drops them, so the
+**Closed orders (#597).** A start given `--keep-closed-days N` drops each closed order (FILLED, CANCELED, REJECTED,
+EXPIRED or REPLACED) whose business day began before the last N, the current one counted (`closedBefore()`,
+`ExpiryScheduler::keptDaysStart()`). Its day is its `dayStart_` (#244), and its creation's time for a record from
+before format 4. `StorageRecordDispatcher::finishLoad()` doesn't restore it, and erases every version of its record
+with `FileSaver::eraseVersions()`, `LMDBStorage::ERASE_BATCH` to a transaction. The load's first pass drops them, so the
 second finds none, and the next id stays past a dropped order's number (`droppedMaxOrderNumber()`). Postgres keeps
 their rows. Only a replacement still pending reads its original (`Pend_Replace`'s rows), and its original isn't closed
-yet, so an open replacement whose original was dropped restores and trades as any order does. Dropping orders while the
-server runs is #722.
+yet, so an open replacement whose original was dropped restores and trades as any order does.
+
+**While the server runs (#722)** the same orders go at each business day's start, as ruled: the expiry scheduler fires
+`TimerEvent::DROP_CLOSED_ORDERS`, which names no order and is set again as it fires
+(`ExpiryScheduler::scheduleClosedOrderDrops()`, armed by `App::scheduleClosedOrderDrops()` only with N above 0), and
+the event worker that takes it starts `Proc::ClosedOrderSweep`:
+- It frees the orders dropped in the business days before, then finds the orders to drop by what each one's last
+  report published (`published_`, read under the order's lock once the store's is released, #404, #628), never by the
+  order's own figures: a decision changes those before the transaction that persists and reports it runs, and a drop
+  enqueued then would run first, and that transaction's persist would write the record back.
+- Each drop is a transaction of its own, `DropClosedOrderTrOperation`, that names the order alone, so that every
+  transaction about it enqueued before has run, and it is enqueued only once the order's booking is (#83, #625). It
+  tests the order again, takes it out of `OrderDataStorage`'s maps (`drop()`, under the store's write lock, #467),
+  which its rollback undoes, and erases every version of its record last (`OrderSaver::eraseOrder()`, one LMDB commit
+  that seeks the record's own keys), which nothing undoes. Postgres keeps the row.
+- At most `ClosedOrderSweep::MAX_IN_FLIGHT` drops are in flight, and the next is enqueued as one is done, from the end
+  of its operation: a day's drops enqueued at once would count in the work in flight (#519), past which the sessions
+  stop reading, and a live order would wait behind all of them for the workers.
+- A dropped order's entry stays allocated, kept by the business day of its drop, until the next day's drop frees it
+  (`freeDropped()`): the order snapshot, the book's depth, and a handler between its lookup and its transaction may
+  hold its pointer.
+- A timer for an order the store no longer has is quiet at or below the highest number dropped
+  (`OrderDataStorage::droppedMaxOrderNumber()`), since a GTD order filled early keeps its expiry's timer; above it, it
+  still throws. The order's strings stay in `WideDataStorage`: a replacement shares its original's ClOrdID entry.
 
 ### 8.2 Codec System
 
@@ -1603,7 +1628,7 @@ Every `.h`, `.cpp`, `.py` and `.sh` file under `src/`, `test/` and `bench/` is n
 
 | Category | Files |
 |----------|-------|
-| **Core Pipeline** | `Processor.h/cpp`, `IncomingQueues.h/cpp`, `OutgoingQueues.h/cpp`, `ExpiryScheduler.h/cpp` |
+| **Core Pipeline** | `Processor.h/cpp`, `IncomingQueues.h/cpp`, `OutgoingQueues.h/cpp`, `ExpiryScheduler.h/cpp`, `ClosedOrderSweep.h/cpp` |
 | **State Machine** | `StateMachine.h/cpp`, `StateMachineDef.h`, `OrderStateMachineImpl.h/cpp`, `OrderStates.h/cpp`, `OrderStateEvents.h` |
 | **Order Matching** | `OrderMatcher.h/cpp`, `OrderBookImpl.h/cpp` |
 | **Transactions** | `TransactionDef.h`, `TransactionMgr.h/cpp`, `TransactionScope.h/cpp`, `TransactionScopePool.h`, `TrOperations.h/cpp`, `NLinkedTree.h/cpp` |

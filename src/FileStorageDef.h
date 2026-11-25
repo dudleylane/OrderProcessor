@@ -49,7 +49,8 @@ public:
     virtual u32 replace(const IdT &id, u32 version, const char *buf, size_t size) = 0;
     /// erases version of the record from file
     virtual void erase(const IdT &id, u32 version) = 0;
-    /// erases all versions of record from file
+    /// erases all versions of record from file, in one transaction: a running server's drop of a closed order erases
+    /// its record so (#722)
     virtual void erase(const IdT &id) = 0;
     /// Erases each version given, in as few transactions as the storage can (#597): a start that drops closed orders
     /// erases every version of each at once, and a transaction each is an fsync each. This default erases them one by

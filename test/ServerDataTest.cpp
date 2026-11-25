@@ -691,9 +691,9 @@ TEST_F(ServerDataTest, AStartDropsTheClosedOrdersOfBusinessDaysBeforeTheKeptOnes
     ASSERT_EQ(utc(2026, 11, 6, 22), days[0]);
     for (int day = 0; day < 3; ++day)
     {
-        EXPECT_EQ(days[day], App::keptDaysStart(now, static_cast<u32>(3 - day)));
+        EXPECT_EQ(days[day], Proc::ExpiryScheduler::keptDaysStart(now, static_cast<u32>(3 - day)));
     }
-    EXPECT_EQ(0u, App::keptDaysStart(now, 0)) << "0 days keeps every day";
+    EXPECT_EQ(0u, Proc::ExpiryScheduler::keptDaysStart(now, 0)) << "0 days keeps every day";
 
     struct Written
     {
@@ -796,4 +796,38 @@ TEST_F(ServerDataTest, AStartDropsTheClosedOrdersOfBusinessDaysBeforeTheKeptOnes
         }
         restart();
     }
+}
+
+TEST_F(ServerDataTest, ARunningServerDropsClosedOrdersAtEachDaysStartOnlyWithDaysToKeep)
+{
+    // --keep-closed-days 0 keeps every order (#597), and a running server sets no drop (#722). With days to keep, the
+    // expiry scheduler fires the drop at each business day's start, the first after the server's start: here
+    // 2026-11-09 17:00 New York, 22:00 UTC, in standard time.
+    DateTimeT now = utc(2026, 11, 9, 15);
+    ::testing::NiceMock<test::MockInQueues> queues;
+    std::vector<std::pair<IdT, Queues::TimerEvent::TimerType>> fired;
+    ON_CALL(queues, push(::testing::_, ::testing::An<const Queues::TimerEvent &>()))
+        .WillByDefault(
+            [&fired](const std::string &, const Queues::TimerEvent &evnt)
+            {
+                fired.emplace_back(evnt.id_, evnt.timerType_);
+            });
+    Proc::ExpiryScheduler expiry(&queues,
+                                 [&now]
+                                 {
+                                     return now;
+                                 });
+    EXPECT_FALSE(App::scheduleClosedOrderDrops(expiry, 0, now));
+    EXPECT_EQ(0u, expiry.pending()) << "keeping every day, a drop was set";
+
+    EXPECT_TRUE(App::scheduleClosedOrderDrops(expiry, 2, now));
+    ASSERT_EQ(1u, expiry.pending());
+    now = utc(2026, 11, 9, 22) - 1;
+    EXPECT_EQ(0u, expiry.fireDue()) << "the drop fired before the day's start";
+    now += 1;
+    EXPECT_EQ(1u, expiry.fireDue());
+    ASSERT_EQ(1u, fired.size());
+    EXPECT_FALSE(fired[0].first.isValid()) << "the drop names an order";
+    EXPECT_EQ(Queues::TimerEvent::DROP_CLOSED_ORDERS, fired[0].second);
+    EXPECT_EQ(1u, expiry.pending()) << "the next day's drop isn't set";
 }

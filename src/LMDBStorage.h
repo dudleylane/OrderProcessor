@@ -61,6 +61,7 @@ public:
     u32 update(const IdT &id, const char *buf, size_t size) override;
     u32 replace(const IdT &id, u32 version, const char *buf, size_t size) override;
     void erase(const IdT &id, u32 version) override;
+    /// Every version of the record, in one transaction, walking the record's own keys alone (#722)
     void erase(const IdT &id) override;
     /// ERASE_BATCH versions to a transaction, where erase(id, version) takes one each (#597)
     void eraseVersions(const std::vector<std::pair<IdT, u32>> &versions) override;

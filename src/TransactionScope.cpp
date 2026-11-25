@@ -81,6 +81,8 @@ const char *operationName(OperationType type) noexcept
         return "REPORT_RESTATEMENT_TROPERATION";
     case REPORT_TRIGGER_TROPERATION:
         return "REPORT_TRIGGER_TROPERATION";
+    case DROP_ORDER_TROPERATION:
+        return "DROP_ORDER_TROPERATION";
     }
     return "an operation of an unknown type";
 }

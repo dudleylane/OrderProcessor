@@ -709,41 +709,38 @@ void LMDBStorage::eraseVersions(const std::vector<std::pair<IdT, u32>> &versions
 
 void LMDBStorage::erase(const IdT &id)
 {
+    // The key is {id, version} compared byte-wise, with its padding zeroed, so a record's versions are one run of keys
+    // from {id, 0}, in whatever order their versions' bytes put them: seek to the first key from there, erase it while
+    // it is the record's, and seek again (#722). It walked the whole database, and a running server's drop of a closed
+    // order erases a record each. A seek after each erase, rather than reading the key the cursor moved to: a seek
+    // needs nothing of where an erase leaves the cursor, at the database's end or with the database emptied.
+    const CompositeKey first(id, 0);
     write("LMDBStorage::erase(all)",
           [&](MDB_txn *txn)
           {
               MDB_cursor *cursor = nullptr;
               int rc = mdb_cursor_open(txn, dbi_, &cursor);
-              if (rc != MDB_SUCCESS)
+              if (MDB_SUCCESS != rc)
               {
                   return rc;
               }
-
-              MDB_val curKey, curData;
-              rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_FIRST);
-              while (rc == MDB_SUCCESS)
+              for (;;)
               {
-                  bool deleted = false;
-                  if (curKey.mv_size == sizeof(CompositeKey))
+                  MDB_val curKey = makeKey(first);
+                  MDB_val curData;
+                  rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_SET_RANGE);
+                  if ((MDB_SUCCESS != rc) || (sizeof(CompositeKey) != curKey.mv_size) || !(readKey(curKey).id_ == id))
                   {
-                      CompositeKey ck = readKey(curKey);
-                      if (ck.id_ == id)
-                      {
-                          mdb_cursor_del(cursor, 0);
-                          deleted = true;
-                      }
+                      break; // past the record's last version: another record's key, or none
                   }
-                  if (!deleted)
+                  rc = mdb_cursor_del(cursor, 0);
+                  if (MDB_SUCCESS != rc)
                   {
-                      rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_NEXT);
-                  }
-                  else
-                  {
-                      rc = mdb_cursor_get(cursor, &curKey, &curData, MDB_GET_CURRENT);
+                      break;
                   }
               }
               mdb_cursor_close(cursor);
-              return MDB_SUCCESS;
+              return (MDB_NOTFOUND == rc) ? MDB_SUCCESS : rc;
           });
 }
 

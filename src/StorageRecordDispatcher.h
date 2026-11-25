@@ -132,6 +132,9 @@ public:
     u32 saveLastTrade(const SourceIdT &instrument, PriceT lastPx, const IdT &tradeId,
                       const std::vector<IdT> &pendingReleases) override;
     void eraseLastTrade(const SourceIdT &instrument, u32 version) override;
+    /// reimplemented from OrderSaver: every version of the order's record, in one transaction, as a running server
+    /// drops a closed order (#722). Postgres keeps its row.
+    void eraseOrder(const IdT &orderId) override;
 
 #ifdef BUILD_PG
 public:

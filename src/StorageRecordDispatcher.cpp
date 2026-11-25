@@ -138,22 +138,6 @@ IdT lastTradeKey(const SourceIdT &instrument)
 {
     return IdT(instrument.id_, LAST_TRADE_KEY_DATE);
 }
-/// An order that will never trade again (#597): filled, canceled, rejected, expired, or replaced by another. In any
-/// other status it is open, held, suspended, done for the day or still pending, and may.
-bool closedForGood(OrderStatus status)
-{
-    switch (status)
-    {
-    case FILLED_ORDSTATUS:
-    case CANCELED_ORDSTATUS:
-    case REJECTED_ORDSTATUS:
-    case EXPIRED_ORDSTATUS:
-    case REPLACED_ORDSTATUS:
-        return true;
-    default:
-        return false;
-    }
-}
 } // namespace
 
 StorageRecordDispatcher::StorageRecordDispatcher(void)
@@ -418,12 +402,8 @@ void StorageRecordDispatcher::finishLoad()
         }
         assert(nullptr != orderStorage_);
         // A closed order of a business day before the kept ones isn't restored, and every version of its record is
-        // erased once the loop ends (#597). Its day is the one its day figures are for (#244), which a fill in a later
-        // day and each day's restatement move on, so a closed order's is the day it closed. A record from before format
-        // 4 has none, and its creation's time stands for it: a time compares with a day's start as the day it is in
-        // does.
-        const DateTimeT day = (0 != order->dayStart_) ? order->dayStart_ : order->creationTime_;
-        if ((0 != dropClosedBefore_) && closedForGood(order->status_) && (day < dropClosedBefore_))
+        // erased once the loop ends (#597): closedBefore() says which, as it does for a running server's drops (#722)
+        if (closedBefore(order->status_, order->dayStart_, order->creationTime_, dropClosedBefore_))
         {
             ++droppedOrders_;
             droppedMaxOrderNumber_ = std::max(droppedMaxOrderNumber_, it->first.id_);
@@ -848,6 +828,14 @@ void StorageRecordDispatcher::eraseLastTrade(const SourceIdT &instrument, u32 ve
 {
     assert(nullptr != fileStorage_);
     fileStorage_->erase(lastTradeKey(instrument), version);
+}
+
+void StorageRecordDispatcher::eraseOrder(const IdT &orderId)
+{
+    assert(nullptr != fileStorage_);
+    // Every version, in one transaction. Postgres hears nothing: it keeps the order's row, as it keeps a row a start
+    // drops (#597)
+    fileStorage_->erase(orderId);
 }
 
 void StorageRecordDispatcher::saveIdLimit(u64 limit)

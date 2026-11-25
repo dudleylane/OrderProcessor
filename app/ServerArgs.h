@@ -76,8 +76,9 @@ inline std::string serverUsage()
            "  --lmdb-map-mb N           LMDB's starting map, in MiB (default " +
            std::to_string(Store::LMDBStorage::DEFAULT_MAP_SIZE >> 20) +
            ")\n"
-           "  --keep-closed-days N      as it starts, drop each closed order whose business day isn't one of\n"
-           "                            the last N, the current one counted (default 0: keep every order)\n"
+           "  --keep-closed-days N      as it starts, and as each business day starts, drop each closed order\n"
+           "                            whose business day isn't one of the last N, the current one counted\n"
+           "                            (default 0: keep every order)\n"
            "  --max-connections N       WebSocket clients at once (default " +
            std::to_string(DEFAULT_MAX_CONNECTIONS) +
            ")\n"

@@ -39,6 +39,9 @@ namespace Proc
 ///
 /// It restates the orders that outlive a business day, at each day's start (#244): the RESTATEMENT timer, at the day's
 /// end, begins the order's figures for the next one (OrderParams::startDay()) and sends a RESTATED report.
+///
+/// With --keep-closed-days, it fires DROP_CLOSED_ORDERS at each day's start too, which names no order: the closed
+/// orders of the days before the kept ones are dropped while the server runs (#722, Proc::ClosedOrderSweep).
 class ExpiryScheduler
 {
 public:
@@ -77,9 +80,17 @@ public:
     /// that rests, in the price book or the stop book, unless its day ends it first, as it does a DAY order and a GTD
     /// order that expires by then. False for any other order.
     static bool restatementOf(const OrderEntry &order, DateTimeT *when);
+    /// The start of the earliest of the last days business days as of now, the current one counted: what
+    /// --keep-closed-days keeps, as a start drops the closed orders of the days before (#597), and a running server
+    /// (#722). 0 for 0 days, which keeps every day.
+    static DateTimeT keptDaysStart(DateTimeT now, u32 days);
 
     /// Fires the timer at the time given, or at once if it has passed. Thread-safe.
     void schedule(const IdT &orderId, DateTimeT when, Queues::TimerEvent::TimerType type);
+    /// Fires DROP_CLOSED_ORDERS at each business day's start from the first after now (#722): as it fires, the timer is
+    /// set again for the first day's start after the clock's time, so it fires once a day, and once for the days a
+    /// stopped clock or a busy machine skipped. Thread-safe.
+    void scheduleClosedOrderDrops(DateTimeT now);
     /// When the thread wakes for a timer at the time given: none past LATEST_TIME, which the system clock can't hold.
     /// Converted all the same, such a time overflowed, and the wait returned at once without letting go of the lock:
     /// the thread spun holding it, and every schedule() and stop() after it waited for good (#511).
@@ -108,6 +119,8 @@ private:
     void run();
     /// Takes the timers due by now off the queue; the caller holds lock_
     void takeDue(DateTimeT now, std::vector<Timer> *due);
+    /// Pushes each due timer's event, and sets a fired DROP_CLOSED_ORDERS again (#722); the caller doesn't hold lock_
+    void fire(const std::vector<Timer> &due, DateTimeT now);
 
     Queues::InQueues *inQueues_;
     Clock clock_;

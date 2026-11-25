@@ -10,6 +10,8 @@
  See http://orderprocessor.sourceforge.net updates, documentation, and revision history.
 */
 
+#include <algorithm>
+#include <iterator>
 #include <stdexcept>
 #include "OrderStorage.h"
 #include "DataModelDef.h"
@@ -40,14 +42,24 @@ OrderDataStorage::~OrderDataStorage(void)
     // Clean up orders with exclusive write lock. The temporary takes the map's allocator, so its nodes go back to
     // their pool (#467)
     OrdersByIDT tmp(ordersById_.get_allocator());
+    DroppedT dropped;
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, true);
         std::swap(tmp, ordersById_);
         ordersByClId_.clear();
+        dropped.swap(dropped_);
     }
     for (OrdersByIDT::iterator it = tmp.begin(); it != tmp.end(); ++it)
     {
         delete it->second;
+    }
+    // And those a running server dropped and kept (#722)
+    for (const DroppedT::value_type &day : dropped)
+    {
+        for (OrderEntry *order : day.second)
+        {
+            delete order;
+        }
     }
 
     aux::ExchLogger::instance()->note("OrderDataStorage destroyed");
@@ -254,6 +266,117 @@ void OrderDataStorage::restore(OrderEntry *order)
             }
             throw;
         }
+    }
+}
+
+bool OrderDataStorage::drop(OrderEntry *order, DateTimeT day)
+{
+    assert(nullptr != order);
+    // Its ClOrdID before the lock: save() and restore() read it as they stored the order, so this takes no lock
+    const RawDataEntry &clOrderId = order->clOrderId_.get();
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, true);
+    const OrdersByIDT::iterator byId = ordersById_.find(order->orderId_);
+    if ((ordersById_.end() == byId) || (order != byId->second))
+    {
+        return false;
+    }
+    // Room for it first, the steps that can throw, so that a throw changes nothing. Doubled, not grown by one: a
+    // day's drops are many.
+    std::vector<OrderEntry *> &held = dropped_[day];
+    if (held.size() == held.capacity())
+    {
+        held.reserve(std::max<size_t>(64, 2 * held.capacity()));
+    }
+    const OrdersByClientIDT::iterator byClId = ordersByClId_.find(clOrderId);
+    if ((ordersByClId_.end() != byClId) && (order == byClId->second))
+    {
+        ordersByClId_.erase(byClId);
+    }
+    ordersById_.erase(byId);
+    held.push_back(order);
+    if (droppedMaxOrderNumber_.load(std::memory_order_relaxed) < order->orderId_.id_)
+    {
+        droppedMaxOrderNumber_.store(order->orderId_.id_, std::memory_order_relaxed);
+    }
+    return true;
+}
+
+bool OrderDataStorage::undrop(OrderEntry *order)
+{
+    assert(nullptr != order);
+    const RawDataEntry &clOrderId = order->clOrderId_.get();
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, true);
+    // From the latest: a rollback follows its own drop closely
+    std::vector<OrderEntry *> *held = nullptr;
+    std::vector<OrderEntry *>::reverse_iterator dropped;
+    for (DroppedT::reverse_iterator day = dropped_.rbegin(); (dropped_.rend() != day) && (nullptr == held); ++day)
+    {
+        dropped = std::find(day->second.rbegin(), day->second.rend(), order);
+        if (day->second.rend() != dropped)
+        {
+            held = &day->second;
+        }
+    }
+    if (nullptr == held)
+    {
+        return false;
+    }
+    ordersById_.insert(OrdersByIDT::value_type(order->orderId_, order));
+    try
+    {
+        // A new order that took its ClOrdID since the drop keeps it: insert() leaves the key as it is
+        ordersByClId_.insert(OrdersByClientIDT::value_type(clOrderId, order));
+    }
+    catch (...)
+    {
+        // Still dropped, in neither map: in one, freeDropped() would free an order a lookup finds
+        ordersById_.erase(order->orderId_);
+        throw;
+    }
+    held->erase(std::next(dropped).base());
+    return true;
+}
+
+size_t OrderDataStorage::freeDropped(DateTimeT before)
+{
+    DroppedT freed;
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, true);
+        // The days before, a node at a time, which allocates nothing under the lock
+        const DroppedT::iterator kept = dropped_.lower_bound(before);
+        while (dropped_.begin() != kept)
+        {
+            freed.insert(dropped_.extract(dropped_.begin()));
+        }
+    }
+    size_t count = 0;
+    for (const DroppedT::value_type &day : freed)
+    {
+        for (OrderEntry *order : day.second)
+        {
+            delete order;
+        }
+        count += day.second.size();
+    }
+    return count;
+}
+
+size_t OrderDataStorage::droppedHeld() const
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
+    size_t held = 0;
+    for (const DroppedT::value_type &day : dropped_)
+    {
+        held += day.second.size();
+    }
+    return held;
+}
+
+void OrderDataStorage::eraseRecord(const IdT &orderId)
+{
+    if (nullptr != saver_)
+    {
+        saver_->eraseOrder(orderId);
     }
 }
 
