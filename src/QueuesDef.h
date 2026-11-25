@@ -202,7 +202,10 @@ struct TimerEvent : public EventBase
         DAY_END,
         DAY_START,
         /// A business day starts for an order that outlives the one before it (#244): its day figures begin again
-        RESTATEMENT
+        RESTATEMENT,
+        /// A business day starts for the server (#722): the closed orders of the days before the kept ones are dropped
+        /// (Proc::ClosedOrderSweep). It names no order, and the expiry scheduler sets it again as it fires.
+        DROP_CLOSED_ORDERS
     };
     TimerType timerType_;
 

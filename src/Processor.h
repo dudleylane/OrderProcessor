@@ -40,6 +40,7 @@ class TransactionManager;
 namespace Proc
 {
 class ExpiryScheduler;
+class ClosedOrderSweep;
 
 struct ProcessorParams
 {
@@ -53,6 +54,9 @@ struct ProcessorParams
     /// Expires DAY and GTD orders at their time (#240), and restates the orders that outlive a business day (#244);
     /// none in most tests
     ExpiryScheduler *expiry_ = nullptr;
+    /// Drops the closed orders of the days before the kept ones at each business day's start while the server runs
+    /// (#722); none without --keep-closed-days, and in most tests
+    ClosedOrderSweep *sweep_ = nullptr;
     /// Milliseconds since the epoch, UTC: the business day a trade or a restatement is in (#244). The system's clock
     /// when empty; tests give one of their own.
     std::function<DateTimeT()> clock_;
@@ -137,8 +141,9 @@ public:
 
 private:
     /// Enqueues a state change of the order with id, to be decided on the transaction worker (#96). caller names the
-    /// handler in the error when the order doesn't exist.
-    void enqueueStateChange(const IdT &id, OrderStateChange change, const char *caller);
+    /// handler in the error when the order doesn't exist. A timer's, timer true, for an order a running server dropped
+    /// is expected, and does nothing (#722).
+    void enqueueStateChange(const IdT &id, OrderStateChange change, const char *caller, bool timer);
     /// The engine's clock, as Context::now() reads it, for a decision made where no Context is: a new order's (#546)
     DateTimeT clockNow() const;
 
@@ -200,6 +205,8 @@ private:
     /// Expires DAY and GTD orders at their time (#240), and restates the orders that outlive a day (#244); none in
     /// most tests
     ExpiryScheduler *expiry_ = nullptr;
+    /// Drops the closed orders of the days before the kept ones as each business day starts (#722); none in most tests
+    ClosedOrderSweep *sweep_ = nullptr;
     /// The business day's clock (#244), given to every transaction's context; the system's when empty
     std::function<DateTimeT()> clock_;
 

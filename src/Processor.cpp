@@ -16,6 +16,7 @@
 #include <thread>
 #include <utility>
 #include "Processor.h"
+#include "ClosedOrderSweep.h"
 #include "ExpiryScheduler.h"
 #include "IdTGenerator.h"
 #include "TransactionDef.h"
@@ -131,6 +132,7 @@ void Processor::init(const ProcessorParams &params)
     inQueue_ = params.inQueue_;
     transactMgr_ = params.transactMgr_;
     expiry_ = params.expiry_;
+    sweep_ = params.sweep_;
     clock_ = params.clock_;
 
     testStateMachine_ = params.testStateMachine_;
@@ -337,7 +339,7 @@ void Processor::onEvent(const std::string & /*source*/, const COP::Queues::Order
     default:
         throw std::runtime_error("Processor::onEvent(OrderChangeStateEvent): invalid change type!");
     }
-    enqueueStateChange(evnt.id_, change, "Processor::onEvent(OrderChangeStateEvent)");
+    enqueueStateChange(evnt.id_, change, "Processor::onEvent(OrderChangeStateEvent)", false);
 }
 
 void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt)
@@ -432,6 +434,16 @@ void Processor::onEvent(const std::string & /*source*/, const ProcessEvent &evnt
 
 void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
 {
+    if (TimerEvent::DROP_CLOSED_ORDERS == evnt.timerType_) [[unlikely]]
+    {
+        // A business day starts for the server, and the timer names no order (#722). Nothing sets it without
+        // --keep-closed-days, and a processor given no sweep drops nothing.
+        if (nullptr != sweep_)
+        {
+            sweep_->start(clockNow());
+        }
+        return;
+    }
     if (!evnt.id_.isValid()) [[unlikely]]
     {
         throw std::runtime_error("Processor::onEvent(TimerEvent): order id is invalid!");
@@ -454,14 +466,26 @@ void Processor::onEvent(const std::string & /*source*/, const TimerEvent &evnt)
     default:
         throw std::runtime_error("Processor::onEvent(TimerEvent): invalid timer type!");
     }
-    enqueueStateChange(evnt.id_, change, "Processor::onEvent(TimerEvent)");
+    enqueueStateChange(evnt.id_, change, "Processor::onEvent(TimerEvent)", true);
 }
 
-void Processor::enqueueStateChange(const IdT &id, OrderStateChange change, const char *caller)
+void Processor::enqueueStateChange(const IdT &id, OrderStateChange change, const char *caller, bool timer)
 {
     OrderEntry *ord = orderStorage_->locateByOrderId(id);
     if (nullptr == ord) [[unlikely]]
     {
+        // A timer can't be canceled, so one can outlive an order a running server dropped: a GTD order filled early
+        // keeps its expiry's (#722). At or below the highest number dropped that is expected, and the timer decides
+        // nothing, as it would have for the closed order. Above it, a missing order is still a bug.
+        if (timer && (id.id_ <= orderStorage_->droppedMaxOrderNumber()))
+        {
+            if (aux::ExchLogger::instance()->isDebugOn())
+            {
+                aux::ExchLogger::instance()->debug(std::string(caller) + ": order " + std::to_string(id.id_) +
+                                                   "'s timer fired after the order was dropped (#722)");
+            }
+            return;
+        }
         throw std::runtime_error(std::string(caller) + ": unable to locate order!");
     }
     // Enqueued before the transaction that books the order, the change would be decided before the order was booked

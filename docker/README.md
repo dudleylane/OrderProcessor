@@ -133,7 +133,7 @@ ENTRYPOINT ["orderProcessorServer"]
 CMD ["--port", "8080", "--data-dir", "/data"]
 ```
 
-`docker-compose.yml` gives its own command, which adds `--keep-closed-days 1` (#597): Postgres keeps every order in this stack, so each start drops the closed orders of the business days before its own. Keep it in a command of your own:
+`docker-compose.yml` gives its own command, which adds `--keep-closed-days 1` (#597): Postgres keeps every order in this stack, so each start drops the closed orders of the business days before its own, and the running server drops a day's as the next one starts (#722). Keep it in a command of your own:
 
 ```yaml
 oms-server:

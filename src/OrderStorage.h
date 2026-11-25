@@ -15,7 +15,9 @@
 #include "Singleton.h"
 #include "TypesDef.h"
 #include <oneapi/tbb/spin_rw_mutex.h>
+#include <atomic>
 #include <map>
+#include <vector>
 #include "NodePool.h"
 #include "DataModelDef.h"
 
@@ -106,6 +108,9 @@ public:
                           const std::vector<IdT> &pendingReleases, u32 *version);
     /// Erases one version of it, undoing a persistLastTrade()
     void unpersistLastTrade(const SourceIdT &instrument, u32 version);
+    /// Erases every version of the order's record (#722), which nothing restores: a running server's drop of a closed
+    /// order does it last. Without a saver, this does nothing.
+    void eraseRecord(const IdT &orderId);
     /// The persists this thread makes between beginPersistGroup() and commitPersistGroup() become durable together, or
     /// none of them do (#163). Without a saver, these do nothing.
     void beginPersistGroup();
@@ -127,6 +132,9 @@ public:
     /// convention, as ruled on #628, so each such reader gets a test that holds a decision's report back and fails if
     /// the reader gives the order as it is, as the snapshot's and the depth's do. A replace copies the whole order to
     /// make its replacement, whose figures the engine decides anew.
+    ///
+    /// The order a lookup finds stays allocated while the store lives, or, once a running server drops it, until the
+    /// next business day's drop frees it (drop(), #722): a reader that took it may read it until then.
     OrderEntry *locateByClOrderId(const RawDataEntry &clOrderId) const;
     OrderEntry *locateByOrderId(const IdT &orderId) const;
     /// The order with this number, the part of its id that clients see (#58). Null when no order has it, or when more
@@ -149,7 +157,8 @@ public:
     /// Calls fn with each stored order, under the store's read lock. A reader outside a transaction gives each order
     /// as the lookups above say, and its fn takes no order's lock: a replace holds its original's write lock while it
     /// stores the replacement, which takes the store's, so an order's lock taken under the store's could deadlock with
-    /// it. The order snapshot gathers the orders here and reads each one under its own lock once this returns (#404).
+    /// it. The order snapshot gathers the orders here and reads each one under its own lock once this returns (#404):
+    /// an order given here stays allocated as one a lookup finds does.
     template <typename Fn> void forEachOrder(Fn &&fn) const
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
@@ -165,6 +174,29 @@ public:
     {
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, false);
         return ordersById_.size();
+    }
+
+    /// Takes a closed order out of the store, as a running server drops one in the business day that starts at day
+    /// (#722): no lookup finds it, and forEachOrder() passes it by, from now on. Under the store's write lock, as every
+    /// change to the maps is (#467). The entry stays allocated until freeDropped() passes its day, since a reader
+    /// outside a transaction, or a transaction about the order enqueued before the drop, may hold its pointer still.
+    /// Returns false, and changes nothing, when the store doesn't hold this order.
+    bool drop(OrderEntry *order, DateTimeT day);
+    /// Puts back an order drop() took out, as the drop's rollback does: false when it isn't one dropped. A new order
+    /// that took its ClOrdID meanwhile keeps it, and this one is found by its id alone.
+    bool undrop(OrderEntry *order);
+    /// Frees the orders dropped in business days that started before the day given, and returns how many (#722). A
+    /// day's drop calls it with its own day as it starts: no reader still holds an order dropped a day before, and
+    /// one dropped earlier the same day, as a drop run twice in a day would have, stays.
+    size_t freeDropped(DateTimeT before);
+    /// The orders dropped and not yet freed
+    size_t droppedHeld() const;
+    /// The largest number of an order dropped while the server runs, or 0 (#722). A timer for an order the store no
+    /// longer has is expected at or below it, since a timer can't be canceled: a GTD order filled early keeps its
+    /// expiry's.
+    u64 droppedMaxOrderNumber() const noexcept
+    {
+        return droppedMaxOrderNumber_.load(std::memory_order_relaxed);
     }
 
 private:
@@ -187,6 +219,13 @@ private:
 
     typedef PooledMap<RawDataEntry, OrderEntry *> OrdersByClientIDT;
     OrdersByClientIDT ordersByClId_;
+
+    /// The orders drop() took out, by the business day they were dropped in, each kept until freeDropped() passes
+    /// its day (#722). Under orderRwLock_'s write lock, as the maps. From the heap, not a pool: no lookup walks it.
+    typedef std::map<DateTimeT, std::vector<OrderEntry *>> DroppedT;
+    DroppedT dropped_;
+    /// Set under the write lock too: a lookup that misses a dropped order, under the read lock, then sees it
+    std::atomic<u64> droppedMaxOrderNumber_{ 0 };
 
     OrderSaver *saver_;
 };

@@ -366,6 +366,42 @@ TEST(ExpirySchedulerTest, TimersFireWhenTheyComeDueInTheirOrder)
     EXPECT_EQ(TimerEvent::EXPIRATION, fired[2].second);
 }
 
+TEST(ExpirySchedulerTest, TheClosedOrdersDropFiresAtEachDaysStartOnceADay)
+{
+    // A running server drops the closed orders of the days before the kept ones as each business day starts (#722).
+    // The timer names no order, and is set again for the next day's start as it fires: from the clock's time, so a
+    // clock that moved on several days fires one drop, not one for each day.
+    const DateTimeT hour = 60ULL * 60 * 1000;
+    const DateTimeT oct15 = 1792022400000ULL; // 2026-10-15 00:00 UTC
+    TimerRecorder queues;
+    DateTimeT now = oct15 + 13 * hour;
+    ExpiryScheduler expiry(&queues,
+                           [&now]
+                           {
+                               return now;
+                           });
+    expiry.scheduleClosedOrderDrops(now);
+    ASSERT_EQ(1u, expiry.pending());
+    now = oct15 + 21 * hour - 1; // 17:00 EDT is 21:00 UTC
+    EXPECT_EQ(0u, expiry.fireDue()) << "the drop fired before the day's start";
+    now += 1;
+    EXPECT_EQ(1u, expiry.fireDue());
+    EXPECT_EQ(1u, expiry.pending()) << "the next day's drop isn't set";
+    ASSERT_EQ(1u, queues.fired().size());
+    EXPECT_FALSE(queues.fired()[0].first.isValid()) << "the drop names an order";
+    EXPECT_EQ(TimerEvent::DROP_CLOSED_ORDERS, queues.fired()[0].second);
+    EXPECT_EQ(0u, expiry.fireDue()) << "the drop fired twice at one day's start";
+
+    now += 3 * DAY + hour;
+    EXPECT_EQ(1u, expiry.fireDue()) << "three days on, the drop didn't fire once";
+    EXPECT_EQ(0u, expiry.fireDue()) << "three days on, the drop fired for each day";
+    now = oct15 + 4 * DAY + 21 * hour - 1;
+    EXPECT_EQ(0u, expiry.fireDue());
+    now += 1;
+    EXPECT_EQ(1u, expiry.fireDue()) << "the drop wasn't set for the day's start after the clock's time";
+    EXPECT_EQ(3u, queues.fired().size());
+}
+
 TEST(ExpirySchedulerTest, TheThreadFiresAPastTimerAtOnceAndASoonerOneBeforeALaterOne)
 {
     // A restored order whose time passed while the server was down expires as soon as the timers start

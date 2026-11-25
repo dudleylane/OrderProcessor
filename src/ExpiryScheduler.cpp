@@ -165,6 +165,21 @@ bool ExpiryScheduler::restatementOf(const OrderEntry &order, DateTimeT *when)
     return true;
 }
 
+DateTimeT ExpiryScheduler::keptDaysStart(DateTimeT now, u32 days)
+{
+    if (0 == days)
+    {
+        return 0;
+    }
+    // Back a day's start at a time: a business day is 23 or 25 hours long when New York changes its clocks
+    DateTimeT start = dayStartOf(now);
+    for (u32 day = 1; (day < days) && (0 < start); ++day)
+    {
+        start = dayStartOf(start - 1);
+    }
+    return start;
+}
+
 static_assert(
     ExpiryScheduler::LATEST_TIME ==
         static_cast<DateTimeT>(
@@ -187,6 +202,11 @@ void ExpiryScheduler::schedule(const IdT &orderId, DateTimeT when, TimerEvent::T
         timers_.push(Timer{ when, orderId, type });
     }
     wake_.notify_one();
+}
+
+void ExpiryScheduler::scheduleClosedOrderDrops(DateTimeT now)
+{
+    schedule(IdT(), dayEndAfter(now), TimerEvent::DROP_CLOSED_ORDERS);
 }
 
 void ExpiryScheduler::start()
@@ -228,17 +248,30 @@ void ExpiryScheduler::takeDue(DateTimeT now, std::vector<Timer> *due)
     }
 }
 
+void ExpiryScheduler::fire(const std::vector<Timer> &due, DateTimeT now)
+{
+    for (const Timer &timer : due)
+    {
+        if (TimerEvent::DROP_CLOSED_ORDERS == timer.type_)
+        {
+            // Once a business day, the server's (#722): from the clock's time, so a clock that moved on several days
+            // fires one drop, not one for each day it skipped. Set again before the push, which a throw would end.
+            scheduleClosedOrderDrops(now);
+        }
+        inQueues_->push(TIMER_SOURCE, TimerEvent(timer.orderId_, timer.type_));
+    }
+}
+
 size_t ExpiryScheduler::fireDue()
 {
     std::vector<Timer> due;
+    DateTimeT now = 0;
     {
         std::lock_guard<std::mutex> lock(lock_);
-        takeDue(clock_(), &due);
+        now = clock_();
+        takeDue(now, &due);
     }
-    for (const Timer &timer : due)
-    {
-        inQueues_->push(TIMER_SOURCE, TimerEvent(timer.orderId_, timer.type_));
-    }
+    fire(due, now);
     return due.size();
 }
 
@@ -248,15 +281,14 @@ void ExpiryScheduler::run()
     while (!stopping_)
     {
         std::vector<Timer> due;
-        takeDue(clock_(), &due);
+        const DateTimeT now = clock_();
+        takeDue(now, &due);
         if (!due.empty())
         {
-            // Pushed without the lock: schedule() may be called meanwhile, from the threads the queue wakes
+            // Pushed without the lock: schedule() may be called meanwhile, from the threads the queue wakes, and by
+            // fire() itself
             lock.unlock();
-            for (const Timer &timer : due)
-            {
-                inQueues_->push(TIMER_SOURCE, TimerEvent(timer.orderId_, timer.type_));
-            }
+            fire(due, now);
             lock.lock();
             continue;
         }

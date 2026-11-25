@@ -54,6 +54,7 @@
 
 #include "BookPublisher.h"
 #include "ClientMessageParser.h"
+#include "ClosedOrderSweep.h"
 #include "DataModelDef.h"
 #include "ExpiryScheduler.h"
 #include "JsonSerializer.h"
@@ -290,6 +291,12 @@ TEST_F(DocConsistencyTest, WebSocketAccessToken)
 TEST_F(DocConsistencyTest, LatestExpireTime)
 {
     expectDocEq("latest_expire_time", COP::Proc::ExpiryScheduler::LATEST_TIME);
+}
+
+// The drops of closed orders a running server keeps in flight at once (#722)
+TEST_F(DocConsistencyTest, ClosedOrderDropsInFlight)
+{
+    expectDocEq("closed_drops_in_flight", COP::Proc::ClosedOrderSweep::MAX_IN_FLIGHT);
 }
 
 // docs/ARCHITECTURE.md's section 10 names the sources, tests and benchmarks one by one, and nothing compared it with

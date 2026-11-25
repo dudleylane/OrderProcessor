@@ -27,21 +27,6 @@
 
 using namespace COP;
 
-DateTimeT App::keptDaysStart(DateTimeT now, u32 days)
-{
-    if (0 == days)
-    {
-        return 0;
-    }
-    // Back a day's start at a time: a business day is 23 or 25 hours long when New York changes its clocks
-    DateTimeT start = Proc::ExpiryScheduler::dayStartOf(now);
-    for (u32 day = 1; (day < days) && (0 < start); ++day)
-    {
-        start = Proc::ExpiryScheduler::dayStartOf(start - 1);
-    }
-    return start;
-}
-
 App::ServerData App::loadServerData(const std::string &dataDir, size_t lmdbMapSize, u64 idBlock,
                                     const std::string &clearingFirm, const std::string &defaultAccount,
                                     u32 keepClosedDays, DateTimeT now, bool defaultAccountUsed)
@@ -51,7 +36,7 @@ App::ServerData App::loadServerData(const std::string &dataDir, size_t lmdbMapSi
     // Phase 1: Load reference data (instruments, accounts, strings) — orderBook is null. Its orders are restored too,
     // and the closed ones of earlier business days dropped (#597): their records are erased, so the second pass finds
     // none.
-    const DateTimeT keptFrom = keptDaysStart(now, keepClosedDays);
+    const DateTimeT keptFrom = Proc::ExpiryScheduler::keptDaysStart(now, keepClosedDays);
     data.lmdbStorage = std::make_unique<Store::LMDBStorage>(lmdbMapSize);
     data.dispatcher = std::make_unique<Store::StorageRecordDispatcher>();
     data.dispatcher->init(Store::WideDataStorage::instance(), nullptr, data.lmdbStorage.get(),
@@ -356,4 +341,14 @@ App::RestartWork App::finishRestart(Proc::Processor &processor, const std::vecto
     // The orders matched above that rest get their expiries' timers now (#768)
     work.timers += scheduleExpiriesOf(ordersToMatch, &expiry);
     return work;
+}
+
+bool App::scheduleClosedOrderDrops(Proc::ExpiryScheduler &expiry, u32 keepClosedDays, DateTimeT now)
+{
+    if (0 == keepClosedDays)
+    {
+        return false;
+    }
+    expiry.scheduleClosedOrderDrops(now);
+    return true;
 }

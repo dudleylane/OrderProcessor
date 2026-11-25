@@ -874,4 +874,56 @@ TEST_F(LMDBStorageTest, AGroupUpdatesARecordOnceAndAThreadHasOneGroup)
     EXPECT_FALSE(storage.isExists(IdT(1, 1), 0));
 }
 
+TEST_F(LMDBStorageTest, EraseAllVersionsErasesTheRecordsOwnKeysAloneInOneTransaction)
+{
+    // A running server's drop of a closed order erases every version of its record (#722), seeking the record's own
+    // run of keys where erase(id) walked the whole database. Keys compare as bytes, little-endian, so the run is the
+    // record's only because the id comes first, with the key's padding zeroed: 256's number comes before 1's, 257's
+    // after it, a record with its number on another date before it, and a version above 255 before version 1. Each of
+    // those neighbours keeps every version, and the records are written in turn, as a server writes them.
+    const IdT order(1, 1792022400);         // an order's id: its number, and the second it was drawn in
+    const IdT lastTrade(1, 2);              // instrument 1's last trade (#237): the same number, another date
+    const IdT before(256, 1792022400);      // its number's bytes, 00 01, come before 1's, 01 00
+    const IdT after(257, 1792022400);       // and 257's, 01 01, after them
+    const IdT otherVersions(2, 1792022400); // keeps versions above 255 too
+    {
+        TestLMDBObserver observer;
+        LMDBStorage storage(testDir_, &observer);
+        for (u32 v = 0; v <= 257; ++v)
+        {
+            ASSERT_EQ(v, storage.update(order, "o", 1));
+            ASSERT_EQ(v, storage.update(otherVersions, "v", 1));
+            if (v < 3)
+            {
+                storage.update(lastTrade, "t", 1);
+                storage.update(before, "b", 1);
+                storage.update(after, "a", 1);
+            }
+        }
+        storage.save(order, "o0", 2); // versions 0, 256 and 257, which the keys put in that order: 00, 00 01, 01 01
+        ASSERT_TRUE(storage.isExists(order, 0));
+        ASSERT_TRUE(storage.isExists(order, 256));
+        ASSERT_TRUE(storage.isExists(order, 257));
+        const u64 commits = storage.commits();
+
+        storage.erase(order);
+        EXPECT_EQ(commits + 1, storage.commits()) << "the erase took more than one transaction";
+        EXPECT_FALSE(storage.isExists(order));
+    }
+    EXPECT_EQ((std::vector<std::string>{ "1/1=t", "1/2=t", "2/256=v", "2/257=v", "256/1=b", "256/2=b", "257/1=a",
+                                         "257/2=a" }),
+              recordsIn(testDir_));
+
+    // The last records go too: an erase that empties the database, or finds nothing, erases nothing more
+    {
+        TestLMDBObserver observer;
+        LMDBStorage storage(testDir_, &observer);
+        for (const IdT &id : { before, lastTrade, otherVersions, after, order })
+        {
+            EXPECT_NO_THROW(storage.erase(id));
+        }
+    }
+    EXPECT_TRUE(recordsIn(testDir_).empty());
+}
+
 } // namespace

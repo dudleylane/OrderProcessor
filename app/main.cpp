@@ -27,6 +27,7 @@
 #include "TransactionScope.h"
 #include "Processor.h"
 #include "ExpiryScheduler.h"
+#include "ClosedOrderSweep.h"
 #include "ExchUtils.h"
 #include "TaskManager.h"
 #include "LMDBStorage.h"
@@ -276,12 +277,22 @@ int main(int argc, char *argv[])
                                                           {
                                                               return aux::currentDateTime();
                                                           });
+    // With --keep-closed-days, the closed orders of the days before the kept ones are dropped at each business day's
+    // start while the server runs, as a start drops them (#722). The processors start each day's drop as its timer
+    // fires, which is set once the restore below is done.
+    std::unique_ptr<Proc::ClosedOrderSweep> closedOrderSweep;
+    if (0 < cfg.keepClosedDays)
+    {
+        closedOrderSweep = std::make_unique<Proc::ClosedOrderSweep>(Store::OrderStorage::instance(), transactMgr.get(),
+                                                                    cfg.keepClosedDays);
+    }
 
     for (int i = 0; i < numProcessors; ++i)
     {
         Proc::ProcessorParams params(IdTGenerator::instance(), Store::OrderStorage::instance(), orderBook.get(),
                                      inQueues.get(), wsOutQueues.get(), inQueues.get(), transactMgr.get());
         params.expiry_ = expiry.get();
+        params.sweep_ = closedOrderSweep.get();
 
         auto *evtProc = new Proc::Processor();
         evtProc->init(params);
@@ -317,6 +328,12 @@ int main(int argc, char *argv[])
                            {
                                taskMgr->waitUntilTransactionsFinished(-1);
                            });
+    if (App::scheduleClosedOrderDrops(*expiry, cfg.keepClosedDays, aux::currentDateTime()))
+    {
+        aux::ExchLogger::instance()->note(
+            "Closed orders of business days before the last " + std::to_string(cfg.keepClosedDays) +
+            " are dropped at each day's start while the server runs (--keep-closed-days, #722)");
+    }
     expiry->start();
     aux::ExchLogger::instance()->note(
         "Expiry and restatement timers set for restored orders: " + std::to_string(restart.timers) + ", " +
@@ -410,6 +427,8 @@ int main(int argc, char *argv[])
     // TaskManager destructor owns and deletes all processors (uses logger), and waits for every task it started
     taskMgr.reset();
     expiry.reset();
+    // Its drops' transactions tell it as each is done (#722): every task has finished
+    closedOrderSweep.reset();
 
     // Only now stop the transaction manager: until ~TaskManager has waited for every task, an event still being
     // processed adds a transaction and a finishing one removes itself, and both require a started manager (#37).

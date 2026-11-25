@@ -15,6 +15,8 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <memory>
@@ -32,6 +34,7 @@
 #include "DataModelDef.h"
 #include "Processor.h"
 #include "ExpiryScheduler.h"
+#include "ClosedOrderSweep.h"
 #include "TransactionScope.h"
 #include "IncomingQueues.h"
 #include "OutgoingQueues.h"
@@ -2428,13 +2431,15 @@ class StopEngine
 {
 public:
     StopEngine(OrderBookImpl *book, IncomingQueues *inQueues, TestTransactionManager *transactions,
-               ExpiryScheduler *expiry = nullptr, std::function<DateTimeT()> clock = {})
+               ExpiryScheduler *expiry = nullptr, std::function<DateTimeT()> clock = {},
+               ClosedOrderSweep *sweep = nullptr)
         : inQueues_(inQueues), transactions_(transactions)
     {
         ProcessorParams params(IdTGenerator::instance(), OrderStorage::instance(), book, inQueues, &reports_, inQueues,
                                transactions);
         params.expiry_ = expiry;
         params.clock_ = std::move(clock); // the business day a trade or a restatement is in (#244)
+        params.sweep_ = sweep;            // the closed orders dropped as a business day starts (#722)
         processor_.init(params);
         transactions_->proc_ = &processor_;
         transactions_->keepNested_ = true;
@@ -5776,4 +5781,514 @@ TEST_F(ProcessorTest, AChangeTheStateMachineRefusesKeepsTheOrdersTime)
     EXPECT_EQ(1u, clock.reads_.size()) << "a change that decided nothing read the clock";
     EXPECT_EQ(accepted, buy->lastUpdateTime_);
     EXPECT_EQ((std::vector<DateTimeT>{ accepted, accepted }), saver.recordsOf(buy->orderId_));
+}
+
+// =============================================================================
+// Closed orders a running server drops (#722)
+// =============================================================================
+
+namespace
+{
+/// The timer the expiry scheduler fires at each business day's start with --keep-closed-days, which names no order
+TimerEvent closedOrdersDrop()
+{
+    return TimerEvent(IdT(), TimerEvent::DROP_CLOSED_ORDERS);
+}
+
+/// The start of the business day after OCT15's: 17:00 New York, 21:00 UTC in October
+const DateTimeT OCT15_DAY_END = OCT15 + 21 * HOUR;
+
+/// What the order's last report published, if it is out, read under the order's lock as a reader outside a
+/// transaction reads it (#404)
+std::optional<OrderFigures> publishedOf(const OrderEntry &order)
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(order.entryMutex_, false);
+    return order.published_;
+}
+
+/// Keeps the orders whose records a drop erased (#722), and how many the store still found as their records went:
+/// a drop takes the order out of the store first, which its rollback undoes, and erases its record last, which
+/// nothing undoes. While failing_ is set, it refuses the erase, as a storage that can't write.
+class DropLog final : public COP::OrderSaver
+{
+public:
+    COP::u32 save(const COP::OrderEntry &, const COP::OrderFigures &) override
+    {
+        return version_++;
+    }
+    void erase(const COP::IdT &, COP::u32) override {}
+    void eraseOrder(const COP::IdT &orderId) override
+    {
+        if (nullptr != OrderStorage::instance()->locateByOrderId(orderId))
+        {
+            ++erasedWhileStored_;
+        }
+        if (failing_)
+        {
+            throw std::runtime_error("the storage refused the erase");
+        }
+        erased_.push_back(orderId);
+    }
+
+    std::vector<IdT> erased_;
+    size_t erasedWhileStored_ = 0;
+    bool failing_ = false;
+
+private:
+    COP::u32 version_ = 0;
+};
+} // namespace
+
+TEST_F(ProcessorTest, ARunningServerDropsAnOrderClosedForGoodInADayBeforeTheKeptOnesAndNoOther)
+{
+    // What a start drops (#597), by what the order's last report published (#722): closed for good, filled, canceled,
+    // rejected, expired or replaced, in a business day before the kept ones, or, with no day, as a record from before
+    // format 4 has, created before them. An open, suspended, done-for-the-day or pending order is kept whatever its
+    // day, and so is one whose first report isn't out.
+    const DateTimeT keptFrom = OCT15_DAY_END;
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 10.0, 100);
+    order->creationTime_ = OCT15 + 13 * HOUR;
+    EXPECT_FALSE(ClosedOrderSweep::droppable(*order, keptFrom)) << "an order whose first report isn't out";
+    for (const OrderStatus status :
+         { FILLED_ORDSTATUS, CANCELED_ORDSTATUS, REJECTED_ORDSTATUS, EXPIRED_ORDSTATUS, REPLACED_ORDSTATUS,
+           RECEIVEDNEW_ORDSTATUS, PENDINGNEW_ORDSTATUS, PENDINGREPLACE_ORDSTATUS, NEW_ORDSTATUS, PARTFILL_ORDSTATUS,
+           DFD_ORDSTATUS, SUSPENDED_ORDSTATUS })
+    {
+        const bool closed = closedForGood(status);
+        order->status_ = status;
+        order->dayStart_ = OCT15 - 3 * HOUR;
+        order->published_ = OrderFigures(*order);
+        EXPECT_EQ(closed, ClosedOrderSweep::droppable(*order, keptFrom)) << "status " << status << ", a day before";
+        order->published_->dayStart_ = keptFrom;
+        EXPECT_FALSE(ClosedOrderSweep::droppable(*order, keptFrom)) << "status " << status << ", in the kept day";
+        order->published_->dayStart_ = 0;
+        EXPECT_EQ(closed, ClosedOrderSweep::droppable(*order, keptFrom)) << "status " << status << ", with no day";
+        EXPECT_FALSE(ClosedOrderSweep::droppable(*order, 0)) << "status " << status << ", keeping every day";
+        // The order's own figures don't count, closed or not: what its last report published does
+        order->status_ = closed ? NEW_ORDSTATUS : FILLED_ORDSTATUS;
+        order->dayStart_ = keptFrom;
+        order->published_->dayStart_ = OCT15 - 3 * HOUR;
+        EXPECT_EQ(closed, ClosedOrderSweep::droppable(*order, keptFrom)) << "status " << status << ", its own read";
+    }
+}
+
+TEST_F(ProcessorTest, ARunningServerDropsTheClosedOrdersOfTheDaysBeforeTheKeptOnesAsADayStarts)
+{
+    // A start drops them (#597), and a server that ran for days kept every closed order until its next start: the
+    // store, the order snapshot and LMDB grew for as long as it ran (#722). As each business day starts it drops the
+    // closed orders of the days before the kept ones now, out of the store, their records erased, and keeps the open
+    // ones and those closed in a kept day.
+    const std::string dir = test::uniqueTestPath("drop-while-running");
+    std::filesystem::remove_all(dir);
+    DateTimeT now = OCT15 + 13 * HOUR;
+    IncomingQueues inQueues;
+    TradeRecorder reports;
+    IdT sold;
+    IdT bought;
+    IdT canceled;
+    IdT open;
+    IdT canceledToday;
+    {
+        EngineOverDirectory engine(dir, instrId1_, &inQueues, &reports, 0, nullptr,
+                                   [&now]
+                                   {
+                                       return now;
+                                   });
+        const auto submit = [&](std::unique_ptr<OrderEntry> order)
+        {
+            const RawDataEntry clOrdId = order->clOrderId_.get();
+            inQueues.push("test", OrderEvent(order.release()));
+            const OrderEntry *stored = engine.process(clOrdId);
+            return (nullptr != stored) ? stored->orderId_ : IdT();
+        };
+        const auto cancel = [&](const IdT &id)
+        {
+            inQueues.push("test", OrderCancelEvent(id));
+            engine.processor_.process();
+        };
+        sold = submit(asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), now));
+        bought = submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now));
+        canceled = submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 9.0, 30), now));
+        cancel(canceled);
+        open = submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 8.0, 30), now));
+        ASSERT_EQ(FILLED_ORDSTATUS, engine.storage_.locateByOrderId(sold)->status_);
+        ASSERT_EQ(FILLED_ORDSTATUS, engine.storage_.locateByOrderId(bought)->status_);
+        ASSERT_EQ(CANCELED_ORDSTATUS, engine.storage_.locateByOrderId(canceled)->status_);
+
+        // The next business day starts, and an order closes in it
+        now = OCT15_DAY_END;
+        canceledToday = submit(asGtc(createTestOrder(instrId1_, SELL_SIDE, 12.0, 30), now));
+        cancel(canceledToday);
+        ASSERT_EQ(CANCELED_ORDSTATUS, engine.storage_.locateByOrderId(canceledToday)->status_);
+        ClosedOrderSweep sweep(&engine.storage_, &engine.transactions_, 1);
+        EXPECT_EQ(3u, sweep.start(now)) << "the filled pair and the order canceled the day before";
+        EXPECT_FALSE(sweep.running());
+        EXPECT_EQ(3u, sweep.dropped());
+        for (const IdT &id : { sold, bought, canceled })
+        {
+            EXPECT_EQ(nullptr, engine.storage_.locateByOrderId(id)) << "order " << id.id_ << " wasn't dropped";
+        }
+        EXPECT_NE(nullptr, engine.storage_.locateByOrderId(open)) << "an open order was dropped";
+        EXPECT_NE(nullptr, engine.storage_.locateByOrderId(canceledToday))
+            << "an order closed in a kept day was dropped";
+        EXPECT_EQ(3u, engine.storage_.droppedHeld());
+        EXPECT_EQ(std::max({ sold.id_, bought.id_, canceled.id_ }), engine.storage_.droppedMaxOrderNumber());
+    }
+    // Their records are erased: a start that drops nothing itself restores the other two alone
+    {
+        EngineOverDirectory restarted(dir, instrId1_, &inQueues, &reports);
+        std::vector<IdT> restored;
+        restarted.storage_.forEachOrder(
+            [&restored](const IdT &id, const OrderEntry &)
+            {
+                restored.push_back(id);
+            });
+        EXPECT_EQ((std::vector<IdT>{ open, canceledToday }), restored);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(ProcessorTest, AnOrderAReaderHoldsStaysReadableAfterItsDropUntilTheNextDaysDropFreesIt)
+{
+    // The order snapshot takes each order's pointer under the store's lock and reads the order under its own once that
+    // is released (#404), as the book's depth does: freed at its drop, an order such a reader holds would be read
+    // freed, which only ASan would see. It stays allocated until the next business day's drop frees it (#722).
+    DateTimeT now = OCT15 + 13 * HOUR;
+    ClosedOrderSweep sweep(OrderStorage::instance(), transMgr_.get(), 1);
+    StopEngine engine(
+        orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+        [&now]
+        {
+            return now;
+        },
+        &sweep);
+    const OrderEntry *sell = engine.submit(asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), now));
+    engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now));
+    ASSERT_NE(nullptr, sell);
+    ASSERT_EQ(FILLED_ORDSTATUS, sell->status_);
+    std::vector<const OrderEntry *> held; // as App::serializeOrderSnapshot() gathers them
+    OrderStorage::instance()->forEachOrder(
+        [&held](const IdT &, const OrderEntry &order)
+        {
+            held.push_back(&order);
+        });
+    ASSERT_EQ(2u, held.size());
+
+    now = OCT15_DAY_END;
+    engine.request(closedOrdersDrop());
+    EXPECT_EQ(0u, OrderStorage::instance()->orderCount()) << "the filled orders weren't dropped";
+    EXPECT_EQ(2u, OrderStorage::instance()->droppedHeld());
+    for (const OrderEntry *order : held)
+    {
+        const std::optional<OrderFigures> published = publishedOf(*order);
+        ASSERT_TRUE(published) << "order " << order->orderId_.id_ << " changed as it was dropped";
+        EXPECT_EQ(FILLED_ORDSTATUS, published->status_);
+        EXPECT_EQ(0u, published->leavesQty_);
+    }
+
+    // The next day's drop frees them: no reader holds an order a business day after its drop
+    held.clear();
+    now += 24 * HOUR;
+    engine.request(closedOrdersDrop());
+    EXPECT_EQ(0u, OrderStorage::instance()->droppedHeld()) << "the orders dropped a day before weren't freed";
+}
+
+TEST_F(ProcessorTest, ATimerOfAnOrderARunningServerDroppedDecidesNothingAndOneAboveEveryDroppedOrderStillThrows)
+{
+    // Timers can't be canceled, so a GTD order filled before its time keeps its expiry's (#240). Once a running server
+    // has dropped the order (#722), its timer finds no order: expected at or below the highest number dropped, where
+    // it decides nothing, and says so only in debug. Above it a missing order is still a bug, and throws, as before.
+    DateTimeT now = OCT15 + 13 * HOUR;
+    ClosedOrderSweep sweep(OrderStorage::instance(), transMgr_.get(), 1);
+    StopEngine engine(
+        orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+        [&now]
+        {
+            return now;
+        },
+        &sweep);
+    const OrderEntry *gtd = engine.submit(asGtd(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now, now + 48 * HOUR));
+    engine.submit(withTif(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), IOC_TIF));
+    ASSERT_NE(nullptr, gtd);
+    ASSERT_EQ(FILLED_ORDSTATUS, gtd->status_);
+    const IdT dropped = gtd->orderId_;
+    now = OCT15_DAY_END;
+    engine.request(closedOrdersDrop());
+    ASSERT_EQ(nullptr, OrderStorage::instance()->locateByOrderId(dropped));
+
+    now += 48 * HOUR;
+    inQueues_->push("ExpiryScheduler", TimerEvent(dropped, TimerEvent::EXPIRATION));
+    EXPECT_NO_THROW(engine.processQueued(1)) << "the timer of an order a running server dropped threw";
+    EXPECT_TRUE(transMgr_->kept_.empty());
+
+    const IdT neverStored(OrderStorage::instance()->droppedMaxOrderNumber() + 1000, dropped.date_);
+    inQueues_->push("ExpiryScheduler", TimerEvent(neverStored, TimerEvent::EXPIRATION));
+    EXPECT_THROW(engine.processQueued(1), std::runtime_error) << "the timer of an order never stored was quiet";
+}
+
+TEST_F(ProcessorTest, ARunningServerDropsAnOrderByWhatItsLastReportPublishedNotByItsOwnFigures)
+{
+    // A decision closes an order before the transaction that persists and reports it runs. Dropped then, by its own
+    // status, the order's drop would run before that transaction, whose persist would write the record back (as ruled
+    // on #722): the drop reads what the order's last report published (#404, #628). The fills' transaction is held
+    // back here, as a busy worker would hold it.
+    DateTimeT now = OCT15 + 13 * HOUR;
+    DropLog saver;
+    OrderStorage::instance()->attach(&saver);
+    ClosedOrderSweep sweep(OrderStorage::instance(), transMgr_.get(), 1);
+    StopEngine engine(
+        orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+        [&now]
+        {
+            return now;
+        },
+        &sweep);
+    OrderEntry *sell = engine.submit(asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), now));
+    ASSERT_NE(nullptr, sell);
+    // The buy's booking matches it and decides both fills, whose transaction its drain enqueues: the manager keeps it
+    // (keepNested_), and nothing runs it yet
+    auto buyOrder = asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now);
+    const RawDataEntry buyClOrdId = buyOrder->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(buyOrder.release()));
+    engine.processor_.process();
+    OrderEntry *buy = OrderStorage::instance()->locateByClOrderId(buyClOrdId);
+    ASSERT_NE(nullptr, buy);
+    ASSERT_EQ(FILLED_ORDSTATUS, sell->status_);
+    ASSERT_EQ(FILLED_ORDSTATUS, buy->status_);
+    ASSERT_FALSE(transMgr_->kept_.empty()) << "the fills' transaction ran";
+    for (const OrderEntry *order : { sell, buy })
+    {
+        const std::optional<OrderFigures> published = publishedOf(*order);
+        ASSERT_TRUE(published);
+        ASSERT_EQ(NEW_ORDSTATUS, published->status_) << "a fill's report went out";
+    }
+
+    now = OCT15_DAY_END;
+    inQueues_->push("ExpiryScheduler", closedOrdersDrop());
+    engine.processor_.process(); // not request(), which would run the fills' transaction
+    EXPECT_EQ(sell, OrderStorage::instance()->locateByOrderId(sell->orderId_))
+        << "dropped by its own status, before its fill's report went out";
+    EXPECT_EQ(buy, OrderStorage::instance()->locateByOrderId(buy->orderId_))
+        << "dropped by its own status, before its fill's report went out";
+    EXPECT_TRUE(saver.erased_.empty());
+
+    // The fills' reports go out, and the next day's drop drops both
+    transMgr_->runKept();
+    ASSERT_EQ(FILLED_ORDSTATUS, publishedOf(*sell)->status_);
+    now += 24 * HOUR;
+    engine.request(closedOrdersDrop());
+    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByOrderId(sell->orderId_));
+    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByOrderId(buy->orderId_));
+    EXPECT_EQ(2u, saver.erased_.size());
+    EXPECT_EQ(0u, saver.erasedWhileStored_) << "a record was erased before its order left the store";
+}
+
+TEST_F(ProcessorTest, ADropsTransactionTestsTheOrderAgainAndLeavesOneThatNoLongerQualifies)
+{
+    // The drop finds its orders as the day starts, and each drop's transaction runs once the order's transactions
+    // before it have: it tests the order again, by what its last report published then, and leaves one that no longer
+    // qualifies, its record as it was (as ruled on #722)
+    DateTimeT now = OCT15 + 13 * HOUR;
+    DropLog saver;
+    OrderStorage::instance()->attach(&saver);
+    ClosedOrderSweep sweep(OrderStorage::instance(), transMgr_.get(), 1);
+    StopEngine engine(
+        orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+        [&now]
+        {
+            return now;
+        },
+        &sweep);
+    OrderEntry *sell = engine.submit(asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), now));
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now));
+    ASSERT_NE(nullptr, sell);
+    ASSERT_NE(nullptr, buy);
+    ASSERT_EQ(FILLED_ORDSTATUS, sell->status_);
+
+    now = OCT15_DAY_END;
+    transMgr_->keep_ = true;
+    inQueues_->push("ExpiryScheduler", closedOrdersDrop());
+    engine.processor_.process();
+    ASSERT_EQ(2u, transMgr_->kept_.size()) << "the two drops weren't enqueued";
+    // What the sell's last report published changes before its drop runs: its day is a kept one now, as a correction
+    // would change its figures (#580's, which nothing produces yet)
+    {
+        oneapi::tbb::spin_rw_mutex::scoped_lock lock(sell->entryMutex_, true);
+        sell->published_->dayStart_ = now;
+    }
+    transMgr_->keep_ = false;
+    transMgr_->runKept();
+    EXPECT_EQ(sell, OrderStorage::instance()->locateByOrderId(sell->orderId_))
+        << "the drop's transaction didn't test the order again";
+    EXPECT_EQ(nullptr, OrderStorage::instance()->locateByOrderId(buy->orderId_));
+    EXPECT_EQ(std::vector<IdT>{ buy->orderId_ }, saver.erased_) << "the record of an order kept was erased";
+    EXPECT_EQ(0u, saver.erasedWhileStored_) << "a record was erased before its order left the store";
+    EXPECT_EQ(1u, sweep.dropped());
+    EXPECT_EQ(1u, sweep.skipped());
+    EXPECT_FALSE(sweep.running());
+}
+
+TEST_F(ProcessorTest, ADropKeepsItsBoundOfTransactionsInFlightAndAnOrderSentMidwayIsDecidedBeforeItEnds)
+{
+    // A day's drops enqueued at once would count in the engine's work in flight (#519), past which the sessions stop
+    // reading, and live orders would wait behind them all for the workers. The drop keeps MAX_IN_FLIGHT of them in
+    // flight, and enqueues the next as one is done (#722). The manager here runs the transactions one at a time, the
+    // first enqueued first, as a single worker would.
+    const size_t bound = ClosedOrderSweep::MAX_IN_FLIGHT;
+    DateTimeT now = OCT15 + 13 * HOUR;
+    DropLog saver;
+    OrderStorage::instance()->attach(&saver);
+    ClosedOrderSweep sweep(OrderStorage::instance(), transMgr_.get(), 1);
+    StopEngine engine(
+        orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+        [&now]
+        {
+            return now;
+        },
+        &sweep);
+    const size_t closedOrders = 3 * bound;
+    for (size_t pair = 0; pair < closedOrders / 2; ++pair)
+    {
+        engine.submit(asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 10), now));
+        engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 10), now));
+    }
+    ASSERT_EQ(closedOrders, OrderStorage::instance()->orderCount());
+
+    now = OCT15_DAY_END;
+    transMgr_->keep_ = true;
+    inQueues_->push("ExpiryScheduler", closedOrdersDrop());
+    engine.processor_.process();
+    ASSERT_TRUE(sweep.running());
+    EXPECT_EQ(bound, sweep.inFlight());
+    EXPECT_EQ(bound, transMgr_->kept_.size()) << "more or fewer drops enqueued than the bound";
+
+    // An order arrives mid-drop: its transaction waits behind the drops in flight, not behind the whole day's
+    auto liveOrder = asGtc(createTestOrder(instrId1_, BUY_SIDE, 9.0, 10), now);
+    const RawDataEntry liveClOrdId = liveOrder->clOrderId_.get();
+    inQueues_->push("test", OrderEvent(liveOrder.release()));
+    engine.processor_.process();
+    const OrderEntry *live = OrderStorage::instance()->locateByClOrderId(liveClOrdId);
+    ASSERT_NE(nullptr, live);
+    bool decidedMidway = false;
+    while (!transMgr_->kept_.empty())
+    {
+        const bool liveWaits = !publishedOf(*live);
+        EXPECT_LE(transMgr_->kept_.size() - (liveWaits ? 1 : 0), bound) << "more drops in flight than the bound";
+        EXPECT_LE(sweep.inFlight(), bound);
+        transMgr_->runKept(1);
+        if (liveWaits && publishedOf(*live))
+        {
+            decidedMidway = sweep.running();
+        }
+    }
+    EXPECT_TRUE(decidedMidway) << "the order sent mid-drop waited for the whole day's drops";
+    EXPECT_FALSE(sweep.running());
+    EXPECT_EQ(closedOrders, sweep.dropped());
+    EXPECT_EQ(closedOrders, saver.erased_.size());
+    EXPECT_EQ(0u, saver.erasedWhileStored_) << "a record was erased before its order left the store";
+    EXPECT_EQ(1u, OrderStorage::instance()->orderCount());
+    EXPECT_EQ(NEW_ORDSTATUS, publishedOf(*live)->status_);
+}
+
+TEST_F(ProcessorTest, ADropWaitsForTheTransactionThatBooksTheOrder)
+{
+    // As the cancel, the replace, the state change and a stop's release wait (#83, #625): enqueued before the
+    // transaction that books the order, the drop would run first. An order the engine stores and refuses has its
+    // reject report out when that transaction runs, which can be before its creator has marked it enqueued.
+    auto order = createTestOrder(instrId1_, BUY_SIDE, 0.0, 100);
+    COP::Store::PublishGuard guard;
+    OrderEntry *stored = OrderStorage::instance()->save(*order, IdTGenerator::instance(), &guard);
+    ASSERT_NE(nullptr, stored);
+    // Rejected, as its report published, in 1970; the guard holds its write lock
+    stored->status_ = REJECTED_ORDSTATUS;
+    stored->leavesQty_ = 0;
+    stored->published_ = OrderFigures(*stored);
+    guard.release();
+
+    ClosedOrderSweep sweep(OrderStorage::instance(), transMgr_.get(), 1);
+    transMgr_->proc_ = nullptr;
+    std::vector<bool> marks;
+    transMgr_->onAdd_ = [&]()
+    {
+        marks.push_back(stored->bookingPending_.load());
+    };
+    std::thread creator(
+        [&guard]()
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            guard.bookingEnqueued();
+        });
+    EXPECT_EQ(1u, sweep.start(OCT15_DAY_END));
+    creator.join();
+    transMgr_->onAdd_ = nullptr;
+
+    ASSERT_EQ(1u, marks.size());
+    EXPECT_FALSE(marks.front()) << "the drop was enqueued before the transaction that books the order";
+}
+
+TEST_F(ProcessorTest, ADropWhoseRecordCantBeErasedPutsTheOrderBack)
+{
+    // A drop takes the order out of the store first, and erases its record last: an erase that fails erases nothing,
+    // as LMDB aborts its transaction, and the rollback puts the order back, for the next day's drop (#722)
+    DateTimeT now = OCT15 + 13 * HOUR;
+    DropLog saver;
+    saver.failing_ = true;
+    OrderStorage::instance()->attach(&saver);
+    ClosedOrderSweep sweep(OrderStorage::instance(), transMgr_.get(), 1);
+    StopEngine engine(
+        orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+        [&now]
+        {
+            return now;
+        },
+        &sweep);
+    OrderEntry *sell = engine.submit(asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), now));
+    OrderEntry *buy = engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now));
+    ASSERT_NE(nullptr, sell);
+    ASSERT_NE(nullptr, buy);
+    const RawDataEntry sellClOrdId = sell->clOrderId_.get();
+    const uint64_t failed = TransactionScope::failedCount();
+
+    now = OCT15_DAY_END;
+    engine.request(closedOrdersDrop());
+    EXPECT_EQ(failed + 2, TransactionScope::failedCount()) << "the failed drops weren't counted";
+    EXPECT_EQ(0u, saver.erasedWhileStored_) << "a record's erase was tried before its order left the store";
+    EXPECT_EQ(sell, OrderStorage::instance()->locateByOrderId(sell->orderId_)) << "a drop whose erase failed stood";
+    EXPECT_EQ(sell, OrderStorage::instance()->locateByClOrderId(sellClOrdId));
+    EXPECT_EQ(buy, OrderStorage::instance()->locateByOrderId(buy->orderId_));
+    EXPECT_EQ(0u, OrderStorage::instance()->droppedHeld());
+    EXPECT_EQ(0u, sweep.dropped());
+    EXPECT_EQ(2u, sweep.skipped());
+    EXPECT_FALSE(sweep.running());
+
+    // The next day's drop finds them again
+    saver.failing_ = false;
+    now += 24 * HOUR;
+    engine.request(closedOrdersDrop());
+    EXPECT_EQ(2u, saver.erased_.size());
+    EXPECT_EQ(0u, OrderStorage::instance()->orderCount());
+}
+
+TEST_F(ProcessorTest, KeepingEveryClosedOrderARunningServerDropsNone)
+{
+    // --keep-closed-days 0 keeps every order (#597): nothing sets the drop's timer then (App::scheduleClosedOrderDrops,
+    // ServerDataTest), a processor has no drop to start on one, and a drop keeping no days finds nothing (#722)
+    DateTimeT now = OCT15 + 13 * HOUR;
+    StopEngine engine(orderBook_.get(), inQueues_.get(), transMgr_.get(), nullptr,
+                      [&now]
+                      {
+                          return now;
+                      });
+    engine.submit(asGtc(createTestOrder(instrId1_, SELL_SIDE, 10.0, 30), now));
+    engine.submit(asGtc(createTestOrder(instrId1_, BUY_SIDE, 10.0, 30), now));
+    ASSERT_EQ(2u, OrderStorage::instance()->orderCount());
+
+    now = OCT15_DAY_END + 24 * HOUR;
+    EXPECT_NO_THROW(engine.request(closedOrdersDrop()));
+    EXPECT_EQ(2u, OrderStorage::instance()->orderCount()) << "a processor with no drop dropped an order";
+    ClosedOrderSweep sweep(OrderStorage::instance(), transMgr_.get(), 0);
+    EXPECT_EQ(0u, sweep.start(now));
+    EXPECT_FALSE(sweep.running());
+    EXPECT_EQ(2u, OrderStorage::instance()->orderCount()) << "a drop keeping every day dropped an order";
+    EXPECT_EQ(0u, OrderStorage::instance()->droppedHeld());
 }

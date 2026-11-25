@@ -54,14 +54,10 @@ struct ServerData
     /// The closed orders the load dropped (#597)
     size_t droppedOrders = 0;
 };
-/// The start of the earliest of the last days business days as of now, the current one counted (#597): 0 for 0 days,
-/// which keeps every day
-DateTimeT keptDaysStart(DateTimeT now, u32 days);
-
 /// Loads the data directory as the server starts, which app/main.cpp did inline until #165:
 /// - reference data first, then everything again with an order book, so that the orders are restored into it;
 /// - with keepClosedDays above 0, each closed order whose business day isn't one of the last keepClosedDays as of now
-///   dropped: not restored, and its records erased (#597);
+///   (Proc::ExpiryScheduler::keptDaysStart()) dropped: not restored, and its records erased (#597);
 /// - the id counter continued past every id issued before (#58, #81), with idBlock ids reserved ahead;
 /// - the clearing firm and default account that orders need (#34). A directory that holds reference data and lacks
 ///   either refuses the start: every order would be refused, or every order that names no account (#640). Under
@@ -132,6 +128,12 @@ struct RestartWork
 RestartWork finishRestart(Proc::Processor &processor, const std::vector<OrderEntry *> &ordersToMatch,
                           const std::vector<OrderEntry *> &stopsReached, const Store::OrderDataStorage &storage,
                           Proc::ExpiryScheduler &expiry, const std::function<void()> &waitIdle);
+
+/// Arms the drop of closed orders while the server runs (#722): with keepClosedDays above 0, the expiry scheduler
+/// fires it at each business day's start from the first after now, and the processors' Proc::ClosedOrderSweep drops
+/// the closed orders of the days before the last keepClosedDays, as a start drops them (#597). With 0 it arms nothing,
+/// and nothing is dropped. Returns whether it armed it. Call it once the restart's work is done (finishRestart()).
+bool scheduleClosedOrderDrops(Proc::ExpiryScheduler &expiry, u32 keepClosedDays, DateTimeT now);
 
 } // namespace App
 } // namespace COP

@@ -30,6 +30,7 @@
 #include "TestAux.h"
 #include "MockQueues.h"
 
+#include "ClosedOrderSweep.h"
 #include "CpuAffinity.h"
 #include "TaskManager.h"
 #include "TransactionMgr.h"
@@ -2215,6 +2216,53 @@ TEST_F(TaskManagerTest, AWaitOnAManagerWithNothingToDoReturnsAtOnce)
     ASSERT_TRUE(manager->waitUntilTransactionsFinished(10));
     EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(500))
         << "a wait with nothing left to do slept before it returned";
+}
+
+// =============================================================================
+// Closed orders a running server drops (#722)
+// =============================================================================
+
+TEST_F(TaskManagerTest, ARunningServersDropOfClosedOrdersRunsOnThePoolBesideOrdersThatTrade)
+{
+    // As the server runs it (#722): the drop starts on an event worker as a business day starts, and each drop's
+    // transaction runs on a transaction worker and enqueues the next as it is done, several at once, while new orders
+    // trade beside them. The other cases run the drops on the test's thread: this one is what TSan sees of the sweep's
+    // lock, the store's dropped orders and the highest number dropped from several threads at once.
+    const DateTimeT oct15 = 1792022400000ULL; // 2026-10-15 00:00 UTC
+    const DateTimeT hour = 60ULL * 60 * 1000;
+    std::atomic<DateTimeT> now{ oct15 + 13 * hour };
+    procParams_->clock_ = [&now]
+    {
+        return now.load();
+    };
+    ClosedOrderSweep sweep(OrderStorage::instance(), transMgr_.get(), 1);
+    procParams_->sweep_ = &sweep;
+    auto manager = createTaskManager(2, 4);
+    const size_t pairs = 3 * ClosedOrderSweep::MAX_IN_FLIGHT;
+    for (size_t pair = 0; pair < pairs; ++pair)
+    {
+        pushOrder(SELL_SIDE, 10.0, 10, "seller", GTC_TIF);
+        pushOrder(BUY_SIDE, 10.0, 10, "buyer", GTC_TIF);
+    }
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    ASSERT_EQ(2 * pairs, OrderStorage::instance()->orderCount());
+
+    // An hour into the next business day: the drop, and orders that trade beside it, closed in a kept day
+    now = oct15 + 22 * hour;
+    inQueues_->push("ExpiryScheduler", TimerEvent(IdT(), TimerEvent::DROP_CLOSED_ORDERS));
+    const size_t todays = 4;
+    for (size_t pair = 0; pair < todays; ++pair)
+    {
+        pushOrder(SELL_SIDE, 11.0, 10, "seller", GTC_TIF);
+        pushOrder(BUY_SIDE, 11.0, 10, "buyer", GTC_TIF);
+    }
+    ASSERT_TRUE(waitUntilIdle(*manager));
+    EXPECT_FALSE(sweep.running());
+    EXPECT_EQ(2 * pairs, sweep.dropped());
+    EXPECT_EQ(0u, sweep.skipped());
+    EXPECT_EQ(2 * todays, OrderStorage::instance()->orderCount()) << "the day's own closed orders weren't kept";
+    EXPECT_EQ(2 * pairs, OrderStorage::instance()->droppedHeld());
+    EXPECT_EQ(0u, manager->tasksFailed());
 }
 
 } // namespace

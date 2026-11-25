@@ -6,6 +6,7 @@ target_sources(orderEngine
         ReplaceRequestDeferedEvent.cpp
         StateChangeDeferedEvent.cpp
         ClearingCodec.cpp
+        ClosedOrderSweep.cpp
         DataModelDef.cpp
         ExchUtils.cpp
         ExecutionDeferedEvent.cpp

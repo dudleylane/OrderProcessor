@@ -169,7 +169,8 @@ std::string App::serializeOrderSnapshot(const Store::OrderDataStorage *storage, 
 {
     // The orders are gathered under the store's lock, and each is read under its own after that lock is released: a
     // replace holds its original's write lock while it stores the replacement, which takes the store's, so an order's
-    // lock taken under the store's could deadlock with it (#404). A stored order is freed only with the store.
+    // lock taken under the store's could deadlock with it (#404). A stored order is freed only with the store, or, if a
+    // running server drops it meanwhile, a business day after the drop (#722): long after this returns.
     std::vector<const OrderEntry *> orders;
     storage->forEachOrder(
         [&](const IdT & /*id*/, const OrderEntry &order)

@@ -114,7 +114,8 @@ enum OperationType
     REPORT_RELEASE_TROPERATION,            // reports a stop's release, if it released the order (#236)
     PERSIST_LASTTRADE_TROPERATION,         // writes a new persisted version of an instrument's last trade (#237)
     REPORT_RESTATEMENT_TROPERATION,        // reports an order's day figures begun again for a new business day (#244)
-    REPORT_TRIGGER_TROPERATION             // reports a replacement its replace released, for its original (#517)
+    REPORT_TRIGGER_TROPERATION,            // reports a replacement its replace released, for its original (#517)
+    DROP_ORDER_TROPERATION                 // drops a closed order a running server keeps no longer (#722)
 };
 
 struct Context

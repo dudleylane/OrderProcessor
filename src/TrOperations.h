@@ -26,6 +26,11 @@
 namespace COP
 {
 
+namespace Proc
+{
+class ClosedOrderSweep;
+}
+
 namespace ACID
 {
 
@@ -345,6 +350,35 @@ public:
 
 private:
     OrderFigures figures_;
+};
+
+/// Drops a closed order a running server keeps no longer (#722), in a transaction of its own that names the order
+/// alone, so every transaction about the order enqueued before it has run. It tests the order again, by what its last
+/// report published, and leaves one that no longer qualifies. A drop takes the order out of the store's lookups first,
+/// which its rollback undoes, and erases every version of its record last, which nothing undoes: so its transaction
+/// holds nothing else. The order's entry stays allocated until the next day's drop frees it (OrderDataStorage::drop()),
+/// and Postgres keeps its row. It tells its sweep, if it has one, once it is done with the order, dropped or not.
+class DropClosedOrderTrOperation final : public Operation
+{
+public:
+    /// keptFrom: the start of the earliest business day whose closed orders are kept (#597). day: the start of the
+    /// business day the drop is in, which the next day's drop frees the order after.
+    DropClosedOrderTrOperation(OrderEntry *order, DateTimeT keptFrom, DateTimeT day, Proc::ClosedOrderSweep *sweep);
+
+    void execute(const Context &cnxt) override;
+    void rollback(const Context &cnxt) override;
+
+private:
+    /// Tells the sweep once, whichever of execute() and rollback() is done with the order last
+    void finished(bool dropped) noexcept;
+
+    OrderEntry *order_;
+    DateTimeT keptFrom_;
+    DateTimeT day_;
+    Proc::ClosedOrderSweep *sweep_;
+    bool removed_ = false;
+    bool erased_ = false;
+    bool told_ = false;
 };
 
 void executeEnqueueOrderEvent(const OrdState::onReplaceReceived &event_, const Context &cnxt);
