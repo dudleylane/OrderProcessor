@@ -419,8 +419,8 @@ worker at a time, and 4 and 8 both ran three. The manager now asks for one more,
 run three, the most oneTBB's default arena runs on four CPUs. From one worker to three, an order takes the same instructions
 in about twice the cycles. The workers wait mostly on `TransactionMgr::lock_`, which each transaction takes four
 times, and under which the transaction tree's sorted vectors move the pending entries at each removal (#712), and
-then on `OrderDataStorage::save()`, which clones the order under the store's write lock (#713). That's the pool's
-own limit: it doesn't limit a server yet, because each order change waits for LMDB (below).
+then on the store's write lock in `OrderDataStorage::save()`, which until #713 covered the order's clone as well.
+That's the pool's own limit: it doesn't limit a server yet, because each order change waits for LMDB (below).
 
 Two things these numbers deliberately exclude:
 

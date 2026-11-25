@@ -137,10 +137,18 @@ OrderEntry *OrderDataStorage::saveUnlessClOrdIdInUse(const OrderEntry &order, Id
     // Drawn before the lock: a draw can save the next id limit to disk (#81), and lookups must not wait on that. An
     // order refused below wastes the id, which is harmless.
     const IdT newId = order.orderId_.isValid() ? IdT() : idGenerator->getId();
+    // Made before the lock too, for the same reason (#713): the copy is over a kilobyte, and its instrument's load
+    // takes WideDataStorage's lock. Nothing in it needs the store, nobody can reach it until it is inserted below, and
+    // an order refused below frees it.
+    std::unique_ptr<OrderEntry> cp(order.clone());
+    if (!cp->orderId_.isValid())
+    {
+        cp->orderId_ = newId;
+    }
 
     OrderEntry *result = nullptr;
     {
-        // Exclusive write lock - atomic dual-map insert
+        // Exclusive write lock: the checks against both maps, and the insertion into both, at once
         oneapi::tbb::spin_rw_mutex::scoped_lock lock(orderRwLock_, true);
         if ((order.orderId_.isValid()) && (ordersById_.end() != ordersById_.find(order.orderId_)))
         {
@@ -157,11 +165,6 @@ OrderEntry *OrderDataStorage::saveUnlessClOrdIdInUse(const OrderEntry &order, Id
             return nullptr;
         }
 
-        std::unique_ptr<OrderEntry> cp(order.clone());
-        if (!cp->orderId_.isValid())
-        {
-            cp->orderId_ = newId;
-        }
         // Lock the clone before it becomes reachable, so the caller can finish initialising it (status,
         // state machine persistence) before any other thread sees it. Nobody else can hold this entry's
         // lock yet, so taking it inside orderRwLock_ cannot deadlock. Mark it too, until the caller has
