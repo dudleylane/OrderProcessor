@@ -392,6 +392,11 @@ public:
     static std::optional<std::string> reportTypeRefusal(const FIX::FieldMap &msg);
     /// An expiry the engine keeps as an ExpireTime (126) carries it, to the millisecond (#240)
     static FIX::UtcTimeStamp toUtcTimeStamp(DateTimeT when);
+    /// Whether bytes are well-formed UTF-8, as Unicode's table 3-7 has it: no overlong form, no surrogate, nothing past
+    /// U+10FFFF, no sequence cut short (#796). The JSON the WebSocket sessions get refuses anything else, so a ClOrdID
+    /// (11) the gateway stores must be: the same bytes, refused there, made each report about the order throw inside
+    /// its transaction.
+    static bool isUtf8(std::string_view bytes) noexcept;
 
     // Internal → FIX enum conversions
     static char fromOrdStatus(OrderStatus s);
