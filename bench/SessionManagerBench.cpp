@@ -165,7 +165,9 @@ public:
         auto *clearing = new ClearingEntry();
         clearing->firm_ = "BENCHCLEARER";
         const SourceIdT clearingId = Store::WideDataStorage::instance()->add(clearing);
-        const std::string clOrdId = "BENCH-1";
+        // A ClOrdID of the shape a WebSocket session makes, WS-<microseconds>-<count> (#67), too long to be kept inline
+        // in a std::string, as every order a session takes has: a copy of it allocates, as a session's would (#790)
+        const std::string clOrdId = "WS-1764288000000000-1";
         const SourceIdT clOrderId = Store::WideDataStorage::instance()->add(
             new RawDataEntry(STRING_RAWDATATYPE, clOrdId.c_str(), static_cast<u32>(clOrdId.size())));
 

@@ -53,6 +53,24 @@ const std::string CANCEL = R"({"type":"cancel_order","data":{"orderId":987654321
 /// the engine: the lightest message whose answer goes through the session's send() and its write's completion
 const std::string UNKNOWN = R"({"type":"no_such_request","data":{}})";
 
+/// A limit order as the order entry panel sends one, with the id it gives each request (#683): one the session takes,
+/// whose ClOrdID, source, destination and execution list stay in WideDataStorage, so the store grows with the
+/// iterations, as the engine benchmarks' stores do
+const std::string NEW_ORDER = R"({"type":"new_order","data":{"symbol":"BENCHEQ","side":"BUY","ordType":"LIMIT",)"
+                              R"("price":150.25,"orderQty":100,"tif":"DAY","currency":"USD","capacity":"AGENCY",)"
+                              R"("requestId":"r3Kf9_x-Lq2A"}})";
+/// The same order without a request id, as a client that names no request sends it
+const std::string NEW_ORDER_WITHOUT_ID = R"({"type":"new_order","data":{"symbol":"BENCHEQ","side":"BUY",)"
+                                         R"("ordType":"LIMIT","price":150.25,"orderQty":100,"tif":"DAY",)"
+                                         R"("currency":"USD","capacity":"AGENCY"}})";
+
+/// What a client's bursts hold: cancels, or new orders, which need an instrument, an account and a clearing firm
+enum class Burst
+{
+    CANCELS,
+    ORDERS
+};
+
 /// How long a step may wait before the benchmark gives up, so a broken session fails it instead of hanging
 const std::chrono::seconds STEP_TIMEOUT(5);
 
@@ -82,19 +100,39 @@ struct Singletons
 /// A real WsServer on loopback, as app/main.cpp serves it, with one client connected, both on the benchmark's thread.
 /// The server's io_context runs only when the benchmark serves: the client writes with blocking calls before that, and
 /// a burst fits in the sockets' buffers. The sessions check the engine's work in flight, the queue's events and a
-/// transaction manager's transactions, none, against the server's default bound (#519).
+/// transaction manager's transactions, none, against the server's default bound (#519). A client that sends new orders
+/// is served with what an order needs: its instrument, and the server's default account and clearing firm.
 class ServedClient
 {
 public:
-    ServedClient()
+    explicit ServedClient(Burst burst = Burst::CANCELS)
     {
         book_.init(OrderBookImpl::InstrumentsT());
         transactMgr_.init(ACID::TransactionMgrParams(IdTGenerator::instance()));
 
+        SourceIdT accountId;
+        SourceIdT clearingId;
+        if (Burst::ORDERS == burst)
+        {
+            auto *instr = new InstrumentEntry();
+            instr->symbol_ = "BENCHEQ";
+            instr->securityId_ = "SEC1";
+            instr->securityIdSource_ = "SRC1";
+            Store::WideDataStorage::instance()->add(instr);
+            auto *acct = new AccountEntry();
+            acct->account_ = "BENCHACCT";
+            acct->firm_ = "BENCHFIRM";
+            acct->type_ = PRINCIPAL_ACCOUNTTYPE;
+            accountId = Store::WideDataStorage::instance()->add(acct);
+            auto *clr = new ClearingEntry();
+            clr->firm_ = "BENCHCLR";
+            clearingId = Store::WideDataStorage::instance()->add(clr);
+        }
+
         server_ = std::make_shared<App::WsServer>(
             serverIoc_, tcp::endpoint(net::ip::make_address("127.0.0.1"), 0), &sessions_,
             Store::WideDataStorage::instance(), Store::OrderStorage::instance(), &inQueues_, IdTGenerator::instance(),
-            &book_, SourceIdT(), SourceIdT(), App::WsLimits(), App::WsAuth(), &inFlight_);
+            &book_, accountId, clearingId, App::WsLimits(), App::WsAuth(), &inFlight_);
         server_->run();
         connected_ = connect();
     }
@@ -154,6 +192,14 @@ public:
         return (BURST == answers_) && !readFailed_;
     }
 
+    /// Has the client read, and drop, whatever the session sent it, up to its answer to one message it answers itself,
+    /// sent after the burst: so that no answer of a burst waits into the next burst's span. Untimed, after a span.
+    /// False unless that answer came.
+    bool skipAnswers()
+    {
+        return skipUpToAnswer(false);
+    }
+
     /// How many events wait in the engine's queue
     u32 queued() const
     {
@@ -199,6 +245,15 @@ private:
         {
             return false;
         }
+        // Each message of a burst goes out as it is written, as the server's own writes do (#653). With Nagle's
+        // algorithm the messages after a burst's first waited for its ACK, which the server's kernel delays, up to
+        // 40 ms, while the session sends nothing back: BM_WsSessionOrderFlood then timed 41 ms a burst, 1.5 ms of it
+        // CPU, and a session that answered each order released the burst early and looked 97% faster.
+        beast::get_lowest_layer(client_).socket().set_option(tcp::no_delay(true), ec);
+        if (ec)
+        {
+            return false;
+        }
         std::optional<beast::error_code> handshake;
         client_.async_handshake("127.0.0.1", "/ws",
                                 [&handshake](beast::error_code result)
@@ -226,6 +281,13 @@ private:
     /// counted as the first burst's answers, and every span would then end that many answers before its own burst's
     /// last. False unless the state ended with the order snapshot, so that one cut short by an error fails here.
     bool skipConnectState()
+    {
+        return skipUpToAnswer(true);
+    }
+
+    /// Sends one message the session answers itself, and reads, and drops, everything up to its answer: true once the
+    /// answer came, and, when asked, an order snapshot before it
+    bool skipUpToAnswer(bool needSnapshot)
     {
         client_.text(true);
         client_.write(net::buffer(UNKNOWN));
@@ -268,7 +330,7 @@ private:
             serverIoc_.poll();
             clientIoc_.poll();
         }
-        return snapshot && answered && !failed;
+        return (snapshot || !needSnapshot) && answered && !failed;
     }
 
     Singletons singletons_;
@@ -364,3 +426,67 @@ static void BM_WsSessionAnswerFlood(benchmark::State &state)
     state.SetItemsProcessed(state.iterations() * BURST);
 }
 BENCHMARK(BM_WsSessionAnswerFlood)->UseManualTime();
+
+/// The IO thread's work for each new order a client sends: a session's read of a burst of 64, each parsed, checked,
+/// made into an order and handed to the engine's queue. The span is one burst's (manual time), until the queue holds
+/// the burst. Then, untimed, the client reads whatever the session answered, up to its answer to one message sent after
+/// the burst, and the queue is emptied, which frees each order. Until #790 no benchmark took a new order through a
+/// session.
+static void orderFlood(benchmark::State &state, const std::string &order)
+{
+    ServedClient served(Burst::ORDERS);
+    if (!served.connected())
+    {
+        state.SkipWithError("the client couldn't connect");
+        return;
+    }
+    // Each order must reach the queue: one the session refused would time its refusal
+    served.sendBurst(order);
+    if (!served.serveBurst() || (BURST != served.queued()))
+    {
+        state.SkipWithError("the session didn't queue each order of a burst");
+        return;
+    }
+    served.drain();
+    if (!served.skipAnswers())
+    {
+        state.SkipWithError("the session didn't answer after a burst");
+        return;
+    }
+
+    for (auto _ : state)
+    {
+        served.sendBurst(order);
+        const auto start = std::chrono::steady_clock::now();
+        const bool ok = served.serveBurst();
+        const auto end = std::chrono::steady_clock::now();
+        if (!ok)
+        {
+            state.SkipWithError("the session stopped queueing the burst's orders");
+            break;
+        }
+        state.SetIterationTime(std::chrono::duration<double>(end - start).count());
+        served.drain();
+        if (!served.skipAnswers())
+        {
+            state.SkipWithError("the session stopped answering after a burst");
+            break;
+        }
+    }
+    state.SetItemsProcessed(state.iterations() * BURST);
+}
+
+/// Orders as the order entry panel sends them, each naming its request, which the session keeps until the order's first
+/// update (#790)
+static void BM_WsSessionOrderFlood(benchmark::State &state)
+{
+    orderFlood(state, NEW_ORDER);
+}
+BENCHMARK(BM_WsSessionOrderFlood)->UseManualTime();
+
+/// The same orders naming no request, as a client that names none sends them
+static void BM_WsSessionOrderFloodWithoutIds(benchmark::State &state)
+{
+    orderFlood(state, NEW_ORDER_WITHOUT_ID);
+}
+BENCHMARK(BM_WsSessionOrderFloodWithoutIds)->UseManualTime();
