@@ -40,6 +40,7 @@
 #include "SettlementDates.h"
 #include "MockQueues.h"
 #include "MockStorage.h"
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -1767,6 +1768,71 @@ DictionaryField dictionaryField(int number)
     return field;
 }
 } // namespace
+
+TEST(FixUtf8Test, TheGatewaysCheckAgreesWithTheJsonItsWebSocketClientsGet)
+{
+    // A ClOrdID the gateway takes must be one the WebSocket sessions' JSON can carry (#796): FixGateway::isUtf8()
+    // takes exactly the strings nlohmann's dump() takes, which throws for the rest. Every string of one and two bytes,
+    // and of three and four bytes every lead byte from E0 with every second byte and the edges of the rest.
+    const auto dumps = [](const std::string &bytes)
+    {
+        try
+        {
+            (void)nlohmann::json(bytes).dump();
+            return true;
+        }
+        catch (const nlohmann::json::type_error &)
+        {
+            return false;
+        }
+    };
+    size_t checked = 0;
+    const auto agree = [&](const std::string &bytes)
+    {
+        ++checked;
+        if (FixGateway::isUtf8(bytes) != dumps(bytes))
+        {
+            std::string hex;
+            for (const char c : bytes)
+            {
+                char byte[4];
+                std::snprintf(byte, sizeof(byte), "%02X ", static_cast<unsigned char>(c));
+                hex += byte;
+            }
+            ADD_FAILURE() << "they disagree on " << hex << ": isUtf8() " << FixGateway::isUtf8(bytes);
+            return false;
+        }
+        return true;
+    };
+    size_t disagreed = 0;
+    for (int a = 0; a < 256; ++a)
+    {
+        disagreed += agree(std::string(1, static_cast<char>(a))) ? 0 : 1;
+        for (int b = 0; b < 256; ++b)
+        {
+            disagreed += agree(std::string{ static_cast<char>(a), static_cast<char>(b) }) ? 0 : 1;
+        }
+    }
+    const int edges[] = { 0x00, 0x41, 0x7F, 0x80, 0x8F, 0x90, 0x9F, 0xA0, 0xBF, 0xC0, 0xFF };
+    for (int a = 0xE0; a < 256; ++a)
+    {
+        for (int b = 0; b < 256; ++b)
+        {
+            for (const int c : edges)
+            {
+                const std::string three{ static_cast<char>(a), static_cast<char>(b), static_cast<char>(c) };
+                disagreed += agree(three) ? 0 : 1;
+                for (const int d : edges)
+                {
+                    disagreed += agree(three + static_cast<char>(d)) ? 0 : 1;
+                }
+            }
+        }
+        ASSERT_LT(disagreed, 20u) << "and more: stopping";
+    }
+    EXPECT_EQ(0u, disagreed) << "of " << checked;
+    EXPECT_TRUE(FixGateway::isUtf8("ORD-\xc3\xa9-\xe2\x82\xac-\xf0\x9f\x98\x80")) << "an e acute, a euro, an emoji";
+}
 
 TEST(FixInstructionTest, EveryExecInstValueIsEitherTakenOrRefused)
 {
@@ -4171,6 +4237,62 @@ TEST_F(FixtSessionTest, AnOrderInstructionTheServerDoesntCarryOutIsRefusedOnEver
                       .find("Replace refused: DisplayQty (1138) must be at least the order's quantity"))
         << fieldOf(rejects[0], FIX::FIELD::Text);
     expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AClOrdIdThatIsntUtf8IsRefusedOnEveryOrderMessage)
+{
+    // A ClOrdID (11) that isn't UTF-8 is refused before anything is stored (#796): stored, every WebSocket report about
+    // its order threw inside the order's transaction, since the JSON refuses such bytes, and the rollback erased what
+    // the transaction had persisted. A NewOrderSingle and a NewOrderMultileg get an ExecutionReport, 150=8 with
+    // OrdRejReason 103=99, and a replace an OrderCancelReject. Nothing reaches the engine.
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>())).Times(0);
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderReplaceEvent &>())).Times(0);
+    OrderEntry *x = saveOrderOf(sid_, "ORD-X");
+    setState(x, NEW_ORDSTATUS, 100, 0, 100);
+
+    // A byte no UTF-8 holds, a lead byte without its continuation, and a surrogate's encoding
+    const std::string single = "ORD-\xff";
+    const std::string swap = "SWAP-\xc3(";
+    const std::string replacement = "RPL-\xed\xa0\x80";
+    receive(makeNewOrderSingle(single, "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    receive(makeFxSwap(swap));
+    receive(makeLimitReplace("ORD-X", replacement));
+
+    const std::vector<FIX::Message> reports = sentOfType(FIX::MsgType_ExecutionReport);
+    ASSERT_EQ(2u, reports.size()) << sentText();
+    const std::string refused[] = { single, swap };
+    for (size_t i = 0; i < reports.size(); ++i)
+    {
+        SCOPED_TRACE(i);
+        EXPECT_EQ(refused[i], fieldOf(reports[i], FIX::FIELD::ClOrdID));
+        EXPECT_EQ(std::string(1, FIX::OrdStatus_REJECTED), fieldOf(reports[i], FIX::FIELD::OrdStatus));
+        EXPECT_EQ(std::to_string(FIX::OrdRejReason_OTHER), fieldOf(reports[i], FIX::FIELD::OrdRejReason));
+        EXPECT_EQ("Order refused: ClOrdID (11) isn't UTF-8", fieldOf(reports[i], FIX::FIELD::Text));
+    }
+    const std::vector<FIX::Message> rejects = sentOfType(FIX::MsgType_OrderCancelReject);
+    ASSERT_EQ(1u, rejects.size()) << sentText();
+    EXPECT_EQ(replacement, fieldOf(rejects[0], FIX::FIELD::ClOrdID));
+    EXPECT_EQ("Replace refused: ClOrdID (11) isn't UTF-8", fieldOf(rejects[0], FIX::FIELD::Text));
+    expectEverythingSentIsTaken();
+}
+
+TEST_F(FixtSessionTest, AClOrdIdInUtf8PastAsciiIsTaken)
+{
+    // The check refuses bytes the JSON can't carry, not every byte past ASCII (#796): a ClOrdID in well-formed UTF-8
+    // reaches the engine
+    ASSERT_NO_FATAL_FAILURE(logOn());
+    std::string taken;
+    EXPECT_CALL(*mockInQueues_, push(_, testing::An<const OrderEvent &>()))
+        .WillOnce(Invoke(
+            [&taken](const std::string &, const OrderEvent &evt)
+            {
+                std::unique_ptr<OrderEntry> order(evt.order_);
+                const RawDataEntry &clOrdId = order->clOrderId_.get();
+                taken.assign(clOrdId.data_, clOrdId.length_);
+            }));
+    receive(makeNewOrderSingle("ORD-\xc3\xa9", "aaa", FIX::Side_BUY, FIX::OrdType_LIMIT, 10.0, 100));
+    EXPECT_EQ(FixGateway::sessionClOrdId(FixGateway::makeSourceString(sid_), "ORD-\xc3\xa9"), taken) << sentText();
 }
 
 TEST_F(FixtSessionTest, ASwapWhoseDatesCantSettleIsRefused)

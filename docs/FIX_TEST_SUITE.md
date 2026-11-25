@@ -428,7 +428,7 @@ Runs `orderProcessorServer` with a certificate made for the run, and checks, on 
 
 ---
 
-## 19. FixQuantityTest, FixPriceTest, FixExpireTimeTest, FixMinQtyTest and FixInstructionTest — What the Gateway Takes
+## 19. FixQuantityTest, FixPriceTest, FixExpireTimeTest, FixMinQtyTest, FixInstructionTest and FixUtf8Test — What the Gateway Takes
 
 **File:** `test/FixGatewayTest.cpp`
 **Requires:** `BUILD_FIX=ON`
@@ -445,6 +445,7 @@ The checks the gateway makes on a quantity, a price, an ExpireTime, a MinQty and
 | `OnlyTheExecInstValuesTheServerCarriesOutAreTaken` (FixInstructionTest) | An ExecInst of the values the server carries out, separated by spaces, is taken; any other value refuses it (#667) |
 | `AnOrderIsShownWhole` (FixInstructionTest) | MaxFloor (111), MaxShow (210) and DisplayQty (1138) ask to show part of the order; one at least its quantity shows all of it, as the server does, and is taken (#667) |
 | `EveryOtherInstructionIsRefusedByItsDictionaryName` (FixInstructionTest) | The display instruction's other fields, the peg, discretion and triggering instructions', MatchIncrement, MaxPriceLevels and ParticipationRate are refused whatever their value, each named as the dictionary names it (#667) |
+| `TheGatewaysCheckAgreesWithTheJsonItsWebSocketClientsGet` (FixUtf8Test) | `FixGateway::isUtf8()` takes exactly the strings the WebSocket sessions' JSON can carry, which nlohmann's `dump()` takes and throws for the rest (#796): every string of one and two bytes, and of three and four bytes every lead byte from E0 with every second byte and the edges of the rest. A ClOrdID the gateway stores goes into every report's JSON |
 
 ---
 
@@ -520,6 +521,8 @@ The gateway speaks FIX 5.0 SP2 over FIXT.1.1 (#377). Each test hands CLIENT_A's 
 | `TheCorpusReplaysThroughTheSessionAndTheGatewayStaysInService` | Each seed of `test/fuzz/corpus/fix_message` goes through the session, which parses and validates it with its own dictionaries, and on to the gateway (#556): a `*.reject.fix` seed draws a Reject (35=3), every other one reaches the gateway, and the session stays logged on. CI's ASan job runs it |
 | `AnOrderInstructionTheServerDoesntCarryOutIsRefusedOnEveryOrderMessage` | An order instruction the engine doesn't carry out is refused rather than ignored (#667), as a MinQty is (#516): a NewOrderSingle's all-or-none and a NewOrderMultileg's peg get an ExecutionReport, 150=8, and a replace's an OrderCancelReject |
 | `AnOrderInstructionTheServerCarriesOutIsTaken` | Reinstate on system failure and on connection loss, as restore and a session that keeps its orders do, and an iceberg as big as the order, which shows it whole (#667): the order reaches the engine |
+| `AClOrdIdThatIsntUtf8IsRefusedOnEveryOrderMessage` | A ClOrdID (11) that isn't UTF-8 is refused before anything is stored (#796): a NewOrderSingle and a NewOrderMultileg get an ExecutionReport, 150=8 with OrdRejReason 103=99, and a replace an OrderCancelReject, each saying so, and nothing reaches the engine. Stored, such a ClOrdID made every WebSocket report about its order throw inside its transaction, whose rollback erased what it had persisted |
+| `AClOrdIdInUtf8PastAsciiIsTaken` | The check refuses the bytes the JSON can't carry, not every byte past ASCII (#796): a ClOrdID in well-formed UTF-8 reaches the engine |
 | `ASwapWhoseDatesCantSettleIsRefused` | A swap whose near date is before the business day, or whose far date doesn't follow its near one, is refused (#551); one that settles on the business day is taken |
 | `AnOrderTheEngineRefusedUnstoredIsReportedWithTheEnginesExecutionId` | The engine draws an unstored refusal's execution id (#545), and the gateway reports it as `R<id>`, so the counterparty and the WebSocket clients that see the refusal number it alike |
 | `EachOrderAndRequestWaitsWhileTheWorkIsOverTheBoundUpToItsLongestWait` (FixtSessionInFlightTest) | While the engine's work in flight is over `--max-in-flight`, as a gauge the test holds says, a NewOrderSingle, a NewOrderMultileg, a cancel and a replace each wait on the session's thread until their longest wait, 200 ms here, is up, and then reach the engine; nothing is refused (#519) |

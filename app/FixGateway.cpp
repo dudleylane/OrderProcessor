@@ -944,6 +944,15 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderSingle &msg, const FIX::Sessi
     FIX::TransactTime transTime;
     msg.get(transTime);
 
+    // A ClOrdID that isn't UTF-8 is refused before anything else (#796). Stored, it made every WebSocket report about
+    // the order throw inside the order's transaction, since the JSON refuses such bytes, and the transaction's rollback
+    // erased what its persists had written, a trade's contra's included.
+    if (!isUtf8(clOrdId.getString()))
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_OTHER, "Order refused: ClOrdID (11) isn't UTF-8");
+        return;
+    }
+
     // The ClOrdID is stored under the session's key, since FIX scopes it to the client that sent it (#71). One the
     // session has sent before is answered first, before anything else is checked (#382).
     const std::string sourceStr = makeSourceString(sid);
@@ -1162,8 +1171,13 @@ void FixGateway::onMessage(const FIX50SP2::NewOrderMultileg &msg, const FIX::Ses
     FIX::OrderQty orderQty;
     msg.get(orderQty);
 
-    // As for NewOrderSingle: the ClOrdID under the session's key (#71), and one the session has sent before answered
-    // first (#382)
+    // As for NewOrderSingle: a ClOrdID that isn't UTF-8 refused first (#796), the ClOrdID under the session's key
+    // (#71), and one the session has sent before answered next (#382)
+    if (!isUtf8(clOrdId.getString()))
+    {
+        refuseOrder(msg, sid, FIX::OrdRejReason_OTHER, "Order refused: ClOrdID (11) isn't UTF-8");
+        return;
+    }
     const std::string sourceStr = makeSourceString(sid);
     const std::string clOrdStr = sessionClOrdId(sourceStr, clOrdId.getString());
     if (answerRepeatedOrder(msg, sid, sourceStr, clOrdStr, clOrdId.getString(), side.getValue()))
@@ -1570,6 +1584,14 @@ void FixGateway::onMessage(const FIX50SP2::OrderCancelReplaceRequest &msg, const
                                                ex.what());
         }
     };
+
+    // The replacement is stored under the request's ClOrdID, which must be UTF-8, as a new order's is (#796). The
+    // OrigClOrdID needs no check: one that isn't names no stored order, and is answered as unknown above.
+    if (!isUtf8(clOrdId.getString()))
+    {
+        refuse("Replace refused: ClOrdID (11) isn't UTF-8");
+        return;
+    }
 
     // Side and Symbol name the order, and FIX requires them to match it; carried over, so that the engine refuses a
     // replace that changes either, rather than keeping the original's without a word
@@ -2972,6 +2994,65 @@ std::optional<std::string> FixGateway::reportTypeRefusal(const FIX::FieldMap &ms
 FIX::UtcTimeStamp FixGateway::toUtcTimeStamp(DateTimeT when)
 {
     return FIX::UtcTimeStamp(static_cast<time_t>(when / 1000), static_cast<int>(when % 1000));
+}
+
+bool FixGateway::isUtf8(std::string_view bytes) noexcept
+{
+    // Unicode's table 3-7 of well-formed byte sequences: each lead byte's range for the byte after it, which keeps out
+    // the overlong forms (E0, F0), the surrogates (ED) and what is past U+10FFFF (F4); the bytes after that are 80..BF
+    size_t i = 0;
+    const size_t n = bytes.size();
+    while (i < n)
+    {
+        const auto lead = static_cast<unsigned char>(bytes[i]);
+        if (lead < 0x80)
+        {
+            ++i;
+            continue;
+        }
+        size_t length = 0;
+        unsigned char low = 0x80;
+        unsigned char high = 0xBF;
+        if ((0xC2 <= lead) && (lead <= 0xDF))
+        {
+            length = 2;
+        }
+        else if ((0xE0 <= lead) && (lead <= 0xEF))
+        {
+            length = 3;
+            low = (0xE0 == lead) ? 0xA0 : 0x80;
+            high = (0xED == lead) ? 0x9F : 0xBF;
+        }
+        else if ((0xF0 <= lead) && (lead <= 0xF4))
+        {
+            length = 4;
+            low = (0xF0 == lead) ? 0x90 : 0x80;
+            high = (0xF4 == lead) ? 0x8F : 0xBF;
+        }
+        else
+        {
+            return false; // 80..C1, a continuation or an overlong two-byte lead, and F5..FF, past U+10FFFF
+        }
+        if (n - i < length)
+        {
+            return false;
+        }
+        const auto second = static_cast<unsigned char>(bytes[i + 1]);
+        if ((second < low) || (high < second))
+        {
+            return false;
+        }
+        for (size_t k = 2; k < length; ++k)
+        {
+            const auto next = static_cast<unsigned char>(bytes[i + k]);
+            if ((next < 0x80) || (0xBF < next))
+            {
+                return false;
+            }
+        }
+        i += length;
+    }
+    return true;
 }
 
 std::string FixGateway::toLocalMktDate(DateTimeT date)
