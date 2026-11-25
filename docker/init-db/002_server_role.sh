@@ -15,4 +15,13 @@ GRANT USAGE ON SCHEMA public TO oms_server;
 GRANT SELECT, INSERT, UPDATE ON instruments, accounts, clearing_firms, orders TO oms_server;
 GRANT DELETE ON orders TO oms_server;
 GRANT USAGE ON SEQUENCE instruments_id_seq, accounts_id_seq, clearing_firms_id_seq, orders_id_seq TO oms_server;
+-- The schema's version, which the writer reads as it connects (#590). A volume made before it has none, until
+-- scripts/pg-migrate.sh makes it, and grants it then.
+DO $$
+BEGIN
+    IF to_regclass('schema_version') IS NOT NULL THEN
+        GRANT SELECT ON schema_version TO oms_server;
+    END IF;
+END
+$$;
 SQL
