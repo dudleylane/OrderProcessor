@@ -271,13 +271,20 @@ if(BUILD_TESTS)
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/LineLengthTest.sh
                      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/line-length.sh)
 
+    # The migration script's decisions (#590), against made-up migrations and a stand-in psql: the tree's own migrations
+    # pass its check, a DROP or a gap is refused, a volume is brought up in order, and a failure stops the run
+    add_test(NAME PgMigrationsApplyInOrderAndDropNothing
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/PgMigrateTest.sh
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/pg-migrate.sh)
+
     # The tests of the repository's own tooling: CI's scripts, the benchmark harness and the format checks. They test no
     # binary, and need git, jq, python3, systemd or podman, so the server image's builder leaves them out when it runs
     # the suite on what it ships (ctest -LE tooling, #566). A new one of its kind takes the label too.
     set_tests_properties(JobStartedHookDecides CiTestedTreeDecides MemoryCapStopsARunaway CiNamesKeepRunnersApart
                          CiJobsTakeTheirShare CiBuildsRunCapped CpuBusyDecides BenchmarkBaselineKeepsItsConfig
                          BenchmarkBusyStartIsInconclusive LineEndingsAreChecked CtestSkipsAreRefused LineLengthIsChecked
-                         SanitizerReportsAreRefused PROPERTIES LABELS tooling)
+                         SanitizerReportsAreRefused PgMigrationsApplyInOrderAndDropNothing
+                         PROPERTIES LABELS tooling)
 endif()
 
 if(BUILD_BENCHMARKS)

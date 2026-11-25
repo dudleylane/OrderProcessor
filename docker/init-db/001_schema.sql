@@ -276,4 +276,18 @@ CREATE INDEX idx_executions_order_id   ON executions (order_id);
 CREATE INDEX idx_executions_exec_time  ON executions (exec_time DESC);
 CREATE INDEX idx_executions_exec_type  ON executions (exec_type);
 
+-- ----------------------------------------------------------
+-- The schema's version (#590): a row a migration, each version the schema has been at. The server's writer reads the
+-- highest when it connects, and refuses a schema of another version than its statements are written for
+-- (PG::SCHEMA_VERSION). A volume made before this table mirrors as before, with a warning, until
+-- scripts/pg-migrate.sh applies docker/migrations, which bring it here. A change to this file bumps the version, and
+-- gets a migration of its own.
+-- ----------------------------------------------------------
+
+CREATE TABLE schema_version (
+    version     INTEGER     PRIMARY KEY,
+    applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO schema_version (version) VALUES (1);
+
 COMMIT;

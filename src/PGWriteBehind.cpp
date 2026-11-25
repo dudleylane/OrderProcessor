@@ -18,15 +18,37 @@
 #include <chrono>
 #include <memory>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "Logger.h"
+#include "PGRequestBuilder.h"
 
 namespace COP::PG
 {
 
 namespace
 {
+
+/// A schema of another version than the server's (#590): refused as a statement the schema refuses is
+struct SchemaVersionRefused : std::runtime_error
+{
+    using std::runtime_error::runtime_error;
+};
+
+/// The schema's version (#590): 0 for a volume made before versioning, which has no schema_version table
+int schemaVersion(pqxx::connection &conn)
+{
+    pqxx::nontransaction txn(conn);
+    const pqxx::result table = txn.exec("SELECT to_regclass('schema_version') IS NOT NULL");
+    if (!table[0][0].as<bool>())
+    {
+        return 0;
+    }
+    const pqxx::result version = txn.exec("SELECT coalesce(max(version), 0) FROM schema_version");
+    return version[0][0].as<int>();
+}
 
 const char *UPSERT_INSTRUMENT = "pg_upsert_instrument";
 const char *UPSERT_ACCOUNT = "pg_upsert_account";
@@ -307,6 +329,8 @@ void PGWriteBehind::run()
     // Whether the last connection's statements were refused by the schema: the writer tries again until they're taken,
     // and logs only the first refusal of a run (#590)
     bool schemaRefused = false;
+    // Whether a schema made before versioning was warned of: once a run of the writer (#590)
+    bool warnedUnversioned = false;
     // Connections lost since a write last landed. The first is replaced at once, as one a firewall dropped while it sat
     // idle would be; after that the writer waits between attempts, as it does for a database it can't reach.
     unsigned lostInARow = 0;
@@ -382,6 +406,27 @@ void PGWriteBehind::run()
             try
             {
                 conn = std::make_unique<pqxx::connection>(connString_);
+                // The schema's version first (#590). One made before versioning is mirrored as before, on every
+                // connection, with a warning once a run; another version is refused, as a statement the schema refuses
+                // is.
+                const int version = schemaVersion(*conn);
+                if (0 == version)
+                {
+                    if (!warnedUnversioned)
+                    {
+                        log->warn("PGWriteBehind: PostgreSQL's schema has no version, so its volume was made before "
+                                  "the schema was versioned; mirroring to it as before. scripts/pg-migrate.sh brings "
+                                  "it to version " +
+                                  std::to_string(SCHEMA_VERSION) + " (docker/README.md)");
+                        warnedUnversioned = true;
+                    }
+                }
+                else if (SCHEMA_VERSION != version)
+                {
+                    throw SchemaVersionRefused("PostgreSQL's schema is version " + std::to_string(version) +
+                                               ", and the server's statements are written for version " +
+                                               std::to_string(SCHEMA_VERSION));
+                }
                 prepareStatements(*conn);
                 log->note(std::string("PGWriteBehind: connected to PostgreSQL") + (everConnected ? " again" : ""));
                 if (schemaRefused)
@@ -407,10 +452,19 @@ void PGWriteBehind::run()
                     totalSchemaRefusals_.fetch_add(1, std::memory_order_relaxed);
                     if (!schemaRefused)
                     {
-                        log->error(std::string("PGWriteBehind: PostgreSQL's schema refused a statement the server "
-                                               "sends, so nothing is written to it until the schema matches; trying "
-                                               "again, and logging this only once (docker/README.md): ") +
-                                   e.what());
+                        if (nullptr != dynamic_cast<const SchemaVersionRefused *>(&e))
+                        {
+                            log->error(std::string("PGWriteBehind: ") + e.what() +
+                                       ", so nothing is written to it until scripts/pg-migrate.sh brings it there; "
+                                       "trying again, and logging this only once (docker/README.md)");
+                        }
+                        else
+                        {
+                            log->error(std::string("PGWriteBehind: PostgreSQL's schema refused a statement the server "
+                                                   "sends, so nothing is written to it until the schema matches; "
+                                                   "trying again, and logging this only once (docker/README.md): ") +
+                                       e.what());
+                        }
                         schemaRefused = true;
                     }
                 }

@@ -57,6 +57,7 @@
 #include "DataModelDef.h"
 #include "ExpiryScheduler.h"
 #include "JsonSerializer.h"
+#include "PGRequestBuilder.h"
 #include "ServerDefaults.h"
 #include "StateMachine.h"
 #include "StateMachineDef.h"
@@ -284,6 +285,33 @@ TEST_F(DocConsistencyTest, ExecTypeCount)
 }
 
 // What WebSocket clients may hold of the server (#159)
+TEST_F(DocConsistencyTest, PgSchemaVersionIsInitDbsAndTheLastMigrations)
+{
+    // The version the server's statements are written for (#590) is the one init-db makes a new volume at, and the last
+    // migration's, which brings an older volume up to it: a schema change that bumps one and not the others fails here
+    const auto root = test::sourceRoot();
+    std::ifstream in(root / "docker/init-db/001_schema.sql");
+    ASSERT_TRUE(in) << "can't read docker/init-db/001_schema.sql";
+    const std::string schema((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::smatch made;
+    ASSERT_TRUE(
+        std::regex_search(schema, made, std::regex(R"(INSERT INTO schema_version \(version\) VALUES \((\d+)\))")))
+        << "init-db sets no version";
+    EXPECT_EQ(COP::PG::SCHEMA_VERSION, std::stoi(made[1].str()));
+    int last = 0;
+    const std::regex migration(R"((\d{3})_.*\.sql)");
+    for (const auto &entry : std::filesystem::directory_iterator(root / "docker/migrations"))
+    {
+        std::smatch number;
+        const std::string name = entry.path().filename().string();
+        if (std::regex_match(name, number, migration))
+        {
+            last = std::max(last, std::stoi(number[1].str()));
+        }
+    }
+    EXPECT_EQ(COP::PG::SCHEMA_VERSION, last) << "docker/migrations' last";
+}
+
 TEST_F(DocConsistencyTest, WebSocketLimits)
 {
     expectDocEq("ws_max_connections", COP::App::DEFAULT_MAX_CONNECTIONS);

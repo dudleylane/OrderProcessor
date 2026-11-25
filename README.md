@@ -674,7 +674,7 @@ With `BUILD_PG=ON` (libpqxx 8) and a libpq connection string, from `OMS_PG_CONNE
 - **Failures:** a write Postgres refuses is logged and counted, and the rest of its transaction's writes land. A lost connection is retried, with the same writes in the same order. Connecting gives up after `connect_timeout`, 5 seconds unless the string sets one, and at shutdown what can't be written then is dropped, counted and logged.
 - **While Postgres is down:** a write of a row that is still queued replaces the queued one, in its place (#231). Each write sets a whole row or deletes it, so only the newest matters. The queue then holds at most one write per row changed during the outage, however many changes there were, and reference data still lands before the orders that name it.
 - **What it holds:** never a version LMDB didn't commit (#599): a group that aborts or fails to commit sends nothing. After a crash Postgres may be a version behind LMDB, which the next start repairs, since it sends what LMDB holds again. Executions aren't mirrored, as LMDB doesn't keep them either. A volume made before #590 keeps the `users` and `audit_log` tables, which nothing uses; a new one doesn't have them. An order a start drops (`--keep-closed-days`, #597) keeps its row: Postgres hears nothing of the drop.
-- **Schema:** `docker/init-db/001_schema.sql`. `PGSchemaTest` checks that every enum string the writer sends is one of its type's values.
+- **Schema:** `docker/init-db/001_schema.sql`. `PGSchemaTest` checks that every enum string the writer sends is one of its type's values. Since #590 the schema has a version, in `schema_version`, which the writer reads as it connects: one made before versioning is mirrored as before, with a warning, and one of another version than the server's statements are written for is refused, logged once, and tried again. `scripts/pg-migrate.sh` brings an older volume up to date with the numbered migrations in `docker/migrations/`, and the server never changes the schema itself (docker/README.md).
 - **Tests:** `scripts/pg-for-tests.sh start NAME` starts a throwaway Postgres with the schema and prints its connection string; with it in `PG_CONNECTION_STRING`, `ctest -R 'PGWriteBehind|Postgres'` runs the writer's tests. CI runs them so, in the Release and sanitizer jobs.
 - **Docker:** compose builds the server with `BUILD_PG=ON` and points it at `oms-db` (docker/README.md)
 
@@ -719,10 +719,12 @@ OrderProcessor/
 │   ├── Dockerfile.oms-frontend # Multi-stage React build (Node 24 + nginx)
 │   ├── nginx.conf          # Frontend proxy config (serves :3000, proxies /ws)
 │   ├── init-db/            # PostgreSQL schema initialization
+│   ├── migrations/         # Numbered migrations that bring an older volume's schema up to date (#590)
 │   └── .env.example        # PostgreSQL credentials and the access token, a template
 ├── scripts/                # Tooling
 │   ├── benchmark-regression.sh  # Before/after benchmark comparison
 │   ├── loop-instructions.sh     # Instructions per iteration in each per-order benchmark's timed span (#503)
+│   ├── pg-migrate.sh            # Applies docker/migrations to a Postgres volume, as its owner (#590)
 │   └── memory-cap.sh            # Runs a command under a memory cap, as CI's builds and tests and the hook's ctest run (#607, #740)
 ├── docs/                   # Architecture documentation
 │   └── ARCHITECTURE.md     # Comprehensive architecture document
