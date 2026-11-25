@@ -18,6 +18,11 @@
 namespace COP::PG
 {
 
+/// The version of the Postgres schema the server's statements are written for (#590). docker/init-db makes a new volume
+/// at it, in schema_version, and scripts/pg-migrate.sh brings an older one up to it, one numbered migration at a time.
+/// A change to the schema bumps it, with a migration of its own in docker/migrations.
+inline constexpr int SCHEMA_VERSION = 1;
+
 class PGRequestBuilder final
 {
 public:
