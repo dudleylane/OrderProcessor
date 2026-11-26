@@ -141,12 +141,15 @@ protected:
         return std::make_unique<TaskManager>(params);
     }
 
+    /// Until the pool is idle and each task has counted itself finished. A task counts itself after handing its
+    /// processor back, so the pool can be idle with a count still on its way (#806), as TaskManagerTest waits for it
     bool waitUntilIdle(TaskManager &manager)
     {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
         while (std::chrono::steady_clock::now() < deadline)
         {
-            if (manager.waitUntilTransactionsFinished(0))
+            if (manager.waitUntilTransactionsFinished(0) && (manager.eventsFinished() == manager.eventsCreated()) &&
+                (manager.transactionsFinished() == manager.transactionsCreated()))
             {
                 return true;
             }
