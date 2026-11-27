@@ -31,6 +31,11 @@ inline constexpr std::size_t MAX_CLIENT_MESSAGE_BYTES = 64 * 1024;
 /// about 20 s at LMDB's ~2 ms a commit, and holds tens of MB.
 inline constexpr std::size_t DEFAULT_MAX_IN_FLIGHT = 10'000;
 
+/// How many new orders' request ids a WebSocket session keeps at most, each until its order's first update names it
+/// (#790). An order whose first update never comes would keep its id for good, so the oldest kept goes first: a client
+/// with more orders than this awaiting their first updates loses the names of the oldest.
+inline constexpr std::size_t MAX_PENDING_REQUESTS = 1024;
+
 /// What WebSocket clients may hold of the server (#159). The defaults bound what slow clients can make the server keep:
 /// 256 x 16 MiB, at most, and less when they wait on the same broadcasts, which share one copy. Each also holds the
 /// state it got as it connected, its order snapshot included, until it has read it (#512).

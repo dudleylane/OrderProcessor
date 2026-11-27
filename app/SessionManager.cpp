@@ -1,7 +1,10 @@
 #include "SessionManager.h"
+#include "JsonSerializer.h"
 #include "WsSession.h"
 
 #include <algorithm>
+#include <string_view>
+#include <tuple>
 #include <boost/asio/post.hpp>
 
 using namespace COP::App;
@@ -105,6 +108,67 @@ void SessionManager::sendToSource(const std::string &source, const std::string &
                           [session, msg]()
                           {
                               session->send(msg);
+                          });
+    }
+}
+
+namespace
+{
+
+/// The copy of an order's message the sessions share, which takes the message's bytes rather than copying them, and
+/// where they hold the order's ClOrdID (#790)
+std::shared_ptr<const OrderMessage> orderMessage(std::string &json, std::string_view clOrdId)
+{
+    auto message = std::make_shared<OrderMessage>();
+    message->json = std::move(json);
+    std::tie(message->clOrdIdAt, message->clOrdIdLength) = locateClOrderId(message->json, clOrdId);
+    return message;
+}
+
+} // namespace
+
+void SessionManager::broadcastOrderUpdate(const SourceIdT &account, std::string json, std::string_view clOrdId)
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    std::shared_ptr<const OrderMessage> update; // made for the first session that gets it, and shared (#159)
+    for (auto &session : sessions_)
+    {
+        const WsIdentity *identity = session->identity();
+        if ((nullptr != identity) && !identity->mayUse(account))
+        {
+            continue;
+        }
+        if (!update)
+        {
+            update = orderMessage(json, clOrdId);
+        }
+        boost::asio::post(session->executor(),
+                          [session, update]()
+                          {
+                              session->sendOrderUpdate(update);
+                          });
+    }
+}
+
+void SessionManager::sendUnstoredReject(const std::string &source, std::string json, std::string_view clOrdId)
+{
+    oneapi::tbb::spin_rw_mutex::scoped_lock lock(rwLock_, false);
+    std::shared_ptr<const OrderMessage> reject;
+    for (auto &session : sessions_)
+    {
+        const WsIdentity *identity = session->identity();
+        if ((nullptr != identity) && (identity->name != source))
+        {
+            continue;
+        }
+        if (!reject)
+        {
+            reject = orderMessage(json, clOrdId);
+        }
+        boost::asio::post(session->executor(),
+                          [session, reject]()
+                          {
+                              session->sendUnstoredReject(reject);
                           });
     }
 }

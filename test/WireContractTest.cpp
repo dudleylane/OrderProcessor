@@ -1355,6 +1355,9 @@ std::vector<Message> WireContractTest::serverMessages()
     order->lastUpdateTime_ = DAY_START + 2000;
     // With the figures a report hands it (#411), as WsOutQueues sends it
     messages.push_back({ "order_update", App::serializeOrderUpdate(*order, OrderFigures(*order)), "", "" });
+    // And as a new order's first update to the session that sent it names the request (#790)
+    const std::string stamped = App::stampRequestId(App::serializeOrderUpdate(*order, OrderFigures(*order)), "r-1");
+    messages.push_back({ "order_update", stamped, "", "" });
     // On FX, a swap, partly filled: the serializer writes its settlement dates and its far leg's price for a swap
     // alone, in the update and in the snapshot
     auto swap = std::make_unique<OrderEntry>(wide->add(new StringT("WebSocket")), wide->add(new StringT("Internal")),
