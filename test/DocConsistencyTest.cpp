@@ -291,6 +291,8 @@ TEST_F(DocConsistencyTest, WebSocketLimits)
     expectDocEq("ws_max_client_message_kib", COP::App::MAX_CLIENT_MESSAGE_BYTES / 1024);
     // The longest id a client may give a request, which the answers refusing it echo (#683)
     expectDocEq("ws_max_request_id", COP::App::MAX_REQUEST_ID);
+    // The new orders' request ids a session keeps at most, each until its order's first update names it (#790)
+    expectDocEq("ws_max_pending_requests", COP::App::MAX_PENDING_REQUESTS);
     // Connections whose upgrade isn't decided yet, and how long each has to send it (#541)
     expectDocEq("ws_max_handshakes", COP::App::WsLimits().maxHandshakes);
     expectDocEq("ws_handshake_timeout_s", COP::App::WsLimits().handshakeTimeout.count());

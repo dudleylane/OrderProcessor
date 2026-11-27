@@ -355,6 +355,9 @@ TEST_F(WsSessionTest, ThrowingRequestsInARowAreEachAnswered)
         .WillByDefault(testing::Throw(std::runtime_error("injected\x01"
                                                          "failure\xff")));
     sessionQueues_ = &failingQueues_;
+    // An order with the cancels' ClOrdID, so that each reaches the push that throws: the session refuses one no order
+    // has before it (#790)
+    restoreOrder(IdT(1, 1790000100), "caf\xc3\xa9");
 
     Client client;
     connect(client);
@@ -400,6 +403,9 @@ TEST_F(WsSessionTest, ThrowingRequestsWithinThePeriodAreLoggedOnceEscaped)
         .WillByDefault(testing::Throw(std::runtime_error("injected\x01"
                                                          "failure\xff")));
     sessionQueues_ = &failingQueues_;
+    // An order with the cancels' ClOrdID, so that each reaches the push that throws: the session refuses one no order
+    // has before it (#790)
+    restoreOrder(IdT(1, 1790000100), "caf\xc3\xa9");
 
     Client client;
     connect(client);
@@ -677,6 +683,121 @@ TEST_F(WsSessionTest, EachErrorAnsweringARequestNamesItsRequestId)
     send(client, R"({"type":"replace_order","data":{"orderId":7,"price":151,"requestId":"r-2"}})");
     ASSERT_TRUE(takeQueuedReplace(REPLY_TIMEOUT, &requestId).has_value()) << "escaped: " << escaped();
     EXPECT_EQ("r-2", requestId);
+}
+
+// =============================================================================
+// A new order's first update names its request (#790)
+// =============================================================================
+
+namespace
+{
+
+/// A new order on AAPL as a client sends one; a test adds its request id, or none, and closes it
+const std::string NEW_AAPL_ORDER = R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT",)"
+                                   R"("price":150.5,"orderQty":10,"tif":"DAY","currency":"USD","capacity":"AGENCY")";
+
+/// An order_update as the engine's push serializes it once for every session, with the order's ClOrdID as its
+/// clOrderId, where the session finds it (#790)
+std::string anOrderUpdate(const std::string &clOrdId)
+{
+    return R"({"data":{"clOrderId":")" + clOrdId + R"(","orderId":1},"type":"order_update"})";
+}
+
+std::string clOrdIdOf(const OrderEntry &order)
+{
+    const RawDataEntry &raw = order.clOrderId_.get();
+    return std::string(raw.data_, raw.length_);
+}
+
+} // namespace
+
+TEST_F(WsSessionTest, ANewOrdersFirstUpdateToItsSenderNamesItsRequestOnce)
+{
+    // The session keeps the request's id by the ClOrdID it made for the order, and adds it to the order's first
+    // order_update to it: not to another order's, and not to the order's later ones
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    send(client, NEW_AAPL_ORDER + R"(,"requestId":"n-1"}})");
+    std::unique_ptr<OrderEntry> order = takeQueuedOrder();
+    ASSERT_NE(nullptr, order) << "escaped: " << escaped();
+    const std::string clOrdId = clOrdIdOf(*order);
+
+    const std::string anotherClOrdId = clOrdId + "-another";
+    sessionMgr_.broadcastOrderUpdate(accountId_, anOrderUpdate(anotherClOrdId), anotherClOrdId);
+    sessionMgr_.broadcastOrderUpdate(accountId_, anOrderUpdate(clOrdId), clOrdId);
+    sessionMgr_.broadcastOrderUpdate(accountId_, anOrderUpdate(clOrdId), clOrdId);
+    std::optional<nlohmann::json> another = readUntil(client, "order_update");
+    std::optional<nlohmann::json> first = readUntil(client, "order_update");
+    std::optional<nlohmann::json> later = readUntil(client, "order_update");
+    ASSERT_TRUE(another && first && later) << "escaped: " << escaped();
+    EXPECT_FALSE(another->contains("requestId")) << "another order's update named the request";
+    EXPECT_EQ("n-1", first->value("requestId", ""));
+    EXPECT_EQ(1, first->at("data").value("orderId", 0)) << "the update changed beyond its request's id";
+    EXPECT_FALSE(later->contains("requestId")) << "the order's later update named the request again";
+}
+
+TEST_F(WsSessionTest, ANewOrderThatNamesNoRequestKeepsNothing)
+{
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    send(client, NEW_AAPL_ORDER + "}}");
+    std::unique_ptr<OrderEntry> order = takeQueuedOrder();
+    ASSERT_NE(nullptr, order) << "escaped: " << escaped();
+
+    sessionMgr_.broadcastOrderUpdate(accountId_, anOrderUpdate(clOrdIdOf(*order)), clOrdIdOf(*order));
+    std::optional<nlohmann::json> update = readUntil(client, "order_update");
+    ASSERT_TRUE(update) << "escaped: " << escaped();
+    EXPECT_FALSE(update->contains("requestId"));
+}
+
+TEST_F(WsSessionTest, ASwapsFirstUpdateToItsSenderNamesItsRequest)
+{
+    // On this branch a swap that names its request is kept by its ClOrdID too, as a new order is (#790)
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    send(client, R"({"type":"new_swap_order","data":{"symbol":"AAPL","side":"BUY","nearPrice":1.085,"farPrice":1.087,)"
+                 R"("settlDate":)" +
+                     std::to_string(test::swapSettlementDate(2)) + R"(,"farSettlDate":)" +
+                     std::to_string(test::swapSettlementDate(33)) +
+                     R"(,"orderQty":1000000,"account":"TRADING-1","currency":"USD",)"
+                     R"("capacity":"AGENCY","requestId":"s-1"}})");
+    std::unique_ptr<OrderEntry> swap = takeQueuedOrder();
+    ASSERT_NE(nullptr, swap) << "escaped: " << escaped();
+    const std::string clOrdId = clOrdIdOf(*swap);
+
+    sessionMgr_.broadcastOrderUpdate(accountId_, anOrderUpdate(clOrdId), clOrdId);
+    sessionMgr_.broadcastOrderUpdate(accountId_, anOrderUpdate(clOrdId), clOrdId);
+    std::optional<nlohmann::json> first = readUntil(client, "order_update");
+    std::optional<nlohmann::json> later = readUntil(client, "order_update");
+    ASSERT_TRUE(first && later) << "escaped: " << escaped();
+    EXPECT_EQ("s-1", first->value("requestId", ""));
+    EXPECT_FALSE(later->contains("requestId"));
+}
+
+TEST_F(WsSessionTest, AnUnstoredOrdersRejectEndsTheKeepingOfItsRequest)
+{
+    // An order the engine refuses without storing it gets no update: its REJECT names the request already (#683), and
+    // the session forgets the id as it sends it, so nothing keeps it for good
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+    send(client, NEW_AAPL_ORDER + R"(,"requestId":"n-3"}})");
+    std::unique_ptr<OrderEntry> order = takeQueuedOrder();
+    ASSERT_NE(nullptr, order) << "escaped: " << escaped();
+    const std::string clOrdId = clOrdIdOf(*order);
+
+    const std::string rejectJson =
+        R"({"data":{"clOrderId":")" + clOrdId + R"(","orderId":0,"requestId":"n-3"},"type":"execution_report"})";
+    sessionMgr_.sendUnstoredReject(App::WsSession::ANONYMOUS_SOURCE, rejectJson, clOrdId);
+    sessionMgr_.broadcastOrderUpdate(accountId_, anOrderUpdate(clOrdId), clOrdId);
+    std::optional<nlohmann::json> reject = readUntil(client, "execution_report");
+    std::optional<nlohmann::json> update = readUntil(client, "order_update");
+    ASSERT_TRUE(reject && update) << "escaped: " << escaped();
+    EXPECT_EQ("n-3", reject->at("data").value("requestId", ""));
+    EXPECT_FALSE(update->contains("requestId")) << "the session kept the request of an order refused unstored";
 }
 
 TEST_F(WsSessionTest, AReplaceToGtdNeedsAnExpireTime)
@@ -1046,19 +1167,28 @@ TEST_F(WsSessionTest, CancelWhoseClOrdIdBelongsToAnotherOrderIsRefused)
     EXPECT_EQ(0u, inQueues_.size());
 }
 
-TEST_F(WsSessionTest, CancelByAnUnknownClOrdIdGoesToTheEngineAsUnknown)
+TEST_F(WsSessionTest, CancelByAnUnknownClOrdIdIsRefusedNamingItsRequest)
 {
-    // The ClOrdID decides when given, so an unknown one is not looked up by number instead
+    // The ClOrdID decides when given, so an unknown one is not looked up by number instead, and the session refuses
+    // it, naming the request: at the engine its cancel_reject named only the number given, 0 when the client gave
+    // none, so the client couldn't tell what it answered (#790)
     restoreOrder(IdT(7, 1790000100), "CL-7");
     Client client;
     connect(client);
     ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
 
-    send(client, R"({"type":"cancel_order","data":{"orderId":7,"clOrderId":"NOPE"}})");
-    auto cancel = takeQueuedCancel();
-    ASSERT_TRUE(cancel.has_value()) << "no cancel queued; escaped: " << escaped();
-    EXPECT_EQ(7u, cancel->id_.id_);
-    EXPECT_FALSE(cancel->id_.isValid());
+    send(client, R"({"type":"cancel_order","data":{"orderId":7,"clOrderId":"NOPE","requestId":"c-1"}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Cancel refused: ClOrdID NOPE names no order with orderId 7", reply->value("message", ""));
+    EXPECT_EQ("c-1", reply->value("requestId", ""));
+    send(client, R"({"type":"cancel_order","data":{"clOrderId":"NOPE"}})");
+    reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Cancel refused: ClOrdID NOPE names no order with orderId 0", reply->value("message", ""));
+    EXPECT_FALSE(reply->contains("requestId"));
+    EXPECT_FALSE(takeQueuedCancel(std::chrono::milliseconds(0)).has_value())
+        << "a cancel of no order reached the engine";
 }
 
 TEST_F(WsSessionTest, CancelByTheClOrdIdAFixOrderShowsNamesThatOrder)
@@ -1102,6 +1232,30 @@ TEST_F(WsSessionTest, AFixOrdersClOrdIdThatAnotherOrderIsStoredUnderStillNamesIt
     auto cancel = takeQueuedCancel();
     ASSERT_TRUE(cancel.has_value()) << "no cancel queued; escaped: " << escaped();
     EXPECT_EQ(fix->orderId_, cancel->id_);
+}
+
+TEST_F(WsSessionTest, AFixOrdersShownClOrdIdWithoutItsNumberIsRefusedNamingTheNumberGiven)
+{
+    // A FIX order's shown ClOrdID names it only with its number (#645), so a cancel that gives it with no number, or
+    // with another order's, names no order and is refused, naming the request. The words name the number given: an
+    // order does show the ClOrdID, so "no order has" it would be untrue (#790)
+    restoreFixOrder(IdT(7, 1790000100), "FIX:B->OMS", "C-1");
+    restoreOrder(IdT(3, 1790000000), "CL-3");
+    Client client;
+    connect(client);
+    ASSERT_TRUE(readUntil(client, "order_snapshot").has_value());
+
+    send(client, R"({"type":"cancel_order","data":{"clOrderId":"C-1","requestId":"c-1"}})");
+    auto reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Cancel refused: ClOrdID C-1 names no order with orderId 0", reply->value("message", ""));
+    EXPECT_EQ("c-1", reply->value("requestId", ""));
+    send(client, R"({"type":"cancel_order","data":{"orderId":3,"clOrderId":"C-1"}})");
+    reply = readUntil(client, "error");
+    ASSERT_TRUE(reply.has_value()) << "escaped: " << escaped();
+    EXPECT_EQ("Cancel refused: ClOrdID C-1 names no order with orderId 3", reply->value("message", ""));
+    EXPECT_FALSE(takeQueuedCancel(std::chrono::milliseconds(0)).has_value())
+        << "a cancel that named no order reached the engine";
 }
 
 // =============================================================================

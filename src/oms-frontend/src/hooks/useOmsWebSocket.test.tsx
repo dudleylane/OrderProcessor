@@ -5,6 +5,7 @@ import { OrderBookPanel } from '../components/OrderBookPanel';
 import type { NewOrderRequest, NewSwapOrderRequest } from '../types';
 import { Capacity, Currency, ExecType, OrderStatus, OrderType, Side, TimeInForce } from '../types/enums';
 import { FakeWebSocket } from '../test/FakeWebSocket';
+import { order } from '../test/fixtures';
 import { useOmsWebSocket } from './useOmsWebSocket';
 
 // The hook's cases from #521, #522 and #523 (#548), on a stand-in WebSocket: a case opens it, feeds it the server's
@@ -309,6 +310,83 @@ describe('request ids (#683)', () => {
       'third cancel',
       'first cancel',
     ]);
+  });
+});
+
+describe('answers matched by the order a request made or named (#790)', () => {
+  it("names a new order the engine stored and rejected, by the request id its first update carries", () => {
+    const hook = renderOms();
+    act(() => live().open());
+    act(() => {
+      hook.result.current.sendOrder(ORDER);
+    });
+    const [id] = requestIds();
+    act(() => live().receive(rejectReport(5, 'Order refused: no market to trade with')));
+    act(() =>
+      live().receive({
+        type: 'order_update',
+        data: order({ orderId: 5, clOrderId: 'WS-1', status: OrderStatus.REJECTED }),
+        requestId: id,
+      }),
+    );
+    expect(hook.result.current.notices.map(n => [n.kind, n.text])).toEqual([
+      ['reject', 'New order (BUY 10 AAA): Order refused: no market to trade with'],
+    ]);
+  });
+
+  it("forgets a new order the engine accepted, and a replace once the replacement's report names its order", () => {
+    const hook = renderOms();
+    act(() => live().open());
+    act(() => {
+      hook.result.current.sendOrder(ORDER);
+      hook.result.current.replaceOrder({ orderId: 8, price: 11 });
+    });
+    const [orderRequest, replaceRequest] = requestIds();
+    act(() =>
+      live().receive({
+        type: 'order_update',
+        data: order({ orderId: 6, clOrderId: 'WS-2', status: OrderStatus.NEW }),
+        requestId: orderRequest,
+      }),
+    );
+    act(() =>
+      live().receive({
+        type: 'execution_report',
+        data: {
+          execId: 7,
+          orderId: 9,
+          origOrderId: 8,
+          type: ExecType.REPLACE,
+          orderStatus: OrderStatus.NEW,
+          market: '',
+          transactTime: 0,
+        },
+      }),
+    );
+    expect(hook.result.current.notices).toEqual([]);
+    // Both are answered, so an error that echoes either id later names no request
+    act(() => live().receive({ type: 'error', message: 'late', requestId: orderRequest }));
+    act(() => live().receive({ type: 'error', message: 'later', requestId: replaceRequest }));
+    expect(hook.result.current.notices.map(n => n.text)).toEqual(['later', 'late']);
+  });
+
+  it('gives no notice for a rejected order whose update names no request of this tab', () => {
+    const hook = renderOms();
+    act(() => live().open());
+    act(() => {
+      hook.result.current.sendOrder(ORDER);
+    });
+    act(() => live().receive(rejectReport(5, 'Order refused: no market to trade with')));
+    // Another tab's order, and an update that names no request: neither answers this tab's request
+    act(() =>
+      live().receive({
+        type: 'order_update',
+        data: order({ orderId: 5, status: OrderStatus.REJECTED }),
+        requestId: 'another-tab',
+      }),
+    );
+    act(() => live().receive({ type: 'order_update', data: order({ orderId: 5, status: OrderStatus.REJECTED }) }));
+    expect(hook.result.current.notices).toEqual([]);
   });
 });
 

@@ -565,7 +565,8 @@ TEST_F(WsAuthorizationTest, AnotherIdentitysOrderCantBeCanceledOrReplaced)
     start();
     std::unique_ptr<Client> a = connect(TOKEN_A);
 
-    // A cancel of it reaches the engine as a cancel of an unknown order, by its number or by its ClOrdID
+    // A cancel of it by its number reaches the engine as a cancel of an unknown order. One by its ClOrdID is refused as
+    // one by a ClOrdID that names no order (#790): the same words, so the client learns nothing of the order.
     a->ws.write(net::buffer(std::string(R"({"type":"cancel_order","data":{"orderId":7}})")));
     std::optional<Queued> queued = takeQueued();
     ASSERT_TRUE(queued && queued->cancel);
@@ -573,17 +574,81 @@ TEST_F(WsAuthorizationTest, AnotherIdentitysOrderCantBeCanceledOrReplaced)
     EXPECT_EQ(IdT(7, 0), queued->cancel->id_) << "another identity's order was named to the engine";
     EXPECT_NE(theirs->orderId_, queued->cancel->id_);
     a->ws.write(net::buffer(std::string(R"({"type":"cancel_order","data":{"orderId":7,"clOrderId":"B-7"}})")));
-    queued = takeQueued();
-    ASSERT_TRUE(queued && queued->cancel);
-    EXPECT_EQ(IdT(7, 0), queued->cancel->id_);
+    std::optional<nlohmann::json> refusal = readUntil(*a, "error");
+    ASSERT_TRUE(refusal);
+    EXPECT_EQ("Cancel refused: ClOrdID B-7 names no order with orderId 7", refusal->value("message", ""));
+    EXPECT_FALSE(takeQueued(std::chrono::milliseconds(0)))
+        << "a cancel by another identity's ClOrdID reached the engine";
 
     // A replace of it is refused as for an order that doesn't exist
     a->ws.write(net::buffer(std::string(R"({"type":"replace_order","data":{"orderId":7,"price":151.0}})")));
-    std::optional<nlohmann::json> refusal = readUntil(*a, "error");
+    refusal = readUntil(*a, "error");
     ASSERT_TRUE(refusal);
     EXPECT_EQ("Order not found for replace: 7", refusal->value("message", ""));
     EXPECT_FALSE(takeQueued(std::chrono::milliseconds(0)))
         << "a replace of another identity's order reached the engine";
+}
+
+TEST_F(WsAuthorizationTest, ANewOrdersFirstUpdateNamesItsRequestToItsSenderAlone)
+{
+    // Through WsOutQueues, as a transaction worker sends an order's report and update (#790): the session that sent the
+    // new_order gets the order's first update with the request's id, another session that may see the order gets the
+    // update as it was serialized, and the order's later updates name no request
+    start(false);
+    std::unique_ptr<Client> sender = connect("");
+    std::unique_ptr<Client> other = connect("");
+    sender->ws.write(net::buffer(std::string(
+        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD",)"
+        R"("capacity":"AGENCY","price":150.0,"orderQty":10,"requestId":"n-7"}})")));
+    std::optional<Queued> queued = takeQueued();
+    ASSERT_TRUE(queued && queued->order);
+    // Stored, as the engine stores it, with the ClOrdID the session made for it
+    OrderEntry *order = queued->order.release();
+    order->orderId_ = IdT(9, 20261015);
+    order->status_ = NEW_ORDSTATUS;
+    OrderStorage::instance()->restore(order);
+
+    report(*order, "WebSocket");
+    report(*order, "WebSocket");
+    std::optional<nlohmann::json> first = readUntil(*sender, "order_update");
+    std::optional<nlohmann::json> later = readUntil(*sender, "order_update");
+    std::optional<nlohmann::json> othersFirst = readUntil(*other, "order_update");
+    ASSERT_TRUE(first && later && othersFirst);
+    EXPECT_EQ("n-7", first->value("requestId", ""));
+    EXPECT_EQ(9u, first->at("data").value("orderId", 0u));
+    EXPECT_FALSE(later->contains("requestId")) << "the order's later update named the request again";
+    EXPECT_FALSE(othersFirst->contains("requestId")) << "another session's copy named the sender's request";
+}
+
+TEST_F(WsAuthorizationTest, AnUnstoredRefusalsPushEndsTheKeepingOfItsRequest)
+{
+    // Through WsOutQueues, as the engine refuses an order without storing it (#790): the REJECT names the request
+    // already (#683), and its push hands the session the order's ClOrdID, which ends the keeping of the request. So an
+    // update of that ClOrdID, were one to come, names no request.
+    start(false);
+    std::unique_ptr<Client> sender = connect("");
+    sender->ws.write(net::buffer(std::string(
+        R"({"type":"new_order","data":{"symbol":"AAPL","side":"BUY","ordType":"LIMIT","tif":"DAY","currency":"USD",)"
+        R"("capacity":"AGENCY","price":150.0,"orderQty":10,"requestId":"n-8"}})")));
+    std::optional<Queued> queued = takeQueued();
+    ASSERT_TRUE(queued && queued->order);
+    const RawDataEntry &clOrdId = queued->order->clOrderId_.get();
+    Queues::OrderRejectEvent reject;
+    reject.clOrderId_ = std::string(clOrdId.data_, clOrdId.length_);
+    reject.requestId_ = "n-8";
+    reject.reason_ = "Order refused: it could not be stored";
+    out_->push(reject, "WebSocket");
+
+    OrderEntry *order = queued->order.release();
+    order->orderId_ = IdT(10, 20261015);
+    order->status_ = NEW_ORDSTATUS;
+    OrderStorage::instance()->restore(order);
+    report(*order, "WebSocket");
+    std::optional<nlohmann::json> refusal = readUntil(*sender, "execution_report");
+    std::optional<nlohmann::json> update = readUntil(*sender, "order_update");
+    ASSERT_TRUE(refusal && update);
+    EXPECT_EQ("n-8", refusal->at("data").value("requestId", ""));
+    EXPECT_FALSE(update->contains("requestId")) << "the unstored refusal's push didn't end the keeping of its request";
 }
 
 TEST_F(WsAuthorizationTest, WithoutIdentitiesEverySessionSeesEverythingAsBefore)

@@ -11,7 +11,8 @@ import type {
 export type ServerMessage =
   | { type: 'connected' }
   | { type: 'order_snapshot'; data: Order[] }
-  | { type: 'order_update'; data: Order }
+  /** requestId: on an order's first update to the session that sent its new_order, the id the request gave (#790) */
+  | { type: 'order_update'; data: Order; requestId?: string }
   | { type: 'execution_report'; data: ExecutionReport }
   | { type: 'book_update'; data: OrderBookSnapshot }
   | { type: 'instrument_list'; data: Instrument[] }

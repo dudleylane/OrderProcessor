@@ -37,8 +37,9 @@ std::atomic<u64> clOrderSequence{ 0 };
 
 /// A ClOrdID for an order or replacement the server makes up. The client did not choose it, so it must not collide
 /// with one already in use, which is refused (#67). Like the order's source and destination, it is written with the
-/// order's record, not as a record of its own on this thread, the server's only IO thread (#192).
-SourceIdT newClOrderId()
+/// order's record, not as a record of its own on this thread, the server's only IO thread (#192). made, when given,
+/// gets its text, by which the session keeps the id of a request that named itself (#790).
+SourceIdT newClOrderId(std::string *made = nullptr)
 {
     std::string clOrdStr = "WS-" +
                            std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
@@ -46,7 +47,12 @@ SourceIdT newClOrderId()
                                               .count()) +
                            "-" + std::to_string(clOrderSequence.fetch_add(1, std::memory_order_relaxed) + 1);
     auto *clOrdRaw = new RawDataEntry(STRING_RAWDATATYPE, clOrdStr.c_str(), static_cast<u32>(clOrdStr.size()));
-    return Store::WideDataStorage::instance()->addUnsaved(clOrdRaw);
+    const SourceIdT id = Store::WideDataStorage::instance()->addUnsaved(clOrdRaw);
+    if (nullptr != made)
+    {
+        *made = std::move(clOrdStr);
+    }
+    return id;
 }
 
 DateTimeT nowMillis()
@@ -449,7 +455,9 @@ void WsSession::handleMessage(const ParsedClientMessage &msg)
             return;
         }
 
-        SourceIdT clOrdId = newClOrderId();
+        // Its text is wanted only to keep the id of a request that named itself (#790)
+        std::string clOrdStr;
+        SourceIdT clOrdId = newClOrderId(msg.requestId.empty() ? nullptr : &clOrdStr);
 
         // Empty ID for the unset origClOrderId
         SourceIdT emptyId;
@@ -489,6 +497,12 @@ void WsSession::handleMessage(const ParsedClientMessage &msg)
         Queues::OrderEvent evt(order);
         evt.requestId_ = msg.requestId; // which the engine's refusal of it, unstored, hands back (#683)
         inQueues_->push(srcStr, evt);
+        // Its first update to this session names the request (#790). Kept after the push, so that a push that throws
+        // keeps nothing: the update can't come first, since it is posted to this session's strand, which runs this
+        if (!msg.requestId.empty())
+        {
+            rememberRequest(std::move(clOrdStr), msg.requestId);
+        }
     }
     else if (msg.type == "new_swap_order")
     {
@@ -623,6 +637,11 @@ void WsSession::handleMessage(const ParsedClientMessage &msg)
         Queues::OrderEvent evt(order);
         evt.requestId_ = msg.requestId; // as for new_order: the engine's refusal of it, unstored, hands it back (#683)
         inQueues_->push(srcStr, evt);
+        // Its first update to this session names the request, as a new order's does (#790)
+        if (!msg.requestId.empty())
+        {
+            rememberRequest(std::move(clOrdStr), msg.requestId);
+        }
     }
     else if (msg.type == "cancel_order")
     {
@@ -633,6 +652,18 @@ void WsSession::handleMessage(const ParsedClientMessage &msg)
         OrderEntry *order = findOrder(number, msg.cancelOrder.clOrderId, msg.requestId, &answered);
         if (answered)
         {
+            return;
+        }
+        // A ClOrdID that names no order with the number given, or none this session may see (#225), is refused here,
+        // naming the request, as one that disagrees with the number is: at the engine its cancel_reject named only the
+        // number given, 0 when the client gave none, so the client couldn't tell what it answered (#790). The words
+        // name the number: a FIX order's shown ClOrdID names it only with its number (#645), so an order may show the
+        // ClOrdID given, and "no order has" it would be untrue
+        if ((nullptr == order) && !msg.cancelOrder.clOrderId.empty())
+        {
+            send(serializeError("Cancel refused: ClOrdID " + msg.cancelOrder.clOrderId +
+                                    " names no order with orderId " + std::to_string(number),
+                                msg.requestId));
             return;
         }
         Queues::OrderCancelEvent evt((nullptr != order) ? order->orderId_ : IdT(number, 0), "Canceled by user");
@@ -776,6 +807,39 @@ void WsSession::send(std::shared_ptr<const std::string> msg)
     }
     queuedBytes_ += msg->size();
     enqueue(std::move(msg));
+}
+
+void WsSession::sendOrderUpdate(const std::shared_ptr<const OrderMessage> &update)
+{
+    if (!pendingRequests_.empty())
+    {
+        if (std::optional<std::string> requestId = pendingRequests_.take(update->clOrdId()))
+        {
+            send(std::make_shared<const std::string>(stampRequestId(update->json, *requestId)));
+            return;
+        }
+    }
+    // The shared copy itself, which the update owns (#159)
+    send(std::shared_ptr<const std::string>(update, &update->json));
+}
+
+void WsSession::sendUnstoredReject(const std::shared_ptr<const OrderMessage> &reject)
+{
+    pendingRequests_.forget(reject->clOrdId());
+    send(std::shared_ptr<const std::string>(reject, &reject->json));
+}
+
+void WsSession::rememberRequest(std::string clOrdId, const std::string &requestId)
+{
+    const std::size_t droppedBefore = pendingRequests_.dropped();
+    pendingRequests_.remember(std::move(clOrdId), requestId);
+    if ((0 == droppedBefore) && (0 < pendingRequests_.dropped()))
+    {
+        aux::ExchLogger::instance()->warn(
+            "WebSocket session: more than " + std::to_string(MAX_PENDING_REQUESTS) +
+            " of its new orders await their first update; the oldest requests' ids are dropped, and their orders' "
+            "updates won't name them (#790)");
+    }
 }
 
 void WsSession::sendInitial(const std::string &msg)

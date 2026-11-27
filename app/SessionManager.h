@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 #include <string>
+#include <string_view>
 #include <oneapi/tbb/spin_rw_mutex.h>
 
 #include "TypesDef.h"
@@ -28,6 +29,14 @@ public:
     /// To the sessions of the identity named source, and to every session without an identity: the answer to a request
     /// that names no order a session may see, routed by the source the request came in under (#225)
     void sendToSource(const std::string &source, const std::string &json);
+    /// broadcastToAccount() for an order's order_update: the session that took the order's request names the request on
+    /// the order's first update, when the request named itself (#790). json is moved into the copy the sessions share,
+    /// with where it holds clOrdId, found once here, so the sessions get the ClOrdID with no copy of it.
+    void broadcastOrderUpdate(const SourceIdT &account, std::string json, std::string_view clOrdId);
+    /// sendToSource() for the REJECT of an order the engine refused without storing it, which names its request
+    /// already (#683): each session it reaches forgets the request it kept for the order's ClOrdID, if it kept one
+    /// (#790). json is moved, as broadcastOrderUpdate()'s is.
+    void sendUnstoredReject(const std::string &source, std::string json, std::string_view clOrdId);
     void broadcastBookUpdate(const std::string &symbol, const std::string &json);
     /// Whether any session subscribes to the symbol's book: a report builds the book's depth only then (#525)
     bool hasBookSubscribers(const std::string &symbol) const;

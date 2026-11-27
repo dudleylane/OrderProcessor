@@ -1,7 +1,10 @@
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <nlohmann/json.hpp>
 #include "DataModelDef.h"
 #include "OrderBookImpl.h"
@@ -46,6 +49,14 @@ std::string serializeCancelReject(u64 orderId, const std::string &reason);
 std::string cancelRejectReason(const Queues::CancelRejectEvent &evnt);
 /// An error answering a client's message; requestId, when the request gave one, names the request it answers (#683)
 std::string serializeError(const std::string &message, const std::string &requestId = std::string());
+/// The message with requestId added at its top level, beside its type, as an error's is: an order's first order_update
+/// to the session that took the order's request, when the request named itself (#790). The message is an object this
+/// serializer wrote.
+std::string stampRequestId(const std::string &message, const std::string &requestId);
+/// Where clOrdId lies in a message this serializer wrote as the value of its clOrderId member, an order_update's or an
+/// unstored REJECT's: its offset and length, or {0, 0} when the message doesn't hold it so. A session finds the request
+/// it kept for an order by these bytes of the message it is handed, with no copy of the ClOrdID (#790).
+std::pair<std::size_t, std::size_t> locateClOrderId(const std::string &message, std::string_view clOrdId);
 
 struct SystemMetrics
 {
