@@ -43,7 +43,12 @@ void WsOutQueues::push(const Queues::ExecReportEvent &evnt, const std::string &t
     }
     const SourceIdT account = order->account_.getId();
     sessionMgr_->broadcastToAccount(account, serializeExecReport(evnt.exec_));
-    sessionMgr_->broadcastToAccount(account, serializeOrderUpdate(*order, *figures));
+    // With the order's ClOrdID, which always resolves (OrderDataStorage requires one): the session that took the
+    // order's request names it on the first (#790)
+    const RawDataEntry &clOrdId = order->clOrderId_.get();
+    sessionMgr_->broadcastOrderUpdate(account, serializeOrderUpdate(*order, *figures),
+                                      (nullptr != clOrdId.data_) ? std::string_view(clOrdId.data_, clOrdId.length_)
+                                                                 : std::string_view());
 
     // 3. The book, to its subscribers, whatever their accounts: it shows no account (#225). Marked only when a session
     // subscribes to it: every report walked the instrument's book, and the broadcast then dropped it unless one did
@@ -77,6 +82,7 @@ void WsOutQueues::push(const Queues::OrderRejectEvent &evnt, const std::string &
     // The order was never stored, so it has no id: a REJECT report with orderId 0, and the reason (#67), its own
     // execution id and the ClOrdIDs (#545), and the request's id (#683). Its time is the clock's: it has no stored
     // order whose decision it reports (#546).
-    // To whoever sent it: nothing was stored, and the report names no order (#225)
-    sessionMgr_->sendToSource(target, serializeUnstoredReject(evnt, aux::currentDateTime()));
+    // To whoever sent it: nothing was stored, and the report names no order (#225). The session that kept the request's
+    // id for the order's first update forgets it: no update follows, and this report names the request (#790).
+    sessionMgr_->sendUnstoredReject(target, serializeUnstoredReject(evnt, aux::currentDateTime()), evnt.clOrderId_);
 }

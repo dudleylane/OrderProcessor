@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <deque>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -15,6 +16,7 @@
 #include "TypesDef.h"
 #include "ServerDefaults.h"
 #include "LogThrottle.h"
+#include "PendingRequests.h"
 #include "WsAuth.h"
 
 namespace COP
@@ -37,6 +39,21 @@ class InQueues;
 namespace App
 {
 struct ParsedClientMessage;
+
+/// A message about an order, shared by the sessions it goes to as one broadcast copy is (#159), with where its own
+/// bytes hold the order's ClOrdID: so the session that took the order's request finds the request by them, with no
+/// parse and no copy of the ClOrdID (#790)
+struct OrderMessage
+{
+    std::string json;
+    std::size_t clOrdIdAt = 0;
+    std::size_t clOrdIdLength = 0;
+    /// The order's ClOrdID, as the message holds it; empty when it holds none
+    std::string_view clOrdId() const
+    {
+        return std::string_view(json).substr(clOrdIdAt, clOrdIdLength);
+    }
+};
 
 class SessionManager;
 class InFlightGauge;
@@ -61,6 +78,12 @@ public:
     void send(const std::string &msg);
     /// Queues a message that other sessions may share: a broadcast is one copy, however many clients get it (#159)
     void send(std::shared_ptr<const std::string> msg);
+    /// Queues an order's order_update: with its request's id added when this session took the order's request and the
+    /// request named itself, on the order's first update to the session, which ends the session's keeping of it (#790)
+    void sendOrderUpdate(const std::shared_ptr<const OrderMessage> &update);
+    /// Queues the REJECT of an order the engine refused without storing it, which names its request already (#683),
+    /// and forgets the request this session kept for the order, if it kept one (#790)
+    void sendUnstoredReject(const std::shared_ptr<const OrderMessage> &reject);
 
     boost::asio::any_io_executor executor()
     {
@@ -127,6 +150,9 @@ private:
     /// sender posts to the session's strand, which runs nothing else until onAccept() returns. So the initial state is
     /// the queue's first messages, which onWrite() and drop() rely on.
     void sendInitial(const std::string &msg);
+    /// Keeps a new order's request id until the order's first update, and warns once when the oldest kept starts to go
+    /// (#790)
+    void rememberRequest(std::string clOrdId, const std::string &requestId);
     /// Queues a message, and starts writing when it is the only one
     void enqueue(std::shared_ptr<const std::string> msg);
     void doWrite();
@@ -175,6 +201,8 @@ private:
     bool closing_ = false;
     /// Contained exceptions logged, at most one a limits_.containedLogPeriod, a second unless a test says (#547, #783)
     LogThrottle containedLog_;
+    /// The ids of this session's new orders' requests, until each order's first update names its request (#790)
+    PendingRequests pendingRequests_{ MAX_PENDING_REQUESTS };
 };
 
 } // namespace App

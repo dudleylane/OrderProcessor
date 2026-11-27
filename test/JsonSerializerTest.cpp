@@ -126,6 +126,36 @@ TEST_F(JsonSerializerTest, AnErrorNamesTheRequestItAnswers)
     EXPECT_FALSE(nlohmann::json::parse(App::serializeError("Unknown message type: hello")).contains("requestId"));
 }
 
+TEST_F(JsonSerializerTest, AnOrdersFirstUpdateToItsSenderNamesTheRequestBesideItsType)
+{
+    // The session adds the id to an order_update the engine's push serialized once for every session (#790): at the
+    // message's top level, as an error's, with the rest unchanged, and written as nlohmann writes a string
+    std::unique_ptr<OrderEntry> order = newOrder("CL-1", IdT(1, 1));
+    const std::string update = App::serializeOrderUpdate(*order);
+    const nlohmann::json stamped = nlohmann::json::parse(App::stampRequestId(update, "r-1"));
+    EXPECT_EQ("r-1", stamped.value("requestId", ""));
+    nlohmann::json rest = stamped;
+    rest.erase("requestId");
+    EXPECT_EQ(nlohmann::json::parse(update), rest);
+    EXPECT_EQ("a\"b", nlohmann::json::parse(App::stampRequestId(update, "a\"b")).value("requestId", ""));
+}
+
+TEST_F(JsonSerializerTest, AnOrdersClOrdIdIsFoundInItsUpdateAsItsClOrderIdAlone)
+{
+    // Where the order_update holds the order's ClOrdID, which a session reads its kept request by (#790): the
+    // clOrderId member's value, not origClOrderId's, and nothing when the message holds another ClOrdID or none
+    std::unique_ptr<OrderEntry> order = newOrder("CL-1", IdT(1, 1));
+    const std::string update = App::serializeOrderUpdate(*order);
+    const auto [at, length] = App::locateClOrderId(update, "CL-1");
+    ASSERT_EQ(4u, length);
+    EXPECT_EQ("CL-1", update.substr(at, length));
+    EXPECT_EQ("\"clOrderId\":\"", update.substr(at - 13, 13));
+    EXPECT_EQ(0u, App::locateClOrderId(update, "CL-2").second);
+    EXPECT_EQ(0u, App::locateClOrderId(update, "CL-").second) << "a ClOrdID's prefix matched";
+    EXPECT_EQ(0u, App::locateClOrderId(update, "").second);
+    EXPECT_EQ(0u, App::locateClOrderId(R"({"data":{"origClOrderId":"CL-1"},"type":"order_update"})", "CL-1").second);
+}
+
 TEST_F(JsonSerializerTest, AnUnstoredRejectHasItsOwnExecutionIdItsClOrdIdsAndItsRequestId)
 {
     // A replacement the engine refused without storing it: orderId 0, an execution id of its own and its ClOrdIDs

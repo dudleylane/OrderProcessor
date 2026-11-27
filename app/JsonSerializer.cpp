@@ -3,6 +3,8 @@
 #include "WideDataStorage.h"
 #include "OrderStorage.h"
 
+#include <cassert>
+
 using namespace COP;
 using namespace COP::App;
 using json = nlohmann::json;
@@ -293,6 +295,41 @@ std::string App::cancelRejectReason(const Queues::CancelRejectEvent &evnt)
     default:
         return "Cancel rejected";
     }
+}
+
+std::string App::stampRequestId(const std::string &message, const std::string &requestId)
+{
+    // An object nlohmann wrote ends with its closing brace, and a written one has a member before it. The id is
+    // written as nlohmann writes a string, escaped, though a parsed one is [A-Za-z0-9_-] alone (#683).
+    assert((2 < message.size()) && ('}' == message.back()));
+    const std::string id = json(requestId).dump();
+    std::string stamped;
+    stamped.reserve(message.size() + id.size() + 14);
+    stamped.append(message, 0, message.size() - 1);
+    stamped += ",\"requestId\":";
+    stamped += id;
+    stamped += '}';
+    return stamped;
+}
+
+std::pair<std::size_t, std::size_t> App::locateClOrderId(const std::string &message, std::string_view clOrdId)
+{
+    // nlohmann writes an object's members in key order, so an order's clOrderId comes early in its data. The quote
+    // before the key keeps origClOrderId from matching, and the value must be the ClOrdID's bytes and nothing more:
+    // one that nlohmann had to escape doesn't match, and a session makes none such.
+    static constexpr std::string_view KEY = "\"clOrderId\":\"";
+    const std::size_t key = message.find(KEY);
+    if (clOrdId.empty() || (std::string::npos == key))
+    {
+        return { 0, 0 };
+    }
+    const std::size_t at = key + KEY.size();
+    if ((message.size() <= at + clOrdId.size()) || (0 != message.compare(at, clOrdId.size(), clOrdId)) ||
+        ('"' != message[at + clOrdId.size()]))
+    {
+        return { 0, 0 };
+    }
+    return { at, clOrdId.size() };
 }
 
 std::string App::serializeError(const std::string &message, const std::string &requestId)
