@@ -280,9 +280,9 @@ static void BM_SessionManagerBroadcast(benchmark::State &state)
 }
 BENCHMARK(BM_SessionManagerBroadcast)->Arg(1)->Arg(8)->Arg(64);
 
-// SessionManager::broadcastToAccount, as WsOutQueues calls it since #225 for every execution report and order update:
-// the message to each of K clients that may see the order's account. Without identities, all of them (the server's
-// default); with them, every other one.
+// SessionManager::broadcastToAccount, as WsOutQueues calls it since #225 for every execution report (and, until #790,
+// every order update): the message to each of K clients that may see the order's account. Without identities, all of
+// them (the server's default); with them, every other one.
 static void BM_SessionManagerBroadcastToAccount(benchmark::State &state)
 {
     Clients clients(static_cast<int>(state.range(0)), 0 != state.range(1));

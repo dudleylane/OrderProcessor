@@ -68,6 +68,8 @@ target_sources(orderProcessorTest
         # WebSocket session, served on loopback (also built from app/)
         WsSessionTest.cpp
         WsServerLimitsTest.cpp
+        # The ids of a session's new orders' requests, until each order's first update (#790; header-only)
+        PendingRequestsTest.cpp
         JsonSerializerTest.cpp
         # The engine's work in flight, which holds the sessions' reads past its bound (#519)
         InFlightGaugeTest.cpp

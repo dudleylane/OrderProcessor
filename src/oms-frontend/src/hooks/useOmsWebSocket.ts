@@ -10,8 +10,8 @@ import type {
   ReplaceOrderRequest,
   SystemMetrics,
 } from '../types';
-import { ExecType } from '../types/enums';
-import { isRejection } from '../types';
+import { ExecType, OrderStatus } from '../types/enums';
+import { isRejection, isReplacement } from '../types';
 import type { ServerMessage, ClientMessage } from '../types/websocket';
 import { wsSubprotocols } from '../utils/accessToken';
 
@@ -26,6 +26,8 @@ const MAX_METRICS_HISTORY = 300; // 5 minutes at 1/sec
 const MAX_NOTICES = 50;
 // The requests this tab remembers, until an answer names one: an accepted request gets no answer that names it (#683)
 const MAX_PENDING_REQUESTS = 100;
+// The reasons of the newest stored orders' REJECT reports, by order, which their order_update follows (#790)
+const MAX_REJECT_REASONS = 100;
 const PENDING_REQUEST_AGE = 10 * 60 * 1000; // ten minutes
 
 /**
@@ -46,6 +48,8 @@ interface PendingRequest {
   at: number;
   /** For a cancel, its order: the engine's answers to a cancel name the order, not the request */
   cancelOf?: number;
+  /** For a replace, its order: the replacement's REPLACE report names it as its original (#790) */
+  replaceOf?: number;
 }
 
 /**
@@ -173,6 +177,8 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
   const noticeSeq = useRef(0);
   // The requests sent on the live socket and not yet answered, oldest first (#683)
   const pendingRef = useRef(new Map<string, PendingRequest>());
+  // Why each of the newest stored orders was rejected: its REJECT report comes just before its order_update (#790)
+  const rejectReasonsRef = useRef(new Map<number, string>());
   const [state, dispatch] = useReducer(omsReducer, INITIAL_STATE);
 
   // Kept until an answer names it, for ten minutes at most, the newest 100: so a request accepted, which nothing
@@ -196,6 +202,23 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
     if (!request) return text;
     pendingRef.current.delete(requestId as string);
     return `${request.label}: ${text}`;
+  }, []);
+
+  // The request this tab sent with the id, which it then forgets; none for an id it didn't send, or no longer remembers
+  const takeRequest = useCallback((requestId: string) => {
+    const request = pendingRef.current.get(requestId);
+    if (request) pendingRef.current.delete(requestId);
+    return request;
+  }, []);
+
+  // The oldest replace of the order this tab sent and hasn't heard answered, which it then forgets: accepted (#790)
+  const takeReplace = useCallback((orderId: number) => {
+    for (const [id, request] of pendingRef.current) {
+      if (request.replaceOf === orderId) {
+        pendingRef.current.delete(id);
+        return;
+      }
+    }
   }, []);
 
   // The oldest cancel of the order this tab sent and hasn't heard answered, which it then forgets
@@ -275,9 +298,16 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
           case 'order_snapshot':
             dispatch({ type: 'ORDER_SNAPSHOT', data: msg.data });
             break;
-          case 'order_update':
+          case 'order_update': {
             dispatch({ type: 'ORDER_UPDATE', data: msg.data });
+            // A new order's first update to the session that sent it names its request (#790): a stored order the
+            // engine rejected gets a notice that names the request, with its REJECT report's reason; one it accepted, none
+            const request = msg.requestId === undefined ? undefined : takeRequest(msg.requestId);
+            if (request && msg.data.status === OrderStatus.REJECTED) {
+              notify('reject', `${request.label}: ${rejectReasonsRef.current.get(msg.data.orderId) ?? 'Order refused'}`);
+            }
             break;
+          }
           case 'execution_report': {
             dispatch({ type: 'EXECUTION_REPORT', data: msg.data });
             // An order or a replacement refused before it was stored: the report comes to its sender alone, and the
@@ -286,8 +316,14 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
             const exec = msg.data as Execution;
             if (exec.orderId === 0 && isRejection(exec)) {
               notify('reject', named(exec.requestId, exec.rejectReason || 'Order refused'));
+            } else if (isRejection(exec)) {
+              const reasons = rejectReasonsRef.current;
+              reasons.set(exec.orderId, exec.rejectReason || 'Order refused');
+              while (reasons.size > MAX_REJECT_REASONS) reasons.delete(reasons.keys().next().value as number);
             } else if (exec.type === ExecType.CANCEL) {
               takeCancel(exec.orderId); // accepted: nothing more answers it
+            } else if (isReplacement(exec)) {
+              takeReplace(exec.origOrderId); // accepted, as the replacement's report says
             }
             break;
           }
@@ -321,7 +357,7 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
     };
 
     wsRef.current = ws;
-  }, [token, notify, named, takeCancel]);
+  }, [token, notify, named, takeRequest, takeCancel, takeReplace]);
 
   useEffect(() => {
     // The requests this tab sent go with the socket they went out on (#683). The ref never takes another map, so the
@@ -381,7 +417,7 @@ export function useOmsWebSocket(token: string): OmsState & OmsActions {
     (req: ReplaceOrderRequest) => {
       const requestId = newRequestId();
       const sent = send({ type: 'replace_order', data: { ...req, requestId } });
-      if (sent) track(requestId, { label: `Replace of order ${req.orderId}`, at: Date.now() });
+      if (sent) track(requestId, { label: `Replace of order ${req.orderId}`, at: Date.now(), replaceOf: req.orderId });
       else notify('not_sent', `Replace of order ${req.orderId} not sent: not connected`);
       return sent;
     },
