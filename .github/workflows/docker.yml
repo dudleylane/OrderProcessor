@@ -64,8 +64,11 @@ jobs:
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && github.actor != 'dependabot[bot]'
     runs-on: [self-hosted, Linux, X64, orderprocessor-dev]
-    # A hung build would hold its runner until it is killed (#59).
-    timeout-minutes: 30
+    # A hung build would hold its runner until it is killed (#59). 45 on FX, where master's is 30, on purpose (#809):
+    # since #566 this job builds the gateway with its tests and runs them in the image, 15.7 minutes alone and 28 to 30
+    # beside its run's other jobs. A full run past 36 minutes calls for a builder image with QuickFIX and libpqxx, not
+    # another raise.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
